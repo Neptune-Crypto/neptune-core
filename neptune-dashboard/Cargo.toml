@@ -3,7 +3,7 @@ name = "neptune-dashboard"
 description = "neptune-cash tui dashboard and wallet"
 authors = ["Triton Software"]
 
-version = "0.14.2"
+version = "0.14.3"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -22,11 +22,11 @@ mock = ["rand", "neptune-cash/mock-rpc"]
 
 [dependencies]
 anyhow = { version = "1.0" }
-neptune-cash = { version = "0.14.2", path = "../neptune-core" }
-neptune-consensus = { version = "0.14.2", path = "../neptune-consensus" }
-neptune-p2p = { version = "0.14.2", path = "../neptune-p2p" }
-neptune-primitives = { version = "0.14.2", path = "../neptune-primitives" }
-neptune-wallet = { version = "0.14.2", path = "../neptune-wallet" }
+neptune-cash = { version = "0.14.3", path = "../neptune-core" }
+neptune-consensus = { version = "0.14.3", path = "../neptune-consensus" }
+neptune-p2p = { version = "0.14.3", path = "../neptune-p2p" }
+neptune-primitives = { version = "0.14.3", path = "../neptune-primitives" }
+neptune-wallet = { version = "0.14.3", path = "../neptune-wallet" }
 clap = { version = "4.5", features = ["derive"] }
 crossterm = "0.27"
 libp2p = { version = "0.56.0", features = ["autonat"] }

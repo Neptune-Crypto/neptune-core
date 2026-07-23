@@ -1,5 +1,31 @@
 Note: (!) indicates a breaking change.
 
+## [0.14.3](https://github.com/Neptune-Crypto/neptune-core/compare/v0.14.2..v0.14.3) - 2026-07-23
+
+### ✨ Features
+
+- *(wallet)* Viewing keys for generation addresses ([#954](https://github.com/Neptune-Crypto/neptune-core/issues/954)) ([435ca9db](https://github.com/Neptune-Crypto/neptune-core/commit/435ca9db))
+
+### 🐛 Bug Fixes
+
+- *(wallet)* Recover guesser rewards to all known keys ([7f0c78c5](https://github.com/Neptune-Crypto/neptune-core/commit/7f0c78c5))
+- *(tx_proof_upgrade)* Always register gobbler reward ([9e9e7ae2](https://github.com/Neptune-Crypto/neptune-core/commit/9e9e7ae2))
+
+### 🚀 Performance
+
+- *(wallet)* Don't build address when only guesser receiver data is needed ([563dd76b](https://github.com/Neptune-Crypto/neptune-core/commit/563dd76b))
+- *(wallet)* Faster scan of announced UTXOs ([0c953301](https://github.com/Neptune-Crypto/neptune-core/commit/0c953301))
+- *(wallet)* Cache all lock script hashes on keys ([5604b42a](https://github.com/Neptune-Crypto/neptune-core/commit/5604b42a))
+
+### ♻️ Refactor
+
+- *(mempool)* Keep and upgrade unsynced ProofCollection transactions ([8e457ca1](https://github.com/Neptune-Crypto/neptune-core/commit/8e457ca1))
+
+### ⏳ Benchmark
+
+- *(wallet)* Set new tip with keys ([55f75528](https://github.com/Neptune-Crypto/neptune-core/commit/55f75528))
+
+
 ## [0.14.2](https://github.com/Neptune-Crypto/neptune-core/compare/v0.14.0..v0.14.2) - 2026-07-14
 
 ### ✨ Features

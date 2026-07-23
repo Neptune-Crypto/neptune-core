@@ -3,7 +3,7 @@ name = "neptune-archival-mutator-set"
 description = "Archival mutator set backed by neptune-database storage. The database-backed companion to the in-memory accumulator in neptune-mutator-set."
 authors = ["Triton Software"]
 
-version = "0.14.2"
+version = "0.14.3"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -17,16 +17,16 @@ repository = "https://github.com/Neptune-Crypto/neptune-core/"
 test-helpers = ["neptune-mutator-set/test-helpers"]
 
 [dependencies]
-neptune-archival-mmr = { version = "0.14.2", path = "../neptune-archival-mmr" }
-neptune-database = { version = "0.14.2", path = "../neptune-database" }
-neptune-mutator-set = { version = "0.14.2", path = "../neptune-mutator-set" }
+neptune-archival-mmr = { version = "0.14.3", path = "../neptune-archival-mmr" }
+neptune-database = { version = "0.14.3", path = "../neptune-database" }
+neptune-mutator-set = { version = "0.14.3", path = "../neptune-mutator-set" }
 itertools = "0.14"
 tasm-lib = "7.0.0"
 
 [dev-dependencies]
 # the archival tests drive the accumulator types and their test-support
 # constructors + proptest strategies.
-neptune-mutator-set = { version = "0.14.2", path = "../neptune-mutator-set", features = [
+neptune-mutator-set = { version = "0.14.3", path = "../neptune-mutator-set", features = [
     "test-helpers",
 ] }
 macro_rules_attr = "0.1.3"

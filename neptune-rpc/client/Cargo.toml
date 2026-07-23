@@ -2,7 +2,7 @@
 name = "neptune-rpc-client"
 description = "library for interacting with neptune-cash's JSON-RPC"
 authors = ["Triton Software"]
-version = "0.14.2"
+version = "0.14.3"
 edition = "2024"
 license = "Apache-2.0"
 
@@ -15,15 +15,15 @@ reqwest = { version = "0.12.24", default-features = false, features = [
     "system-proxy",
 ] }
 serde_json = "1.0"
-neptune-consensus = { version = "0.14.2", path = "../../neptune-consensus" }
-neptune-rpc-api = { version = "0.14.2", path = "../api" }
-neptune-primitives = { version = "0.14.2", path = "../../neptune-primitives" }
+neptune-consensus = { version = "0.14.3", path = "../../neptune-consensus" }
+neptune-rpc-api = { version = "0.14.3", path = "../api" }
+neptune-primitives = { version = "0.14.3", path = "../../neptune-primitives" }
 async-trait = "0.1.83"
 
 [dev-dependencies]
-neptune-cash = { version = "0.14.2", path = "../../neptune-core" }
-neptune-mempool = { version = "0.14.2", path = "../../neptune-mempool" }
-neptune-wallet = { version = "0.14.2", path = "../../neptune-wallet" }
+neptune-cash = { version = "0.14.3", path = "../../neptune-core" }
+neptune-mempool = { version = "0.14.3", path = "../../neptune-mempool" }
+neptune-wallet = { version = "0.14.3", path = "../../neptune-wallet" }
 itertools = "0.14"
 num-traits = "0.2"
 rand = "0.9"

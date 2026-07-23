@@ -3,7 +3,7 @@ name = "neptune-consensus"
 description = "Consensus logic and proof abstractions for Neptune Cash."
 authors = ["Triton Software"]
 
-version = "0.14.2"
+version = "0.14.3"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -79,9 +79,9 @@ tokio = { version = "1.47", features = [
 ] }
 tracing = "0.1"
 
-neptune-job-queue = { version = "0.14.2", path = "../neptune-job-queue" }
-neptune-mutator-set = { version = "0.14.2", path = "../neptune-mutator-set" }
-neptune-primitives = { version = "0.14.2", path = "../neptune-primitives" }
+neptune-job-queue = { version = "0.14.3", path = "../neptune-job-queue" }
+neptune-mutator-set = { version = "0.14.3", path = "../neptune-mutator-set" }
+neptune-primitives = { version = "0.14.3", path = "../neptune-primitives" }
 
 [dev-dependencies]
 # Unit tests in this crate need the optional arbitrary/proptest impls and the
@@ -91,13 +91,13 @@ neptune-primitives = { version = "0.14.2", path = "../neptune-primitives" }
 neptune-consensus = { path = ".", features = ["test-helpers", "spec"] }
 
 # enables neptune-mutator-set's `strategies` + `msa_and_records` test modules.
-neptune-mutator-set = { version = "0.14.2", path = "../neptune-mutator-set", features = [
+neptune-mutator-set = { version = "0.14.3", path = "../neptune-mutator-set", features = [
     "test-helpers",
 ] }
 
 # enables `Network::arbitrary`/`all_networks` and the `Arbitrary` derives on the
 # primitives-level types (Difficulty, ProofOfWork, BlockHeight) used by tests.
-neptune-primitives = { version = "0.14.2", path = "../neptune-primitives", features = [
+neptune-primitives = { version = "0.14.3", path = "../neptune-primitives", features = [
     "test-helpers",
 ] }
 

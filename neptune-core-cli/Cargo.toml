@@ -3,7 +3,7 @@ name = "neptune-core-cli"
 description = "cli client for interfacing with neptune-core"
 authors = ["Triton Software"]
 
-version = "0.14.2"
+version = "0.14.3"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -24,11 +24,11 @@ path = "src/main.rs"
 
 [dependencies]
 
-neptune-cash = { version = "0.14.2", path = "../neptune-core" }
-neptune-consensus = { version = "0.14.2", path = "../neptune-consensus" }
-neptune-mempool = { version = "0.14.2", path = "../neptune-mempool" }
-neptune-primitives = { version = "0.14.2", path = "../neptune-primitives" }
-neptune-wallet = { version = "0.14.2", path = "../neptune-wallet" }
+neptune-cash = { version = "0.14.3", path = "../neptune-core" }
+neptune-consensus = { version = "0.14.3", path = "../neptune-consensus" }
+neptune-mempool = { version = "0.14.3", path = "../neptune-mempool" }
+neptune-primitives = { version = "0.14.3", path = "../neptune-primitives" }
+neptune-wallet = { version = "0.14.3", path = "../neptune-wallet" }
 anyhow = { version = "1.0" }
 tiny-bip39 = "1.0"
 clap = { version = "4.5", features = ["derive"] }
@@ -57,7 +57,7 @@ bech32 = ">=0.9, <0.10"
 libp2p = "0.56.0"
 
 [dev-dependencies]
-neptune-wallet = { version = "0.14.2", path = "../neptune-wallet", features = [
+neptune-wallet = { version = "0.14.3", path = "../neptune-wallet", features = [
     "arbitrary-impls",
 ] }
 arbitrary = "1.4.2"

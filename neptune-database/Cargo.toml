@@ -3,7 +3,7 @@ name = "neptune-database"
 description = "LevelDB-backed async storage layer (schema, vectors, maps) used by neptune-cash"
 authors = ["Triton Software"]
 
-version = "0.14.2"
+version = "0.14.3"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -16,7 +16,7 @@ repository = "https://github.com/Neptune-Crypto/neptune-core/"
 test-helpers = []
 
 [dependencies]
-neptune-locks = { version = "0.14.2", path = "../neptune-locks" }
+neptune-locks = { version = "0.14.3", path = "../neptune-locks" }
 anyhow = { version = "1.0", features = ["backtrace"] }
 async-stream = "0.3.6"
 async-trait = "0.1.83"

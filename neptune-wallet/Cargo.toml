@@ -3,7 +3,7 @@ name = "neptune-wallet"
 description = "Wallet functionality (keys, addresses, transaction construction) for Neptune Cash."
 authors = ["Triton Software"]
 
-version = "0.14.2"
+version = "0.14.3"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -58,9 +58,9 @@ tiny-bip39 = "1.0"
 tracing = "0.1"
 zeroize = "1.8.1"
 
-neptune-consensus = { version = "0.14.2", path = "../neptune-consensus" }
-neptune-mutator-set = { version = "0.14.2", path = "../neptune-mutator-set" }
-neptune-primitives = { version = "0.14.2", path = "../neptune-primitives" }
+neptune-consensus = { version = "0.14.3", path = "../neptune-consensus" }
+neptune-mutator-set = { version = "0.14.3", path = "../neptune-mutator-set" }
+neptune-primitives = { version = "0.14.3", path = "../neptune-primitives" }
 
 [dev-dependencies]
 
@@ -71,7 +71,7 @@ neptune-primitives = { version = "0.14.2", path = "../neptune-primitives" }
 neptune-wallet = { path = ".", features = ["arbitrary-impls"] }
 
 # enables neptune-consensus's test-support constructors (e.g. make_mock_transaction).
-neptune-consensus = { version = "0.14.2", path = "../neptune-consensus", features = [
+neptune-consensus = { version = "0.14.3", path = "../neptune-consensus", features = [
     "test-helpers",
 ] }
 

@@ -2,7 +2,7 @@
 name = "neptune-rpc-api"
 description = "Neptune JSON-RPC API contract: the RpcApi trait and its data-transfer model types"
 authors = ["Triton Software"]
-version = "0.14.2"
+version = "0.14.3"
 edition = "2024"
 license = "Apache-2.0"
 
@@ -17,11 +17,11 @@ test-helpers = []
 async-trait = "0.1.83"
 hex = "0.4.3"
 multiaddr = "0.18.2"
-neptune-consensus = { version = "0.14.2", path = "../../neptune-consensus" }
-neptune-mutator-set = { version = "0.14.2", path = "../../neptune-mutator-set" }
-neptune-primitives = { version = "0.14.2", path = "../../neptune-primitives" }
-neptune-rpc-macros = { version = "0.14.2", path = "../macros" }
-neptune-wallet = { version = "0.14.2", path = "../../neptune-wallet" }
+neptune-consensus = { version = "0.14.3", path = "../../neptune-consensus" }
+neptune-mutator-set = { version = "0.14.3", path = "../../neptune-mutator-set" }
+neptune-primitives = { version = "0.14.3", path = "../../neptune-primitives" }
+neptune-rpc-macros = { version = "0.14.3", path = "../macros" }
+neptune-wallet = { version = "0.14.3", path = "../../neptune-wallet" }
 num-bigint = { version = "0.4", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_arrays = "0.2"
@@ -33,10 +33,10 @@ thiserror = "1.0.65"
 
 [dev-dependencies]
 macro_rules_attr = "0.1.3"
-neptune-consensus = { version = "0.14.2", path = "../../neptune-consensus", features = [
+neptune-consensus = { version = "0.14.3", path = "../../neptune-consensus", features = [
     "test-helpers",
 ] }
-neptune-mutator-set = { version = "0.14.2", path = "../../neptune-mutator-set", features = [
+neptune-mutator-set = { version = "0.14.3", path = "../../neptune-mutator-set", features = [
     "arbitrary-impls",
 ] }
 proptest = "1.7"
