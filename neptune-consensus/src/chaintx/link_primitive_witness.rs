@@ -52,7 +52,7 @@ use crate::type_scripts::TypeScriptAndWitness;
 /// `input_membership_proofs.len()`: the first that-many entries are confirmed
 /// inputs, and the remaining `kernel.thruputs.len()` are thruputs.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
-pub struct LinkWitness {
+pub struct LinkPrimitiveWitness {
     /// Confirmed input UTXOs followed by thruput UTXOs -- the combined,
     /// type-script-facing input list. The first `input_membership_proofs.len()`
     /// entries are confirmed inputs; the remaining `kernel.thruputs.len()` are
@@ -92,7 +92,7 @@ pub struct LinkWitness {
     pub kernel: LinkKernel,
 }
 
-impl LinkWitness {
+impl LinkPrimitiveWitness {
     /// Verify a chained transaction directly from its witness -- the Rust
     /// reference predicate for `Forge`, analogous to
     /// [`PrimitiveWitness::validate`](crate::transaction::primitive_witness::PrimitiveWitness::validate).
@@ -285,8 +285,8 @@ impl LinkWitness {
 }
 
 #[cfg(any(test, feature = "arbitrary-impls"))]
-impl LinkWitness {
-    /// Build a *valid* `LinkWitness` from a valid `PrimitiveWitness` by
+impl LinkPrimitiveWitness {
+    /// Build a *valid* `LinkPrimitiveWitness` from a valid `PrimitiveWitness` by
     /// reclassifying the last `num_thruputs` of its inputs from confirmed
     /// inputs into thruputs.
     ///
@@ -294,7 +294,7 @@ impl LinkWitness {
     /// `input_utxos` and count toward the input balance); only the backing
     /// record differs (an `AdditionRecord` in `kernel.thruputs` instead of a
     /// `RemovalRecord` + membership proof). So a valid `PrimitiveWitness` with
-    /// `n + k` inputs *is* a valid `LinkWitness` with `n` confirmed inputs and
+    /// `n + k` inputs *is* a valid `LinkPrimitiveWitness` with `n` confirmed inputs and
     /// `k` thruputs, with no re-balancing: `input_utxos`, the type-script
     /// witnesses, and the mutator set carry over unchanged. Each reclassified
     /// input reuses its own membership-proof randomness, so its thruput
@@ -370,7 +370,7 @@ impl LinkWitness {
         }
     }
 
-    /// Proptest strategy for a structurally-varied, *valid* `LinkWitness`:
+    /// Proptest strategy for a structurally-varied, *valid* `LinkPrimitiveWitness`:
     /// reclassify the tail of a valid `PrimitiveWitness`'s inputs as thruputs
     /// (see [`from_primitive_witness`](Self::from_primitive_witness)).
     pub fn arbitrary_strategy() -> proptest::strategy::BoxedStrategy<Self> {
@@ -410,22 +410,22 @@ mod tests {
 
     #[proptest]
     fn bfield_codec_round_trip(
-        #[strategy(LinkWitness::arbitrary_strategy())] witness: LinkWitness,
+        #[strategy(LinkPrimitiveWitness::arbitrary_strategy())] witness: LinkPrimitiveWitness,
     ) {
-        let decoded = *LinkWitness::decode(&witness.encode()).unwrap();
+        let decoded = *LinkPrimitiveWitness::decode(&witness.encode()).unwrap();
         assert_eq!(witness, decoded);
     }
 
     // ------------------------------------------------------------------ positive
 
     /// Lifting a *valid* `PrimitiveWitness` at any thruput count yields a valid
-    /// `LinkWitness` -- for free, off any legacy strategy.
+    /// `LinkPrimitiveWitness` -- for free, off any legacy strategy.
     #[proptest(cases = 5, async = "tokio")]
     async fn lift_preserves_validity(
         #[strategy(pw_strategy(Some(4)))] pw: PrimitiveWitness,
         #[strategy(0usize..=4)] num_thruputs: usize,
     ) {
-        let result = LinkWitness::from_primitive_witness(pw, num_thruputs)
+        let result = LinkPrimitiveWitness::from_primitive_witness(pw, num_thruputs)
             .validate()
             .await;
         prop_assert!(result.is_ok(), "{result:?}");
@@ -435,7 +435,7 @@ mod tests {
     /// thruputs are counted toward the input sum.
     #[proptest(cases = 5, async = "tokio")]
     async fn all_thruputs_is_valid(#[strategy(pw_strategy(Some(2)))] pw: PrimitiveWitness) {
-        let witness = LinkWitness::from_primitive_witness(pw, 2);
+        let witness = LinkPrimitiveWitness::from_primitive_witness(pw, 2);
         prop_assert!(witness.input_membership_proofs.is_empty());
         let result = witness.validate().await;
         prop_assert!(result.is_ok(), "{result:?}");
@@ -451,11 +451,11 @@ mod tests {
     async fn missing_or_extra_lock_script_is_not_caught(
         #[strategy(pw_strategy(Some(4)))] pw: PrimitiveWitness,
     ) {
-        let mut missing = LinkWitness::from_primitive_witness(pw.clone(), 2);
+        let mut missing = LinkPrimitiveWitness::from_primitive_witness(pw.clone(), 2);
         missing.lock_scripts_and_witnesses.pop();
         prop_assert!(missing.validate().await.is_ok());
 
-        let mut extra = LinkWitness::from_primitive_witness(pw, 2);
+        let mut extra = LinkPrimitiveWitness::from_primitive_witness(pw, 2);
         let dup = extra.lock_scripts_and_witnesses[0].clone();
         extra.lock_scripts_and_witnesses.push(dup);
         prop_assert!(extra.validate().await.is_ok());
@@ -467,7 +467,7 @@ mod tests {
     async fn extra_input_utxo_fails_cardinality(
         #[strategy(pw_strategy(Some(4)))] pw: PrimitiveWitness,
     ) {
-        let mut w = LinkWitness::from_primitive_witness(pw, 2);
+        let mut w = LinkPrimitiveWitness::from_primitive_witness(pw, 2);
         let dup = w.input_utxos.utxos[0].clone();
         w.input_utxos.utxos.push(dup);
         assert!(matches!(
@@ -480,7 +480,7 @@ mod tests {
     async fn short_thruput_randomness_fails_cardinality(
         #[strategy(pw_strategy(Some(4)))] pw: PrimitiveWitness,
     ) {
-        let mut w = LinkWitness::from_primitive_witness(pw, 2);
+        let mut w = LinkPrimitiveWitness::from_primitive_witness(pw, 2);
         w.thruput_sender_randomnesses.pop();
         assert!(matches!(
             w.validate().await,
@@ -492,7 +492,7 @@ mod tests {
 
     #[proptest(cases = 5, async = "tokio")]
     async fn bad_lock_script_witness_fails(#[strategy(pw_strategy(Some(2)))] pw: PrimitiveWitness) {
-        let mut w = LinkWitness::from_primitive_witness(pw, 1);
+        let mut w = LinkPrimitiveWitness::from_primitive_witness(pw, 1);
         let program = LockScriptAndWitness::genaddr_like_hash_lock_from_seed(Tip5::hash(
             &BFieldElement::new(2),
         ))
@@ -515,7 +515,7 @@ mod tests {
     async fn bad_mutator_set_accumulator_fails(
         #[strategy(pw_strategy(Some(2)))] pw: PrimitiveWitness,
     ) {
-        let mut w = LinkWitness::from_primitive_witness(pw, 1);
+        let mut w = LinkPrimitiveWitness::from_primitive_witness(pw, 1);
         w.mutator_set_accumulator = MutatorSetAccumulator::default();
         assert!(matches!(
             w.validate().await,
@@ -537,7 +537,7 @@ mod tests {
         pw.kernel = TransactionKernelModifier::default()
             .mutator_set_hash(Digest::default())
             .modify(pw.kernel);
-        let w = LinkWitness::from_primitive_witness(pw, 2);
+        let w = LinkPrimitiveWitness::from_primitive_witness(pw, 2);
         assert!(matches!(
             w.validate().await,
             Err(WitnessValidationError::MutatorSetMismatch { .. })
@@ -550,11 +550,11 @@ mod tests {
     async fn unbalanced_output_fails_type_script(
         #[strategy(pw_strategy(Some(4)))] mut pw: PrimitiveWitness,
     ) {
-        let inflated = pw.output_utxos.utxos[0].get_native_currency_amount()
-            + NativeCurrencyAmount::coins(1);
+        let inflated =
+            pw.output_utxos.utxos[0].get_native_currency_amount() + NativeCurrencyAmount::coins(1);
         pw.output_utxos.utxos[0] =
             pw.output_utxos.utxos[0].new_with_native_currency_amount(inflated);
-        let w = LinkWitness::from_primitive_witness(pw, 2);
+        let w = LinkPrimitiveWitness::from_primitive_witness(pw, 2);
         assert!(matches!(
             w.validate().await,
             Err(WitnessValidationError::InvalidTypeScript { .. })
@@ -568,7 +568,7 @@ mod tests {
         pw.kernel = TransactionKernelModifier::default()
             .fee(pw.kernel.fee + NativeCurrencyAmount::coins(1))
             .modify(pw.kernel);
-        let w = LinkWitness::from_primitive_witness(pw, 2);
+        let w = LinkPrimitiveWitness::from_primitive_witness(pw, 2);
         assert!(matches!(
             w.validate().await,
             Err(WitnessValidationError::InvalidTypeScript { .. })
@@ -579,7 +579,7 @@ mod tests {
     async fn missing_type_script_witness_fails(
         #[strategy(pw_strategy(Some(4)))] pw: PrimitiveWitness,
     ) {
-        let mut w = LinkWitness::from_primitive_witness(pw, 2);
+        let mut w = LinkPrimitiveWitness::from_primitive_witness(pw, 2);
         w.type_scripts_and_witnesses.remove(0);
         assert!(matches!(
             w.validate().await,
@@ -591,7 +591,7 @@ mod tests {
     async fn too_many_type_script_witnesses_fails(
         #[strategy(pw_strategy(Some(4)))] pw: PrimitiveWitness,
     ) {
-        let mut w = LinkWitness::from_primitive_witness(pw, 2);
+        let mut w = LinkPrimitiveWitness::from_primitive_witness(pw, 2);
         let extra = TimeLockWitness::new(
             w.kernel.kernel.clone(),
             w.input_utxos.clone(),
@@ -608,7 +608,9 @@ mod tests {
     // ----------------------------------------------- negative: kernel-record consistency
 
     #[proptest(cases = 5, async = "tokio")]
-    async fn swapped_removal_records_fail(#[strategy(pw_strategy(Some(3)))] mut pw: PrimitiveWitness) {
+    async fn swapped_removal_records_fail(
+        #[strategy(pw_strategy(Some(3)))] mut pw: PrimitiveWitness,
+    ) {
         // 3 inputs, lift 1 => 2 confirmed; swap their removal records so the
         // kernel disagrees with what the membership proofs imply.
         let mut inputs = pw.kernel.inputs.clone();
@@ -616,7 +618,7 @@ mod tests {
         pw.kernel = TransactionKernelModifier::default()
             .inputs(inputs)
             .modify(pw.kernel);
-        let w = LinkWitness::from_primitive_witness(pw, 1);
+        let w = LinkPrimitiveWitness::from_primitive_witness(pw, 1);
         assert!(matches!(
             w.validate().await,
             Err(WitnessValidationError::RemovalRecordsMismatch { .. })
@@ -627,7 +629,7 @@ mod tests {
     async fn tampered_thruput_addition_record_fails(
         #[strategy(pw_strategy(Some(4)))] pw: PrimitiveWitness,
     ) {
-        let mut w = LinkWitness::from_primitive_witness(pw, 2);
+        let mut w = LinkPrimitiveWitness::from_primitive_witness(pw, 2);
         w.kernel.thruputs[0].canonical_commitment = Digest::default();
         assert!(matches!(
             w.validate().await,
@@ -639,7 +641,7 @@ mod tests {
     async fn tampered_thruput_randomness_fails(
         #[strategy(pw_strategy(Some(4)))] pw: PrimitiveWitness,
     ) {
-        let mut w = LinkWitness::from_primitive_witness(pw, 2);
+        let mut w = LinkPrimitiveWitness::from_primitive_witness(pw, 2);
         w.thruput_sender_randomnesses[0] = Digest::default();
         assert!(matches!(
             w.validate().await,
@@ -651,10 +653,15 @@ mod tests {
 
     #[proptest(cases = 5, async = "tokio")]
     async fn merge_bit_is_rejected(
-        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers_and_merge_bit(Some(4), 2, 1, true))]
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers_and_merge_bit(
+            Some(4),
+            2,
+            1,
+            true
+        ))]
         pw: PrimitiveWitness,
     ) {
-        let w = LinkWitness::from_primitive_witness(pw, 2);
+        let w = LinkPrimitiveWitness::from_primitive_witness(pw, 2);
         assert!(matches!(
             w.validate().await,
             Err(WitnessValidationError::MergeBitSet)
@@ -663,7 +670,7 @@ mod tests {
 
     #[proptest(cases = 5, async = "tokio")]
     async fn coinbase_kernel_is_rejected(#[strategy(pw_strategy(None))] pw: PrimitiveWitness) {
-        let w = LinkWitness::from_primitive_witness(pw, 0);
+        let w = LinkPrimitiveWitness::from_primitive_witness(pw, 0);
         assert!(matches!(
             w.validate().await,
             Err(WitnessValidationError::CoinbaseSet)

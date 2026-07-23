@@ -4,7 +4,7 @@ use serde::Serialize;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 
 use super::link_kernel::LinkKernel;
-use super::link_witness::LinkWitness;
+use super::link_primitive_witness::LinkPrimitiveWitness;
 use crate::transaction::validity::neptune_proof::NeptuneProof;
 
 /// The proof backing a [`LinkTx`].
@@ -16,7 +16,7 @@ use crate::transaction::validity::neptune_proof::NeptuneProof;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub enum LinkTxProof {
     /// The raw witness. Exposes secrets (spending keys); must not be shared.
-    Witness(Box<LinkWitness>),
+    Witness(Box<LinkPrimitiveWitness>),
     /// A link proof: the output of one of `Forge`/`Chain`/`Update`/`Cast`. Does
     /// not expose secrets and can be shared with peers.
     Proof(NeptuneProof),
@@ -35,13 +35,14 @@ impl LinkTxProof {
 #[cfg(test)]
 impl LinkTxProof {
     /// Proptest strategy producing both variants: a witness-backed proof (via
-    /// [`LinkWitness::arbitrary_strategy`]) or a proof-backed one.
+    /// [`LinkPrimitiveWitness::arbitrary_strategy`]) or a proof-backed one.
     pub fn arbitrary_strategy() -> proptest::strategy::BoxedStrategy<Self> {
         use proptest::prelude::Strategy;
         use proptest_arbitrary_interop::arb;
 
         proptest::prop_oneof![
-            LinkWitness::arbitrary_strategy().prop_map(|lw| LinkTxProof::Witness(Box::new(lw))),
+            LinkPrimitiveWitness::arbitrary_strategy()
+                .prop_map(|lw| LinkTxProof::Witness(Box::new(lw))),
             arb::<NeptuneProof>().prop_map(LinkTxProof::Proof),
         ]
         .boxed()
