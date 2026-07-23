@@ -49,6 +49,42 @@ pub const GENERATION_FLAG: BFieldElement = BFieldElement::new(GENERATION_FLAG_U8
 
 pub const HRP_PREFIX: &str = "nolga";
 
+pub const GENERATION_VIEWING_KEY_HRP_PREFIX: &str = "nolgavk";
+
+/// Decrypt a Generation Address ciphertext with the lattice-KEM secret key.
+fn decrypt_with_decryption_key(
+    decryption_key: lattice::kem::SecretKey,
+    ciphertext: &[BFieldElement],
+) -> Result<(Utxo, Digest)> {
+    // parse ciphertext
+    ensure!(
+        ciphertext.len() > CIPHERTEXT_SIZE_IN_BFES,
+        "Ciphertext does not have nonce.",
+    );
+    let (kem_ctxt, remainder_ctxt) = ciphertext.split_at(CIPHERTEXT_SIZE_IN_BFES);
+    ensure!(
+        remainder_ctxt.len() > 1,
+        "Ciphertext does not have payload.",
+    );
+    let (nonce_ctxt, dem_ctxt) = remainder_ctxt.split_at(1);
+    let kem_ctxt_array: [BFieldElement; CIPHERTEXT_SIZE_IN_BFES] = kem_ctxt.try_into().unwrap();
+
+    // decrypt
+    let Some(shared_key) = lattice::kem::dec(decryption_key, kem_ctxt_array.into()) else {
+        bail!("Could not establish shared secret key.");
+    };
+    let cipher = Aes256Gcm::new(&shared_key.into());
+    let nonce_as_bytes = [nonce_ctxt[0].value().to_be_bytes().to_vec(), vec![0u8; 4]].concat();
+    let nonce = Nonce::from_slice(&nonce_as_bytes); // almost 64 bits; unique per message
+    let ciphertext_bytes = common::bfes_to_bytes(dem_ctxt)?;
+    let plaintext = cipher
+        .decrypt(nonce, ciphertext_bytes.as_ref())
+        .map_err(|_| anyhow!("Failed to decrypt symmetric payload."))?;
+
+    // convert plaintext to utxo and digest
+    Ok(bincode::deserialize(&plaintext)?)
+}
+
 // note: we serde(skip) fields that can be computed from the seed in order to
 // keep the serialized (including bech32m) representation small.
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize)]
@@ -217,33 +253,23 @@ impl GenerationSpendingKey {
 
     /// Decrypt a Generation Address ciphertext
     pub(super) fn decrypt(&self, ciphertext: &[BFieldElement]) -> Result<(Utxo, Digest)> {
-        // parse ciphertext
-        ensure!(
-            ciphertext.len() > CIPHERTEXT_SIZE_IN_BFES,
-            "Ciphertext does not have nonce.",
-        );
-        let (kem_ctxt, remainder_ctxt) = ciphertext.split_at(CIPHERTEXT_SIZE_IN_BFES);
-        ensure!(
-            remainder_ctxt.len() > 1,
-            "Ciphertext does not have payload.",
-        );
-        let (nonce_ctxt, dem_ctxt) = remainder_ctxt.split_at(1);
-        let kem_ctxt_array: [BFieldElement; CIPHERTEXT_SIZE_IN_BFES] = kem_ctxt.try_into().unwrap();
+        decrypt_with_decryption_key(self.decryption_key, ciphertext)
+    }
 
-        // decrypt
-        let Some(shared_key) = lattice::kem::dec(self.decryption_key, kem_ctxt_array.into()) else {
-            bail!("Could not establish shared secret key.");
-        };
-        let cipher = Aes256Gcm::new(&shared_key.into());
-        let nonce_as_bytes = [nonce_ctxt[0].value().to_be_bytes().to_vec(), vec![0u8; 4]].concat();
-        let nonce = Nonce::from_slice(&nonce_as_bytes); // almost 64 bits; unique per message
-        let ciphertext_bytes = common::bfes_to_bytes(dem_ctxt)?;
-        let plaintext = cipher
-            .decrypt(nonce, ciphertext_bytes.as_ref())
-            .map_err(|_| anyhow!("Failed to decrypt symmetric payload."))?;
-
-        // convert plaintext to utxo and digest
-        Ok(bincode::deserialize(&plaintext)?)
+    /// Export the viewing key corresponding to this spending key.
+    ///
+    /// The KEM secret key is derived from the seed through SHAKE256 and so
+    /// cannot be inverted to the seed. Handing it out therefore reveals
+    /// neither the unlock key preimage nor the receiver preimage, both of
+    /// which are derived directly from the seed.
+    pub fn viewing_key(&self) -> GenerationViewingKey {
+        let kem_keygen_randomness: [u8; 32] =
+            common::shake256::<32>(&bincode::serialize(&self.seed).unwrap());
+        GenerationViewingKey {
+            kem_keygen_randomness,
+            decryption_key: self.decryption_key,
+            address: self.to_address(),
+        }
     }
 
     fn generate_spending_lock(&self) -> Digest {
@@ -263,17 +289,124 @@ impl GenerationSpendingKey {
     }
 }
 
-// future improvements: a strong argument can be made that this type
-// should not have any methods with
-// outside types as parameters or return types.  for example:
-//
-// pub fn generate_announcement(
-//     &self,
-//     utxo_notification_payload: &UtxoNotificationPayload,
-// ) -> Announcement;
-//
-// this method is dealing with types far outside the concern of
-// a key, which means the method belongs elsewhere.
+/// Lightweight struct containing what is sent over the wire when serializing
+/// a [GenerationViewingKey]. Short bech32 format compared to a
+/// [GenerationReceivingAddress].
+///
+/// The KEM key pair is re-derived from the keygen randomness on
+/// deserialization; encoding the randomness instead of the keys keeps the
+/// serialized viewing key short. In particular, the ~2 kB KEM public key
+/// never goes over the wire.
+#[derive(Serialize, Deserialize)]
+struct GenerationViewingKeyDto {
+    kem_keygen_randomness: [u8; 32],
+    receiver_identifier: BFieldElement,
+    receiver_postimage: Digest,
+    lock_postimage: Digest,
+}
+
+impl From<GenerationViewingKeyDto> for GenerationViewingKey {
+    fn from(dto: GenerationViewingKeyDto) -> Self {
+        let (sk, pk) = lattice::kem::keygen(dto.kem_keygen_randomness);
+        Self {
+            kem_keygen_randomness: dto.kem_keygen_randomness,
+            decryption_key: sk,
+            address: GenerationReceivingAddress {
+                receiver_identifier: dto.receiver_identifier,
+                encryption_key: pk,
+                receiver_postimage: dto.receiver_postimage,
+                lock_postimage: dto.lock_postimage,
+            },
+        }
+    }
+}
+
+impl From<GenerationViewingKey> for GenerationViewingKeyDto {
+    fn from(key: GenerationViewingKey) -> Self {
+        Self {
+            kem_keygen_randomness: key.kem_keygen_randomness,
+            receiver_identifier: key.address.receiver_identifier,
+            receiver_postimage: key.address.receiver_postimage,
+            lock_postimage: key.address.lock_postimage,
+        }
+    }
+}
+
+/// Cryptographic information to detect and decrypt all incoming [Utxo]s sent
+/// to a [GenerationReceivingAddress], without the ability to spend any of
+/// them.
+///
+/// The viewing key holds the randomness from which the notification KEM key
+/// pair is derived, and the (public) receiving address, which contains only
+/// post-images of the spending and privacy secrets. Consequently, the holder
+/// can neither spend the received UTXOs nor see whether they have been spent.
+/// If you want to see if UTXOs received on the address have been spent (still
+/// without spending abilities), you need the receiver preimage in addition to
+/// this data structure.
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "GenerationViewingKeyDto", into = "GenerationViewingKeyDto")]
+pub struct GenerationViewingKey {
+    kem_keygen_randomness: [u8; 32],
+
+    // The remaining fields are derivable from the serialized representation.
+    // They are cached here to avoid re-deriving them on every use.
+    decryption_key: lattice::kem::SecretKey,
+
+    address: GenerationReceivingAddress,
+}
+
+impl GenerationViewingKey {
+    /// Decrypt a Generation Address ciphertext
+    pub fn decrypt(&self, ciphertext: &[BFieldElement]) -> Result<(Utxo, Digest)> {
+        decrypt_with_decryption_key(self.decryption_key, ciphertext)
+    }
+
+    pub fn to_address(&self) -> GenerationReceivingAddress {
+        self.address
+    }
+
+    /// returns the receiver_identifier, a public fingerprint
+    pub fn receiver_identifier(&self) -> BFieldElement {
+        self.address.receiver_identifier
+    }
+
+    pub(super) fn get_hrp(network: Network) -> String {
+        let mut hrp = GENERATION_VIEWING_KEY_HRP_PREFIX.to_string();
+        let network_byte = network_hrp_char(network);
+        hrp.push(network_byte);
+        hrp
+    }
+
+    pub fn to_bech32m(&self, network: Network) -> Result<String> {
+        let hrp = Self::get_hrp(network);
+        let payload = bincode::serialize(self)?;
+        let variant = Variant::Bech32m;
+        match bech32::encode(&hrp, payload.to_base32(), variant) {
+            Ok(enc) => Ok(enc),
+            Err(e) => {
+                bail!("Could not encode generation viewing key as bech32m because error: {e}")
+            }
+        }
+    }
+
+    pub fn from_bech32m(encoded: &str, network: Network) -> Result<Self> {
+        let (hrp, data, variant) = bech32::decode(encoded)?;
+
+        ensure!(
+            variant == Variant::Bech32m,
+            "Can only decode bech32m viewing keys.",
+        );
+        ensure!(
+            hrp == Self::get_hrp(network),
+            "Could not decode bech32m viewing key because of invalid prefix",
+        );
+
+        let payload = Vec::<u8>::from_base32(&data)?;
+        bincode::deserialize(&payload)
+            .map_err(|e| anyhow!("Could not decode bech32m viewing key because of error: {e}"))
+    }
+}
+
 impl GenerationReceivingAddress {
     pub fn from_spending_key(spending_key: &GenerationSpendingKey) -> Self {
         let seed = spending_key.seed;
@@ -499,6 +632,130 @@ mod tests {
                 let from_seed = LockScriptAndWitness::genaddr_like_hash_lock_from_seed(seed);
                 assert_eq!(from_key.program, from_seed.program);
             }
+        }
+    }
+
+    mod generation_viewing_key {
+        use super::*;
+
+        #[test]
+        fn viewing_key_and_spending_key_agree_on_address() {
+            let spending_key = GenerationSpendingKey::derive_from_seed(rand::random());
+            assert_eq!(
+                spending_key.to_address(),
+                spending_key.viewing_key().to_address()
+            );
+        }
+
+        #[test]
+        fn viewing_key_can_decrypt_notification() {
+            let spending_key = GenerationSpendingKey::derive_from_seed(rand::random());
+            let payload = UtxoNotificationPayload::new(Utxo::empty_dummy(), rand::random());
+            let ciphertext = spending_key.to_address().encrypt(&payload);
+
+            let (utxo, sender_randomness) = spending_key
+                .viewing_key()
+                .decrypt(&ciphertext)
+                .expect("Decryption should succeed for valid ciphertext and matching keys");
+
+            assert_eq!(
+                payload,
+                UtxoNotificationPayload::new(utxo, sender_randomness)
+            );
+        }
+
+        #[test]
+        fn decryption_fails_with_wrong_viewing_key() {
+            let alice_key = GenerationSpendingKey::derive_from_seed(Digest::default());
+            let bob_key = GenerationSpendingKey::derive_from_seed(Digest::default().hash());
+            let payload = UtxoNotificationPayload::new(Utxo::empty_dummy(), Digest::default());
+
+            let ciphertext = bob_key.to_address().encrypt(&payload);
+            let failed_decryption = alice_key.viewing_key().decrypt(&ciphertext);
+
+            assert!(
+                failed_decryption.is_err(),
+                "Decryption should fail when using the wrong key"
+            );
+        }
+
+        #[test]
+        fn viewing_key_bech32_consistency() {
+            let network = Network::Main;
+            let viewing_key = GenerationSpendingKey::derive_from_seed(rand::random()).viewing_key();
+
+            assert_eq!(
+                viewing_key,
+                GenerationViewingKey::from_bech32m(
+                    &viewing_key.to_bech32m(network).unwrap(),
+                    network
+                )
+                .unwrap()
+            );
+        }
+
+        #[test]
+        fn no_crash_in_viewing_key_bech32_decoding() {
+            const SHORT_PREFIX: &str = "n";
+            let network = Network::Main;
+
+            // Encodings with valid checksum
+            let short_prefix =
+                bech32::encode(SHORT_PREFIX, vec![].to_base32(), Variant::Bech32m).unwrap();
+            let long_prefix =
+                bech32::encode("nolganolga", vec![].to_base32(), Variant::Bech32m).unwrap();
+
+            for str in [short_prefix, long_prefix] {
+                assert!(
+                    GenerationViewingKey::from_bech32m(&str, network).is_err(),
+                    "Invalid bech32 encoding must lead to error: {str}"
+                );
+            }
+
+            // Not valid checksums.
+            for i in 0..10 {
+                let as_ = "a".repeat(i);
+                assert!(
+                    GenerationViewingKey::from_bech32m(&as_, network).is_err(),
+                    "Invalid bech32 encoding must lead to error 1"
+                );
+                assert!(
+                    GenerationViewingKey::from_bech32m(
+                        &format!("{GENERATION_VIEWING_KEY_HRP_PREFIX}1{as_}"),
+                        network
+                    )
+                    .is_err(),
+                    "Invalid bech32 encoding must lead to error 2"
+                );
+            }
+        }
+
+        #[test]
+        fn viewing_key_bech32_representation_is_unchanged() {
+            assert_eq!(
+                "nolgavkm1dx6fyc3g4ze27ynzsjszt59my8qfxqk3l47qnpgxrw2q827xn4qdf6j67nd34ngrxdcs4y2fclektkckskrl0jmk288akd6mll869lvyaj47v0wjrp2fwrg7gckx0ur6s6vhv6p7pv0lt4yzr78umsxcnep2gc69au66rekajnc5dm5sduygn7wttpxrsjhpmt9wrp",
+                WalletEntropy::devnet_wallet()
+                    .nth_generation_spending_key(0)
+                    .viewing_key()
+                    .to_bech32m(Network::Main)
+                    .unwrap()
+            );
+        }
+
+        /// An address bech32m string must not decode as a viewing key, and
+        /// vice versa, even though their prefixes share the `nolga` stem.
+        #[test]
+        fn viewing_key_and_address_encodings_do_not_collide() {
+            let network = Network::Main;
+            let spending_key = GenerationSpendingKey::derive_from_seed(rand::random());
+
+            let address_encoded = spending_key.to_address().to_bech32m(network).unwrap();
+            let viewing_key_encoded = spending_key.viewing_key().to_bech32m(network).unwrap();
+
+            assert!(GenerationViewingKey::from_bech32m(&address_encoded, network).is_err());
+            assert!(
+                GenerationReceivingAddress::from_bech32m(&viewing_key_encoded, network).is_err()
+            );
         }
     }
 
