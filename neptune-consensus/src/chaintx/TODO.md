@@ -82,6 +82,10 @@ txs):
   - [x] `validate` -- analogous to `PrimitiveWitness::validate`
 - [ ] `LinkProofWitness` enum: `Forge | Chain | Update | Cast`
       (mirror `SingleProofWitness`; note `Fix` is NOT here)
+  - [x] `Forge(Box<LinkWitness>)` variant, discriminant 0 pinned, hand-written
+        `TasmObject` impl (derive rejects enums)
+  - [ ] `Chain` (1), `Update` (2), `Cast` (3) — land with their witnesses
+  - [ ] `SecretWitness` impl — blocked on the `LinkProof` program existing
 - [ ] `SingleProofWitness::Fix(FixWitness)` — new variant on the *existing*
       enum; recursively verifies a LinkProof, asserts `thruputs == []`
 
