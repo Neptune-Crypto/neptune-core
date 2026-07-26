@@ -21,7 +21,6 @@ use tasm_lib::list::new::New;
 use tasm_lib::list::push::Push;
 use tasm_lib::memory::encode_to_memory;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
-use tasm_lib::mmr::bag_peaks::BagPeaks;
 use tasm_lib::mmr::verify_from_secret_in_leaf_index_on_stack::MmrVerifyFromSecretInLeafIndexOnStack;
 use tasm_lib::neptune::mutator_set;
 use tasm_lib::structure::tasm_object::TasmObject;
@@ -47,6 +46,7 @@ use crate::transaction::utxo::Coin;
 use crate::transaction::utxo::Utxo;
 use crate::transaction::validity::neptune_proof::Proof;
 use crate::transaction::validity::tasm::claims::new_claim::NewClaim;
+use crate::transaction::validity::tasm::leaf_authentication::authenticate_msa_against_txk::AuthenticateMsaAgainstTxk;
 use crate::transaction::validity::tasm::compute_absolute_indices::ComputeAbsoluteIndices;
 use crate::type_scripts::native_currency::NativeCurrency;
 use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -192,13 +192,19 @@ struct ForgeWitnessMemory {
     output_utxos: SaltedUtxos,
     outputs: Vec<AdditionRecord>,
     aocl: MmrAccumulator,
-    swbfi: MmrAccumulator,
+    /// The bagged inactive-window peaks and the active-window hash, as digests.
+    /// `AuthenticateMsaAgainstTxk` consumes these directly (it bags only the
+    /// AOCL itself), so -- like `update_branch`'s `UpdateWitness` -- the memory
+    /// image carries them pre-reduced rather than the raw swbfi MMR.
+    swbfi_bagged: Digest,
+    swbfa_hash: Digest,
     lock_scripts_halt: Vec<Proof>,
     type_scripts_halt: Vec<Proof>,
 }
 
 impl From<&ForgeWitness> for ForgeWitnessMemory {
     fn from(witness: &ForgeWitness) -> Self {
+        use tasm_lib::twenty_first::prelude::Mmr;
         Self {
             input_utxos: witness.input_utxos.clone(),
             confirmed_inputs: witness.confirmed_inputs.clone(),
@@ -206,7 +212,8 @@ impl From<&ForgeWitness> for ForgeWitnessMemory {
             output_utxos: witness.output_utxos.clone(),
             outputs: witness.outputs.clone(),
             aocl: witness.aocl.clone(),
-            swbfi: witness.swbfi.clone(),
+            swbfi_bagged: witness.swbfi.bag_peaks(),
+            swbfa_hash: witness.swbfa_hash,
             lock_scripts_halt: witness.lock_scripts_halt.clone(),
             type_scripts_halt: witness.type_scripts_halt.clone(),
         }
@@ -525,8 +532,9 @@ impl SecretWitness for ForgeWitness {
 
         // Each digest and the u64 leaf index are laid down reversed: that is
         // the orientation the tasm expects to find them in on the stack after
-        // divining.
-        let mut nd_stream: Vec<BFieldElement> = self.swbfa_hash.reversed().values().to_vec();
+        // divining. (The swbfa hash used to be divined here; it now lives in the
+        // memory image, so the stream starts with the confirmed-input data.)
+        let mut nd_stream: Vec<BFieldElement> = vec![];
         for msmp in &self.membership_proofs {
             let mut leaf_index = msmp.aocl_leaf_index.encode();
             leaf_index.reverse();
@@ -658,7 +666,6 @@ impl TritonProgram for Forge {
 
         let mut library = Library::new();
 
-        let bag_peaks = library.import(Box::new(BagPeaks));
         let merkle_verify = library.import(Box::new(MerkleVerify));
         let hash_varlen = library.import(Box::new(HashVarlen));
         let ms_commit = library.import(Box::new(mutator_set::commit::Commit));
@@ -693,9 +700,16 @@ impl TritonProgram for Forge {
         let contains = library.import(Box::new(Contains::new(DataType::Digest)));
         let new_list = library.import(Box::new(New));
         let list_push_digest = library.import(Box::new(Push::new(DataType::Digest)));
+        // Shared mutator-set-accumulator authentication, at LinkKernel's height.
+        // Imported here (with the other verifier-side snippets) so its internal
+        // `BagPeaks`/`MerkleVerify` imports cannot disturb the four allocs above.
+        let authenticate_msa = library.import(Box::new(AuthenticateMsaAgainstTxk {
+            mast_height: LinkKernel::MAST_HEIGHT as u32,
+        }));
 
         let field_aocl = field!(ForgeWitnessMemory::aocl);
-        let field_swbfi = field!(ForgeWitnessMemory::swbfi);
+        let field_swbfi_bagged = field!(ForgeWitnessMemory::swbfi_bagged);
+        let field_swbfa_hash = field!(ForgeWitnessMemory::swbfa_hash);
         let field_peaks = field!(MmrAccumulatorTip5::peaks);
         let field_mmr_num_leafs = field!(MmrAccumulatorTip5::leaf_count);
         let field_input_utxos = field!(ForgeWitnessMemory::input_utxos);
@@ -753,75 +767,27 @@ impl TritonProgram for Forge {
         // pushes it first, matching `CollectTypeScripts`.
         let push_native_currency_hash = push_digest(NativeCurrency.hash());
 
-        // `_ [lkmh] *witness` -> `_ [lkmh] *witness`, having authenticated the
-        // mutator set accumulator against the link-kernel MAST hash.
-        //
-        // This is a near-verbatim copy of
-        // `RemovalRecordsIntegrity`'s `authenticate_mutator_set_acc_against_txkmh`,
-        // differing only in the `push {MAST_HEIGHT}` immediate (LinkKernel's 4
-        // vs. TransactionKernel's 3; the MutatorSetHash leaf index, 6, is the
-        // same in both). Not shared, and deliberately not guarded like the
-        // confirmed-input loop: the lone differing immediate means an equality
-        // guard would have to special-case it, which costs more than the copy
-        // is worth. Same rationale as the loop -- RRI's hash is frozen, so
-        // coupling buys nothing (see the `for_all_confirmed_loop` comment).
+        // Authenticate the mutator-set accumulator against the link-kernel MAST
+        // hash via the shared `AuthenticateMsaAgainstTxk` snippet (instantiated
+        // at LinkKernel's height; the `MutatorSetHash` leaf index 6 is the same
+        // as `TransactionKernel`'s). The snippet bags the AOCL peaks itself and
+        // reads the pre-bagged swbfi digest and the swbfa digest from the
+        // witness -- the same layout `update_branch`'s `UpdateWitness` uses.
         let authenticate_mutator_set_acc = triton_asm!(
             // _ [lkmh] *witness
-            dup 5 dup 5 dup 5 dup 5 dup 5
-            // _ [lkmh] *witness [lkmh]
+            dup 0 {&field_aocl}
+            // _ [lkmh] *witness *aocl
 
-            push {LinkKernel::MAST_HEIGHT}
-            // _ [lkmh] *witness [lkmh] h
+            dup 1 {&field_swbfi_bagged}
+            // _ [lkmh] *witness *aocl *swbfi_bagged
 
-            dup 6
-            // _ [lkmh] *witness [lkmh] h *witness
+            dup 2 {&field_swbfa_hash}
+            // _ [lkmh] *witness *aocl *swbfi_bagged *swbfa
 
-            push 0 push 0 push 0 push 0 push 1
-            // _ [lkmh] *witness [lkmh] h *witness [padding]
+            dup 8 dup 8 dup 8 dup 8 dup 8
+            // _ [lkmh] *witness *aocl *swbfi_bagged *swbfa [lkmh]
 
-            push 0 push 0 push 0 push 0 push 0
-            // _ [lkmh] *witness [lkmh] h *witness [padding] [default]
-
-            divine {Digest::LEN}
-            // _ [lkmh] *witness [lkmh] h *witness [padding] [default] [swbfa_hash]
-
-            hash
-            // _ [lkmh] *witness [lkmh] h *witness [padding] [right]
-
-            dup 10 {&field_swbfi}
-            call {bag_peaks}
-            // _ [lkmh] *witness [lkmh] h *witness [padding] [right] [swbfi_hash]
-
-            dup 15 {&field_aocl}
-            call {bag_peaks}
-            // _ [lkmh] *witness [lkmh] h *witness [padding] [right] [swbfi_hash] [aocl_hash]
-
-            hash
-            // _ [lkmh] *witness [lkmh] h *witness [padding] [right] [left]
-
-            hash
-            // _ [lkmh] *witness [lkmh] h *witness [padding] [msa_hash]
-
-            sponge_init sponge_absorb
-            // _ [lkmh] *witness [lkmh] h *witness
-
-            sponge_squeeze
-            // _ [lkmh] *witness [lkmh] h *witness [garbage] [msa_hash_as_leaf]
-
-            swap 5 pop 1
-            swap 5 pop 1
-            swap 5 pop 1
-            swap 5 pop 1
-            swap 5 pop 1
-            // _ [lkmh] *witness [lkmh] h *witness [msa_hash_as_leaf]
-
-            push {LinkKernelField::MutatorSetHash as u32}
-            // _ [lkmh] *witness [lkmh] h *witness [msa_hash_as_leaf] i
-
-            swap 6 pop 1
-            // _ [lkmh] *witness [lkmh] h i [msa_hash_as_leaf]
-
-            call {merkle_verify}
+            call {authenticate_msa}
             // _ [lkmh] *witness
         );
 
@@ -1726,12 +1692,12 @@ mod tests {
 
             let input_utxos: &[Utxo] = &witness.input_utxos.utxos;
             let aocl: MmrAccumulator = witness.aocl;
-            let swbfi: MmrAccumulator = witness.swbfi;
 
-            // authenticate the mutator set accumulator
-            let left = Tip5::hash_pair(aocl.bag_peaks(), swbfi.bag_peaks());
-            let active_swbf_digest: Digest = tasm::tasmlib_io_read_secin___digest();
-            let right = Tip5::hash_pair(active_swbf_digest, Digest::default());
+            // authenticate the mutator set accumulator (mirrors the shared
+            // `AuthenticateMsaAgainstTxk` snippet: bag only the AOCL, take the
+            // swbfi/swbfa digests from the witness)
+            let left = Tip5::hash_pair(aocl.bag_peaks(), witness.swbfi_bagged);
+            let right = Tip5::hash_pair(witness.swbfa_hash, Digest::default());
             let msah: Digest = Tip5::hash_pair(left, right);
             tasm::tasmlib_hashing_merkle_verify(
                 lkmh,

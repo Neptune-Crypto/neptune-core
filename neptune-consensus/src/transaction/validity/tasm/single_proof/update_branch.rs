@@ -216,7 +216,9 @@ impl BasicSnippet for UpdateBranch {
         let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
             Stark::default(),
         )));
-        let authenticate_msa = library.import(Box::new(AuthenticateMsaAgainstTxk));
+        let authenticate_msa = library.import(Box::new(AuthenticateMsaAgainstTxk {
+            mast_height: TransactionKernel::MAST_HEIGHT as u32,
+        }));
         let authenticate_inputs = library.import(Box::new(AuthenticateTxkField(
             TransactionKernelField::Inputs,
         )));
