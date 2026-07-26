@@ -250,9 +250,10 @@ tested on the new dual pipeline as well.
 - `NativeCurrency` and `TimeLock` are recursively verified by `Forge` *unchanged*,
   so their own existing tests still apply — no re-test; only their whole-tx
   consequences below are re-stated against a `LinkKernel`.
-- `CollectLockScripts` / `CollectTypeScripts` do NOT survive as separate
-  programs; `Forge` absorbs them. Their *net behavior* must be tested on `Forge`
-  (below).
+- `CollectLockScripts` / `CollectTypeScripts` do NOT appear as separate programs
+  in the dual pipeline; `Forge` absorbs them (they remain, unchanged and
+  consensus-pinned, in the legacy pipeline). Their *net behavior* must be tested
+  on `Forge` (below).
 - Reuse strategy: build the base `LinkPrimitiveWitness` via
   `LinkPrimitiveWitness::from_primitive_witness(pw, k)` off the same legacy
   `PrimitiveWitness::arbitrary_*` strategy the mirrored test uses, then poke one
