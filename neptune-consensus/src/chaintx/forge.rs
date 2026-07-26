@@ -1530,6 +1530,7 @@ mod tests {
     use super::*;
     use crate::proof_abstractions::tasm::builtins as tasm;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
+    use crate::proof_abstractions::tasm::program::tests::test_program_snapshot;
     use crate::proof_abstractions::triton_vm_job_queue::vm_job_queue;
     use crate::transaction::primitive_witness::PrimitiveWitness;
     use crate::transaction::utxo::Utxo;
@@ -2185,4 +2186,9 @@ mod tests {
             )
             .unwrap();
     }
+
+    test_program_snapshot!(
+        Forge,
+        "ae37c9e33256535a5780c0fcdea48e801f0511a08fbc92533f4e5e2215c28eac5989d1425807cb09"
+    );
 }
