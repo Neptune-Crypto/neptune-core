@@ -101,9 +101,10 @@ mod tests {
         );
     }
 
-    /// The wrapped kernel's leafs are reused verbatim and thruputs is appended.
+    /// The wrapped kernel's leafs are reused verbatim and thruputs is appended
+    /// to this list of leafs.
     #[proptest]
-    fn mast_sequences_reuse_kernel_leaves_and_append_thruputs(#[strategy(arb())] link: LinkKernel) {
+    fn mast_sequences_reuse_kernel_leafs_and_append_thruputs(#[strategy(arb())] link: LinkKernel) {
         let kernel_seqs = link.kernel.mast_sequences();
         let link_seqs = link.mast_sequences();
 
