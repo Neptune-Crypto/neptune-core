@@ -90,7 +90,7 @@ txs):
 
 ## Tasm
 Four produce a `LinkProof`; `Fix` produces a `SingleProof`.
-- [ ] **Forge** `LinkPrimitiveWitness -> LinkTx`: inline
+- [x] **Forge** `LinkPrimitiveWitness -> LinkTx`: inline
       `RemovalRecordsIntegrity` (non-recursive) + collect the lock/type-script
       hashes inline and recursively verify the lock/type-script proofs.
   - [x] input integrity:
@@ -115,7 +115,7 @@ Four produce a `LinkProof`; `Fix` produces a `SingleProof`.
         (Inner root divined, authenticated against `lkmh`, then kept at the
         bottom of the stack -- reusing the now-dead `lkmh` slot -- so both
         script-claim templates read it without static memory.)
-  - [ ] `test_program_snapshot!` — deferred until the program stops changing
+  - [x] `test_program_snapshot!` — pins the `Forge` program hash
 - [ ] **Chain** `LinkTx * LinkTx -> LinkTx`: recursively verify both input
       LinkProofs, merge, cut-through where
       `successor.thruputs ⊆ predecessor.outputs` (mirror
