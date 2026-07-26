@@ -1533,6 +1533,7 @@ mod tests {
     use crate::proof_abstractions::tasm::program::tests::test_program_snapshot;
     use crate::proof_abstractions::triton_vm_job_queue::vm_job_queue;
     use crate::transaction::primitive_witness::PrimitiveWitness;
+    use crate::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::transaction::utxo::Utxo;
     use crate::transaction::validity::removal_records_integrity::RemovalRecordsIntegrity;
 
@@ -2183,6 +2184,53 @@ mod tests {
                 witness.standard_input(),
                 witness.nondeterminism(),
                 &[WRONG_NUMBER_OF_LOCK_SCRIPT_PROOFS_ERROR],
+            )
+            .unwrap();
+    }
+
+    /// A mutator-set accumulator that disagrees with the kernel's committed
+    /// `MutatorSetHash` is rejected: the recomputed hash no longer authenticates
+    /// against the `LinkKernel` MAST root. Sharper than the proof-free tier
+    /// (which surfaces it only as `InvalidMembershipProof`). This is also the one
+    /// negative test that exercises the shared `AuthenticateMsaAgainstTxk`
+    /// snippet's rejection path.
+    #[proptest(cases = 4)]
+    fn bad_mutator_set_accumulator_is_rejected(#[strategy(pokeable_lpw())] lpw: LinkPrimitiveWitness) {
+        let mut witness = ForgeWitness::without_proofs(&lpw);
+        witness.swbfa_hash = Digest::default();
+        prop_assert!(!witness.validate_integrity());
+        Forge
+            .test_assertion_failure(
+                witness.standard_input(),
+                witness.nondeterminism(),
+                &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
+            )
+            .unwrap();
+    }
+
+    /// A confirmed removal record whose claimed absolute index set does not match
+    /// the one recomputed from its UTXO and randomness is rejected -- the inlined
+    /// `RemovalRecordsIntegrity` check that a bad index set (a double-spend path
+    /// if unchecked) cannot slip through. The kernel is rebuilt around the poked
+    /// record so its `Inputs` leaf still authenticates and the *index* check is
+    /// the surviving failure (mirrors `removal_records_fail_on_bad_absolute_indices`).
+    #[proptest(cases = 4)]
+    fn bad_absolute_index_set_is_rejected(
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 1))] mut pw: PrimitiveWitness,
+    ) {
+        let mut inputs = pw.kernel.inputs.clone();
+        inputs[0].absolute_indices.increment_bloom_filter_index(0);
+        pw.kernel = TransactionKernelModifier::default()
+            .inputs(inputs)
+            .modify(pw.kernel);
+        // 1 thruput => input[0] stays a confirmed input.
+        let witness = ForgeWitness::without_proofs(&LinkPrimitiveWitness::from_primitive_witness(pw, 1));
+        prop_assert!(!witness.validate_integrity());
+        Forge
+            .test_assertion_failure(
+                witness.standard_input(),
+                witness.nondeterminism(),
+                &[COMPUTED_AND_CLAIMED_INDICES_DISAGREE_ERROR],
             )
             .unwrap();
     }

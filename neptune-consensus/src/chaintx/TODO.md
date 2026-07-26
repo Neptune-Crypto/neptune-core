@@ -233,11 +233,13 @@ Gap pinned (same gap as `PrimitiveWitness::validate`; enforced later by `Forge`)
       (`missing_or_extra_lock_script_is_not_caught`)
 
 Deferred to `Forge` (sharper there than at the proof-free tier):
-- [ ] bad input MAST auth path / bad absolute index set (confirmed inputs) —
-      reachable here but only as `InvalidMembershipProof`
-- [ ] partition misclassification (confirmed ↔ thruput)
-- [ ] phantom thruput / phantom confirmed UTXO backed by no record — surfaces as
-      cardinality here; the exact inflation-path test belongs on `Forge`
+- [x] bad input MAST auth path / bad absolute index set (confirmed inputs) — bad
+      index set: `bad_absolute_index_set_is_rejected`
+      (`COMPUTED_AND_CLAIMED_INDICES_DISAGREE_ERROR`); bad kernel-MAST binding:
+      `unauthenticated_removal_record_is_rejected` / `unauthenticated_thruput_is_rejected`
+      (`ROOT_MISMATCH`).
+- [x] phantom thruput / phantom confirmed UTXO backed by no record —
+      `phantom_input_utxo_is_rejected` (`CARDINALITY_MISMATCH_ERROR`)
 
 ## Mirror Tests
 Two tiers: the proof-free `LinkPrimitiveWitness::validate` (above) and the tasm programs
@@ -260,13 +262,19 @@ tested on the new dual pipeline as well.
   field (legacy negative-test idiom) — no per-test strategy duplication.
 
 ### onto `Forge`
-- [ ] bad mutator-set accumulator rejected
-      (← `removal_records_fail_on_bad_ms_acc`) — confirmed inputs only
-- [ ] bad input MAST auth path rejected
-      (← `removal_records_fail_on_bad_mast_path_inputs`) — confirmed inputs only
-- [ ] bad absolute index set rejected (← `removal_record_fail_on_bad_absolute_indices`)
-      — confirmed inputs only
-- [ ] all lock scripts have valid witnesses (net behavior of `CollectLockScripts`)
+- [x] bad mutator-set accumulator rejected
+      (← `removal_records_fail_on_bad_ms_acc`) — `bad_mutator_set_accumulator_is_rejected`
+- [x] bad input MAST auth path rejected
+      (← `removal_records_fail_on_bad_mast_path_inputs`) — covered by
+      `unauthenticated_removal_record_is_rejected` (the kernel MAST path is
+      derived from `mast_leafs`, so poking the confirmed record is the way to
+      break the `Inputs`-leaf binding)
+- [x] bad absolute index set rejected (← `removal_record_fail_on_bad_absolute_indices`)
+      — `bad_absolute_index_set_is_rejected`
+- [x] all lock scripts have valid witnesses (net behavior of `CollectLockScripts`)
+      — every input UTXO needs a proof (count guard,
+      `missing_lock_script_proof_is_rejected`) and each is `StarkVerify`d;
+      the positive path is `forge_accepts_valid_witnesses`
 - [x] all unique type scripts have valid witnesses (net behavior of `CollectTypeScripts`)
       (`forge_accepts_timelocked_witness` forges a tx whose unique list is
       `[NativeCurrency, TimeLock]`, recursively verifying both.)
@@ -275,12 +283,14 @@ tested on the new dual pipeline as well.
       `missing_lock_script_proof_is_rejected` trip
       `WRONG_NUMBER_OF_{TYPE,LOCK}_SCRIPT_PROOFS_ERROR`; `validate` rejects a
       dropped lock- or type-script proof too -- see `validate_matches_forge`.)
-- [ ] unbalanced `LinkTx` invalid (← `unbalanced_transaction_without_coinbase_is_invalid`)
-  - [ ] unbalanced and `thruputs == []`
-  - [ ] unbalanced only after counting `thruputs`
-- [ ] fee-too-big inflation rejected (← `prop_inflation_violation_when_fee_too_big`)
-- [ ] fee bounds enforced
-      (← `positive_fee_cannot_exceed_max_nau` / `negative_fee_cannot_exceed_min_nau`)
+
+Not on `Forge` -- these are `NativeCurrency` properties, recursively *verified*
+(not re-implemented) by `Forge`, so `NativeCurrency`'s own tests still apply and
+no valid `Forge` witness can violate them (`produce` cannot prove an unbalanced /
+over-fee'd type script): unbalanced `LinkTx`; fee-too-big inflation; fee bounds.
+Likewise partition misclassification (confirmed ↔ thruput) is not an error -- the
+partition *is* the kernel, every input carries a lock-script proof, and an
+unmatched thruput is un-`Fix`able (see §Motivation).
 
 ### onto `Update`
 - [ ] new timestamp older than old rejected (← `new_timestamp_older_than_old_prop`)
