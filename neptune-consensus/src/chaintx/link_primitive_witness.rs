@@ -119,6 +119,21 @@ impl LinkPrimitiveWitness {
             return Err(error);
         }
 
+        // 1b. Likewise on the output side: every output UTXO the type scripts
+        //     weigh must be backed by an addition record.
+        let num_outputs = self.kernel.kernel.outputs.len();
+        if self.output_utxos.utxos.len() != num_outputs
+            || self.output_sender_randomnesses.len() != num_outputs
+            || self.output_receiver_digests.len() != num_outputs
+        {
+            let error = WitnessValidationError::OutputCardinalityMismatch {
+                output_utxos: self.output_utxos.utxos.len(),
+                outputs: num_outputs,
+            };
+            warn!("{error}");
+            return Err(error);
+        }
+
         // 2. Every input -- confirmed and thruput -- must be unlocked.
         for lock_script_and_witness in &self.lock_scripts_and_witnesses {
             let lock_script = lock_script_and_witness.program.clone();
@@ -233,10 +248,13 @@ impl LinkPrimitiveWitness {
             }
         }
 
-        // 5. Removal records derived from the confirmed inputs must match the
-        //    kernel's inputs (as in `PrimitiveWitness::validate`, after the type
-        //    scripts), and each thruput's canonical commitment must match its
-        //    addition record -- the addition-record analog of that check.
+        // 5. Check the preimages of a) the confirmed inputs and b) the
+        //    thruputs.
+        //    Confirmed inputs: removal records derived from the confirmed
+        //    inputs must match the kernel's inputs (as in
+        //    `PrimitiveWitness::validate`, after the type scripts).
+        //    Thruputs: each thruput's canonical commitment must match an
+        //    addition record from the transaction kernel.
         //    (`Forge` does not match a thruput against a predecessor output;
         //    that is `Chain`'s job.)
         if witnessed_removal_records != self.kernel.kernel.inputs {
@@ -255,6 +273,20 @@ impl LinkPrimitiveWitness {
             );
             if addition_record != self.kernel.thruputs[i] {
                 let error = WitnessValidationError::ThruputCommitmentMismatch { index: i };
+                warn!("{error}");
+                return Err(error);
+            }
+        }
+
+        // 5c. Check the preimages of the outputs (addition records).
+        for (i, output_utxo) in self.output_utxos.utxos.iter().enumerate() {
+            let addition_record = commit(
+                Tip5::hash(output_utxo),
+                self.output_sender_randomnesses[i],
+                self.output_receiver_digests[i],
+            );
+            if addition_record != self.kernel.kernel.outputs[i] {
+                let error = WitnessValidationError::OutputCommitmentMismatch { index: i };
                 warn!("{error}");
                 return Err(error);
             }
@@ -634,6 +666,34 @@ mod tests {
         assert!(matches!(
             w.validate().await,
             Err(WitnessValidationError::ThruputCommitmentMismatch { index: 0 })
+        ));
+    }
+
+    /// The output-side inflation path: outputs the type scripts weigh must be
+    /// bound to the addition records the kernel commits to. `Forge` establishes
+    /// this by absorbing `KernelToOutputs`; this predicate mirrors it.
+    #[proptest(cases = 5, async = "tokio")]
+    async fn tampered_output_randomness_fails(
+        #[strategy(pw_strategy(Some(4)))] pw: PrimitiveWitness,
+    ) {
+        let mut w = LinkPrimitiveWitness::from_primitive_witness(pw, 2);
+        w.output_sender_randomnesses[0] = Digest::default();
+        assert!(matches!(
+            w.validate().await,
+            Err(WitnessValidationError::OutputCommitmentMismatch { index: 0 })
+        ));
+    }
+
+    #[proptest(cases = 5, async = "tokio")]
+    async fn extra_output_utxo_fails_cardinality(
+        #[strategy(pw_strategy(Some(4)))] pw: PrimitiveWitness,
+    ) {
+        let mut w = LinkPrimitiveWitness::from_primitive_witness(pw, 2);
+        let dup = w.output_utxos.utxos[0].clone();
+        w.output_utxos.utxos.push(dup);
+        assert!(matches!(
+            w.validate().await,
+            Err(WitnessValidationError::OutputCardinalityMismatch { .. })
         ));
     }
 

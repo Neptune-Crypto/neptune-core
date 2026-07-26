@@ -75,15 +75,14 @@ txs):
 - [x] `LinkKernel { kernel: TransactionKernel, thruputs: Vec<AdditionRecord> }`
       (compose — reuse kernel MAST/hashing, no field drift)
 - [x] MAST encoding: thruputs as one extra leaf beside the existing kernel
-      leaves
+      leafs
 - [x] `LinkTx { kernel: LinkKernel, proof: LinkProof }`
 - [x] `LinkPrimitiveWitness` — primitive-witness analog consumed by `Forge`
   - [x] an arbitrary strategy obtained by lifting its `PrimitiveWitness` analog
   - [x] `validate` -- analogous to `PrimitiveWitness::validate`
 - [ ] `LinkProofWitness` enum: `Forge | Chain | Update | Cast`
       (mirror `SingleProofWitness`; note `Fix` is NOT here)
-  - [x] `Forge(Box<LinkPrimitiveWitness>)` variant, discriminant 0 pinned, hand-written
-        `TasmObject` impl (derive rejects enums)
+  - [x] `Forge(Box<LinkPrimitiveWitness>)`
   - [ ] `Chain` (1), `Update` (2), `Cast` (3) — land with their witnesses
   - [ ] `SecretWitness` impl — blocked on the `LinkProof` program existing
 - [ ] `SingleProofWitness::Fix(FixWitness)` — new variant on the *existing*
@@ -91,10 +90,32 @@ txs):
 
 ## Tasm
 Four produce a `LinkProof`; `Fix` produces a `SingleProof`.
-- [ ] **Forge** `LinkPrimitiveWitness -> LinkTx`: inline `RemovalRecordsIntegrity`
-      (non-recursive) + recursively verify `collect_lock_scripts`,
-      `collect_type_scripts`, and the lock/type-script proofs. Largest new
-      program; RRI lives here.
+- [ ] **Forge** `LinkPrimitiveWitness -> LinkTx`: inline
+      `RemovalRecordsIntegrity` (non-recursive) + collect the lock/type-script
+      hashes inline and recursively verify the lock/type-script proofs.
+  - [x] input integrity:
+    - [x] msa / inputs / thruputs / no-coinbase / no-merge-bit authenticated
+      against the `LinkKernel` MAST hash.
+    - [x] inlined RRI over the confirmed inputs.
+    - [x] thruput commitments.
+    - [x] cardinality.
+    - [x] Rust shadow + tasm agree on every confirmed/thruput split.
+  - [x] output integrity:
+    - [x] `KernelToOutputs` absorbed.
+    - [x] `outputs` authenticated against the `LinkKernel` MAST hash
+    - [x] each addition record checked to be the canonical commitment of the
+          matching `output_utxos` entry.
+  - [x] collect lock-script and type-script hashes inline over `input_utxos` and
+        `input_utxos || output_utxos`, respectively. (Type-script collection
+        absorbs `CollectTypeScripts`: seed `NativeCurrency`, dedup with
+        `Contains` across every coin of every input then output UTXO.)
+  - [x] recursively verify the lock-script and type-script proofs. Needs the
+        *inner* `TransactionKernel` MAST root (type scripts see the legacy
+        kernel, height 3) derived from the `LinkKernel` leafs (height 4).
+        (Inner root divined, authenticated against `lkmh`, then kept at the
+        bottom of the stack -- reusing the now-dead `lkmh` slot -- so both
+        script-claim templates read it without static memory.)
+  - [ ] `test_program_snapshot!` — deferred until the program stops changing
 - [ ] **Chain** `LinkTx * LinkTx -> LinkTx`: recursively verify both input
       LinkProofs, merge, cut-through where
       `successor.thruputs ⊆ predecessor.outputs` (mirror
@@ -245,8 +266,14 @@ tested on the new dual pipeline as well.
 - [ ] bad absolute index set rejected (← `removal_record_fail_on_bad_absolute_indices`)
       — confirmed inputs only
 - [ ] all lock scripts have valid witnesses (net behavior of `CollectLockScripts`)
-- [ ] all unique type scripts have valid witnesses (net behavior of `CollectTypeScripts`)
-- [ ] negative: a single missing lock-script or type-script witness fails `Forge`
+- [x] all unique type scripts have valid witnesses (net behavior of `CollectTypeScripts`)
+      (`forge_accepts_timelocked_witness` forges a tx whose unique list is
+      `[NativeCurrency, TimeLock]`, recursively verifying both.)
+- [x] negative: a single missing lock-script or type-script witness fails `Forge`
+      (both tasm guards done: `missing_type_script_proof_is_rejected` /
+      `missing_lock_script_proof_is_rejected` trip
+      `WRONG_NUMBER_OF_{TYPE,LOCK}_SCRIPT_PROOFS_ERROR`; `validate` rejects a
+      dropped lock- or type-script proof too -- see `validate_matches_forge`.)
 - [ ] unbalanced `LinkTx` invalid (← `unbalanced_transaction_without_coinbase_is_invalid`)
   - [ ] unbalanced and `thruputs == []`
   - [ ] unbalanced only after counting `thruputs`
