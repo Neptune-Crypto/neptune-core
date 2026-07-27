@@ -1,0 +1,180 @@
+use std::sync::OnceLock;
+
+use tasm_lib::library::Library;
+use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
+use tasm_lib::triton_vm::prelude::*;
+
+use super::forge::Forge;
+use super::link_proof_witness::DISCRIMINANT_FOR_FORGE;
+use crate::proof_abstractions::tasm::program::TritonProgram;
+
+/// No branch of the `LinkProof` program ran: the discriminant found in memory
+/// matched none of them.
+///
+/// Unreachable while [`INVALID_WITNESS_DISCRIMINANT_ERROR`] rejects everything
+/// but a branch's own value; it is the backstop against a dispatch bug, not
+/// against a malformed witness.
+pub(crate) const NO_BRANCH_TAKEN_ERROR: i128 = 1_000_530;
+
+/// The witness in memory leads with a discriminant that names no branch.
+///
+/// Checked up front rather than left to [`NO_BRANCH_TAKEN_ERROR`]: the branches
+/// signal "taken" by leaving `-1` in the discriminant's slot, so a witness that
+/// *claims* `-1` would otherwise sail through the dispatcher untouched.
+pub(crate) const INVALID_WITNESS_DISCRIMINANT_ERROR: i128 = 1_000_531;
+
+/// `LinkProof`: the consensus program backing a
+/// [`LinkTx`](super::link_tx::LinkTx).
+///
+/// The transaction-chaining analog of
+/// [`SingleProof`](crate::transaction::validity::single_proof::SingleProof),
+/// and structured the same way: a thin dispatcher over the branches of
+/// [`LinkProofWitness`](super::link_proof_witness::LinkProofWitness), each of
+/// which is a [`BasicSnippet`] that establishes the same claim by a different
+/// route. `Forge` is the entry point; `Chain`, `Update` and `Cast` follow.
+///
+/// The claim is `{ program: LinkProof, input: [lkmh] }`. It gains the
+/// `SingleProof` program digest as a second input when `Cast` lands -- that
+/// parameter is what breaks the `Fix`/`Cast` circular dependency; see the
+/// design note in `chaintx/TODO.md`.
+#[derive(Debug, Copy, Clone)]
+pub struct LinkProof;
+
+impl TritonProgram for LinkProof {
+    fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
+        let mut library = Library::new();
+
+        // `Forge` must be imported first. Four of its `kmalloc`s have to land at
+        // the same addresses as `RemovalRecordsIntegrity`'s (it inlines that
+        // program's confirmed-input loop verbatim; see
+        // `forge_confirmed_loop_matches_rri`), which holds only as long as
+        // nothing allocates ahead of them. Any future branch imports *after*
+        // this one.
+        let forge_branch = library.import(Box::new(Forge));
+
+        // Sum the per-branch equality flags: exactly one may be set. Extend with
+        // `dup n push {DISCRIMINANT_FOR_X} eq` + one more `add` per branch.
+        let verify_discriminant_has_legal_value = triton_asm!(
+            // _ disc
+
+            dup 0
+            push {DISCRIMINANT_FOR_FORGE}
+            eq
+            // _ disc (disc == forge)
+
+            assert error_id {INVALID_WITNESS_DISCRIMINANT_ERROR}
+            // _ disc
+        );
+
+        let main = triton_asm! {
+            read_io {Digest::LEN}
+            hint link_kernel_mast_hash = stack[0..5]
+            // _ [lkmh]
+
+            push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
+            // _ [lkmh] *link_proof_witness
+
+            read_mem 1 addi 1 swap 1
+            hint discriminant = stack[0]
+            hint link_proof_witness = stack[1]
+            // _ [lkmh] *link_proof_witness discriminant
+
+            {&verify_discriminant_has_legal_value}
+            // _ [lkmh] *link_proof_witness discriminant
+
+            /* match discriminant */
+            dup 0 push {DISCRIMINANT_FOR_FORGE} eq
+            skiz call {forge_branch}
+            // _ [lkmh] *link_proof_witness discriminant
+
+            // a discriminant of -1 indicates that some branch was executed
+            push -1
+            eq
+            assert error_id {NO_BRANCH_TAKEN_ERROR}
+            // _ [dispatcher_scratch] *link_proof_witness
+
+            // The digest slot belongs to the dispatcher, and it is scratch: a
+            // branch may leave anything there (`Forge` leaves the inner kernel
+            // root, having reused the slot once `lkmh` went dead). Nothing may
+            // read it -- it is popped here unexamined. Should a check ever need
+            // `lkmh` after dispatch, stash it in a `kmalloc` *here*, once, for
+            // every branch; do not make branches hand it back, which would put
+            // the burden -- and the chance of handing back the wrong digest --
+            // on each of them.
+            pop 1 pop 5
+            // _
+
+            halt
+        };
+
+        let code = triton_asm!(
+            {&main}
+            {&library.all_imports()}
+        );
+
+        (library, code)
+    }
+
+    fn hash(&self) -> Digest {
+        static HASH: OnceLock<Digest> = OnceLock::new();
+
+        *HASH.get_or_init(|| self.program().hash())
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use std::collections::HashMap;
+
+    use tasm_lib::twenty_first::bfe_array;
+    use tasm_lib::twenty_first::bfe_vec;
+
+    use super::*;
+    use crate::chaintx::forge::tests::forge_branch_source;
+    use crate::chaintx::link_proof_witness::LinkProofWitnessMemory;
+    use crate::proof_abstractions::tasm::builtins as tasm;
+    use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
+    use crate::proof_abstractions::tasm::program::tests::test_program_snapshot;
+
+    impl TritonProgramSpecification for LinkProof {
+        fn source(&self) {
+            let lkmh: Digest = tasm::tasmlib_io_read_stdin___digest();
+
+            match tasm::decode_from_memory::<LinkProofWitnessMemory>(
+                FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+            ) {
+                LinkProofWitnessMemory::Forge(witness) => forge_branch_source(lkmh, witness),
+            }
+        }
+    }
+
+    /// A discriminant no branch claims must halt the program, not fall through
+    /// it. Mirrors `SingleProof`'s `invalid_discriminant_crashes_execution`.
+    #[test]
+    fn invalid_discriminant_crashes_execution() {
+        let public_input = PublicInput::new(bfe_vec![0, 0, 0, 0, 0]);
+        for illegal_discriminant in bfe_array![-1, 1, 2, 3, 1u64 << 40] {
+            let memory: HashMap<_, _> = [(
+                FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+                illegal_discriminant,
+            )]
+            .into_iter()
+            .collect();
+            let nondeterminism = NonDeterminism::default().with_ram(memory);
+
+            LinkProof
+                .test_assertion_failure(
+                    public_input.clone(),
+                    nondeterminism,
+                    &[INVALID_WITNESS_DISCRIMINANT_ERROR],
+                )
+                .unwrap();
+        }
+    }
+
+    test_program_snapshot!(
+        LinkProof,
+        "7bd4f50dea814bb2d6ab877986c4ea4ed0f5f0458376817cc94f7ff00d57c18f4af5c753a5e8aa51"
+    );
+}
