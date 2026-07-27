@@ -49,7 +49,8 @@ pub struct BlockHeader {
     /// Total proof-of-work accumulated by this chain
     pub cumulative_proof_of_work: ProofOfWork,
 
-    /// The difficulty for the *next* block. Unit: expected # hashes
+    /// After HF-gamma: difficulty for the current block. Otherwise, the
+    /// difficulty of the next block. Unit: expected # hashes
     pub difficulty: Difficulty,
 
     /// Information for the guesser to take custody of the guesser UTXOs.

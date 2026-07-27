@@ -830,8 +830,40 @@ impl Block {
         Ok(())
     }
 
+    /// Validate everything about a block that can be done in isolation, without
+    /// knowledge of the block's immediate predecessor or follower.
+    pub async fn solo_validate(
+        &self,
+        now: Timestamp,
+        network: Network,
+    ) -> Result<(), BlockValidationError> {
+        let height = self.header().height;
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, height);
+
+        // 0.a)
+        let expected_height: BlockHeight =
+            self.kernel.body.block_mmr_accumulator.num_leafs().into();
+        if expected_height != height {
+            return Err(BlockValidationError::BlockHeight);
+        }
+
+        // 0.g)
+        let future_limit = now + FUTUREDATING_LIMIT;
+        if self.kernel.header.timestamp >= future_limit {
+            return Err(BlockValidationError::FutureDating);
+        }
+
+        // 2.f)
+
+        todo!()
+    }
+
     /// Validate the proof of a block, an that the proof relates to the expected
     /// appendices.
+    ///
+    /// Additionally, validates everything that can be validated in isolation
+    /// on that block. In other words: Validates everything that can be done
+    /// without considering the previous block.
     pub async fn validate_block_proof(&self, network: Network) -> Result<(), BlockValidationError> {
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, self.header().height);
 
@@ -856,6 +888,17 @@ impl Block {
         if !BlockProgram::verify(self.body(), self.appendix(), block_proof, network).await {
             return Err(BlockValidationError::ProofValidity);
         }
+
+        // What qualities of the header could be checked?
+        //
+        // version:                     must match version in pow field (1.f)
+        // height:                      must match num leafs in block MMR accumulator (0.a?)
+        // prev_block_digest:           -
+        // timestamp:                   not future-dated (0.g), legal wrt. tx-timestamp (2.f)
+        // pow:                         lustration status is decodable (2.m)
+        // cumulative_proof_of_work:    -
+        // difficulty:                  -
+        // guesser_receiver_data:       -
 
         Ok(())
     }
