@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::OnceLock;
 
 use itertools::Itertools;
 use neptune_mutator_set::addition_record::AdditionRecord;
@@ -23,6 +22,7 @@ use tasm_lib::memory::encode_to_memory;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::mmr::verify_from_secret_in_leaf_index_on_stack::MmrVerifyFromSecretInLeafIndexOnStack;
 use tasm_lib::neptune::mutator_set;
+use tasm_lib::prelude::BasicSnippet;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
@@ -35,6 +35,9 @@ use tasm_lib::verifier::stark_verify::StarkVerify;
 use super::link_kernel::LinkKernel;
 use super::link_kernel::LinkKernelField;
 use super::link_primitive_witness::LinkPrimitiveWitness;
+use super::link_proof::LinkProof;
+use super::link_proof_witness::LinkProofWitnessMemory;
+use super::link_proof_witness::DISCRIMINANT_FOR_FORGE;
 use crate::proof_abstractions::error::CreateProofError;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
@@ -46,8 +49,8 @@ use crate::transaction::utxo::Coin;
 use crate::transaction::utxo::Utxo;
 use crate::transaction::validity::neptune_proof::Proof;
 use crate::transaction::validity::tasm::claims::new_claim::NewClaim;
-use crate::transaction::validity::tasm::leaf_authentication::authenticate_msa_against_txk::AuthenticateMsaAgainstTxk;
 use crate::transaction::validity::tasm::compute_absolute_indices::ComputeAbsoluteIndices;
+use crate::transaction::validity::tasm::leaf_authentication::authenticate_msa_against_txk::AuthenticateMsaAgainstTxk;
 use crate::type_scripts::native_currency::NativeCurrency;
 use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
@@ -143,6 +146,12 @@ pub struct ForgeWitness {
 }
 
 impl ForgeWitness {
+    /// The [`LinkKernel`]'s MAST hash: the public input of the `LinkProof`
+    /// claim this witness is proven against.
+    pub(super) fn kernel_mast_hash(&self) -> Digest {
+        self.mast_tree().root()
+    }
+
     /// The [`LinkKernel`]'s MAST tree, rebuilt from [`Self::mast_leafs`].
     /// Mirrors [`MastHash::merkle_tree`]'s padding.
     fn mast_tree(&self) -> MerkleTree {
@@ -184,8 +193,13 @@ impl ForgeWitness {
 
 /// The parts of a [`ForgeWitness`] that are initialized in memory at the start
 /// of each execution. The rest arrives on the non-determinism streams.
+///
+/// Wrapped in
+/// [`LinkProofWitnessMemory::Forge`](super::link_proof_witness::LinkProofWitnessMemory::Forge)
+/// before it is written to memory -- `Forge` is a branch of `LinkProof`, not a
+/// program of its own.
 #[derive(Clone, Debug, BFieldCodec, TasmObject)]
-struct ForgeWitnessMemory {
+pub(super) struct ForgeWitnessMemory {
     input_utxos: SaltedUtxos,
     confirmed_inputs: Vec<RemovalRecord>,
     thruputs: Vec<AdditionRecord>,
@@ -518,11 +532,13 @@ impl SecretWitness for ForgeWitness {
     }
 
     fn program(&self) -> Program {
-        Forge.program()
+        LinkProof.program()
     }
 
     fn nondeterminism(&self) -> NonDeterminism {
-        let memory_part: ForgeWitnessMemory = self.into();
+        // `Forge` is a branch of `LinkProof`, so the memory image is the
+        // *enum's*: discriminant, field size, then the payload.
+        let memory_part = LinkProofWitnessMemory::Forge(self.into());
         let mut memory = HashMap::default();
         encode_to_memory(
             &mut memory,
@@ -659,12 +675,33 @@ impl SecretWitness for ForgeWitness {
 #[derive(Debug, Copy, Clone)]
 pub struct Forge;
 
-impl TritonProgram for Forge {
-    fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
+impl BasicSnippet for Forge {
+    fn parameters(&self) -> Vec<(DataType, String)> {
+        vec![
+            (DataType::Digest, "link_kernel_mast_hash".to_string()),
+            (DataType::VoidPointer, "link_proof_witness".to_string()),
+            (DataType::Bfe, "discriminant".to_string()),
+        ]
+    }
+
+    /// The digest slot is the dispatcher's scratch space, not a return value:
+    /// this branch leaves the *inner* (legacy `TransactionKernel`) root there,
+    /// having reused the slot once `lkmh` went dead. See `LinkProof`.
+    fn return_values(&self) -> Vec<(DataType, String)> {
+        vec![
+            (DataType::Digest, "dispatcher_scratch".to_string()),
+            (DataType::VoidPointer, "link_proof_witness".to_string()),
+            (DataType::Bfe, "minus_1".to_string()),
+        ]
+    }
+
+    fn entrypoint(&self) -> String {
+        "neptune_consensus_chaintx_link_proof_forge_branch".to_string()
+    }
+
+    fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
         type MmrAccumulatorTip5 = MmrAccumulator;
         const MAX_JUMP_LENGTH: usize = 2_000_000;
-
-        let mut library = Library::new();
 
         let merkle_verify = library.import(Box::new(MerkleVerify));
         let hash_varlen = library.import(Box::new(HashVarlen));
@@ -882,13 +919,16 @@ impl TritonProgram for Forge {
         };
 
         let payload = triton_asm!(
-            read_io {Digest::LEN}
-            hint link_kernel_mast_hash = stack[0..5]
-            // _ [lkmh]
+            {self.entrypoint()}:
+            // _ [lkmh] *link_proof_witness disc
 
-            push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
+            place 6
+            // _ disc [lkmh] *link_proof_witness
+
+            addi 2
             hint witness = stack[0]
-            // _ [lkmh] *witness
+            // _ disc [lkmh] *witness
+            // `disc` stays buried below the frame until the epilogue
 
             dup 0 call {audit_preloaded_data} pop 1
             // _ [lkmh] *witness
@@ -1118,12 +1158,20 @@ impl TritonProgram for Forge {
             // _ [inner_root] *witness *claim *program_digest num_utxos 0 *utxos[0]_si *proofs[0]_si
 
             call {verify_lock_scripts}
-            // _ [inner_root] *witness *claim *program_digest num_utxos num_utxos *utxos[N]_si *proofs[N]_si
+            // _ disc [inner_root] *witness *claim *program_digest num_utxos num_utxos *utxos[N]_si *proofs[N]_si
 
-            pop 5 pop 5 pop 2
-            // _
+            pop 5 pop 1
+            // _ disc [inner_root] *witness
 
-            halt
+            pick 6
+            // _ [inner_root] *witness disc
+            // (`inner_root` stays in the digest slot: it is the dispatcher's
+            // scratch space, and the dispatcher pops it unread.)
+
+            addi {-(DISCRIMINANT_FOR_FORGE as isize) - 1}
+            // _ [lkmh] *witness -1
+
+            return
         );
 
         // Deliberately a copy of `RemovalRecordsIntegrity`'s loop rather than a
@@ -1496,29 +1544,20 @@ impl TritonProgram for Forge {
                 return
         );
 
-        let code = triton_asm!(
+        triton_asm!(
             {&payload}
             {&for_all_confirmed_loop}
             {&for_all_addition_records_loop}
             {&verify_lock_scripts_loop}
             {&verify_type_scripts_loop}
             {&collect_type_script_hashes}
-            {&library.all_imports()}
-        );
-
-        (library, code)
-    }
-
-    fn hash(&self) -> Digest {
-        static HASH: OnceLock<Digest> = OnceLock::new();
-
-        *HASH.get_or_init(|| self.program().hash())
+        )
     }
 }
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
+pub(crate) mod tests {
     use neptune_mutator_set::commit;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
@@ -1530,7 +1569,6 @@ mod tests {
     use super::*;
     use crate::proof_abstractions::tasm::builtins as tasm;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
-    use crate::proof_abstractions::tasm::program::tests::test_program_snapshot;
     use crate::proof_abstractions::triton_vm_job_queue::vm_job_queue;
     use crate::transaction::primitive_witness::PrimitiveWitness;
     use crate::transaction::transaction_kernel::TransactionKernelModifier;
@@ -1549,7 +1587,7 @@ mod tests {
         /// impractically long. These tests build their witnesses here; only the
         /// positive proof-verifying tests pay the steep price for `produce`.
         #[cfg(test)]
-        fn without_proofs(lpw: &LinkPrimitiveWitness) -> Self {
+        pub(crate) fn without_proofs(lpw: &LinkPrimitiveWitness) -> Self {
             Self::build_from_parts(lpw, vec![], vec![])
         }
     }
@@ -1581,7 +1619,7 @@ mod tests {
     #[test]
     fn forge_confirmed_loop_matches_rri() {
         let (_, rri_code) = RemovalRecordsIntegrity.library_and_code();
-        let (_, forge_code) = Forge.library_and_code();
+        let (_, forge_code) = LinkProof.library_and_code();
 
         let rri_loop = extract_loop_body(&rri_code, "for_all_utxos");
         let forge_loop = extract_loop_body(
@@ -1653,7 +1691,7 @@ mod tests {
         use crate::transaction::validity::collect_type_scripts::CollectTypeScripts;
 
         let (_, cts_code) = CollectTypeScripts.library_and_code();
-        let (_, forge_code) = Forge.library_and_code();
+        let (_, forge_code) = LinkProof.library_and_code();
 
         // (CollectTypeScripts label, Forge label) for each copied subroutine.
         let pairs = [
@@ -1685,13 +1723,13 @@ mod tests {
         }
     }
 
-    impl TritonProgramSpecification for Forge {
-        fn source(&self) {
-            let lkmh: Digest = tasm::tasmlib_io_read_stdin___digest();
-            let start_address: BFieldElement =
-                FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
-            let witness: ForgeWitnessMemory = tasm::decode_from_memory(start_address);
-
+    /// The `Forge` branch of the `LinkProof` rust shadow, called by
+    /// [`LinkProof::source`](super::super::link_proof::LinkProof) once it has
+    /// read `lkmh` off stdin and matched the witness discriminant -- mirroring
+    /// the tasm, where the dispatcher does exactly that before `call`ing this
+    /// branch.
+    pub(in crate::chaintx) fn forge_branch_source(lkmh: Digest, witness: ForgeWitnessMemory) {
+        {
             let input_utxos: &[Utxo] = &witness.input_utxos.utxos;
             let aocl: MmrAccumulator = witness.aocl;
 
@@ -1897,10 +1935,10 @@ mod tests {
     /// shadow and the tasm run to completion: every `assert` in either one
     /// held.
     fn prop_positive(witness: ForgeWitness) {
-        Forge
+        LinkProof
             .run_rust(&witness.standard_input(), witness.nondeterminism())
             .unwrap();
-        Forge
+        LinkProof
             .run_tasm(&witness.standard_input(), witness.nondeterminism())
             .unwrap();
     }
@@ -2053,7 +2091,7 @@ mod tests {
         let phantom = witness.input_utxos.utxos[0].clone();
         witness.input_utxos.utxos.push(phantom);
         prop_assert!(!witness.validate_integrity());
-        Forge
+        LinkProof
             .test_assertion_failure(
                 witness.standard_input(),
                 witness.nondeterminism(),
@@ -2075,7 +2113,7 @@ mod tests {
         witness.output_utxos.utxos[0] =
             witness.output_utxos.utxos[0].new_with_native_currency_amount(inflated);
         prop_assert!(!witness.validate_integrity());
-        Forge
+        LinkProof
             .test_assertion_failure(
                 witness.standard_input(),
                 witness.nondeterminism(),
@@ -2091,7 +2129,7 @@ mod tests {
         let phantom = witness.output_utxos.utxos[0].clone();
         witness.output_utxos.utxos.push(phantom);
         prop_assert!(!witness.validate_integrity());
-        Forge
+        LinkProof
             .test_assertion_failure(
                 witness.standard_input(),
                 witness.nondeterminism(),
@@ -2105,7 +2143,7 @@ mod tests {
         let mut witness = ForgeWitness::without_proofs(&lpw);
         witness.thruput_sender_randomnesses[0] = Digest::default();
         prop_assert!(!witness.validate_integrity());
-        Forge
+        LinkProof
             .test_assertion_failure(
                 witness.standard_input(),
                 witness.nondeterminism(),
@@ -2126,7 +2164,7 @@ mod tests {
             .confirmed_inputs
             .push(witness.confirmed_inputs[0].clone());
         prop_assert!(!witness.validate_integrity());
-        Forge
+        LinkProof
             .test_assertion_failure(
                 witness.standard_input(),
                 witness.nondeterminism(),
@@ -2141,7 +2179,7 @@ mod tests {
         let mut witness = ForgeWitness::without_proofs(&lpw);
         witness.thruputs[0].canonical_commitment = Digest::default();
         prop_assert!(!witness.validate_integrity());
-        Forge
+        LinkProof
             .test_assertion_failure(
                 witness.standard_input(),
                 witness.nondeterminism(),
@@ -2162,7 +2200,7 @@ mod tests {
     ) {
         let witness = ForgeWitness::without_proofs(&lpw);
         prop_assert!(witness.validate_integrity());
-        Forge
+        LinkProof
             .test_assertion_failure(
                 witness.standard_input(),
                 witness.nondeterminism(),
@@ -2179,7 +2217,7 @@ mod tests {
     async fn missing_lock_script_proof_is_rejected() {
         let mut witness = deterministic_forge_witness_proven(1, 0).await;
         witness.lock_scripts_halt.pop();
-        Forge
+        LinkProof
             .test_assertion_failure(
                 witness.standard_input(),
                 witness.nondeterminism(),
@@ -2195,11 +2233,13 @@ mod tests {
     /// negative test that exercises the shared `AuthenticateMsaAgainstTxk`
     /// snippet's rejection path.
     #[proptest(cases = 4)]
-    fn bad_mutator_set_accumulator_is_rejected(#[strategy(pokeable_lpw())] lpw: LinkPrimitiveWitness) {
+    fn bad_mutator_set_accumulator_is_rejected(
+        #[strategy(pokeable_lpw())] lpw: LinkPrimitiveWitness,
+    ) {
         let mut witness = ForgeWitness::without_proofs(&lpw);
         witness.swbfa_hash = Digest::default();
         prop_assert!(!witness.validate_integrity());
-        Forge
+        LinkProof
             .test_assertion_failure(
                 witness.standard_input(),
                 witness.nondeterminism(),
@@ -2216,7 +2256,8 @@ mod tests {
     /// the surviving failure (mirrors `removal_records_fail_on_bad_absolute_indices`).
     #[proptest(cases = 4)]
     fn bad_absolute_index_set_is_rejected(
-        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 1))] mut pw: PrimitiveWitness,
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 1))]
+        mut pw: PrimitiveWitness,
     ) {
         let mut inputs = pw.kernel.inputs.clone();
         inputs[0].absolute_indices.increment_bloom_filter_index(0);
@@ -2224,9 +2265,10 @@ mod tests {
             .inputs(inputs)
             .modify(pw.kernel);
         // 1 thruput => input[0] stays a confirmed input.
-        let witness = ForgeWitness::without_proofs(&LinkPrimitiveWitness::from_primitive_witness(pw, 1));
+        let witness =
+            ForgeWitness::without_proofs(&LinkPrimitiveWitness::from_primitive_witness(pw, 1));
         prop_assert!(!witness.validate_integrity());
-        Forge
+        LinkProof
             .test_assertion_failure(
                 witness.standard_input(),
                 witness.nondeterminism(),
@@ -2234,9 +2276,4 @@ mod tests {
             )
             .unwrap();
     }
-
-    test_program_snapshot!(
-        Forge,
-        "ae37c9e33256535a5780c0fcdea48e801f0511a08fbc92533f4e5e2215c28eac5989d1425807cb09"
-    );
 }

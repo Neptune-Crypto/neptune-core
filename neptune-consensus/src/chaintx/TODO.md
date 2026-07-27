@@ -81,7 +81,8 @@ Rust side: `LinkProofWitness::standard_input()` returns
 an explicit field on each branch witness (`ChainWitness`, `UpdateWitness`,
 `CastWitness`, and `ForgeWitness` too since it is in the claim), populated by
 the builder from `ConsensusRuleSet::infer_from(..)`'s pinned `SingleProof`
-digest.
+digest. **Not built yet**: the claim input is `[lkmh]` alone until `Cast` gives
+`D` a consumer (see §Data Structures).
 
 **Why this breaks the cycle.** `LinkProof::hash()` becomes computable from
 `LinkProof`'s code alone; `SingleProof::hash()` then depends on it one-
@@ -149,16 +150,54 @@ verified", i.e. universal forgery. Covered by §Negative tests for `D`.
   - [x] `validate` -- analogous to `PrimitiveWitness::validate`
 - [ ] `LinkProofWitness` enum: `Forge | Chain | Update | Cast`
       (mirror `SingleProofWitness`; note `Fix` is NOT here)
-  - [x] `Forge(Box<LinkPrimitiveWitness>)`
+  - [x] `Forge(Box<ForgeWitness>)` — the variant holds what the branch consumes,
+        mirroring `SingleProofWitness::Collection(ProofCollection)`.
+        `LinkPrimitiveWitness` is the `PrimitiveWitness` analog and, like it, is
+        deliberately not a variant.
   - [ ] `Chain` (1), `Update` (2), `Cast` (3) — land with their witnesses
-  - [ ] `SecretWitness` impl — blocked on the `LinkProof` program existing.
-        `standard_input()` = `lkmh.reversed() || D.reversed()` where `D` is the
-        `SingleProof` program digest (§Breaking the `Fix`/`Cast` cycle).
+  - [x] `SecretWitness` impl — dispatches to the branch witness.
+  - [ ] `standard_input()` gains `|| D.reversed()`, `D` = the `SingleProof`
+        program digest (§Breaking the `Fix`/`Cast` cycle). Deferred until `Cast`
+        lands: today no branch reads `D`, and sourcing it means plumbing
+        `ConsensusRuleSet` into every branch witness for a value nothing
+        consumes. Claim input is `[lkmh]` until then.
 - [ ] `SingleProofWitness::Fix(FixWitness)` — new variant on the *existing*
       enum; recursively verifies a LinkProof, asserts `thruputs == []`
 
 ## Tasm
 Four produce a `LinkProof`; `Fix` produces a `SingleProof`.
+
+`LinkProof` is the program; the four are *branches* of it, dispatched on the
+[`LinkProofWitness`] discriminant exactly as `SingleProof` dispatches on
+`SingleProofWitness`. Each branch is a `BasicSnippet` with the stack contract
+`[lkmh] *link_proof_witness disc -> [scratch] *link_proof_witness -1`, and the
+dispatcher asserts the `-1` afterwards.
+
+**The digest slot belongs to the dispatcher.** A branch receives `lkmh` there
+and may leave anything behind; the dispatcher pops it unread. Should a
+post-dispatch check ever need `lkmh`, stash it in a `kmalloc` in `LinkProof`,
+once, for every branch -- do not make branches hand it back. Handing it back
+puts the burden on each of them, and a branch that returns the wrong digest of
+the same transaction (inner root vs. `lkmh`: both well-formed, both plausible)
+would bind that check to the wrong tree without crashing.
+- [x] **LinkProof** dispatcher (`link_proof.rs`): reads `lkmh` off stdin, reads
+      the discriminant at address 0, range-checks it
+      (`INVALID_WITNESS_DISCRIMINANT_ERROR` -- *not* redundant with
+      `NO_BRANCH_TAKEN_ERROR`, since a witness claiming `-1` would otherwise
+      impersonate a taken branch), dispatches, asserts a branch ran.
+  - [x] `LinkProofWitnessMemory` -- the memory-image mirror of
+        `LinkProofWitness`, the way `ForgeWitnessMemory` mirrors `ForgeWitness`.
+        The witness enum holds the rich branch witness (it has to build the ND
+        streams); only the projection is written to memory. Branches find their
+        payload at `*witness + 2`, past the discriminant and field-size words.
+  - [x] `test_program_snapshot!` — pins the `LinkProof` program hash (replaces
+        the `Forge`-as-a-program pin; `Forge` no longer has a hash of its own)
+  - [ ] Import order is consensus-critical: `Forge` must be imported *first*,
+        because four of its `kmalloc`s have to land at
+        `RemovalRecordsIntegrity`'s addresses (`forge_confirmed_loop_matches_rri`
+        compares the emitted instructions, `push`ed addresses included). Every
+        branch added later imports after it. Re-check that guard test when
+        `Chain`/`Update`/`Cast` land.
 - [x] **Forge** `LinkPrimitiveWitness -> LinkTx`: inline
       `RemovalRecordsIntegrity` (non-recursive) + collect the lock/type-script
       hashes inline and recursively verify the lock/type-script proofs.
@@ -184,7 +223,6 @@ Four produce a `LinkProof`; `Fix` produces a `SingleProof`.
         (Inner root divined, authenticated against `lkmh`, then kept at the
         bottom of the stack -- reusing the now-dead `lkmh` slot -- so both
         script-claim templates read it without static memory.)
-  - [x] `test_program_snapshot!` — pins the `Forge` program hash
 - [ ] **Chain** `LinkTx * LinkTx -> LinkTx`: recursively verify both input
       LinkProofs, merge, cut-through where
       `successor.thruputs ⊆ predecessor.outputs` (mirror

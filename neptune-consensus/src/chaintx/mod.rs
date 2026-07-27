@@ -6,5 +6,6 @@
 pub mod forge;
 pub mod link_kernel;
 pub mod link_primitive_witness;
+pub mod link_proof;
 pub mod link_proof_witness;
 pub mod link_tx;
