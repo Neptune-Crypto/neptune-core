@@ -1283,7 +1283,7 @@ mod tests {
             .lock_guard()
             .await
             .mempool()
-            .get_transactions_for_block_composition(usize::MAX, None);
+            .get_transactions_for_block_composition(ConsensusRuleSet::default(), usize::MAX, None);
         assert_eq!(1, txs.len());
 
         drop(main_to_peer_rx);
@@ -1604,7 +1604,7 @@ mod tests {
             .lock_guard()
             .await
             .mempool()
-            .get_transactions_for_block_composition(usize::MAX, None);
+            .get_transactions_for_block_composition(ConsensusRuleSet::default(), usize::MAX, None);
         assert_eq!(1, mempool_tx.len());
         let mempool_tx = &mempool_tx[0];
 

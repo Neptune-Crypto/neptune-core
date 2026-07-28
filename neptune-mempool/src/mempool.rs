@@ -30,7 +30,9 @@ use neptune_consensus::transaction::validity::neptune_proof::Proof;
 use neptune_consensus::transaction::validity::proof_collection::ProofCollection;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_mutator_set::addition_record::AdditionRecord;
+use neptune_mutator_set::removal_record::RemovalRecord;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
 use neptune_primitives::timestamp::Timestamp;
 /// `FeeDensity` is a measure of 'Fee/Bytes' or 'reward per storage unit' for
 /// transactions.  Different strategies are possible for selecting transactions
@@ -55,6 +57,7 @@ use priority_queue::DoublePriorityQueue;
 use priority_queue::PriorityQueue;
 use priority_queue::priority_queue::iterators::IntoSortedIter as SingleEndedIterator;
 use tasm_lib::prelude::Digest;
+use tasm_lib::twenty_first::prelude::BFieldCodec;
 use tracing::debug;
 use tracing::error;
 
@@ -1077,19 +1080,70 @@ impl Mempool {
     /// - backed by single proofs, and
     /// - synced to the tip.
     ///
-    /// Number of transactions returned can be capped by either size (measured
-    /// in bytes), or by transaction count. The function guarantees that neither
-    /// of the specified limits will be exceeded.
+    /// Number of transactions returned can be capped by either kernel size
+    /// (measured in number of b-field elements when encoded), or by transaction
+    /// count. The function guarantees that neither of the specified limits will
+    /// be exceeded. Additionally, the total number of inputs, outputs, and
+    /// announcements across the returned transactions is guaranteed to respect
+    /// the caps imposed by the consensus rules, with room to spare for the
+    /// coinbase transaction that the returned transactions are expected to be
+    /// merged with.
+    ///
+    /// The size limit is checked against the projected kernel size of the
+    /// block transaction resulting from merging all returned transactions.
+    /// This projection accounts for the packing of the input removal records,
+    /// cf. [`RemovalRecordList::pack`], which deduplicates authentication data
+    /// shared between removal records. So many more transactions may fit
+    /// within the limit than their stand-alone kernel sizes would suggest.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the removal records of the tip-synced transactions in the
+    /// mempool are invalid or mutually inconsistent, as this indicates a
+    /// programmer error.
     pub fn get_transactions_for_block_composition(
         &self,
-        mut remaining_storage: usize,
+        consensus_rule_set: ConsensusRuleSet,
+        max_kernel_size: usize,
         max_num_txs: Option<usize>,
     ) -> Vec<Transaction> {
+        // Numbers of outputs and announcements reserved for the coinbase
+        // transaction that the returned transactions will be merged with. No
+        // reservation is needed for inputs since the coinbase transaction has
+        // none.
+        const COINBASE_NUM_OUTPUTS_RESERVATION: usize = 128;
+        const COINBASE_NUM_ANNOUNCEMENTS_RESERVATION: usize = 128;
+
+        // Packing usually shrinks the inputs but can, in degenerate cases,
+        // grow them by a few b-field elements per tree in the SWBFI MMR. So
+        // the sum of stand-alone kernel sizes plus this slack bounds the
+        // projected kernel size from above.
+        const FAST_PATH_SLACK: usize = 1_000;
+
+        let mut remaining_num_inputs = consensus_rule_set.max_num_inputs();
+        let mut remaining_num_outputs = consensus_rule_set
+            .max_num_outputs()
+            .saturating_sub(COINBASE_NUM_OUTPUTS_RESERVATION);
+        let mut remaining_num_announcements = consensus_rule_set
+            .max_num_announcements()
+            .saturating_sub(COINBASE_NUM_ANNOUNCEMENTS_RESERVATION);
+
+        // The kernel of the block transaction contains the packed union of the
+        // merged transactions' inputs and the concatenation of their other
+        // dynamically sized fields. So the projected kernel size is the sum of
+        // the selected kernels' sizes without their inputs fields, plus the
+        // size of the packed union of all selected inputs. Fixed-size fields
+        // (fee, timestamp, etc.) are counted once per selected transaction
+        // even though merging collapses them into one, making the projection
+        // a slight overestimate.
+        let mut selected_inputs: Vec<RemovalRecord> = vec![];
+        let mut kernel_wo_inputs_size_acc = 0;
+        let mut full_kernel_size_acc = 0;
+
         let mut transactions = vec![];
 
         for (transaction_digest, _fee_density) in self.fee_density_iter() {
-            // No more transactions can possibly be packed
-            if remaining_storage == 0 || max_num_txs.is_some_and(|max| transactions.len() == max) {
+            if max_num_txs.is_some_and(|max| transactions.len() == max) {
                 break;
             }
 
@@ -1103,17 +1157,44 @@ impl Mempool {
                     continue;
                 }
 
-                let transaction_copy = transaction_ptr.to_owned();
-                let transaction_size = transaction_copy.get_size();
-
-                // Current transaction is too big
-                if transaction_size > remaining_storage {
+                let kernel = &transaction_ptr.kernel;
+                if kernel.inputs.len() > remaining_num_inputs
+                    || kernel.outputs.len() > remaining_num_outputs
+                    || kernel.announcements.len() > remaining_num_announcements
+                {
                     continue;
                 }
 
+                let full_kernel_size = kernel.encode().len();
+
+                // A dynamically sized kernel field's encoding is prepended
+                // with one length-indicating b-field element, hence the +/- 1.
+                let kernel_wo_inputs_size = full_kernel_size - kernel.inputs.encode().len() - 1;
+
+                // Only compute the exact size when the cheap and conservative
+                // check is inconclusive.
+                if full_kernel_size_acc + full_kernel_size + FAST_PATH_SLACK > max_kernel_size {
+                    let mut all_inputs = selected_inputs.clone();
+                    all_inputs.extend_from_slice(&kernel.inputs);
+                    let packed_inputs_field_size =
+                        RemovalRecordList::pack(all_inputs).encode().len() + 1;
+
+                    // Current transaction is too big
+                    if kernel_wo_inputs_size_acc + kernel_wo_inputs_size + packed_inputs_field_size
+                        > max_kernel_size
+                    {
+                        continue;
+                    }
+                }
+
                 // Include transaction
-                remaining_storage -= transaction_size;
-                transactions.push(transaction_copy)
+                selected_inputs.extend_from_slice(&kernel.inputs);
+                full_kernel_size_acc += full_kernel_size;
+                kernel_wo_inputs_size_acc += kernel_wo_inputs_size;
+                remaining_num_inputs -= kernel.inputs.len();
+                remaining_num_outputs -= kernel.outputs.len();
+                remaining_num_announcements -= kernel.announcements.len();
+                transactions.push(transaction_ptr.to_owned())
             }
         }
 
@@ -1507,6 +1588,7 @@ mod tests {
     use itertools::Itertools;
     use macro_rules_attr::apply;
     use neptune_consensus::block::Block;
+    use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
     use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
     use neptune_consensus::transaction::Transaction;
     use neptune_consensus::transaction::TransactionProof;
@@ -1519,14 +1601,22 @@ mod tests {
     use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier;
     use neptune_consensus::transaction::transaction_proof::TransactionProofType;
     use neptune_mutator_set::addition_record::AdditionRecord;
+    use neptune_mutator_set::msa_and_records::MsaAndRecords;
     use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+    use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
     use neptune_primitives::network::Network;
     use neptune_primitives::timestamp::Timestamp;
     use num_bigint::BigInt;
     use num_rational::BigRational as FeeDensity;
     use num_traits::Zero;
+    use proptest::arbitrary::Arbitrary;
+    use proptest::strategy::Strategy;
+    use proptest::strategy::ValueTree;
+    use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
     use rand::Rng;
+    use tasm_lib::prelude::Digest;
+    use tasm_lib::twenty_first::prelude::BFieldCodec;
     use tracing_test::traced_test;
 
     use crate::mempool::Mempool;
@@ -1655,9 +1745,11 @@ mod tests {
 
         let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(u128::MAX), BigInt::from(1));
         let mut prev_fee_density = max_fee_density;
-        for curr_transaction in
-            mempool.get_transactions_for_block_composition(SIZE_20MB_IN_BYTES, None)
-        {
+        for curr_transaction in mempool.get_transactions_for_block_composition(
+            ConsensusRuleSet::default(),
+            SIZE_20MB_IN_BYTES,
+            None,
+        ) {
             let curr_fee_density = curr_transaction.fee_density();
             assert!(curr_fee_density <= prev_fee_density);
             prev_fee_density = curr_fee_density;
@@ -1677,8 +1769,11 @@ mod tests {
         let mempool = mock_mempool_singleproofs(num_txs_in_mempool, &sync_block);
 
         for num_mergers in 0..=num_txs_in_mempool {
-            let returned_transactions = mempool
-                .get_transactions_for_block_composition(SIZE_20MB_IN_BYTES, Some(num_mergers));
+            let returned_transactions = mempool.get_transactions_for_block_composition(
+                ConsensusRuleSet::default(),
+                SIZE_20MB_IN_BYTES,
+                Some(num_mergers),
+            );
             assert_eq!(num_mergers, returned_transactions.len());
 
             let max_fee_density: FeeDensity =
@@ -1728,7 +1823,11 @@ mod tests {
             assert_eq!(
                 i,
                 mempool
-                    .get_transactions_for_block_composition(SIZE_20MB_IN_BYTES, Some(i))
+                    .get_transactions_for_block_composition(
+                        ConsensusRuleSet::default(),
+                        SIZE_20MB_IN_BYTES,
+                        Some(i),
+                    )
                     .len()
             );
         }
@@ -1757,8 +1856,11 @@ mod tests {
             }
 
             let max_total_tx_size = 1_000_000_000;
-            let txs_returned =
-                mempool.get_transactions_for_block_composition(max_total_tx_size, None);
+            let txs_returned = mempool.get_transactions_for_block_composition(
+                ConsensusRuleSet::default(),
+                max_total_tx_size,
+                None,
+            );
             assert_eq!(
                 0,
                 txs_returned.len(),
@@ -1776,7 +1878,11 @@ mod tests {
             assert_eq!(
                 i,
                 mempool
-                    .get_transactions_for_block_composition(max_total_tx_size, None)
+                    .get_transactions_for_block_composition(
+                        ConsensusRuleSet::default(),
+                        max_total_tx_size,
+                        None,
+                    )
                     .len(),
                 "Must return {i}/{i} transaction when mutator set hashes do match"
             );
@@ -1845,9 +1951,90 @@ mod tests {
         assert!(!mempool.is_empty());
         assert!(
             mempool
-                .get_transactions_for_block_composition(usize::MAX, None)
+                .get_transactions_for_block_composition(
+                    ConsensusRuleSet::default(),
+                    usize::MAX,
+                    None
+                )
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn size_limit_accounts_for_input_packing() {
+        // Build mutually consistent removal records, all valid against the
+        // same mutator set, and distribute them across several transactions.
+        let num_txs = 4;
+        let inputs_per_tx = 4;
+        let num_inputs = num_txs * inputs_per_tx;
+        let aocl_size = 1u64 << 30;
+        let removables =
+            vec![(Digest::default(), Digest::default(), Digest::default()); num_inputs];
+        let mut test_runner = TestRunner::deterministic();
+        let msa_and_records = MsaAndRecords::arbitrary_with((removables, aocl_size))
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let mutator_set_hash = msa_and_records.mutator_set_accumulator.hash();
+        let removal_records = msa_and_records.unpacked_removal_records();
+
+        let mut txs = make_plenty_mock_transaction_supported_by_invalid_single_proofs(num_txs);
+        for (i, tx) in txs.iter_mut().enumerate() {
+            let inputs = removal_records[i * inputs_per_tx..(i + 1) * inputs_per_tx].to_vec();
+            tx.kernel = TransactionKernelModifier::default()
+                .inputs(inputs)
+                .mutator_set_hash(mutator_set_hash)
+                .modify(tx.kernel.clone());
+        }
+
+        let genesis_block = Block::genesis(Network::Main);
+        let mut mempool = Mempool::new(
+            ByteSize::gb(1),
+            TxProvingCapability::ProofCollection,
+            &genesis_block,
+        );
+        mempool.tip_mutator_set_hash = mutator_set_hash;
+        for tx in txs.clone() {
+            mempool.insert(tx, UpgradePriority::Irrelevant);
+        }
+        assert_eq!(num_txs, mempool.len());
+
+        // Projected size of the kernel of the block transaction merged from
+        // all transactions, mirroring the calculation under test.
+        let standalone_kernel_len_sum =
+            txs.iter().map(|tx| tx.kernel.encode().len()).sum::<usize>();
+        let non_inputs_kernel_len_sum = txs
+            .iter()
+            .map(|tx| tx.kernel.encode().len() - tx.kernel.inputs.encode().len() - 1)
+            .sum::<usize>();
+        let packed_inputs_field_len = RemovalRecordList::pack(removal_records).encode().len() + 1;
+        let projected_kernel_len = non_inputs_kernel_len_sum + packed_inputs_field_len;
+        assert!(
+            projected_kernel_len < standalone_kernel_len_sum,
+            "Test assumption: packing the inputs must save space"
+        );
+
+        let num_returned = |max_kernel_len: usize| {
+            mempool
+                .get_transactions_for_block_composition(
+                    ConsensusRuleSet::default(),
+                    max_kernel_len,
+                    None,
+                )
+                .len()
+        };
+
+        // A limit that accommodates the packed projection but not the sum of
+        // the stand-alone kernel sizes must admit all transactions.
+        assert_eq!(num_txs, num_returned(standalone_kernel_len_sum - 1));
+        assert_eq!(num_txs, num_returned(projected_kernel_len));
+
+        // A limit just below the packed projection must reject exactly one
+        // transaction.
+        assert_eq!(num_txs - 1, num_returned(projected_kernel_len - 1));
+
+        // Sanity check of tx-selector
+        assert_eq!(0, num_returned(0));
     }
 
     #[traced_test]
@@ -2122,8 +2309,11 @@ mod tests {
         async fn queue_order_matches_block_selection_order() {
             let mempool = mock_mempool_mixed(20, &Block::genesis(Network::Main));
 
-            let txs_for_block_inclusion =
-                mempool.get_transactions_for_block_composition(usize::MAX, None);
+            let txs_for_block_inclusion = mempool.get_transactions_for_block_composition(
+                ConsensusRuleSet::default(),
+                usize::MAX,
+                None,
+            );
             let txs_for_block_inclusion = txs_for_block_inclusion
                 .into_iter()
                 .map(|x| x.txid())

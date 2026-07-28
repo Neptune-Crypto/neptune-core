@@ -583,7 +583,8 @@ mod tests {
         // updated and valid-again mutator set data
         let block2_msa = block_2.mutator_set_accumulator_after().unwrap();
         let mut tx_by_alice_updated: Transaction =
-            mempool.get_transactions_for_block_composition(usize::MAX, None)[0].clone();
+            mempool.get_transactions_for_block_composition(consensus_rule_set, usize::MAX, None)[0]
+                .clone();
         assert!(
             tx_by_alice_updated.is_confirmable_relative_to(&block2_msa),
             "Block with tx with updated mutator set data must be confirmable wrt. block_2"
@@ -607,7 +608,8 @@ mod tests {
         }
 
         tx_by_alice_updated =
-            mempool.get_transactions_for_block_composition(usize::MAX, None)[0].clone();
+            mempool.get_transactions_for_block_composition(consensus_rule_set, usize::MAX, None)[0]
+                .clone();
         let block_5_timestamp = previous_block.header().timestamp + Timestamp::hours(1);
 
         let tip_alice = alice
@@ -969,7 +971,7 @@ mod tests {
                 .lock_guard()
                 .await
                 .mempool
-                .get_transactions_for_block_composition(usize::MAX, None);
+                .get_transactions_for_block_composition(consensus_rule_set, usize::MAX, None);
             assert_eq!(
                 1,
                 mempool_txs.len(),
@@ -1017,7 +1019,7 @@ mod tests {
                 .lock_guard()
                 .await
                 .mempool
-                .get_transactions_for_block_composition(usize::MAX, None)
+                .get_transactions_for_block_composition(consensus_rule_set, usize::MAX, None)
                 .iter()
                 .all(|tx| tx.is_confirmable_relative_to(
                     &block_1b.mutator_set_accumulator_after().unwrap(),

@@ -1,4 +1,5 @@
 use neptune_consensus::block::Block;
+use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_primitives::timestamp::Timestamp;
 use neptune_wallet::expected_utxo::ExpectedUtxo;
 use tasm_lib::prelude::Digest;
@@ -6,7 +7,6 @@ use tracing::info;
 
 use super::error::RegTestError;
 use crate::application::loops::mine_loop::mock_block_generator::MockBlockGenerator;
-use crate::protocol::shared::SIZE_20MB_IN_BYTES;
 use crate::state::mining::block_proposal::BlockProposal;
 use crate::GlobalStateLock;
 use crate::RPCServerToMain;
@@ -135,11 +135,9 @@ impl RegTestPrivate {
         find_valid_pow: bool,
     ) -> (Block, Vec<ExpectedUtxo>) {
         let gsl = &self.global_state_lock;
+        let network = gsl.cli().network;
 
-        assert!(
-            gsl.cli().network.use_mock_proof(),
-            "Must use mock-proof network"
-        );
+        assert!(network.use_mock_proof(), "Must use mock-proof network");
 
         let gs = gsl.lock_guard().await;
 
@@ -149,8 +147,11 @@ impl RegTestPrivate {
 
         // retrieve selected tx from mempool for block inclusion.
         let txs_from_mempool = if include_mempool_txs {
+            let consensus_rule_set = ConsensusRuleSet::infer_from(network, next_block_height);
+            let max_kernel_len = consensus_rule_set.max_recommended_block_tx_kernel_size();
             gs.mempool().get_transactions_for_block_composition(
-                SIZE_20MB_IN_BYTES,
+                consensus_rule_set,
+                max_kernel_len,
                 Some(gsl.cli().max_num_compose_mergers.get()),
             )
         } else {
@@ -168,7 +169,7 @@ impl RegTestPrivate {
             timestamp,
             seed,
             txs_from_mempool,
-            gsl.cli().network,
+            network,
         );
 
         let lustration_status = block.header().pow.lustration_status().ok();

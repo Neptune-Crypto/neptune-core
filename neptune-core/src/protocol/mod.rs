@@ -1,4 +1,3 @@
-pub mod shared;
 pub mod utils;
 
 #[cfg(test)]

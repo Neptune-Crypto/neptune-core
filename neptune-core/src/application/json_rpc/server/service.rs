@@ -1689,12 +1689,16 @@ impl RpcApi for RpcServer {
         &self,
         _: BestTransactionForNextBlockRequest,
     ) -> RpcResult<BestTransactionForNextBlockResponse> {
-        let tx = self
-            .state
-            .lock_guard()
-            .await
-            .mempool()
-            .get_transactions_for_block_composition(usize::MAX, Some(1));
+        let network = self.state.cli().network;
+        let state = self.state.lock_guard().await;
+        let next_block_height = state.chain.tip().header().height.next();
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, next_block_height);
+        let tx = state.mempool().get_transactions_for_block_composition(
+            consensus_rule_set,
+            usize::MAX,
+            Some(1),
+        );
+        drop(state);
         let tx = tx.first();
         let tx = BestTransactionForNextBlockResponse {
             transaction: tx.map(|tx| (&tx.kernel).into()),
