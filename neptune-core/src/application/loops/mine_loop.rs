@@ -534,9 +534,9 @@ pub(crate) async fn create_block_transaction_from(
     )
     .await?;
 
-    // Cap max size of kernel, conservatively. Does not account for input
-    // packing so upper limit is probably much higher than this value. Also
-    // does not account for the coinbase transaction.
+    // Cap max size of kernel. The mempool accounts for the packing of inputs
+    // when applying this limit. The limit does not account for the coinbase
+    // transaction, but its built-in headroom more than covers that.
     let max_kernel_len = new_rules.max_recommended_block_tx_kernel_size();
 
     // Get most valuable transactions from mempool.

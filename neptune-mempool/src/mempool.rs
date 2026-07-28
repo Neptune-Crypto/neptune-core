@@ -30,7 +30,9 @@ use neptune_consensus::transaction::validity::neptune_proof::Proof;
 use neptune_consensus::transaction::validity::proof_collection::ProofCollection;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_mutator_set::addition_record::AdditionRecord;
+use neptune_mutator_set::removal_record::RemovalRecord;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
 use neptune_primitives::timestamp::Timestamp;
 /// `FeeDensity` is a measure of 'Fee/Bytes' or 'reward per storage unit' for
 /// transactions.  Different strategies are possible for selecting transactions
@@ -1087,14 +1089,22 @@ impl Mempool {
     /// coinbase transaction that the returned transactions are expected to be
     /// merged with.
     ///
-    /// When a size limit is used, this does not take into account the packing
-    /// of the input removal records. So the transaction kernel resulting from
-    /// the merger of the returned transactions is likely to be smaller than the
-    /// size calculated in this method.
+    /// The size limit is checked against the projected kernel size of the
+    /// block transaction resulting from merging all returned transactions.
+    /// This projection accounts for the packing of the input removal records,
+    /// cf. [`RemovalRecordList::pack`], which deduplicates authentication data
+    /// shared between removal records. So many more transactions may fit
+    /// within the limit than their stand-alone kernel sizes would suggest.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the removal records of the tip-synced transactions in the
+    /// mempool are invalid or mutually inconsistent, as this indicates a
+    /// programmer error.
     pub fn get_transactions_for_block_composition(
         &self,
         consensus_rule_set: ConsensusRuleSet,
-        mut remaining_kernel_len: usize,
+        max_kernel_size: usize,
         max_num_txs: Option<usize>,
     ) -> Vec<Transaction> {
         // Numbers of outputs and announcements reserved for the coinbase
@@ -1104,6 +1114,12 @@ impl Mempool {
         const COINBASE_NUM_OUTPUTS_RESERVATION: usize = 128;
         const COINBASE_NUM_ANNOUNCEMENTS_RESERVATION: usize = 128;
 
+        // Packing usually shrinks the inputs but can, in degenerate cases,
+        // grow them by a few b-field elements per tree in the SWBFI MMR. So
+        // the sum of stand-alone kernel sizes plus this slack bounds the
+        // projected kernel size from above.
+        const FAST_PATH_SLACK: usize = 1_000;
+
         let mut remaining_num_inputs = consensus_rule_set.max_num_inputs();
         let mut remaining_num_outputs = consensus_rule_set
             .max_num_outputs()
@@ -1112,12 +1128,22 @@ impl Mempool {
             .max_num_announcements()
             .saturating_sub(COINBASE_NUM_ANNOUNCEMENTS_RESERVATION);
 
+        // The kernel of the block transaction contains the packed union of the
+        // merged transactions' inputs and the concatenation of their other
+        // dynamically sized fields. So the projected kernel size is the sum of
+        // the selected kernels' sizes without their inputs fields, plus the
+        // size of the packed union of all selected inputs. Fixed-size fields
+        // (fee, timestamp, etc.) are counted once per selected transaction
+        // even though merging collapses them into one, making the projection
+        // a slight overestimate.
+        let mut selected_inputs: Vec<RemovalRecord> = vec![];
+        let mut kernel_wo_inputs_size_acc = 0;
+        let mut full_kernel_size_acc = 0;
+
         let mut transactions = vec![];
 
         for (transaction_digest, _fee_density) in self.fee_density_iter() {
-            // No more transactions can possibly be packed
-            if remaining_kernel_len == 0 || max_num_txs.is_some_and(|max| transactions.len() == max)
-            {
+            if max_num_txs.is_some_and(|max| transactions.len() == max) {
                 break;
             }
 
@@ -1139,21 +1165,36 @@ impl Mempool {
                     continue;
                 }
 
-                let kernel_len = kernel.encode().len();
+                let full_kernel_size = kernel.encode().len();
 
-                // Current transaction is too big
-                if kernel_len > remaining_kernel_len {
-                    continue;
+                // A dynamically sized kernel field's encoding is prepended
+                // with one length-indicating b-field element, hence the +/- 1.
+                let kernel_wo_inputs_size = full_kernel_size - kernel.inputs.encode().len() - 1;
+
+                // Only compute the exact size when the cheap and conservative
+                // check is inconclusive.
+                if full_kernel_size_acc + full_kernel_size + FAST_PATH_SLACK > max_kernel_size {
+                    let mut all_inputs = selected_inputs.clone();
+                    all_inputs.extend_from_slice(&kernel.inputs);
+                    let packed_inputs_field_size =
+                        RemovalRecordList::pack(all_inputs).encode().len() + 1;
+
+                    // Current transaction is too big
+                    if kernel_wo_inputs_size_acc + kernel_wo_inputs_size + packed_inputs_field_size
+                        > max_kernel_size
+                    {
+                        continue;
+                    }
                 }
 
-                let transaction_copy = transaction_ptr.to_owned();
-
                 // Include transaction
-                remaining_kernel_len -= kernel_len;
-                remaining_num_inputs -= transaction_copy.kernel.inputs.len();
-                remaining_num_outputs -= transaction_copy.kernel.outputs.len();
-                remaining_num_announcements -= transaction_copy.kernel.announcements.len();
-                transactions.push(transaction_copy)
+                selected_inputs.extend_from_slice(&kernel.inputs);
+                full_kernel_size_acc += full_kernel_size;
+                kernel_wo_inputs_size_acc += kernel_wo_inputs_size;
+                remaining_num_inputs -= kernel.inputs.len();
+                remaining_num_outputs -= kernel.outputs.len();
+                remaining_num_announcements -= kernel.announcements.len();
+                transactions.push(transaction_ptr.to_owned())
             }
         }
 
@@ -1560,14 +1601,22 @@ mod tests {
     use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier;
     use neptune_consensus::transaction::transaction_proof::TransactionProofType;
     use neptune_mutator_set::addition_record::AdditionRecord;
+    use neptune_mutator_set::msa_and_records::MsaAndRecords;
     use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+    use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
     use neptune_primitives::network::Network;
     use neptune_primitives::timestamp::Timestamp;
     use num_bigint::BigInt;
     use num_rational::BigRational as FeeDensity;
     use num_traits::Zero;
+    use proptest::arbitrary::Arbitrary;
+    use proptest::strategy::Strategy;
+    use proptest::strategy::ValueTree;
+    use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
     use rand::Rng;
+    use tasm_lib::prelude::Digest;
+    use tasm_lib::twenty_first::prelude::BFieldCodec;
     use tracing_test::traced_test;
 
     use crate::mempool::Mempool;
@@ -1909,6 +1958,83 @@ mod tests {
                 )
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn size_limit_accounts_for_input_packing() {
+        // Build mutually consistent removal records, all valid against the
+        // same mutator set, and distribute them across several transactions.
+        let num_txs = 4;
+        let inputs_per_tx = 4;
+        let num_inputs = num_txs * inputs_per_tx;
+        let aocl_size = 1u64 << 30;
+        let removables =
+            vec![(Digest::default(), Digest::default(), Digest::default()); num_inputs];
+        let mut test_runner = TestRunner::deterministic();
+        let msa_and_records = MsaAndRecords::arbitrary_with((removables, aocl_size))
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let mutator_set_hash = msa_and_records.mutator_set_accumulator.hash();
+        let removal_records = msa_and_records.unpacked_removal_records();
+
+        let mut txs = make_plenty_mock_transaction_supported_by_invalid_single_proofs(num_txs);
+        for (i, tx) in txs.iter_mut().enumerate() {
+            let inputs = removal_records[i * inputs_per_tx..(i + 1) * inputs_per_tx].to_vec();
+            tx.kernel = TransactionKernelModifier::default()
+                .inputs(inputs)
+                .mutator_set_hash(mutator_set_hash)
+                .modify(tx.kernel.clone());
+        }
+
+        let genesis_block = Block::genesis(Network::Main);
+        let mut mempool = Mempool::new(
+            ByteSize::gb(1),
+            TxProvingCapability::ProofCollection,
+            &genesis_block,
+        );
+        mempool.tip_mutator_set_hash = mutator_set_hash;
+        for tx in txs.clone() {
+            mempool.insert(tx, UpgradePriority::Irrelevant);
+        }
+        assert_eq!(num_txs, mempool.len());
+
+        // Projected size of the kernel of the block transaction merged from
+        // all transactions, mirroring the calculation under test.
+        let standalone_kernel_len_sum =
+            txs.iter().map(|tx| tx.kernel.encode().len()).sum::<usize>();
+        let non_inputs_kernel_len_sum = txs
+            .iter()
+            .map(|tx| tx.kernel.encode().len() - tx.kernel.inputs.encode().len() - 1)
+            .sum::<usize>();
+        let packed_inputs_field_len = RemovalRecordList::pack(removal_records).encode().len() + 1;
+        let projected_kernel_len = non_inputs_kernel_len_sum + packed_inputs_field_len;
+        assert!(
+            projected_kernel_len < standalone_kernel_len_sum,
+            "Test assumption: packing the inputs must save space"
+        );
+
+        let num_returned = |max_kernel_len: usize| {
+            mempool
+                .get_transactions_for_block_composition(
+                    ConsensusRuleSet::default(),
+                    max_kernel_len,
+                    None,
+                )
+                .len()
+        };
+
+        // A limit that accommodates the packed projection but not the sum of
+        // the stand-alone kernel sizes must admit all transactions.
+        assert_eq!(num_txs, num_returned(standalone_kernel_len_sum - 1));
+        assert_eq!(num_txs, num_returned(projected_kernel_len));
+
+        // A limit just below the packed projection must reject exactly one
+        // transaction.
+        assert_eq!(num_txs - 1, num_returned(projected_kernel_len - 1));
+
+        // Sanity check of tx-selector
+        assert_eq!(0, num_returned(0));
     }
 
     #[traced_test]
