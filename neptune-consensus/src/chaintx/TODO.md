@@ -154,7 +154,10 @@ verified", i.e. universal forgery. Covered by §Negative tests for `D`.
         mirroring `SingleProofWitness::Collection(ProofCollection)`.
         `LinkPrimitiveWitness` is the `PrimitiveWitness` analog and, like it, is
         deliberately not a variant.
-  - [ ] `Chain` (1), `Update` (2), `Cast` (3) — land with their witnesses
+  - [x] `Chain(Box<ChainWitness>)` — holds the two operand kernels, the chained
+        kernel, the cut-through set, and the two operand link proofs. It needs
+        no memory projection.
+  - [ ] `Update` (2), `Cast` (3) — land with their witnesses
   - [x] `SecretWitness` impl — dispatches to the branch witness.
   - [ ] `standard_input()` gains `|| D.reversed()`, `D` = the `SingleProof`
         program digest (§Breaking the `Fix`/`Cast` cycle). Deferred until `Cast`
@@ -192,12 +195,15 @@ would bind that check to the wrong tree without crashing.
         payload at `*witness + 2`, past the discriminant and field-size words.
   - [x] `test_program_snapshot!` — pins the `LinkProof` program hash (replaces
         the `Forge`-as-a-program pin; `Forge` no longer has a hash of its own)
-  - [ ] Import order is consensus-critical: `Forge` must be imported *first*,
+  - [x] Import order is consensus-critical: `Forge` must be imported *first*,
         because four of its `kmalloc`s have to land at
         `RemovalRecordsIntegrity`'s addresses (`forge_confirmed_loop_matches_rri`
         compares the emitted instructions, `push`ed addresses included). Every
-        branch added later imports after it. Re-check that guard test when
-        `Chain`/`Update`/`Cast` land.
+        branch added later imports after it. (`Chain` does; re-check the guard
+        test again when `Update`/`Cast` land.)
+  - [x] `main` reads the own program digest off the initial stack and hands it
+        to every branch below `lkmh`. `Chain` needs it to name `LinkProof` in
+        its operand claims; `Forge` ignores it. Mirrors `SingleProof`'s `main`.
 - [x] **Forge** `LinkPrimitiveWitness -> LinkTx`: inline
       `RemovalRecordsIntegrity` (non-recursive) + collect the lock/type-script
       hashes inline and recursively verify the lock/type-script proofs.
@@ -223,13 +229,29 @@ would bind that check to the wrong tree without crashing.
         (Inner root divined, authenticated against `lkmh`, then kept at the
         bottom of the stack -- reusing the now-dead `lkmh` slot -- so both
         script-claim templates read it without static memory.)
-- [ ] **Chain** `LinkTx * LinkTx -> LinkTx`: recursively verify both input
+- [x] **Chain** `LinkTx * LinkTx -> LinkTx`: recursively verify both input
       LinkProofs, merge, cut-through where
       `successor.thruputs ⊆ predecessor.outputs` (mirror
-      `single_proof/merge_branch`). Both operand claims: program =
-      `own_program_digest()`, input = `[lkmh_operand, D]` with `D` **copied
-      verbatim** from own public input (audit-critical; §Breaking the
-      `Fix`/`Cast` cycle).
+      `single_proof/merge_branch`).
+  - [x] both operand claims: program = `own_program_digest()`, input =
+        `[lkmh_operand]`.
+  - [ ] append `D`, **copied verbatim** from own public input, to both operand
+        claims (audit-critical; §Breaking the `Fix`/`Cast` cycle). Blocked on
+        `D` entering the claim at all, which is deferred until `Cast`.
+  - [x] cut-through as one witness-supplied multiset removed from the
+        concatenated outputs *and* the concatenated thruputs, so a record can
+        only leave the output side by leaving the input side with it. Matching
+        is on the addition record, i.e. on the canonical commitment.
+  - [x] inputs and announcements are the concatenations; fee is the sum (both
+        operands bounded, hence non-negative); timestamp is the max; one mutator
+        set hash across all three kernels.
+  - [x] the chained kernel carries no coinbase and no merge bit. The operands'
+        are *not* re-checked: every branch asserts both on the kernel it
+        produces, so an operand that verifies has them by induction. Any branch
+        added later owes the same assertion.
+  - [ ] a positive test in which cut-through is *partial* -- the prover leaves a
+        matching (output, thruput) pair standing. Permitted by design; currently
+        only maximal cut-through is exercised.
 - [ ] **Update** `LinkTx -> LinkTx`: re-target a new mutator-set hash without
       re-forging (mirror `single_proof/update_branch`). Same verbatim `D`
       pass-through onto the operand claim. `Update` re-targets the *mutator set*,
@@ -430,6 +452,36 @@ unmatched thruput is un-`Fix`able (see §Motivation).
 ### onto `Chain`
 - Not applicable: coinbase-specific merge tests (`too_big_time_diff`,
   `authenticate_coinbase_fields_*`) — a `LinkTx` is never a coinbase transaction
+- [x] chained inputs are the operands' inputs
+- [x] chained announcements are the operands' announcements
+- [x] chained fee is the sum of the operand fees (too big *and* too small)
+- [ ] fee-sum overflow rejected. **Not testable through the tasm today, and the
+      margin is thinner than it looks.** `Chain` bounds both operand fees to
+      `[0, MAX_NAU]` before adding, and `MAX_NAU` is 98.74% of `2**127`, so two
+      bounded fees clear `u128::MAX` by 1.26% — the overflow assert after
+      `overflowing_add_u128` cannot fire, and no witness can drive it. *Three*
+      bounded fees would overflow. Pinned by
+      `two_bounded_fees_cannot_overflow` rather than left to the argument in a
+      comment. Revisit if: the conversion factor or the 42M coin cap grows; a
+      branch sums more than two amounts in one `u128` addition; or a negative
+      operand fee (huge as a `u128`) ever becomes reachable — the last is what
+      makes `Update`/`Cast` owe the same bounds check `Chain` does.
+- [x] chained timestamp is the later of the operand timestamps
+- [x] all three kernels agree on the mutator-set hash
+- [x] coinbase / merge bit on the chained kernel rejected
+- [x] bad MAST auth path rejected
+- [x] chained kernel must be the one named in the claim
+- [x] one-sided cut-through rejected, in both directions (← §cut-through value
+      conservation, negative)
+- [x] cut-through on unequal commitments rejected — the phantom-thruput
+      argument, as a test: a thruput no predecessor output resolves can never
+      be cancelled
+- [ ] chained *outputs* are the operands' outputs when nothing cuts through
+      (the `cut_through == []` case is only covered positively)
+- [ ] double spend across operands: both operands spending the same input.
+      `Chain` does not reject this today — nor does `merge_branch`; index-set
+      uniqueness is enforced downstream. Confirm that is still true once a
+      `LinkTx` can reach a block via `Fix`, and test it wherever it lands.
 
 ### onto `Fix`
 - [ ] invalid `LinkProofWitness` discriminant crashes (← `invalid_discriminant_crashes_execution`)
@@ -499,15 +551,18 @@ Positive counterparts (so the negatives cannot pass vacuously):
       `Chain(Chain(A, B), C) = Chain(A, Chain(B, C))`
 - [ ] Property: `Fix` distributivity: `Fix(Chain(A, B)) = Merge(Fix(A), Fix(B))`
       when `thruputs == []`
-- [ ] `Chain`: new timestamp unequal to max rejected
+- [x] `Chain`: new timestamp unequal to max rejected
 - [ ] Thruput-input integrity: a thruput must equal an output of a predecessor
       in the chain (validated against that output, not mutator-set membership)
 - [ ] Negative: `LinkKernel` carrying a coinbase rejected
 - [ ] `Update` then `Fix` == `Fix` on the updated mutator set
 - [ ] `Cast` round-trip: `Cast(tx)` then `Fix` == `tx`
 - [ ] Negative: `Fix` with non-empty thruputs rejected
-- [ ] Negative: `Chain` with mismatched thruputs rejected
-- [ ] Negative: `Chain` with double-spends rejected
+- [x] Negative: `Chain` with mismatched thruputs rejected (a cut-through whose
+      commitment matches no output)
+- [ ] Negative: `Chain` with double-spends rejected. Not enforced by the branch
+      today (`merge_branch` does not either -- index-set uniqueness is a
+      downstream check); revisit once `Fix` can carry a `LinkTx` into a block
 - [ ] End-to-end: `Fix`'d tx passes existing `SingleProof` verification & enters
       into a block
 - [ ] Phantom thruputs are rejected. Salted inputs list contains a UTXO not
@@ -528,13 +583,15 @@ Positive counterparts (so the negatives cannot pass vacuously):
 - [ ] Faithful union. A valid `Forge` with both confirmed inputs and thruputs
       produces a digest that the unchanged NativeCurrency accepts, and the
       balance sums over both sets.
-- [ ] Chain rejects a bad MAST auth path for an operand's `inputs` / `outputs` /
-      `thruputs` / `fee`.
-- [ ] cut-through value conservation (positive): a cut-through cancels a
+- [x] Chain rejects a bad MAST auth path for an operand's `inputs` / `outputs` /
+      `thruputs` / `fee`. (One path tampered; every field goes through the same
+      snippet.)
+- [x] cut-through value conservation (positive): a cut-through cancels a
       (thruput, output) pair only when their canonical commitments are equal,
       and removes it from both sides together — so no value is created or
-      destroyed.
-- [ ] Cut-through value conservation (negative): one-sided removal, or a cancel
+      destroyed. (Maximal cut-through only; see §Tasm > `Chain` for the partial
+      case.)
+- [x] Cut-through value conservation (negative): one-sided removal, or a cancel
       on unequal commitments, is rejected.
 
 ## Benchmarks

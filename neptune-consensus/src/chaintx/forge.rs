@@ -525,7 +525,7 @@ impl SecretWitness for ForgeWitness {
     fn nondeterminism(&self) -> NonDeterminism {
         // `Forge` is a branch of `LinkProof`, so the memory image is the
         // *enum's*: discriminant, field size, then the payload.
-        let memory_part = LinkProofWitnessMemory::Forge(self.into());
+        let memory_part = LinkProofWitnessMemory::Forge(Box::new(self.into()));
         let mut memory = HashMap::default();
         encode_to_memory(
             &mut memory,

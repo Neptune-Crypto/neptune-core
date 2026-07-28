@@ -4,6 +4,7 @@
 //! (`LinkTx`) pipeline that runs parallel to the legacy `Transaction` pipeline.
 
 mod authenticate_link_kernel_field;
+pub mod chain;
 pub mod forge;
 pub mod link_kernel;
 pub mod link_primitive_witness;

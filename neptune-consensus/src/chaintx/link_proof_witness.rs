@@ -10,20 +10,21 @@ use tasm_lib::twenty_first::error::BFieldCodecError;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 
+use super::chain::ChainWitness;
 use super::forge::ForgeWitness;
 use super::forge::ForgeWitnessMemory;
 use super::link_proof::LinkProof;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::proof_abstractions::SecretWitness;
 
-/// Discriminant of [`LinkProofWitness::Forge`].
+/// Discriminant of the various pathways into `LinkProof`.
 ///
 /// Consensus-critical: the `LinkProof` program branches on this value, so it is
 /// pinned here and must never be reassigned. The remaining branches append:
-///  - `Chain` = 1
 ///  - `Update` = 2,
 ///  - `Cast` = 3.
 pub(crate) const DISCRIMINANT_FOR_FORGE: u64 = 0;
+pub(crate) const DISCRIMINANT_FOR_CHAIN: u64 = 1;
 
 /// The witness for a link proof: which of the `LinkProof` branches produced this
 /// [`LinkTx`](super::link_tx::LinkTx), plus that branch's secret
@@ -35,14 +36,17 @@ pub(crate) const DISCRIMINANT_FOR_FORGE: u64 = 0;
 /// Note that `Fix` is deliberately *not* a variant here: `Fix` produces a
 /// `SingleProof`, not a `LinkProof`, and therefore lives on `SingleProofWitness`.
 ///
-/// The remaining branches -- `Chain`, `Update` and `Cast` -- are added together
-/// with their witnesses and tasm programs, appended in that order (see
-/// [`DISCRIMINANT_FOR_FORGE`]) so the wire layout of `Forge` never shifts
-/// underneath them.
+/// The remaining branches -- `Update` and `Cast` -- are added together with
+/// their witnesses and tasm programs, appended in that order so the wire layout
+/// of the existing branches never shifts underneath them.
 #[derive(Debug, Clone, BFieldCodec)]
 pub enum LinkProofWitness {
     /// `LinkPrimitiveWitness -> LinkTx`: the entry point into the chain pipeline.
     Forge(Box<ForgeWitness>),
+
+    /// `LinkTx * LinkTx -> LinkTx`: chain two link transactions, cutting
+    /// through the thruputs that the other operand's outputs resolve.
+    Chain(Box<ChainWitness>),
 }
 
 /// The memory image of a [`LinkProofWitness`]: what the `LinkProof` program
@@ -54,7 +58,13 @@ pub enum LinkProofWitness {
 /// without caring which of the two enums produced the image.
 #[derive(Debug, Clone, BFieldCodec)]
 pub(super) enum LinkProofWitnessMemory {
-    Forge(ForgeWitnessMemory),
+    /// Boxed, like [`Chain`](Self::Chain), only to keep the enum small.
+    Forge(Box<ForgeWitnessMemory>),
+
+    /// A [`ChainWitness`] is read from memory in its entirety, so it is its own
+    /// projection. Boxed only to keep the enum small; `Box<T>` encodes exactly
+    /// as `T`, so the image `LinkProof` decodes is unaffected.
+    Chain(Box<ChainWitness>),
 }
 
 // Required for `decode_from_memory`; `derive(TasmObject)` does not handle enums.
@@ -85,7 +95,8 @@ impl TasmObject for LinkProofWitnessMemory {
         let field_data = iterator.take(field_size).collect_vec();
 
         match discriminant.value() {
-            DISCRIMINANT_FOR_FORGE => Ok(Box::new(Self::Forge(*BFieldCodec::decode(&field_data)?))),
+            DISCRIMINANT_FOR_FORGE => Ok(Box::new(Self::Forge(BFieldCodec::decode(&field_data)?))),
+            DISCRIMINANT_FOR_CHAIN => Ok(Box::new(Self::Chain(BFieldCodec::decode(&field_data)?))),
             // TODO: decode other variants here
             _ => Err(Box::new(BFieldCodecError::ElementOutOfRange)),
         }
@@ -97,11 +108,16 @@ impl LinkProofWitness {
         Self::Forge(Box::new(witness))
     }
 
+    pub fn from_chain(witness: ChainWitness) -> Self {
+        Self::Chain(Box::new(witness))
+    }
+
     /// MAST hash of the [`LinkKernel`](super::link_kernel::LinkKernel) this
     /// witness attests to -- the public input of the `LinkProof` claim.
     pub fn kernel_mast_hash(&self) -> Digest {
         match self {
             Self::Forge(witness) => witness.kernel_mast_hash(),
+            Self::Chain(witness) => witness.kernel_mast_hash(),
         }
     }
 }
@@ -111,12 +127,14 @@ impl SecretWitness for LinkProofWitness {
     fn standard_input(&self) -> PublicInput {
         match self {
             Self::Forge(witness) => witness.standard_input(),
+            Self::Chain(witness) => witness.standard_input(),
         }
     }
 
     fn output(&self) -> Vec<BFieldElement> {
         match self {
             Self::Forge(witness) => witness.output(),
+            Self::Chain(witness) => witness.output(),
         }
     }
 
@@ -127,6 +145,7 @@ impl SecretWitness for LinkProofWitness {
     fn nondeterminism(&self) -> NonDeterminism {
         match self {
             Self::Forge(witness) => witness.nondeterminism(),
+            Self::Chain(witness) => witness.nondeterminism(),
         }
     }
 }
@@ -163,7 +182,7 @@ mod tests {
         #[strategy(LinkPrimitiveWitness::arbitrary_strategy())] lpw: LinkPrimitiveWitness,
     ) {
         let witness = ForgeWitness::without_proofs(&lpw);
-        let original = LinkProofWitnessMemory::Forge((&witness).into());
+        let original = LinkProofWitnessMemory::Forge(Box::new((&witness).into()));
 
         let mut memory = HashMap::default();
         let address = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
@@ -181,7 +200,7 @@ mod tests {
         #[strategy(LinkPrimitiveWitness::arbitrary_strategy())] lpw: LinkPrimitiveWitness,
     ) {
         let witness = ForgeWitness::without_proofs(&lpw);
-        let memory_image = LinkProofWitnessMemory::Forge((&witness).into());
+        let memory_image = LinkProofWitnessMemory::Forge(Box::new((&witness).into()));
         let expected = BFieldElement::new(DISCRIMINANT_FOR_FORGE);
 
         prop_assert_eq!(LinkProofWitness::from_forge(witness).encode()[0], expected);
