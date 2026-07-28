@@ -32,9 +32,12 @@ use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 
+use super::authenticate_link_kernel_field::AuthenticateLinkKernelField;
 use super::link_kernel::LinkKernel;
 use super::link_kernel::LinkKernelField;
 use super::link_primitive_witness::LinkPrimitiveWitness;
+use super::link_proof::merge_bit_false_leaf;
+use super::link_proof::no_coinbase_leaf;
 use super::link_proof::LinkProof;
 use super::link_proof_witness::LinkProofWitnessMemory;
 use super::link_proof_witness::DISCRIMINANT_FOR_FORGE;
@@ -52,7 +55,6 @@ use crate::transaction::validity::tasm::claims::new_claim::NewClaim;
 use crate::transaction::validity::tasm::compute_absolute_indices::ComputeAbsoluteIndices;
 use crate::transaction::validity::tasm::leaf_authentication::authenticate_msa_against_txk::AuthenticateMsaAgainstTxk;
 use crate::type_scripts::native_currency::NativeCurrency;
-use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
 const CARDINALITY_MISMATCH_ERROR: i128 = 1_000_520;
 const COMPUTED_AND_CLAIMED_INDICES_DISAGREE_ERROR: i128 = 1_000_521;
@@ -67,21 +69,6 @@ const WRONG_NUMBER_OF_LOCK_SCRIPT_PROOFS_ERROR: i128 = 1_000_528;
 /// Number of coins per UTXO must be strictly less than this. Copied, with the
 /// guard, from [`CollectTypeScripts`](crate::transaction::validity::collect_type_scripts).
 const MAX_NUM_COINS_PER_UTXO: usize = 100_000;
-
-/// The MAST leaf a [`LinkKernel`] must carry at
-/// [`LinkKernelField::Coinbase`]. A `LinkTx` is never a coinbase transaction,
-/// so the leaf is a constant and `Forge` authenticates it directly rather than
-/// reading a coinbase out of the witness.
-fn no_coinbase_leaf() -> Digest {
-    Tip5::hash(&Option::<NativeCurrencyAmount>::None)
-}
-
-/// The MAST leaf a [`LinkKernel`] must carry at
-/// [`LinkKernelField::MergeBit`]. `Forge` is the entry point into the chain
-/// pipeline, so the merge bit is always false -- again a constant leaf.
-fn merge_bit_false_leaf() -> Digest {
-    Tip5::hash(&false)
-}
 
 /// The witness consumed by [`Forge`]: the `Forge`-facing projection of a
 /// [`LinkPrimitiveWitness`].
@@ -743,6 +730,17 @@ impl BasicSnippet for Forge {
         let authenticate_msa = library.import(Box::new(AuthenticateMsaAgainstTxk {
             mast_height: LinkKernel::MAST_HEIGHT as u32,
         }));
+        // Same reasoning: neither of this snippet's imports allocates today, but
+        // importing it here rather than above keeps that from mattering.
+        let authenticate_inputs = library.import(Box::new(AuthenticateLinkKernelField(
+            LinkKernelField::Inputs,
+        )));
+        let authenticate_thruputs_field = library.import(Box::new(AuthenticateLinkKernelField(
+            LinkKernelField::Thruputs,
+        )));
+        let authenticate_outputs_field = library.import(Box::new(AuthenticateLinkKernelField(
+            LinkKernelField::Outputs,
+        )));
 
         let field_aocl = field!(ForgeWitnessMemory::aocl);
         let field_swbfi_bagged = field!(ForgeWitnessMemory::swbfi_bagged);
@@ -828,22 +826,40 @@ impl BasicSnippet for Forge {
             // _ [lkmh] *witness
         );
 
-        // Authenticate one link-kernel MAST leaf. `produce_leaf` runs at
-        // `_ [lkmh] *witness [lkmh] h i` and must leave a leaf digest on top:
-        // `_ [lkmh] *witness [lkmh] h i [leaf]`. A variable-length field hashes
-        // its contents into the leaf; a constant leaf is pushed directly, which
-        // simultaneously asserts the field's value (only one preimage hashes to
-        // it).
-        let authenticate_leaf =
-            |leaf_index: LinkKernelField, produce_leaf: &[LabelledInstruction]| {
+        // Authenticate one variable-length link-kernel MAST leaf, via the
+        // shared `AuthenticateLinkKernelField` snippet, so no two branches can
+        // drift on how a `LinkKernel` leaf is proven. `field_accessor` turns
+        // `*witness` into `*field size`.
+        let authenticate_field =
+            |snippet: &str, field_accessor: &[LabelledInstruction]| {
+                triton_asm!(
+                    // _ [lkmh] *witness
+                    dup 5 dup 5 dup 5 dup 5 dup 5
+                    // _ [lkmh] *witness [lkmh]
+
+                    dup 5
+                    {&field_accessor}
+                    // _ [lkmh] *witness [lkmh] *field size
+
+                    call {snippet}
+                    // _ [lkmh] *witness
+                )
+            };
+
+        // A leaf whose value consensus fixes is *not* one of those: pushing the
+        // constant digest straight into `merkle_verify` asserts the field's
+        // value at the same time (only one preimage hashes to it), which is
+        // strictly stronger than authenticating whatever the witness holds.
+        let authenticate_constant_leaf =
+            |leaf_index: LinkKernelField, leaf: &[LabelledInstruction]| {
                 triton_asm!(
                     // _ [lkmh] *witness
                     dup 5 dup 5 dup 5 dup 5 dup 5
                     push {LinkKernel::MAST_HEIGHT}
-                    push {leaf_index as u32}
+                    push {leaf_index.discriminant() as u32}
                     // _ [lkmh] *witness [lkmh] h i
 
-                    {&produce_leaf}
+                    {&leaf}
                     // _ [lkmh] *witness [lkmh] h i [leaf]
 
                     call {merkle_verify}
@@ -851,22 +867,16 @@ impl BasicSnippet for Forge {
                 )
             };
 
-        let authenticate_confirmed_inputs = authenticate_leaf(
-            LinkKernelField::Inputs,
-            &triton_asm!(dup 7 {&field_with_size_confirmed_inputs} call {hash_varlen}),
-        );
-        let authenticate_thruputs = authenticate_leaf(
-            LinkKernelField::Thruputs,
-            &triton_asm!(dup 7 {&field_with_size_thruputs} call {hash_varlen}),
-        );
-        let authenticate_outputs = authenticate_leaf(
-            LinkKernelField::Outputs,
-            &triton_asm!(dup 7 {&field_with_size_outputs} call {hash_varlen}),
-        );
+        let authenticate_confirmed_inputs =
+            authenticate_field(&authenticate_inputs, &field_with_size_confirmed_inputs);
+        let authenticate_thruputs =
+            authenticate_field(&authenticate_thruputs_field, &field_with_size_thruputs);
+        let authenticate_outputs =
+            authenticate_field(&authenticate_outputs_field, &field_with_size_outputs);
         let authenticate_no_coinbase =
-            authenticate_leaf(LinkKernelField::Coinbase, &push_no_coinbase_leaf);
+            authenticate_constant_leaf(LinkKernelField::Coinbase, &push_no_coinbase_leaf);
         let authenticate_merge_bit_false =
-            authenticate_leaf(LinkKernelField::MergeBit, &push_merge_bit_false_leaf);
+            authenticate_constant_leaf(LinkKernelField::MergeBit, &push_merge_bit_false_leaf);
 
         // The type scripts see `input_utxos` as one flat list and contain all
         // inputs, both confirmed inputs and thruputs. Binding its length to
@@ -1574,6 +1584,7 @@ pub(crate) mod tests {
     use crate::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::transaction::utxo::Utxo;
     use crate::transaction::validity::removal_records_integrity::RemovalRecordsIntegrity;
+    use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
     impl ForgeWitness {
         /// Cheap test-only constructor: identical to

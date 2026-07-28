@@ -7,6 +7,7 @@ use tasm_lib::triton_vm::prelude::*;
 use super::forge::Forge;
 use super::link_proof_witness::DISCRIMINANT_FOR_FORGE;
 use crate::proof_abstractions::tasm::program::TritonProgram;
+use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
 /// No branch of the `LinkProof` program ran: the discriminant found in memory
 /// matched none of them.
@@ -22,6 +23,32 @@ pub(crate) const NO_BRANCH_TAKEN_ERROR: i128 = 1_000_530;
 /// signal "taken" by leaving `-1` in the discriminant's slot, so a witness that
 /// *claims* `-1` would otherwise sail through the dispatcher untouched.
 pub(crate) const INVALID_WITNESS_DISCRIMINANT_ERROR: i128 = 1_000_531;
+
+/// The MAST leaf a [`LinkKernel`](super::link_kernel::LinkKernel) must carry at
+/// [`LinkKernelField::Coinbase`](super::link_kernel::LinkKernelField::Coinbase).
+///
+/// A `LinkTx` is never a coinbase transaction, so the leaf is a constant and a
+/// branch authenticates it directly rather than reading a coinbase out of its
+/// witness -- which asserts the field's value at the same time, since only one
+/// preimage hashes to it.
+///
+/// Lives here, not on any one branch: *every* branch owes this assertion on the
+/// kernel it produces, and branches that recurse rely on it holding for their
+/// operands by induction rather than re-checking it.
+pub(super) fn no_coinbase_leaf() -> Digest {
+    Tip5::hash(&Option::<NativeCurrencyAmount>::None)
+}
+
+/// The MAST leaf a [`LinkKernel`](super::link_kernel::LinkKernel) must carry at
+/// [`LinkKernelField::MergeBit`](super::link_kernel::LinkKernelField::MergeBit).
+///
+/// The merge bit marks a transaction that has been through `Merge`, which is a
+/// legacy-pipeline operation; nothing in the chain pipeline sets it. Same
+/// constant-leaf treatment, and the same obligation on every branch, as
+/// [`no_coinbase_leaf`].
+pub(super) fn merge_bit_false_leaf() -> Digest {
+    Tip5::hash(&false)
+}
 
 /// `LinkProof`: the consensus program backing a
 /// [`LinkTx`](super::link_tx::LinkTx).
@@ -190,6 +217,6 @@ mod tests {
 
     test_program_snapshot!(
         LinkProof,
-        "c28c1290502d158cd612e8dd2acc45ab25c53a23371badaff8bbfe4e0eb7b001806061bd1b1173a9"
+        "a0a6420cf1d4dca4291d734adb2d9c794ff754a316e15a0abc25f9ba8a5af104f473d1aaa235c85a"
     );
 }
