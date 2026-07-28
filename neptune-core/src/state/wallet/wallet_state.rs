@@ -4981,6 +4981,82 @@ pub(crate) mod tests {
         }
     }
 
+    mod announcement_scanning {
+        use neptune_consensus::transaction::test_helpers::txkernel;
+        use neptune_wallet::utxo_notification::UtxoNotificationPayload;
+        use proptest_arbitrary_interop::arb;
+
+        use super::*;
+        use crate::tests::shared::files::unit_test_data_directory;
+
+        /// Verify that the wallet does not pick up announced UTXOs that the
+        /// announced-to key cannot spend.
+        ///
+        /// A third party can craft a transaction whose announcement decrypts
+        /// under the victim's key and whose outputs contain the matching
+        /// addition record, but where the announced UTXO is locked by a script
+        /// the victim cannot unlock. Tracking such a UTXO would inflate the
+        /// wallet's balance with funds it cannot spend.
+        #[traced_test]
+        #[test_strategy::proptest(async = "tokio", cases = 5)]
+        async fn announced_utxo_with_foreign_lock_script_is_not_picked_up(
+            #[strategy(txkernel::with_lengths(5, 5, 5, false))] kernel: TransactionKernel,
+            #[strategy(arb())] wallet_secret: WalletEntropy,
+            #[strategy(arb())] sender_randomness: Digest,
+            #[strategy(arb())] foreign_lock_script_hash: Digest,
+        ) {
+            let network = Network::Main;
+            let genesis = Block::genesis(network);
+            let data_dir = unit_test_data_directory(network).unwrap();
+            let mut wallet_state = WalletState::new_from_wallet_entropy(
+                &data_dir,
+                wallet_secret,
+                &cli_args::Args::default(),
+                &genesis,
+            )
+            .await;
+            let key = wallet_state
+                .next_unused_spending_key(KeyType::Generation)
+                .await;
+
+            let foreign_utxo =
+                Utxo::new_native_currency(foreign_lock_script_hash, NativeCurrencyAmount::coins(5));
+            let own_utxo = Utxo::new_native_currency(
+                key.to_address().lock_script_hash(),
+                NativeCurrencyAmount::coins(5),
+            );
+
+            // Announce both UTXOs and include both addition records in the
+            // transaction so that the lock script is the only difference
+            // between the two.
+            let mut announcements = kernel.announcements.clone();
+            let mut outputs = kernel.outputs.clone();
+            for utxo in [&foreign_utxo, &own_utxo] {
+                let payload = UtxoNotificationPayload::new(utxo.clone(), sender_randomness);
+                announcements.push(key.to_address().generate_announcement(payload));
+                let incoming = IncomingUtxo {
+                    utxo: utxo.clone(),
+                    sender_randomness,
+                    receiver_preimage: key.privacy_preimage(),
+                    is_guesser_fee: false,
+                };
+                outputs.push(incoming.addition_record());
+            }
+            let kernel = TransactionKernelModifier::default()
+                .announcements(announcements)
+                .outputs(outputs)
+                .modify(kernel);
+
+            let caught = wallet_state
+                .scan_for_utxos_announced_to_known_keys(&kernel)
+                .collect_vec();
+
+            assert_eq!(1, caught.len(), "Exactly one announced UTXO must be caught");
+            assert_eq!(own_utxo, caught[0].utxo);
+            assert_eq!(sender_randomness, caught[0].sender_randomness);
+        }
+    }
+
     pub(crate) mod fee_notifications {
 
         use neptune_consensus::block::block_transaction::BlockTransaction;

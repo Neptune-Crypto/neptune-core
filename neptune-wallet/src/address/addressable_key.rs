@@ -428,6 +428,9 @@ impl SpendingKey {
     /// Decrypt a single announcement with this key, if it is of this key's type
     /// and decryptable.
     ///
+    /// The caller is responsible for verifying that the announced UTXO is
+    /// actually present in the handled transaction.
+    ///
     /// The caller is responsible for having matched the announcement's receiver
     /// identifier to this key (see [`Self::scan_announcements_for_keys`]); this
     /// method only checks the key-type flag and attempts decryption.
@@ -437,6 +440,11 @@ impl SpendingKey {
         }
         let ciphertext = self.ok_warn(common::ciphertext_from_announcement(announcement))?;
         let (utxo, sender_randomness) = self.ok_warn(self.decrypt(&ciphertext))?;
+
+        if utxo.lock_script_hash() != self.lock_script_hash() {
+            return None;
+        }
+
         Some(IncomingUtxo {
             utxo,
             sender_randomness,

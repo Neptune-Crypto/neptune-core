@@ -42,6 +42,20 @@ mod tests {
         }
     }
 
+    #[proptest(cases = 3)]
+    fn announced_utxo_with_foreign_lock_script_is_rejected(
+        #[strategy(arb())] seed: Digest,
+        #[strategy(arb())] foreign_lock_script_hash: Digest,
+    ) {
+        for key_type in KeyType::iter() {
+            let key = SpendingKey::from_seed(seed, key_type);
+            worker::announced_utxo_with_foreign_lock_script_is_rejected(
+                key,
+                foreign_lock_script_hash,
+            )
+        }
+    }
+
     /// tests encrypting and decrypting with all key types.
     #[proptest(cases = 10)]
     fn test_encrypt_decrypt(#[strategy(arb())] seed: Digest) {
@@ -134,6 +148,38 @@ mod tests {
             assert_eq!(expected_addition_record, announced_utxo.addition_record());
             assert_eq!(sender_randomness, announced_utxo.sender_randomness);
             assert_eq!(key.privacy_preimage(), announced_utxo.receiver_preimage);
+        }
+
+        pub fn announced_utxo_with_foreign_lock_script_is_rejected(
+            key: SpendingKey,
+            foreign_lock_script_hash: Digest,
+        ) {
+            let sender_randomness: Digest = random();
+            let announce = |utxo: Utxo| {
+                let payload = UtxoNotificationPayload::new(utxo, sender_randomness);
+                key.to_address().generate_announcement(payload)
+            };
+
+            let foreign_utxo = Utxo::new_native_currency(
+                foreign_lock_script_hash,
+                NativeCurrencyAmount::coins(10),
+            );
+            assert!(
+                SpendingKey::scan_announcements_for_keys(&[announce(foreign_utxo)], [key.clone()])
+                    .is_empty(),
+                "announced UTXO with foreign lock script must be rejected"
+            );
+
+            let own_utxo = Utxo::new_native_currency(
+                key.to_address().lock_script_hash(),
+                NativeCurrencyAmount::coins(10),
+            );
+            let caught = SpendingKey::scan_announcements_for_keys(&[announce(own_utxo)], [key]);
+            assert_eq!(
+                1,
+                caught.len(),
+                "announced UTXO with own lock script must be caught"
+            );
         }
 
         /// This tests encrypting and decrypting with a [SpendingKey]
