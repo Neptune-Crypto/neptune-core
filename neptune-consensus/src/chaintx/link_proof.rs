@@ -33,6 +33,11 @@ pub(crate) const INVALID_WITNESS_DISCRIMINANT_ERROR: i128 = 1_000_531;
 /// which is a [`BasicSnippet`] that establishes the same claim by a different
 /// route. `Forge` is the entry point; `Chain`, `Update` and `Cast` follow.
 ///
+/// The dispatcher hands each branch `[own_program_digest] [lkmh] *witness disc`
+/// and expects `[own_program_digest] [scratch] *witness -1` back. A branch that
+/// does not recurse into `LinkProof` -- `Forge` -- simply leaves the digest
+/// buried; the dispatcher pops it.
+///
 /// The claim is `{ program: LinkProof, input: [lkmh] }`. It gains the
 /// `SingleProof` program digest as a second input when `Cast` lands -- that
 /// parameter is what breaks the `Fix`/`Cast` circular dependency; see the
@@ -67,31 +72,41 @@ impl TritonProgram for LinkProof {
         );
 
         let main = triton_asm! {
+            // The program digest sits at the bottom of the initial stack, and
+            // `dup`'s reach is 16 deep, so it can only be read *here*, before
+            // anything is pushed on top. `Chain` (and later `Update`) will need
+            // it for their operand claims: a `LinkProof` recursively verifying a
+            // `LinkProof` names itself, rather than hardcoding a digest it
+            // cannot know while being built. Mirrors `SingleProof`'s `main`.
+            dup 15 dup 15 dup 15 dup 15 dup 15
+            hint own_program_digest = stack[0..5]
+            // _ [own_program_digest]
+
             read_io {Digest::LEN}
             hint link_kernel_mast_hash = stack[0..5]
-            // _ [lkmh]
+            // _ [own_program_digest] [lkmh]
 
             push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
-            // _ [lkmh] *link_proof_witness
+            // _ [own_program_digest] [lkmh] *link_proof_witness
 
             read_mem 1 addi 1 swap 1
             hint discriminant = stack[0]
             hint link_proof_witness = stack[1]
-            // _ [lkmh] *link_proof_witness discriminant
+            // _ [own_program_digest] [lkmh] *link_proof_witness discriminant
 
             {&verify_discriminant_has_legal_value}
-            // _ [lkmh] *link_proof_witness discriminant
+            // _ [own_program_digest] [lkmh] *link_proof_witness discriminant
 
             /* match discriminant */
             dup 0 push {DISCRIMINANT_FOR_FORGE} eq
             skiz call {forge_branch}
-            // _ [lkmh] *link_proof_witness discriminant
+            // _ [own_program_digest] [lkmh] *link_proof_witness discriminant
 
             // a discriminant of -1 indicates that some branch was executed
             push -1
             eq
             assert error_id {NO_BRANCH_TAKEN_ERROR}
-            // _ [dispatcher_scratch] *link_proof_witness
+            // _ [own_program_digest] [dispatcher_scratch] *link_proof_witness
 
             // The digest slot belongs to the dispatcher, and it is scratch: a
             // branch may leave anything there (`Forge` leaves the inner kernel
@@ -101,7 +116,7 @@ impl TritonProgram for LinkProof {
             // every branch; do not make branches hand it back, which would put
             // the burden -- and the chance of handing back the wrong digest --
             // on each of them.
-            pop 1 pop 5
+            pop 1 pop 5 pop 5
             // _
 
             halt
@@ -175,6 +190,6 @@ mod tests {
 
     test_program_snapshot!(
         LinkProof,
-        "7bd4f50dea814bb2d6ab877986c4ea4ed0f5f0458376817cc94f7ff00d57c18f4af5c753a5e8aa51"
+        "c28c1290502d158cd612e8dd2acc45ab25c53a23371badaff8bbfe4e0eb7b001806061bd1b1173a9"
     );
 }
