@@ -329,6 +329,9 @@ impl SpendingKey {
     /// verify that the announced UTXOs are actually present. This is the
     /// caller's responsibility..
     ///
+    /// Announcements whose UTXO is not locked to this key are ignored, as the
+    /// key cannot spend such UTXOs.
+    ///
     /// Note that a single `Transaction` may represent an entire block.
     ///
     /// # Side Effects
@@ -341,40 +344,20 @@ impl SpendingKey {
     /// Only scans the matching announcements. Does not verify that the
     /// announced UTXO is actually an output in the transaction.
     pub fn scan_for_announced_utxos(&self, tx_kernel: &TransactionKernel) -> Vec<IncomingUtxo> {
-        // pre-compute some fields, and early-abort if key cannot receive.
         let receiver_identifier = self.receiver_identifier();
-        let receiver_preimage = self.privacy_preimage();
 
         // for all announcements
         tx_kernel
             .announcements
             .iter()
-
-            // ... that are marked as encrypted to our key type
-            .filter(|pa| self.matches_announcement_key_type(pa))
-
             // ... that match the receiver_id of this key
             .filter(move |pa| {
                 matches!(common::receiver_identifier_from_announcement(pa), Ok(r) if r == receiver_identifier)
             })
-
-            // ... that have a ciphertext field
-            .filter_map(|pa| self.ok_warn(common::ciphertext_from_announcement(pa)))
-
-            // ... which can be decrypted with this key
-            .filter_map(|c| self.ok_warn(self.decrypt(&c)))
-
-            // ... map to IncomingUtxo
-            .map(move |(utxo, sender_randomness)| {
-                // and join those with the receiver digest to get a commitment
-                // Note: the commitment is computed in the same way as in the mutator set.
-                IncomingUtxo {
-                    utxo,
-                    sender_randomness,
-                    receiver_preimage,
-                    is_guesser_fee: false,
-                }
-            }).collect()
+            // ... that are of this key's type, can be decrypted, and whose
+            // UTXO this key can spend
+            .filter_map(|pa| self.incoming_utxo_from_announcement(pa))
+            .collect()
     }
 
     /// Scan a transaction's announcements for UTXOs decryptable by any of the

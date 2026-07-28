@@ -4472,6 +4472,7 @@ pub(crate) mod tests {
     pub(crate) mod scan_mode {
         use std::hint::black_box;
 
+        use neptune_consensus::block::test_helpers::invalid_block_with_tx_kernel;
         use neptune_consensus::transaction::test_helpers::txkernel;
         use neptune_primitives::block_height::BlockHeight;
         use neptune_wallet::fee_notification_policy::FeeNotificationPolicy;
@@ -4749,6 +4750,9 @@ pub(crate) mod tests {
             #[strategy(collection::vec(any::<bool>(), 4 * NUM_FUTURE_KEYS))] mut select_vec: Vec<
                 bool,
             >,
+            #[strategy(collection::vec(any::<bool>(), 4 * NUM_FUTURE_KEYS))] mut own_lock_vec: Vec<
+                bool,
+            >,
         ) {
             let network = Network::Main;
             let genesis = Block::genesis(network);
@@ -4825,6 +4829,7 @@ pub(crate) mod tests {
             // create master list of UTXOs with context
             struct UtxoContext {
                 select: bool,
+                own_lock: bool,
                 key_type: KeyType,
                 relative_index: usize,
                 absolute_index: u64,
@@ -4839,7 +4844,17 @@ pub(crate) mod tests {
                 .chain(future_ech_keys)
                 .chain(future_viewing_keys)
             {
+                // Lock the UTXO to the announced key, or -- to verify that
+                // unspendable UTXOs are not caught -- leave the arbitrary
+                // (foreign) lock script hash in place.
                 let utxo = utxo_vec.pop().unwrap();
+                let own_lock = own_lock_vec.pop().unwrap();
+                let lock_script_hash = if own_lock {
+                    key.to_address().lock_script_hash()
+                } else {
+                    utxo.lock_script_hash()
+                };
+                let utxo = Utxo::new(lock_script_hash, utxo.coins().to_vec());
                 let sender_randomness = sender_randomness_vec.pop().unwrap();
 
                 let receiver_preimage = key.privacy_preimage();
@@ -4865,6 +4880,7 @@ pub(crate) mod tests {
 
                 let utxo_context = UtxoContext {
                     select,
+                    own_lock,
                     key_type,
                     relative_index,
                     absolute_index,
@@ -4892,6 +4908,11 @@ pub(crate) mod tests {
                     continue;
                 }
 
+                if !uc.own_lock {
+                    println!("rejecting UTXO because of foreign lock script");
+                    continue;
+                }
+
                 let index_in_range = uc.relative_index < NUM_FUTURE_KEYS;
                 if !index_in_range {
                     println!(
@@ -4909,7 +4930,70 @@ pub(crate) mod tests {
             assert_eq!(filtered_utxos, caught_utxos);
         }
 
-        #[traced_test]
+        #[test_strategy::proptest(async = "tokio", cases = 5)]
+        async fn scan_mode_ignores_future_key_utxos_with_foreign_lock_script(
+            #[strategy(txkernel::with_lengths(0, 5, 5, false))] kernel: TransactionKernel,
+            #[strategy(arb())] wallet_secret: WalletEntropy,
+            #[strategy(arb())] sender_randomness: Digest,
+            #[strategy(arb())] foreign_lock_script_hash: Digest,
+        ) {
+            let network = Network::Main;
+            let genesis = Block::genesis(network);
+            let data_dir = unit_test_data_directory(network).unwrap();
+            let cli = cli_args::Args {
+                scan_blocks: Some(0..=10),
+                network,
+                ..Default::default()
+            };
+            let mut wallet_state = WalletState::new_from_wallet_entropy(
+                &data_dir,
+                wallet_secret.clone(),
+                &cli,
+                &genesis,
+            )
+            .await;
+
+            // Announce to a *future* generation key, as caught by scan mode.
+            let future_index = wallet_state.wallet_db.get_generation_key_counter() + 3;
+            let key = SpendingKey::from(wallet_secret.nth_generation_spending_key(future_index));
+
+            let foreign_utxo =
+                Utxo::new_native_currency(foreign_lock_script_hash, NativeCurrencyAmount::coins(5));
+            let own_utxo = Utxo::new_native_currency(
+                key.to_address().lock_script_hash(),
+                NativeCurrencyAmount::coins(5),
+            );
+
+            // Announce both UTXOs and include both addition records in the
+            // block so that the lock script is the only difference between
+            // the two.
+            let mut announcements = kernel.announcements.clone();
+            let mut outputs = kernel.outputs.clone();
+            for utxo in [&foreign_utxo, &own_utxo] {
+                let payload = UtxoNotificationPayload::new(utxo.clone(), sender_randomness);
+                announcements.push(key.to_address().generate_announcement(payload));
+                let incoming = IncomingUtxo {
+                    utxo: utxo.clone(),
+                    sender_randomness,
+                    receiver_preimage: key.privacy_preimage(),
+                    is_guesser_fee: false,
+                };
+                outputs.push(incoming.addition_record());
+            }
+            let kernel = TransactionKernelModifier::default()
+                .announcements(announcements)
+                .outputs(outputs)
+                .modify(kernel);
+            let block1 = invalid_block_with_tx_kernel(&genesis, kernel);
+
+            let recovered = wallet_state.recover_by_scanning(&block1).await;
+
+            assert_eq!(1, recovered.len(), "Exactly one UTXO must be recovered");
+            assert_eq!(own_utxo, recovered[0].utxo);
+            assert_eq!(sender_randomness, recovered[0].sender_randomness);
+            assert_eq!(key.privacy_preimage(), recovered[0].receiver_preimage);
+        }
+
         #[apply(shared_tokio_runtime)]
         async fn scan_mode_recovers_unexpected_offchain_composer_utxos() {
             // Set up Rando with scan mode active
