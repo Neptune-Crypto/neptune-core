@@ -1,0 +1,1630 @@
+use std::cmp::max;
+use std::collections::HashMap;
+
+use itertools::Itertools;
+use neptune_mutator_set::addition_record::AdditionRecord;
+use neptune_primitives::mast_hash::HasDiscriminant;
+use neptune_primitives::mast_hash::MastHash;
+use neptune_primitives::timestamp::Timestamp;
+use num_traits::CheckedAdd;
+use rand::prelude::SliceRandom;
+use rand::rngs::StdRng;
+use rand::SeedableRng;
+use tasm_lib::data_type::DataType;
+use tasm_lib::field;
+use tasm_lib::field_with_size;
+use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
+use tasm_lib::hashing::merkle_verify::MerkleVerify;
+use tasm_lib::library::Library;
+use tasm_lib::list::higher_order::inner_function::InnerFunction;
+use tasm_lib::list::higher_order::inner_function::RawCode;
+use tasm_lib::list::higher_order::map::ChainMap;
+use tasm_lib::list::higher_order::map::Map;
+use tasm_lib::list::multiset_equality_digests::MultisetEqualityDigests;
+use tasm_lib::memory::encode_to_memory;
+use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
+use tasm_lib::prelude::BasicSnippet;
+use tasm_lib::prelude::Digest;
+use tasm_lib::structure::tasm_object::TasmObject;
+use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
+use tasm_lib::triton_vm::prelude::*;
+use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
+use tasm_lib::verifier::stark_verify::StarkVerify;
+
+use super::authenticate_link_kernel_field::AuthenticateLinkKernelField;
+use super::link_kernel::LinkKernel;
+use super::link_kernel::LinkKernelField;
+use super::link_proof::merge_bit_false_leaf;
+use super::link_proof::no_coinbase_leaf;
+use super::link_proof::LinkProof;
+use super::link_proof_witness::LinkProofWitnessMemory;
+use super::link_proof_witness::DISCRIMINANT_FOR_CHAIN;
+use super::link_tx::LinkTx;
+use super::link_tx::LinkTxProof;
+use crate::proof_abstractions::tasm::program::TritonProgram;
+use crate::proof_abstractions::SecretWitness;
+use crate::transaction::transaction_kernel::TransactionKernel;
+use crate::transaction::transaction_kernel::TransactionKernelProxy;
+use crate::transaction::validity::neptune_proof::Proof;
+use crate::transaction::validity::tasm::claims::generate_single_proof_claim::GenerateSingleProofClaim;
+use crate::transaction::validity::tasm::hash_removal_record_index_sets::HashRemovalRecordIndexSets;
+use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
+
+const LEFT_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT_ERROR: i128 = 1_000_540;
+const RIGHT_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT_ERROR: i128 = 1_000_541;
+const NEW_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT_ERROR: i128 = 1_000_542;
+const NEW_FEE_IS_NOT_SUM_OF_OPERAND_FEES_ERROR: i128 = 1_000_543;
+const INPUTS_ARE_NOT_THE_OPERANDS_INPUTS_ERROR: i128 = 1_000_544;
+const OUTPUTS_ARE_NOT_CUT_THROUGH_ERROR: i128 = 1_000_545;
+const THRUPUTS_ARE_NOT_CUT_THROUGH_ERROR: i128 = 1_000_546;
+const ANNOUNCEMENTS_ARE_NOT_THE_OPERANDS_ANNOUNCEMENTS_ERROR: i128 = 1_000_547;
+const TIMESTAMP_IS_NOT_MAX_OF_OPERAND_TIMESTAMPS_ERROR: i128 = 1_000_548;
+const MUTATOR_SET_HASH_MISMATCH_ERROR: i128 = 1_000_549;
+
+/// The witness consumed by [`Chain`](super::chain::Chain).
+///
+/// Consists of the two operand [`LinkTx`]es (kernels plus link proofs), the
+/// chained kernel they produce, and the addition records cut through along the
+/// way.
+///
+/// Transaction-chaining analog of
+/// [`MergeWitness`](crate::transaction::validity::tasm::single_proof::merge_branch::MergeWitness),
+/// and laid out the same way: the witness *is* its own memory image (everything
+/// it carries is read from RAM), so -- unlike
+/// [`ForgeWitness`](super::forge::ForgeWitness) -- it needs no separate
+/// projection.
+#[derive(Clone, Debug, BFieldCodec, TasmObject)]
+pub struct ChainWitness {
+    pub(super) left_kernel: LinkKernel,
+    pub(super) right_kernel: LinkKernel,
+    pub(super) new_kernel: LinkKernel,
+
+    /// The addition records cancelled by cut-through: each is simultaneously an
+    /// output of one operand and a thruput of one operand, and is removed from
+    /// *both* sides together. That pairing is what conserves value -- an
+    /// addition record dropped from the outputs without also being dropped from
+    /// the thruputs (or vice versa) would create or destroy funds -- and
+    /// matching on the addition record itself means the pairing is on the
+    /// UTXO's canonical commitment.
+    ///
+    /// Cut-through need not be maximal: a prover may leave a matching pair
+    /// standing. [`Self::chained_kernel`] cancels everything it can.
+    pub(super) cut_through: Vec<AdditionRecord>,
+
+    pub(super) left_proof: Proof,
+    pub(super) right_proof: Proof,
+}
+
+impl ChainWitness {
+    /// Chain two link transactions, cutting through every thruput of the one
+    /// that is an output of the other.
+    ///
+    /// Both arguments must be proof-backed and valid; the `Chain` branch is
+    /// what actually establishes that, and this constructor assumes it. Takes
+    /// randomness for shuffling the concatenations, mirroring
+    /// [`MergeWitness::from_transactions`](crate::transaction::validity::tasm::single_proof::merge_branch::MergeWitness::from_transactions).
+    pub fn chain(left: LinkTx, right: LinkTx, shuffle_seed: [u8; 32]) -> Self {
+        let LinkTxProof::Proof(left_proof) = left.proof else {
+            panic!("cannot chain a link transaction that is not backed by a link proof");
+        };
+        let LinkTxProof::Proof(right_proof) = right.proof else {
+            panic!("cannot chain a link transaction that is not backed by a link proof");
+        };
+
+        let (new_kernel, cut_through) =
+            Self::chained_kernel(&left.kernel, &right.kernel, shuffle_seed);
+
+        Self {
+            left_kernel: left.kernel,
+            right_kernel: right.kernel,
+            new_kernel,
+            cut_through,
+            left_proof,
+            right_proof,
+        }
+    }
+
+    /// The [`LinkKernel`] two operands chain into, and the addition records cut
+    /// through in the process.
+    ///
+    /// Every field is the concatenation of the operands' -- shuffled, so the
+    /// chained transaction does not leak which operand contributed what --
+    /// except that the outputs and the thruputs each lose the cut-through set.
+    ///
+    /// Cut-through is computed as the multiset intersection of the concatenated
+    /// outputs with the concatenated thruputs: a thruput is an unconfirmed
+    /// input, so pairing it with the output it spends resolves both. Note that
+    /// this treats the two operands symmetrically, and even cancels an
+    /// operand's thruput against its own output; that pairing is still a
+    /// value-conserving one, and the branch imposes no more than value
+    /// conservation.
+    fn chained_kernel(
+        left: &LinkKernel,
+        right: &LinkKernel,
+        shuffle_seed: [u8; 32],
+    ) -> (LinkKernel, Vec<AdditionRecord>) {
+        assert_eq!(
+            left.kernel.mutator_set_hash, right.kernel.mutator_set_hash,
+            "attempted to chain link kernels with non-matching mutator set hashes"
+        );
+        assert!(
+            left.kernel.coinbase.is_none() && right.kernel.coinbase.is_none(),
+            "a link transaction is never a coinbase transaction"
+        );
+        assert!(
+            !left.kernel.merge_bit && !right.kernel.merge_bit,
+            "a link transaction never carries the merge bit"
+        );
+
+        let fee = left
+            .kernel
+            .fee
+            .checked_add(&right.kernel.fee)
+            .expect("chained fee must be a non-negative amount within range");
+
+        let mut rng: StdRng = SeedableRng::from_seed(shuffle_seed);
+
+        // ponytail: quadratic pairing. A chain carries tens of records, not
+        // millions; swap in a commitment->count map if that ever changes.
+        let mut thruputs = [left.thruputs.clone(), right.thruputs.clone()].concat();
+        let mut cut_through = vec![];
+        let mut outputs = vec![];
+        for output in [left.kernel.outputs.clone(), right.kernel.outputs.clone()].concat() {
+            match thruputs.iter().position(|thruput| *thruput == output) {
+                Some(i) => {
+                    thruputs.swap_remove(i);
+                    cut_through.push(output);
+                }
+                None => outputs.push(output),
+            }
+        }
+
+        let mut inputs = [left.kernel.inputs.clone(), right.kernel.inputs.clone()].concat();
+        let mut announcements = [
+            left.kernel.announcements.clone(),
+            right.kernel.announcements.clone(),
+        ]
+        .concat();
+        inputs.shuffle(&mut rng);
+        outputs.shuffle(&mut rng);
+        announcements.shuffle(&mut rng);
+        thruputs.shuffle(&mut rng);
+
+        let kernel = TransactionKernelProxy {
+            inputs,
+            outputs,
+            announcements,
+            fee,
+            coinbase: None,
+            timestamp: max(left.kernel.timestamp, right.kernel.timestamp),
+            mutator_set_hash: left.kernel.mutator_set_hash,
+            merge_bit: false,
+        }
+        .into_kernel();
+
+        (LinkKernel { kernel, thruputs }, cut_through)
+    }
+
+    /// MAST hash of the chained [`LinkKernel`]: the public input of the
+    /// `LinkProof` claim this witness is proven against.
+    pub(super) fn kernel_mast_hash(&self) -> Digest {
+        self.new_kernel.mast_hash()
+    }
+
+    /// The claim an operand's link proof is verified against: this very
+    /// program, on the operand's kernel MAST hash.
+    fn operand_claim(kernel: &LinkKernel) -> Claim {
+        Claim::new(LinkProof.hash()).with_input(kernel.mast_hash().reversed().values())
+    }
+}
+
+impl SecretWitness for ChainWitness {
+    fn standard_input(&self) -> PublicInput {
+        PublicInput::new(self.kernel_mast_hash().reversed().values().to_vec())
+    }
+
+    fn output(&self) -> Vec<BFieldElement> {
+        std::vec![]
+    }
+
+    fn program(&self) -> Program {
+        LinkProof.program()
+    }
+
+    fn nondeterminism(&self) -> NonDeterminism {
+        // `Chain` is a branch of `LinkProof`, so the memory image is that of
+        // the enum variant's associated data: field size, then the payload.
+        let mut memory = HashMap::default();
+        encode_to_memory(
+            &mut memory,
+            FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+            &LinkProofWitnessMemory::Chain(Box::new(self.clone())),
+        );
+
+        // The operands' kernel MAST hashes are divined -- each is bound to its
+        // operand by the recursive proof verification, and to the fields read
+        // out of the witness by the authentication paths below.
+        let individual_tokens = [
+            self.left_kernel.mast_hash().reversed().values().to_vec(),
+            self.right_kernel.mast_hash().reversed().values().to_vec(),
+        ]
+        .concat();
+
+        // The digest stream is consumed in program order: first the
+        // authentication paths, in the order of the `merkle_verify` calls -- per
+        // field, left operand then right operand then the chained kernel, and
+        // finally the chained kernel's two constant leafs.
+        let path = |kernel: &LinkKernel, field: LinkKernelField| kernel.mast_path(field);
+        let per_kernel = |field: LinkKernelField| {
+            [
+                path(&self.left_kernel, field),
+                path(&self.right_kernel, field),
+                path(&self.new_kernel, field),
+            ]
+            .concat()
+        };
+        let mut nondeterminism = NonDeterminism::new(individual_tokens).with_ram(memory);
+        nondeterminism.digests.extend(
+            [
+                per_kernel(LinkKernelField::Inputs),
+                per_kernel(LinkKernelField::Outputs),
+                per_kernel(LinkKernelField::Thruputs),
+                per_kernel(LinkKernelField::Announcements),
+                per_kernel(LinkKernelField::Fee),
+                per_kernel(LinkKernelField::Timestamp),
+                per_kernel(LinkKernelField::MutatorSetHash),
+                path(&self.new_kernel, LinkKernelField::Coinbase),
+                path(&self.new_kernel, LinkKernelField::MergeBit),
+            ]
+            .concat(),
+        );
+
+        // Then the recursive link-proof verifications, which the branch does
+        // last.
+        let stark_verify = StarkVerify::new_with_dynamic_layout(Stark::default());
+        for (kernel, proof) in [
+            (&self.left_kernel, &self.left_proof),
+            (&self.right_kernel, &self.right_proof),
+        ] {
+            // A mock proof has no proof stream to extract nondeterminism from.
+            // It never reaches a real `StarkVerify` either: on a mock-proof
+            // network nothing runs the program, and in the negative tests some
+            // earlier assertion fires first -- the recursion is this branch's
+            // last act.
+            if proof.is_mock() {
+                continue;
+            }
+            stark_verify.update_nondeterminism(
+                &mut nondeterminism,
+                proof,
+                &Self::operand_claim(kernel),
+            );
+        }
+
+        nondeterminism
+    }
+}
+
+/// `Chain: LinkTx * LinkTx -> LinkTx`: chain two link transactions into one,
+/// cutting through the thruputs that the operands' outputs resolve.
+///
+/// `Chain` recursively verifies both operands' link proofs -- against claims
+/// that name `LinkProof` *itself*, taken from the dispatcher's copy of the own
+/// program digest -- and then establishes that the chained kernel is the
+/// operands' kernels combined:
+///
+/// - inputs and announcements are the concatenations, in any order;
+/// - outputs and thruputs are the concatenations minus the same cut-through
+///   multiset, removed from both sides together, so cut-through neither creates
+///   nor destroys value;
+/// - the fee is the sum, both operand fees being non-negative and in range;
+/// - the timestamp is the larger of the two;
+/// - all three kernels share one mutator-set hash;
+/// - the chained kernel carries no coinbase and no merge bit.
+///
+/// The operands' coinbase and merge-bit leafs are deliberately *not* re-checked:
+/// every branch producing a `LinkProof` asserts both on the kernel it produces,
+/// so an operand that verifies has them by induction. Any branch added later
+/// owes the same assertion.
+#[derive(Debug, Copy, Clone)]
+pub struct Chain;
+
+impl BasicSnippet for Chain {
+    fn parameters(&self) -> Vec<(DataType, String)> {
+        vec![
+            (DataType::Digest, "link_kernel_mast_hash".to_string()),
+            (DataType::VoidPointer, "link_proof_witness".to_string()),
+            (DataType::Bfe, "discriminant".to_string()),
+        ]
+    }
+
+    /// The digest slot is the dispatcher's scratch space, not a return value;
+    /// this branch leaves the chained kernel's MAST hash there. See `LinkProof`.
+    fn return_values(&self) -> Vec<(DataType, String)> {
+        vec![
+            (DataType::Digest, "dispatcher_scratch".to_string()),
+            (DataType::VoidPointer, "link_proof_witness".to_string()),
+            (DataType::Bfe, "minus_1".to_string()),
+        ]
+    }
+
+    fn entrypoint(&self) -> String {
+        "neptune_consensus_chaintx_link_proof_chain_branch".to_string()
+    }
+
+    fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
+        let audit_preloaded_data =
+            library.import(Box::new(VerifyNdSiIntegrity::<ChainWitness>::default()));
+        // The claim generator is program-digest-agnostic -- it takes the digest
+        // as an argument -- so the `SingleProof`-flavored name is the only thing
+        // specific about it. Here that argument is `LinkProof`'s own digest.
+        let generate_link_proof_claim = library.import(Box::new(GenerateSingleProofClaim));
+        let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
+            Stark::default(),
+        )));
+        let merkle_verify = library.import(Box::new(MerkleVerify));
+        let hash_varlen = library.import(Box::new(HashVarlen));
+        let multiset_equality = library.import(Box::new(MultisetEqualityDigests));
+        let hash_1_removal_record_index_set =
+            library.import(Box::new(HashRemovalRecordIndexSets::<1>));
+        let hash_2_removal_record_index_sets =
+            library.import(Box::new(HashRemovalRecordIndexSets::<2>));
+
+        let authenticate_inputs = library.import(Box::new(AuthenticateLinkKernelField(
+            LinkKernelField::Inputs,
+        )));
+        let authenticate_outputs = library.import(Box::new(AuthenticateLinkKernelField(
+            LinkKernelField::Outputs,
+        )));
+        let authenticate_thruputs = library.import(Box::new(AuthenticateLinkKernelField(
+            LinkKernelField::Thruputs,
+        )));
+        let authenticate_announcements = library.import(Box::new(AuthenticateLinkKernelField(
+            LinkKernelField::Announcements,
+        )));
+        let authenticate_fee =
+            library.import(Box::new(AuthenticateLinkKernelField(LinkKernelField::Fee)));
+        let authenticate_timestamp = library.import(Box::new(AuthenticateLinkKernelField(
+            LinkKernelField::Timestamp,
+        )));
+        let authenticate_mutator_set_hash = library.import(Box::new(AuthenticateLinkKernelField(
+            LinkKernelField::MutatorSetHash,
+        )));
+
+        // Addition records and announcements are compared as multisets of
+        // digests, so both get hashed into digest lists first. Copied from
+        // `merge_branch`, which compares the same two field types the same way.
+        debug_assert!(AdditionRecord::static_length().is_some());
+        let hash_addition_record = RawCode::new(
+            triton_asm! {
+                neptune_consensus_chaintx_chain_hash_addition_record:
+                    push 0 push 0 push 0 push 0 push 0
+                    pick 9 pick 9 pick 9 pick 9 pick 9
+                    hash
+                    return
+            },
+            DataType::Digest,
+            DataType::Digest,
+        );
+        let hash_2_lists_of_addition_records = library.import(Box::new(ChainMap::<2>::new(
+            InnerFunction::RawCode(hash_addition_record),
+        )));
+        let hash_announcement = RawCode::new(
+            triton_asm! {
+                neptune_consensus_chaintx_chain_hash_announcement:
+                    call {hash_varlen}
+                    return
+            },
+            DataType::Tuple(vec![DataType::VoidPointer, DataType::Bfe]),
+            DataType::Digest,
+        );
+        let hash_1_list_of_announcements = library.import(Box::new(Map::new(
+            InnerFunction::RawCode(hash_announcement.clone()),
+        )));
+        let hash_2_lists_of_announcements = library.import(Box::new(ChainMap::<2>::new(
+            InnerFunction::RawCode(hash_announcement),
+        )));
+
+        let overflowing_add_u128 = library.import(Box::new(
+            tasm_lib::arithmetic::u128::overflowing_add::OverflowingAdd,
+        ));
+        let lt_u128 = library.import(Box::new(tasm_lib::arithmetic::u128::lt::Lt));
+        let lt_u64 = library.import(Box::new(tasm_lib::arithmetic::u64::lt::Lt));
+        let compare_u128 = DataType::U128.compare();
+        let compare_digests = DataType::Digest.compare();
+        let push_max_amount = NativeCurrencyAmount::max().push_to_stack();
+
+        let digest_len = u32::try_from(Digest::LEN).unwrap();
+        let left_lkmh_alloc = library.kmalloc(digest_len);
+        let right_lkmh_alloc = library.kmalloc(digest_len);
+        let new_lkmh_alloc = library.kmalloc(digest_len);
+        let left_lkmh = left_lkmh_alloc.read_address();
+        let right_lkmh = right_lkmh_alloc.read_address();
+        let new_lkmh = new_lkmh_alloc.read_address();
+
+        let field_left_kernel = field!(ChainWitness::left_kernel);
+        let field_right_kernel = field!(ChainWitness::right_kernel);
+        let field_new_kernel = field!(ChainWitness::new_kernel);
+        let field_cut_through = field!(ChainWitness::cut_through);
+        let field_left_proof = field!(ChainWitness::left_proof);
+        let field_right_proof = field!(ChainWitness::right_proof);
+
+        // A `LinkKernel` composes a legacy `TransactionKernel`, so every legacy
+        // field is reached through this one extra hop.
+        let field_inner_kernel = field!(LinkKernel::kernel);
+        let field_with_size_thruputs = field_with_size!(LinkKernel::thruputs);
+        let field_with_size_inputs = field_with_size!(TransactionKernel::inputs);
+        let field_with_size_outputs = field_with_size!(TransactionKernel::outputs);
+        let field_with_size_announcements = field_with_size!(TransactionKernel::announcements);
+        let field_fee = field!(TransactionKernel::fee);
+        let field_timestamp = field!(TransactionKernel::timestamp);
+        let field_mutator_set_hash = field!(TransactionKernel::mutator_set_hash);
+
+        let fee_size = NativeCurrencyAmount::static_length().unwrap();
+        let timestamp_size = Timestamp::static_length().unwrap();
+
+        // Push a compile-time-known digest such that its 0th element ends up on
+        // top -- the layout `merkle_verify` expects for a leaf.
+        let push_digest = |digest: Digest| {
+            digest
+                .reversed()
+                .values()
+                .into_iter()
+                .flat_map(|v| triton_asm!(push { v }))
+                .collect_vec()
+        };
+
+        // Authenticate the same variable-length field of all three kernels,
+        // leaving the three field pointers behind for the multiset comparison
+        // that follows. `accessor` turns a `*link_kernel` into `*field size`.
+        //
+        // BEFORE: _ *witness *l_lk *r_lk *n_lk
+        // AFTER:  _ *witness *l_lk *r_lk *n_lk *l_field *r_field *n_field
+        let authenticate_in_all_three =
+            |accessor: &[LabelledInstruction], authenticate: &str| -> Vec<LabelledInstruction> {
+                // The stack grows by one pointer per kernel, and the kernel
+                // pointer being read sinks by one at the same rate, so the same
+                // `dup 7` reaches `*l_lk`, then `*r_lk`, then `*n_lk`.
+                let one = |mast_hash_address| {
+                    triton_asm!(
+                        // _ *witness *l_lk *r_lk *n_lk [*field..]
+                        push {mast_hash_address}
+                        read_mem {Digest::LEN}
+                        pop 1
+                        // _ ... [lkmh]
+
+                        dup 7
+                        {&accessor}
+                        // _ ... [lkmh] *field size
+
+                        dup 1
+                        place 7
+                        // _ ... *field [lkmh] *field size
+
+                        call {authenticate}
+                        // _ ... *field
+                    )
+                };
+                [one(left_lkmh), one(right_lkmh), one(new_lkmh)].concat()
+            };
+
+        let inner =
+            |accessor: &[LabelledInstruction]| triton_asm!({&field_inner_kernel} {&accessor});
+
+        // New inputs are exactly the operands' inputs, in any order. Removal
+        // records are compared by their absolute index sets: that is what a
+        // double spend collides on.
+        let assert_inputs_are_the_operands_inputs = triton_asm!(
+            // _ *witness *l_lk *r_lk *n_lk
+            {&authenticate_in_all_three(&inner(&field_with_size_inputs), &authenticate_inputs)}
+            // _ *witness *l_lk *r_lk *n_lk *l_in *r_in *n_in
+
+            call {hash_1_removal_record_index_set}
+            // _ *witness *l_lk *r_lk *n_lk *l_in *r_in *n_in_digests
+
+            place 2
+            call {hash_2_removal_record_index_sets}
+            // _ *witness *l_lk *r_lk *n_lk *n_in_digests *lr_in_digests
+
+            call {multiset_equality}
+            assert error_id {INPUTS_ARE_NOT_THE_OPERANDS_INPUTS_ERROR}
+            // _ *witness *l_lk *r_lk *n_lk
+        );
+
+        // Cut-through, on both sides at once: the chained outputs plus the
+        // cut-through set are exactly the operands' outputs, and the chained
+        // thruputs plus *that same* set are exactly the operands' thruputs. So
+        // an addition record leaves the output side if and only if it leaves the
+        // input side, which is precisely value conservation. Matching happens on
+        // the addition record, i.e. on the UTXO's canonical commitment.
+        let assert_cut_through =
+            |accessor: &[LabelledInstruction], authenticate: &str, error_id: i128| {
+                triton_asm!(
+                    // _ *witness *l_lk *r_lk *n_lk
+                    {&authenticate_in_all_three(accessor, authenticate)}
+                    // _ *witness *l_lk *r_lk *n_lk *l_field *r_field *n_field
+
+                    dup 6
+                    {&field_cut_through}
+                    // _ *witness *l_lk *r_lk *n_lk *l_field *r_field *n_field *cut_through
+
+                    call {hash_2_lists_of_addition_records}
+                    // _ *witness *l_lk *r_lk *n_lk *l_field *r_field *n_and_cut_digests
+
+                    place 2
+                    call {hash_2_lists_of_addition_records}
+                    // _ *witness *l_lk *r_lk *n_lk *n_and_cut_digests *lr_digests
+
+                    call {multiset_equality}
+                    assert error_id {error_id}
+                    // _ *witness *l_lk *r_lk *n_lk
+                )
+            };
+
+        let assert_announcements_are_the_operands_announcements = triton_asm!(
+            // _ *witness *l_lk *r_lk *n_lk
+            {&authenticate_in_all_three(
+                &inner(&field_with_size_announcements),
+                &authenticate_announcements,
+            )}
+            // _ *witness *l_lk *r_lk *n_lk *l_pa *r_pa *n_pa
+
+            call {hash_1_list_of_announcements}
+            place 2
+            call {hash_2_lists_of_announcements}
+            call {multiset_equality}
+            assert error_id {ANNOUNCEMENTS_ARE_NOT_THE_OPERANDS_ANNOUNCEMENTS_ERROR}
+            // _ *witness *l_lk *r_lk *n_lk
+        );
+
+        // Read one kernel's fee, authenticate it, and leave its value on the
+        // stack, having established that it is a non-negative, in-range amount.
+        // (An amount is a two's-complement `i128` in `u128` clothing, so
+        // `fee <= max` excludes the negatives too.)
+        let bounded_fee = |kernel_depth: usize, mast_hash_address, error_id: i128| {
+            triton_asm!(
+                // _ *witness *l_lk *r_lk *n_lk [fees..]
+                dup {kernel_depth}
+                {&field_inner_kernel}
+                {&field_fee}
+                // _ ... *fee
+
+                push {mast_hash_address}
+                read_mem {Digest::LEN}
+                pop 1
+                // _ ... *fee [lkmh]
+
+                dup 5
+                push {fee_size}
+                call {authenticate_fee}
+                // _ ... *fee
+
+                addi {fee_size - 1}
+                read_mem {fee_size}
+                pop 1
+                // _ ... [fee; 4]
+
+                dup 3 dup 3 dup 3 dup 3
+                {&push_max_amount}
+                call {lt_u128}
+                // _ ... [fee; 4] (max_amount < fee)
+
+                push 0 eq
+                assert error_id {error_id}
+                // _ ... [fee; 4]
+            )
+        };
+
+        let assert_fee_is_sum_of_operand_fees = triton_asm!(
+            // _ *witness *l_lk *r_lk *n_lk
+            {&bounded_fee(2, left_lkmh, LEFT_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT_ERROR)}
+            // _ *witness *l_lk *r_lk *n_lk [left_fee; 4]
+
+            {&bounded_fee(5, right_lkmh, RIGHT_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT_ERROR)}
+            // _ *witness *l_lk *r_lk *n_lk [left_fee; 4] [right_fee; 4]
+
+            call {overflowing_add_u128}
+            // _ *witness *l_lk *r_lk *n_lk [sum; 4] overflow
+
+            // Unreachable *for two summands*, and only just: both are in
+            // `[0, MAX_NAU]` by the bounds above, and `MAX_NAU` is 98.74% of
+            // `2**127` (`two_bounded_fees_cannot_overflow` pins that), so their
+            // sum clears `u128::MAX` with 1.26% to spare. A third bounded
+            // summand would *not* -- so this assert is load-bearing the moment
+            // anything chains more than two fees in one addition, or lets a
+            // negative fee (huge as a `u128`) reach here.
+            push 0 eq
+            assert error_id {NEW_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT_ERROR}
+            // _ *witness *l_lk *r_lk *n_lk [sum; 4]
+
+            dup 3 dup 3 dup 3 dup 3
+            {&push_max_amount}
+            call {lt_u128}
+            push 0 eq
+            assert error_id {NEW_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT_ERROR}
+            // _ *witness *l_lk *r_lk *n_lk [sum; 4]
+
+            /* the chained kernel's fee must be that sum */
+            dup 4
+            {&field_inner_kernel}
+            {&field_fee}
+            // _ *witness *l_lk *r_lk *n_lk [sum; 4] *new_fee
+
+            push {new_lkmh}
+            read_mem {Digest::LEN}
+            pop 1
+            // _ ... [sum; 4] *new_fee [n_lkmh]
+
+            dup 5
+            push {fee_size}
+            call {authenticate_fee}
+            // _ ... [sum; 4] *new_fee
+
+            addi {fee_size - 1}
+            read_mem {fee_size}
+            pop 1
+            // _ *witness *l_lk *r_lk *n_lk [sum; 4] [new_fee; 4]
+
+            {&compare_u128}
+            assert error_id {NEW_FEE_IS_NOT_SUM_OF_OPERAND_FEES_ERROR}
+            // _ *witness *l_lk *r_lk *n_lk
+        );
+
+        // Mirrors `merge_branch`'s timestamp handling: the chained timestamp is
+        // the later of the two, computed branchlessly.
+        let assert_timestamp_is_max_of_operand_timestamps = triton_asm!(
+            // _ *witness *l_lk *r_lk *n_lk
+
+            dup 2 {&field_inner_kernel} {&field_timestamp}
+            read_mem 1 addi 1
+            // _ *witness *l_lk *r_lk *n_lk left_timestamp *left_timestamp
+
+            push {left_lkmh}
+            read_mem {Digest::LEN}
+            pop 1
+            // _ ... left_timestamp *left_timestamp [l_lkmh]
+
+            pick {Digest::LEN}
+            push {timestamp_size}
+            call {authenticate_timestamp}
+            // _ *witness *l_lk *r_lk *n_lk left_timestamp
+
+            dup 2 {&field_inner_kernel} {&field_timestamp}
+            read_mem 1 addi 1
+            // _ ... left_timestamp right_timestamp *right_timestamp
+
+            push {right_lkmh}
+            read_mem {Digest::LEN}
+            pop 1
+            // _ ... left_timestamp right_timestamp *right_timestamp [r_lkmh]
+
+            pick {Digest::LEN}
+            push {timestamp_size}
+            call {authenticate_timestamp}
+            // _ *witness *l_lk *r_lk *n_lk left_timestamp right_timestamp
+
+            dup 1 split
+            dup 2 split
+            call {lt_u64}
+            // _ ... left_timestamp right_timestamp (right < left)
+
+            pick 2 dup 1 mul place 2
+            // _ ... ((r<l) * left_timestamp) right_timestamp (r<l)
+
+            push 0 eq mul
+            // _ ... ((r<l) * left_timestamp) ((r>=l) * right_timestamp)
+
+            add
+            // _ *witness *l_lk *r_lk *n_lk max_timestamp
+
+            dup 1 {&field_inner_kernel} {&field_timestamp}
+            read_mem 1 addi 1
+            // _ ... max_timestamp new_timestamp *new_timestamp
+
+            place 2
+            eq
+            assert error_id {TIMESTAMP_IS_NOT_MAX_OF_OPERAND_TIMESTAMPS_ERROR}
+            // _ *witness *l_lk *r_lk *n_lk *new_timestamp
+
+            push {new_lkmh}
+            read_mem {Digest::LEN}
+            pop 1
+            // _ ... *new_timestamp [n_lkmh]
+
+            pick {Digest::LEN}
+            push {timestamp_size}
+            call {authenticate_timestamp}
+            // _ *witness *l_lk *r_lk *n_lk
+        );
+
+        // All three kernels must be relative to one and the same mutator set;
+        // otherwise the operands' membership proofs would be pooled across
+        // incompatible mutator-set states.
+        let read_and_authenticate_mutator_set_hash = |kernel_depth: usize, mast_hash_address| {
+            triton_asm!(
+                // _ ...
+                dup {kernel_depth} {&field_inner_kernel} {&field_mutator_set_hash}
+                addi {Digest::LEN - 1}
+                read_mem {Digest::LEN}
+                addi 1
+                place {Digest::LEN}
+                // _ ... *msh [msh]
+
+                push {mast_hash_address}
+                read_mem {Digest::LEN}
+                pop 1
+                // _ ... *msh [msh] [lkmh]
+
+                pick {2 * Digest::LEN}
+                push {Digest::LEN}
+                call {authenticate_mutator_set_hash}
+                // _ ... [msh]
+            )
+        };
+
+        let assert_all_kernels_agree_on_mutator_set_hash = triton_asm!(
+            // _ *witness *l_lk *r_lk *n_lk
+            {&read_and_authenticate_mutator_set_hash(2, left_lkmh)}
+            // _ *witness *l_lk *r_lk *n_lk [left_msh]
+
+            {&read_and_authenticate_mutator_set_hash(6, right_lkmh)}
+            // _ *witness *l_lk *r_lk *n_lk [left_msh] [right_msh]
+
+            dup 9 dup 9 dup 9 dup 9 dup 9
+            {&compare_digests}
+            assert error_id {MUTATOR_SET_HASH_MISMATCH_ERROR}
+            // _ *witness *l_lk *r_lk *n_lk [left_msh]
+
+            // only `[left_msh]` survived the comparison above, so `*n_lk` is
+            // back at the depth it had for the left operand's read, plus one
+            // digest
+            {&read_and_authenticate_mutator_set_hash(5, new_lkmh)}
+            // _ *witness *l_lk *r_lk *n_lk [left_msh] [new_msh]
+
+            dup 9 dup 9 dup 9 dup 9 dup 9
+            {&compare_digests}
+            assert error_id {MUTATOR_SET_HASH_MISMATCH_ERROR}
+            // _ *witness *l_lk *r_lk *n_lk [left_msh]
+
+            pop {Digest::LEN}
+            // _ *witness *l_lk *r_lk *n_lk
+        );
+
+        // A chained transaction is no more a coinbase transaction, and no more
+        // merged, than a forged one: the constant leaf is authenticated
+        // directly, which asserts the field's value at the same time (only one
+        // preimage hashes to it).
+        let authenticate_constant_leaf = |leaf_index: LinkKernelField, leaf: Digest| {
+            triton_asm!(
+                // _
+                push {new_lkmh}
+                read_mem {Digest::LEN}
+                pop 1
+                // _ [n_lkmh]
+
+                push {LinkKernel::MAST_HEIGHT}
+                push {leaf_index.discriminant() as u32}
+                {&push_digest(leaf)}
+                // _ [n_lkmh] height index [leaf]
+
+                call {merkle_verify}
+                // _
+            )
+        };
+
+        // Divine one operand's kernel MAST hash and stash it. Unconstrained at
+        // this point; the recursive verification below is what binds it to a
+        // link proof, and the field authentications in between are what bind it
+        // to the witness data.
+        let divine_operand_mast_hash = |mast_hash_write_address| {
+            triton_asm!(
+                // _ [own_program_digest] disc *witness
+                divine {Digest::LEN}
+                hint operand_link_kernel_mast_hash = stack[0..5]
+                // _ [own_program_digest] disc *witness [operand_lkmh]
+
+                push {mast_hash_write_address}
+                write_mem {Digest::LEN}
+                pop 1
+                // _ [own_program_digest] disc *witness
+            )
+        };
+
+        // Recursively verify one operand's link proof, against a claim naming
+        // this very program on that operand's kernel MAST hash.
+        //
+        // Deliberately the *last* thing the branch does, unlike
+        // `merge_branch`, which recurses first. Everything else is cheap and
+        // self-contained, so running it first lets a negative test drive any of
+        // those assertions with a proofless witness -- the same reason `Forge`
+        // ends with its script verifications. Order is immaterial to soundness:
+        // every assertion has to hold either way.
+        let verify_operand = |mast_hash_read_address, proof: &[LabelledInstruction]| {
+            triton_asm!(
+                // _ [own_program_digest] disc *witness
+                push {mast_hash_read_address}
+                read_mem {Digest::LEN}
+                pop 1
+                // _ [own_program_digest] disc *witness [operand_lkmh]
+
+                dup 11 dup 11 dup 11 dup 11 dup 11
+                // _ [own_program_digest] disc *witness [operand_lkmh] [own_program_digest]
+
+                call {generate_link_proof_claim}
+                // _ [own_program_digest] disc *witness *claim
+
+                dup 1
+                {&proof}
+                // _ [own_program_digest] disc *witness *claim *proof
+
+                call {stark_verify}
+                // _ [own_program_digest] disc *witness
+            )
+        };
+
+        triton_asm!(
+            {self.entrypoint()}:
+            // _ [own_program_digest] [new_lkmh] *link_proof_witness disc
+
+            place 6
+            // _ [own_program_digest] disc [new_lkmh] *link_proof_witness
+
+            addi 2
+            hint witness = stack[0]
+            // _ [own_program_digest] disc [new_lkmh] *witness
+            // `disc` stays buried below the frame until the epilogue; the own
+            // program digest stays below that, where the dispatcher left it.
+
+            dup 0 call {audit_preloaded_data} pop 1
+            // _ [own_program_digest] disc [new_lkmh] *witness
+
+            place 5
+            push {new_lkmh_alloc.write_address()}
+            write_mem {Digest::LEN}
+            pop 1
+            // _ [own_program_digest] disc *witness
+
+            {&divine_operand_mast_hash(left_lkmh_alloc.write_address())}
+            {&divine_operand_mast_hash(right_lkmh_alloc.write_address())}
+            // _ [own_program_digest] disc *witness
+
+            dup 0 {&field_left_kernel}
+            dup 1 {&field_right_kernel}
+            dup 2 {&field_new_kernel}
+            // _ [own_program_digest] disc *witness *l_lk *r_lk *n_lk
+
+            {&assert_inputs_are_the_operands_inputs}
+            {&assert_cut_through(
+                &inner(&field_with_size_outputs),
+                &authenticate_outputs,
+                OUTPUTS_ARE_NOT_CUT_THROUGH_ERROR,
+            )}
+            {&assert_cut_through(
+                &field_with_size_thruputs,
+                &authenticate_thruputs,
+                THRUPUTS_ARE_NOT_CUT_THROUGH_ERROR,
+            )}
+            {&assert_announcements_are_the_operands_announcements}
+            {&assert_fee_is_sum_of_operand_fees}
+            {&assert_timestamp_is_max_of_operand_timestamps}
+            {&assert_all_kernels_agree_on_mutator_set_hash}
+            // _ [own_program_digest] disc *witness *l_lk *r_lk *n_lk
+
+            pop 3
+            // _ [own_program_digest] disc *witness
+
+            {&authenticate_constant_leaf(LinkKernelField::Coinbase, no_coinbase_leaf())}
+            {&authenticate_constant_leaf(LinkKernelField::MergeBit, merge_bit_false_leaf())}
+            // _ [own_program_digest] disc *witness
+
+            /* Last: the recursion. Both operand kernels are bound to the witness
+               data by now; these two claims bind them to their link proofs. */
+            {&verify_operand(left_lkmh, &field_left_proof)}
+            {&verify_operand(right_lkmh, &field_right_proof)}
+            // _ [own_program_digest] disc *witness
+
+            swap 1
+            // _ [own_program_digest] *witness disc
+
+            push {new_lkmh}
+            read_mem {Digest::LEN}
+            pop 1
+            // _ [own_program_digest] *witness disc [new_lkmh]
+            // (the chained kernel's MAST hash goes into the dispatcher's scratch
+            // slot, which the dispatcher pops unread.)
+
+            pick 6 pick 6
+            // _ [own_program_digest] [new_lkmh] *witness disc
+
+            addi {-(DISCRIMINANT_FOR_CHAIN as isize) - 1}
+            // _ [own_program_digest] [new_lkmh] *witness -1
+
+            return
+        )
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub(crate) mod tests {
+    use neptune_primitives::mast_hash::HasDiscriminant;
+    use proptest::prop_assert_eq;
+    use proptest::strategy::Strategy;
+    use proptest::strategy::ValueTree;
+    use proptest::test_runner::TestRunner;
+    use proptest_arbitrary_interop::arb;
+    use test_strategy::proptest;
+
+    use super::*;
+    use crate::chaintx::forge::ForgeWitness;
+    use crate::chaintx::link_primitive_witness::LinkPrimitiveWitness;
+    use crate::proof_abstractions::tasm::builtins as tasm;
+    use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
+    use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+    use crate::proof_abstractions::triton_vm_job_queue::vm_job_queue;
+    use crate::transaction::primitive_witness::PrimitiveWitness;
+
+    /// The `Chain` branch of the `LinkProof` rust shadow, called by
+    /// [`LinkProof::source`](super::super::link_proof::LinkProof) once it has
+    /// read the own program digest and `lkmh`, and matched the witness
+    /// discriminant -- mirroring the tasm, where the dispatcher does exactly
+    /// that before `call`ing this branch.
+    pub(in crate::chaintx) fn chain_branch_source(
+        own_program_digest: Digest,
+        lkmh: Digest,
+        witness: ChainWitness,
+    ) {
+        /* the operands' kernel MAST hashes; unconstrained until the recursive
+        verifications at the very end */
+        let left_lkmh: Digest = tasm::tasmlib_io_read_secin___digest();
+        let right_lkmh: Digest = tasm::tasmlib_io_read_secin___digest();
+
+        let left = &witness.left_kernel;
+        let right = &witness.right_kernel;
+        let new = &witness.new_kernel;
+        let height = LinkKernel::MAST_HEIGHT as u32;
+        let authenticate = |root: Digest, field: LinkKernelField, leaf: Digest| {
+            tasm::tasmlib_hashing_merkle_verify(root, field.discriminant() as u32, leaf, height);
+        };
+
+        /* inputs: the concatenation, in any order, compared by index set --
+        that is what a double spend collides on */
+        authenticate(
+            left_lkmh,
+            LinkKernelField::Inputs,
+            Tip5::hash(&left.kernel.inputs),
+        );
+        authenticate(
+            right_lkmh,
+            LinkKernelField::Inputs,
+            Tip5::hash(&right.kernel.inputs),
+        );
+        authenticate(
+            lkmh,
+            LinkKernelField::Inputs,
+            Tip5::hash(&new.kernel.inputs),
+        );
+        let index_sets = |kernel: &LinkKernel| {
+            kernel
+                .kernel
+                .inputs
+                .iter()
+                .map(|rr| Tip5::hash(&rr.absolute_indices.to_vec()))
+                .collect_vec()
+        };
+        assert_eq!(
+            [index_sets(left), index_sets(right)]
+                .concat()
+                .into_iter()
+                .sorted()
+                .collect_vec(),
+            index_sets(new).into_iter().sorted().collect_vec(),
+        );
+
+        /* outputs and thruputs: the concatenations, both minus the same
+        cut-through multiset */
+        let cut_through = witness.cut_through.iter().map(Tip5::hash).collect_vec();
+        let hashed = |records: &[AdditionRecord]| records.iter().map(Tip5::hash).collect_vec();
+
+        authenticate(
+            left_lkmh,
+            LinkKernelField::Outputs,
+            Tip5::hash(&left.kernel.outputs),
+        );
+        authenticate(
+            right_lkmh,
+            LinkKernelField::Outputs,
+            Tip5::hash(&right.kernel.outputs),
+        );
+        authenticate(
+            lkmh,
+            LinkKernelField::Outputs,
+            Tip5::hash(&new.kernel.outputs),
+        );
+        assert_eq!(
+            [hashed(&left.kernel.outputs), hashed(&right.kernel.outputs)]
+                .concat()
+                .into_iter()
+                .sorted()
+                .collect_vec(),
+            [hashed(&new.kernel.outputs), cut_through.clone()]
+                .concat()
+                .into_iter()
+                .sorted()
+                .collect_vec(),
+        );
+
+        authenticate(
+            left_lkmh,
+            LinkKernelField::Thruputs,
+            Tip5::hash(&left.thruputs),
+        );
+        authenticate(
+            right_lkmh,
+            LinkKernelField::Thruputs,
+            Tip5::hash(&right.thruputs),
+        );
+        authenticate(lkmh, LinkKernelField::Thruputs, Tip5::hash(&new.thruputs));
+        assert_eq!(
+            [hashed(&left.thruputs), hashed(&right.thruputs)]
+                .concat()
+                .into_iter()
+                .sorted()
+                .collect_vec(),
+            [hashed(&new.thruputs), cut_through]
+                .concat()
+                .into_iter()
+                .sorted()
+                .collect_vec(),
+        );
+
+        /* announcements: the concatenation, in any order */
+        authenticate(
+            left_lkmh,
+            LinkKernelField::Announcements,
+            Tip5::hash(&left.kernel.announcements),
+        );
+        authenticate(
+            right_lkmh,
+            LinkKernelField::Announcements,
+            Tip5::hash(&right.kernel.announcements),
+        );
+        authenticate(
+            lkmh,
+            LinkKernelField::Announcements,
+            Tip5::hash(&new.kernel.announcements),
+        );
+        let announcements = |kernel: &LinkKernel| {
+            kernel
+                .kernel
+                .announcements
+                .iter()
+                .map(Tip5::hash)
+                .collect_vec()
+        };
+        assert_eq!(
+            [announcements(left), announcements(right)]
+                .concat()
+                .into_iter()
+                .sorted()
+                .collect_vec(),
+            announcements(new).into_iter().sorted().collect_vec(),
+        );
+
+        /* fee: the sum, both operand fees being non-negative and in range */
+        authenticate(
+            left_lkmh,
+            LinkKernelField::Fee,
+            Tip5::hash(&left.kernel.fee),
+        );
+        assert!(left.kernel.fee <= NativeCurrencyAmount::max());
+        authenticate(
+            right_lkmh,
+            LinkKernelField::Fee,
+            Tip5::hash(&right.kernel.fee),
+        );
+        assert!(right.kernel.fee <= NativeCurrencyAmount::max());
+        // the tasm adds the two as `u128`s, asserts no carry, then asserts the
+        // sum is in range; `checked_add` is `None` in exactly those two cases
+        let sum = left.kernel.fee.checked_add(&right.kernel.fee).unwrap();
+        authenticate(lkmh, LinkKernelField::Fee, Tip5::hash(&new.kernel.fee));
+        assert_eq!(sum, new.kernel.fee);
+
+        /* timestamp: the later of the two */
+        authenticate(
+            left_lkmh,
+            LinkKernelField::Timestamp,
+            Tip5::hash(&left.kernel.timestamp),
+        );
+        authenticate(
+            right_lkmh,
+            LinkKernelField::Timestamp,
+            Tip5::hash(&right.kernel.timestamp),
+        );
+        assert_eq!(
+            max(left.kernel.timestamp, right.kernel.timestamp),
+            new.kernel.timestamp
+        );
+        authenticate(
+            lkmh,
+            LinkKernelField::Timestamp,
+            Tip5::hash(&new.kernel.timestamp),
+        );
+
+        /* one mutator set for all three */
+        authenticate(
+            left_lkmh,
+            LinkKernelField::MutatorSetHash,
+            Tip5::hash(&left.kernel.mutator_set_hash),
+        );
+        authenticate(
+            right_lkmh,
+            LinkKernelField::MutatorSetHash,
+            Tip5::hash(&right.kernel.mutator_set_hash),
+        );
+        assert_eq!(left.kernel.mutator_set_hash, right.kernel.mutator_set_hash);
+        authenticate(
+            lkmh,
+            LinkKernelField::MutatorSetHash,
+            Tip5::hash(&new.kernel.mutator_set_hash),
+        );
+        assert_eq!(left.kernel.mutator_set_hash, new.kernel.mutator_set_hash);
+
+        /* a chained transaction is no more a coinbase transaction, and no more
+        merged, than a forged one */
+        authenticate(lkmh, LinkKernelField::Coinbase, no_coinbase_leaf());
+        authenticate(lkmh, LinkKernelField::MergeBit, merge_bit_false_leaf());
+
+        /* last: recursively verify both operands' link proofs */
+        let left_claim =
+            Claim::new(own_program_digest).with_input(left_lkmh.reversed().values().to_vec());
+        tasm::verify_stark(Stark::default(), &left_claim, &witness.left_proof);
+
+        let right_claim =
+            Claim::new(own_program_digest).with_input(right_lkmh.reversed().values().to_vec());
+        tasm::verify_stark(Stark::default(), &right_claim, &witness.right_proof);
+    }
+
+    /// A predecessor/successor pair over one mutator set: the successor's
+    /// thruputs are exactly the predecessor's outputs, so chaining them cuts
+    /// through every one.
+    ///
+    /// The predecessor spends `num_thruputs` confirmed UTXOs and pays them
+    /// straight back out with the very randomness their membership proofs carry
+    /// -- so its addition records are, element for element, the commitments the
+    /// successor's reclassified inputs became when
+    /// [`LinkPrimitiveWitness::from_primitive_witness`] turned them into
+    /// thruputs. Balanced by construction (same UTXOs in and out, zero fee), so
+    /// no re-balancing is needed.
+    pub(super) fn chainable_link_primitive_witnesses(
+        num_inputs: usize,
+        num_thruputs: usize,
+    ) -> (LinkPrimitiveWitness, LinkPrimitiveWitness) {
+        use crate::transaction::transaction_kernel::TransactionKernelProxy;
+        use crate::type_scripts::known_type_scripts::match_type_script_and_generate_witness;
+
+        let mut test_runner = TestRunner::deterministic();
+        let successor_pw = PrimitiveWitness::arbitrary_with_size_numbers(Some(num_inputs), 2, 1)
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        assert!(num_thruputs <= num_inputs);
+        let num_confirmed = num_inputs - num_thruputs;
+
+        // The UTXOs the successor will hold as thruputs, together with the
+        // randomness that commits them.
+        let utxos = successor_pw.input_utxos.utxos[num_confirmed..].to_vec();
+        let membership_proofs = successor_pw.input_membership_proofs[num_confirmed..].to_vec();
+        let sender_randomnesses = membership_proofs
+            .iter()
+            .map(|mp| mp.sender_randomness)
+            .collect_vec();
+        let receiver_digests = membership_proofs
+            .iter()
+            .map(|mp| mp.receiver_preimage.hash())
+            .collect_vec();
+
+        // The predecessor: spend exactly those UTXOs, and pay them back out
+        // with the same randomness.
+        let mutator_set_accumulator = successor_pw.mutator_set_accumulator.clone();
+        let salted_utxos = crate::transaction::primitive_witness::SaltedUtxos::new_with_rng(
+            utxos.clone(),
+            &mut rand::rngs::StdRng::seed_from_u64(0),
+        );
+        let inputs = utxos
+            .iter()
+            .zip(&membership_proofs)
+            .map(|(utxo, mp)| mutator_set_accumulator.drop(Tip5::hash(utxo), mp))
+            .collect_vec();
+        let outputs = utxos
+            .iter()
+            .zip(&sender_randomnesses)
+            .zip(&receiver_digests)
+            .map(|((utxo, sr), rd)| neptune_mutator_set::commit(Tip5::hash(utxo), *sr, *rd))
+            .collect_vec();
+        let predecessor_kernel = TransactionKernelProxy {
+            inputs,
+            outputs,
+            announcements: vec![],
+            fee: NativeCurrencyAmount::coins(0),
+            coinbase: None,
+            timestamp: successor_pw.kernel.timestamp,
+            mutator_set_hash: mutator_set_accumulator.hash(),
+            merge_bit: false,
+        }
+        .into_kernel();
+        let type_scripts_and_witnesses = successor_pw
+            .type_scripts_and_witnesses
+            .iter()
+            .map(|tsaw| {
+                match_type_script_and_generate_witness(
+                    tsaw.program.hash(),
+                    predecessor_kernel.clone(),
+                    salted_utxos.clone(),
+                    salted_utxos.clone(),
+                )
+                .expect("type script hash should be known")
+            })
+            .collect_vec();
+        let predecessor_pw = PrimitiveWitness {
+            input_utxos: salted_utxos.clone(),
+            input_membership_proofs: membership_proofs,
+            lock_scripts_and_witnesses: successor_pw.lock_scripts_and_witnesses[num_confirmed..]
+                .to_vec(),
+            type_scripts_and_witnesses,
+            output_utxos: salted_utxos,
+            output_sender_randomnesses: sender_randomnesses,
+            output_receiver_digests: receiver_digests,
+            mutator_set_accumulator,
+            kernel: predecessor_kernel,
+        };
+
+        (
+            LinkPrimitiveWitness::from_primitive_witness(predecessor_pw, 0),
+            LinkPrimitiveWitness::from_primitive_witness(successor_pw, num_thruputs),
+        )
+    }
+
+    /// Forge a link primitive witness into a proof-backed [`LinkTx`].
+    async fn forge(lpw: &LinkPrimitiveWitness) -> LinkTx {
+        let witness =
+            ForgeWitness::produce(lpw, vm_job_queue(), TritonVmProofJobOptions::default())
+                .await
+                .unwrap();
+        let proof = LinkProof
+            .prove(
+                witness.claim(),
+                witness.nondeterminism(),
+                vm_job_queue(),
+                TritonVmProofJobOptions::default(),
+            )
+            .await
+            .unwrap();
+
+        LinkTx {
+            kernel: lpw.kernel.clone(),
+            proof: LinkTxProof::Proof(proof),
+        }
+    }
+
+    /// `Chain` writes nothing to stdout, so the assertion is that both the Rust
+    /// shadow and the tasm run to completion: every `assert` in either one held.
+    fn prop_positive(witness: ChainWitness) {
+        LinkProof
+            .run_rust(&witness.standard_input(), witness.nondeterminism())
+            .unwrap();
+        LinkProof
+            .run_tasm(&witness.standard_input(), witness.nondeterminism())
+            .unwrap();
+    }
+
+    /// Cut-through pairs an output with a thruput and drops both, so the
+    /// chained kernel loses one of each per pair.
+    #[proptest(cases = 4)]
+    fn cut_through_removes_matching_pairs_from_both_sides(
+        #[strategy(0usize..=3)] num_thruputs: usize,
+        #[strategy(arb())] shuffle_seed: [u8; 32],
+    ) {
+        let (predecessor, successor) = chainable_link_primitive_witnesses(3, num_thruputs);
+        let (chained, cut_through) =
+            ChainWitness::chained_kernel(&predecessor.kernel, &successor.kernel, shuffle_seed);
+
+        prop_assert_eq!(num_thruputs, cut_through.len());
+        prop_assert_eq!(
+            predecessor.kernel.kernel.outputs.len() + successor.kernel.kernel.outputs.len()
+                - num_thruputs,
+            chained.kernel.outputs.len()
+        );
+        prop_assert_eq!(
+            predecessor.kernel.thruputs.len() + successor.kernel.thruputs.len() - num_thruputs,
+            chained.thruputs.len()
+        );
+        prop_assert_eq!(
+            predecessor.kernel.kernel.inputs.len() + successor.kernel.kernel.inputs.len(),
+            chained.kernel.inputs.len()
+        );
+    }
+
+    /// A successor chained onto the predecessor whose outputs it spends: every
+    /// thruput cuts through, and the chained transaction is one the `Fix` branch
+    /// could eventually take to a block.
+    #[tokio::test]
+    async fn chain_accepts_a_predecessor_successor_pair() {
+        for num_thruputs in 0..=2 {
+            let (predecessor, successor) = chainable_link_primitive_witnesses(2, num_thruputs);
+            let witness = ChainWitness::chain(
+                forge(&predecessor).await,
+                forge(&successor).await,
+                [0u8; 32],
+            );
+            assert_eq!(num_thruputs, witness.cut_through.len());
+            assert!(witness.new_kernel.thruputs.is_empty());
+            prop_positive(witness);
+        }
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod negative_tests {
+    use neptune_mutator_set::addition_record::AdditionRecord;
+    use num_traits::CheckedSub;
+    use tasm_lib::hashing::merkle_verify::MerkleVerify;
+
+    use super::tests::chainable_link_primitive_witnesses;
+    use super::*;
+    use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
+    use crate::transaction::transaction_kernel::TransactionKernelModifier;
+
+    impl ChainWitness {
+        /// Cheap test-only constructor: a [`ChainWitness`] whose operand link
+        /// proofs are mocks.
+        ///
+        /// Sound for every negative below because the recursion is the *last*
+        /// thing the `Chain` branch does, so any other assertion fires before a
+        /// proof is ever looked at. A positive test cannot use this.
+        fn without_proofs(left: &LinkKernel, right: &LinkKernel, shuffle_seed: [u8; 32]) -> Self {
+            let (new_kernel, cut_through) = Self::chained_kernel(left, right, shuffle_seed);
+            Self {
+                left_kernel: left.clone(),
+                right_kernel: right.clone(),
+                new_kernel,
+                cut_through,
+                left_proof: Proof::invalid_mock(),
+                right_proof: Proof::invalid_mock(),
+            }
+        }
+    }
+
+    /// A chainable pair whose successor holds one thruput that the predecessor's
+    /// single output resolves -- so there is a cut-through to tamper with, an
+    /// input on either side, and a non-empty everything.
+    fn pokeable_witness() -> ChainWitness {
+        let (predecessor, successor) = chainable_link_primitive_witnesses(2, 1);
+        ChainWitness::without_proofs(&predecessor.kernel, &successor.kernel, [0u8; 32])
+    }
+
+    /// Poke the chained kernel and re-derive everything from it: the claim's
+    /// public input and all of its authentication paths come from
+    /// `new_kernel`, so a tampered kernel stays internally consistent and only
+    /// the check under test can fail.
+    fn expect_failure(
+        witness: ChainWitness,
+        error_ids: &[i128],
+    ) -> Result<(), proptest::test_runner::TestCaseError> {
+        LinkProof.test_assertion_failure(
+            witness.standard_input(),
+            witness.nondeterminism(),
+            error_ids,
+        )
+    }
+
+    /// Dropping one of the operands' removal records from the chained kernel is
+    /// value creation: an input vanishes without its funds being accounted for.
+    #[test]
+    fn chained_inputs_must_be_the_operands_inputs() {
+        let mut witness = pokeable_witness();
+        let mut inputs = witness.new_kernel.kernel.inputs.clone();
+        inputs.pop().unwrap();
+        witness.new_kernel.kernel = TransactionKernelModifier::default()
+            .inputs(inputs)
+            .modify(witness.new_kernel.kernel);
+
+        expect_failure(witness, &[INPUTS_ARE_NOT_THE_OPERANDS_INPUTS_ERROR]).unwrap();
+    }
+
+    /// Announcements likewise carry over wholesale.
+    #[test]
+    fn chained_announcements_must_be_the_operands_announcements() {
+        let mut witness = pokeable_witness();
+        let mut announcements = witness.new_kernel.kernel.announcements.clone();
+        announcements.pop().unwrap();
+        witness.new_kernel.kernel = TransactionKernelModifier::default()
+            .announcements(announcements)
+            .modify(witness.new_kernel.kernel);
+
+        expect_failure(
+            witness,
+            &[ANNOUNCEMENTS_ARE_NOT_THE_OPERANDS_ANNOUNCEMENTS_ERROR],
+        )
+        .unwrap();
+    }
+
+    /// Cut-through must be two-sided. Dropping a record from the output side
+    /// alone -- keeping the thruput that pays for it -- destroys value; the
+    /// mirror image creates it. Both are one cancellation that only happened
+    /// once, and both are caught by the *outputs* equation, which is checked
+    /// first.
+    #[test]
+    fn one_sided_cut_through_is_rejected() {
+        // the thruput leaves, its matching output stays
+        let mut witness = pokeable_witness();
+        let outputs = [
+            witness.new_kernel.kernel.outputs.clone(),
+            witness.cut_through.clone(),
+        ]
+        .concat();
+        witness.new_kernel.kernel = TransactionKernelModifier::default()
+            .outputs(outputs)
+            .modify(witness.new_kernel.kernel);
+        expect_failure(witness, &[OUTPUTS_ARE_NOT_CUT_THROUGH_ERROR]).unwrap();
+
+        // the output leaves, its matching thruput stays
+        let mut witness = pokeable_witness();
+        witness.new_kernel.thruputs = [
+            witness.new_kernel.thruputs.clone(),
+            witness.cut_through.clone(),
+        ]
+        .concat();
+        expect_failure(witness, &[THRUPUTS_ARE_NOT_CUT_THROUGH_ERROR]).unwrap();
+    }
+
+    /// Cut-through cancels an output against a thruput only when their
+    /// canonical commitments are equal. A record matching neither side cancels
+    /// nothing, so naming it in the cut-through set fails the same equation --
+    /// which is what stops a thruput being resolved by a predecessor output that
+    /// does not exist.
+    #[test]
+    fn cut_through_on_unequal_commitments_is_rejected() {
+        let mut witness = pokeable_witness();
+        witness.cut_through[0] = AdditionRecord {
+            canonical_commitment: Digest::default(),
+        };
+
+        expect_failure(witness, &[OUTPUTS_ARE_NOT_CUT_THROUGH_ERROR]).unwrap();
+    }
+
+    /// `Chain` bounds both operand fees to `[0, MAX_NAU]` and *then* adds them,
+    /// asserting the `u128` addition did not carry. That assert is unreachable
+    /// only because two bounded amounts fit in a `u128` -- which they do by a
+    /// margin of 1.26%, since `MAX_NAU` is 98.74% of `2**127`.
+    ///
+    /// So the margin is pinned here rather than asserted in prose. Widening the
+    /// conversion factor, or raising the 42-million coin cap, breaks the
+    /// argument -- and would make a fee sum wrap around into a small positive
+    /// amount that passes the `<= max` check below it.
+    ///
+    /// Note what this does *not* say: three bounded amounts do not fit. A branch
+    /// that ever sums more than two fees in one `u128` addition must keep its
+    /// own overflow assert reachable and test it.
+    #[test]
+    fn two_bounded_fees_cannot_overflow() {
+        let max = u128::try_from(NativeCurrencyAmount::MAX_NAU).unwrap();
+        assert!(
+            max.checked_mul(2).is_some(),
+            "two maximal fees must not overflow a u128"
+        );
+        assert!(
+            max.checked_mul(3).is_none(),
+            "three maximal fees are expected NOT to fit; if they now do, the \
+             comment in `assert_fee_is_sum_of_operand_fees` is stale"
+        );
+    }
+
+    /// The chained fee is the operands' fees added up -- no more (a fee the
+    /// operands never paid is minted out of nothing) and no less (short-changing
+    /// the miner while the operands' balances still say otherwise).
+    #[test]
+    fn chained_fee_must_be_the_sum_of_the_operand_fees() {
+        let one_nau = NativeCurrencyAmount::one_nau();
+        let base_fee = pokeable_witness().new_kernel.kernel.fee;
+        assert!(
+            base_fee >= one_nau,
+            "the fixture's fee must leave room to go both up and down"
+        );
+
+        for fee in [
+            base_fee + one_nau,
+            base_fee
+                .checked_sub(&one_nau)
+                .expect("fee stays non-negative"),
+        ] {
+            let mut witness = pokeable_witness();
+            witness.new_kernel.kernel = TransactionKernelModifier::default()
+                .fee(fee)
+                .modify(witness.new_kernel.kernel);
+
+            expect_failure(witness, &[NEW_FEE_IS_NOT_SUM_OF_OPERAND_FEES_ERROR]).unwrap();
+        }
+    }
+
+    /// A chained transaction is no older than the later of its operands --
+    /// otherwise chaining would be a way to walk a transaction backwards past a
+    /// time lock.
+    #[test]
+    fn chained_timestamp_must_be_the_later_of_the_operand_timestamps() {
+        let mut witness = pokeable_witness();
+        let timestamp = witness.new_kernel.kernel.timestamp - Timestamp::seconds(1);
+        witness.new_kernel.kernel = TransactionKernelModifier::default()
+            .timestamp(timestamp)
+            .modify(witness.new_kernel.kernel);
+
+        expect_failure(witness, &[TIMESTAMP_IS_NOT_MAX_OF_OPERAND_TIMESTAMPS_ERROR]).unwrap();
+    }
+
+    /// All three kernels are relative to one and the same mutator set.
+    #[test]
+    fn mismatched_mutator_set_hash_is_rejected() {
+        let mut witness = pokeable_witness();
+        witness.new_kernel.kernel = TransactionKernelModifier::default()
+            .mutator_set_hash(Digest::default())
+            .modify(witness.new_kernel.kernel);
+
+        expect_failure(witness, &[MUTATOR_SET_HASH_MISMATCH_ERROR]).unwrap();
+    }
+
+    /// A chained transaction is never a coinbase transaction and never carries
+    /// the merge bit. Both leafs are constants the branch authenticates
+    /// directly, so a kernel holding anything else has the wrong leaf, not
+    /// merely the wrong value.
+    #[test]
+    fn coinbase_or_merge_bit_on_the_chained_kernel_is_rejected() {
+        let mut witness = pokeable_witness();
+        witness.new_kernel.kernel = TransactionKernelModifier::default()
+            .coinbase(Some(NativeCurrencyAmount::coins(1)))
+            .modify(witness.new_kernel.kernel);
+        expect_failure(witness, &[MerkleVerify::ROOT_MISMATCH_ERROR_ID]).unwrap();
+
+        let mut witness = pokeable_witness();
+        witness.new_kernel.kernel = TransactionKernelModifier::default()
+            .merge_bit(true)
+            .modify(witness.new_kernel.kernel);
+        expect_failure(witness, &[MerkleVerify::ROOT_MISMATCH_ERROR_ID]).unwrap();
+    }
+
+    /// Every field the branch reads is bound to the kernel it was read from: a
+    /// bad authentication path fails before any of the equations above get a
+    /// chance to hold.
+    #[test]
+    fn bad_authentication_path_is_rejected() {
+        let witness = pokeable_witness();
+        let mut nondeterminism = witness.nondeterminism();
+        nondeterminism.digests[0].0[0].increment();
+
+        LinkProof
+            .test_assertion_failure(
+                witness.standard_input(),
+                nondeterminism,
+                &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
+            )
+            .unwrap();
+    }
+
+    /// The chained kernel is bound to the claim: `Chain` authenticates the new
+    /// kernel's fields against `lkmh` straight off the public input, so a
+    /// witness proven against some *other* transaction's kernel fails at the
+    /// first field.
+    #[test]
+    fn chained_kernel_must_be_the_one_in_the_claim() {
+        let witness = pokeable_witness();
+        let other_lkmh = witness.left_kernel.mast_hash();
+
+        LinkProof
+            .test_assertion_failure(
+                PublicInput::new(other_lkmh.reversed().values().to_vec()),
+                witness.nondeterminism(),
+                &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
+            )
+            .unwrap();
+    }
+}

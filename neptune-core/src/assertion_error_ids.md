@@ -33,3 +33,5 @@ often.
 |  500..510 | [`GenerateCollectTypeScriptsClaim`](protocol/consensus/transaction/validity/tasm/claims/generate_collect_type_scripts_claim.rs) |
 |  510..520 | [`CollectTypeScripts`](protocol/consensus/transaction/validity/collect_type_scripts.rs)                                         |
 |  520..530 | [`Forge`](../../neptune-consensus/src/chaintx/forge.rs)                                                                         |
+|  530..540 | [`LinkProof`](../../neptune-consensus/src/chaintx/link_proof.rs)                                                                |
+|  540..550 | [`Chain`](../../neptune-consensus/src/chaintx/chain.rs)                                                                        |

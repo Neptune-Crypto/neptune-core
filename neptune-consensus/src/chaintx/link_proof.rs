@@ -4,7 +4,9 @@ use tasm_lib::library::Library;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::triton_vm::prelude::*;
 
+use super::chain::Chain;
 use super::forge::Forge;
+use super::link_proof_witness::DISCRIMINANT_FOR_CHAIN;
 use super::link_proof_witness::DISCRIMINANT_FOR_FORGE;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -43,9 +45,9 @@ pub(super) fn no_coinbase_leaf() -> Digest {
 /// [`LinkKernelField::MergeBit`](super::link_kernel::LinkKernelField::MergeBit).
 ///
 /// The merge bit marks a transaction that has been through `Merge`, which is a
-/// legacy-pipeline operation; nothing in the chain pipeline sets it. Same
-/// constant-leaf treatment, and the same obligation on every branch, as
-/// [`no_coinbase_leaf`].
+/// legacy-pipeline operation; nothing in the chain pipeline sets it, and
+/// `Chain` is not a `Merge`. Same constant-leaf treatment, and the same
+/// obligation on every branch, as [`no_coinbase_leaf`].
 pub(super) fn merge_bit_false_leaf() -> Digest {
     Tip5::hash(&false)
 }
@@ -58,7 +60,8 @@ pub(super) fn merge_bit_false_leaf() -> Digest {
 /// and structured the same way: a thin dispatcher over the branches of
 /// [`LinkProofWitness`](super::link_proof_witness::LinkProofWitness), each of
 /// which is a [`BasicSnippet`] that establishes the same claim by a different
-/// route. `Forge` is the entry point; `Chain`, `Update` and `Cast` follow.
+/// route. `Forge` is the entry point and `Chain` combines two link
+/// transactions; `Update` and `Cast` follow.
 ///
 /// The dispatcher hands each branch `[own_program_digest] [lkmh] *witness disc`
 /// and expects `[own_program_digest] [scratch] *witness -1` back. A branch that
@@ -80,9 +83,10 @@ impl TritonProgram for LinkProof {
         // the same addresses as `RemovalRecordsIntegrity`'s (it inlines that
         // program's confirmed-input loop verbatim; see
         // `forge_confirmed_loop_matches_rri`), which holds only as long as
-        // nothing allocates ahead of them. Any future branch imports *after*
-        // this one.
+        // nothing allocates ahead of them. Every other branch -- `Chain` below,
+        // and any future one -- imports *after* this one.
         let forge_branch = library.import(Box::new(Forge));
+        let chain_branch = library.import(Box::new(Chain));
 
         // Sum the per-branch equality flags: exactly one may be set. Extend with
         // `dup n push {DISCRIMINANT_FOR_X} eq` + one more `add` per branch.
@@ -94,17 +98,20 @@ impl TritonProgram for LinkProof {
             eq
             // _ disc (disc == forge)
 
+            dup 1
+            push {DISCRIMINANT_FOR_CHAIN}
+            eq
+            // _ disc (disc == forge) (disc == chain)
+
+            add
+            // _ disc (disc == forge || disc == chain)
+
             assert error_id {INVALID_WITNESS_DISCRIMINANT_ERROR}
             // _ disc
         );
 
         let main = triton_asm! {
-            // The program digest sits at the bottom of the initial stack, and
-            // `dup`'s reach is 16 deep, so it can only be read *here*, before
-            // anything is pushed on top. `Chain` (and later `Update`) will need
-            // it for their operand claims: a `LinkProof` recursively verifying a
-            // `LinkProof` names itself, rather than hardcoding a digest it
-            // cannot know while being built. Mirrors `SingleProof`'s `main`.
+            // Read own program digest.
             dup 15 dup 15 dup 15 dup 15 dup 15
             hint own_program_digest = stack[0..5]
             // _ [own_program_digest]
@@ -127,6 +134,9 @@ impl TritonProgram for LinkProof {
             /* match discriminant */
             dup 0 push {DISCRIMINANT_FOR_FORGE} eq
             skiz call {forge_branch}
+
+            dup 0 push {DISCRIMINANT_FOR_CHAIN} eq
+            skiz call {chain_branch}
             // _ [own_program_digest] [lkmh] *link_proof_witness discriminant
 
             // a discriminant of -1 indicates that some branch was executed
@@ -173,6 +183,7 @@ mod tests {
     use tasm_lib::twenty_first::bfe_vec;
 
     use super::*;
+    use crate::chaintx::chain::tests::chain_branch_source;
     use crate::chaintx::forge::tests::forge_branch_source;
     use crate::chaintx::link_proof_witness::LinkProofWitnessMemory;
     use crate::proof_abstractions::tasm::builtins as tasm;
@@ -181,12 +192,16 @@ mod tests {
 
     impl TritonProgramSpecification for LinkProof {
         fn source(&self) {
+            let own_program_digest: Digest = tasm::own_program_digest();
             let lkmh: Digest = tasm::tasmlib_io_read_stdin___digest();
 
             match tasm::decode_from_memory::<LinkProofWitnessMemory>(
                 FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
             ) {
-                LinkProofWitnessMemory::Forge(witness) => forge_branch_source(lkmh, witness),
+                LinkProofWitnessMemory::Forge(witness) => forge_branch_source(lkmh, *witness),
+                LinkProofWitnessMemory::Chain(witness) => {
+                    chain_branch_source(own_program_digest, lkmh, *witness)
+                }
             }
         }
     }
@@ -196,7 +211,7 @@ mod tests {
     #[test]
     fn invalid_discriminant_crashes_execution() {
         let public_input = PublicInput::new(bfe_vec![0, 0, 0, 0, 0]);
-        for illegal_discriminant in bfe_array![-1, 1, 2, 3, 1u64 << 40] {
+        for illegal_discriminant in bfe_array![-1, 2, 3, 1u64 << 40] {
             let memory: HashMap<_, _> = [(
                 FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
                 illegal_discriminant,
@@ -217,6 +232,6 @@ mod tests {
 
     test_program_snapshot!(
         LinkProof,
-        "a0a6420cf1d4dca4291d734adb2d9c794ff754a316e15a0abc25f9ba8a5af104f473d1aaa235c85a"
+        "7f09f5e8e3ebd387b54e4cbe7a31fa4ea00eb77d4b784f2f4cb3ca385b11b7a575ca27fc61537548"
     );
 }
