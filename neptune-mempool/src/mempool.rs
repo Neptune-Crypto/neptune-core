@@ -55,6 +55,7 @@ use priority_queue::DoublePriorityQueue;
 use priority_queue::PriorityQueue;
 use priority_queue::priority_queue::iterators::IntoSortedIter as SingleEndedIterator;
 use tasm_lib::prelude::Digest;
+use tasm_lib::twenty_first::prelude::BFieldCodec;
 use tracing::debug;
 use tracing::error;
 
@@ -1077,19 +1078,26 @@ impl Mempool {
     /// - backed by single proofs, and
     /// - synced to the tip.
     ///
-    /// Number of transactions returned can be capped by either size (measured
-    /// in bytes), or by transaction count. The function guarantees that neither
-    /// of the specified limits will be exceeded.
+    /// Number of transactions returned can be capped by either kernel size
+    /// (measured in number of b-field elements when encoded), or by transaction
+    /// count. The function guarantees that neither of the specified limits will
+    /// be exceeded.
+    ///
+    /// When a size limit is used, this does not take into account the packing
+    /// of the input removal records. So the transaction kernel resulting from
+    /// the merger of the returned transactions is likely to be smaller than the
+    /// size calculated in this method.
     pub fn get_transactions_for_block_composition(
         &self,
-        mut remaining_storage: usize,
+        mut remaining_kernel_len: usize,
         max_num_txs: Option<usize>,
     ) -> Vec<Transaction> {
         let mut transactions = vec![];
 
         for (transaction_digest, _fee_density) in self.fee_density_iter() {
             // No more transactions can possibly be packed
-            if remaining_storage == 0 || max_num_txs.is_some_and(|max| transactions.len() == max) {
+            if remaining_kernel_len == 0 || max_num_txs.is_some_and(|max| transactions.len() == max)
+            {
                 break;
             }
 
@@ -1104,15 +1112,15 @@ impl Mempool {
                 }
 
                 let transaction_copy = transaction_ptr.to_owned();
-                let transaction_size = transaction_copy.get_size();
+                let kernel_len = transaction_copy.kernel.encode().len();
 
                 // Current transaction is too big
-                if transaction_size > remaining_storage {
+                if kernel_len > remaining_kernel_len {
                     continue;
                 }
 
                 // Include transaction
-                remaining_storage -= transaction_size;
+                remaining_kernel_len -= kernel_len;
                 transactions.push(transaction_copy)
             }
         }

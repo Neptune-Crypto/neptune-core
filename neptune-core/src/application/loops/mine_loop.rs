@@ -57,7 +57,6 @@ use crate::application::loops::channel::*;
 use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
 use crate::application::loops::mine_loop::guesser_configuration::GuessingConfiguration;
 use crate::application::loops::mine_loop::mock_block_generator::MockBlockGenerator;
-use crate::protocol::shared::SIZE_20MB_IN_BYTES;
 use crate::state::GlobalStateLock;
 use crate::COMPOSITION_FAILED_EXIT_CODE;
 
@@ -140,16 +139,21 @@ pub(crate) async fn mock_compose_block(
     global_state_lock: GlobalStateLock,
     coinbase_timestamp: Timestamp,
 ) -> (Block, Vec<ExpectedUtxo>) {
+    let network = global_state_lock.cli().network;
+    let next_height = latest_block.header().height.next();
     let gs = global_state_lock.lock_guard().await;
     let composer_parameters = gs.wallet_state.composer_parameters(
-        latest_block.header().height.next(),
+        next_height,
         gs.cli().guesser_fraction,
         Default::default(),
         gs.mining_state.overridden_coinbase_distribution(),
     );
+
+    let max_kernel_len =
+        ConsensusRuleSet::infer_from(network, next_height).max_recommended_block_tx_kernel_size();
     let (guesser_address, _) = gs.mining_rewards_address();
     let txs = gs.mempool().get_transactions_for_block_composition(
-        SIZE_20MB_IN_BYTES,
+        max_kernel_len,
         Some(gs.cli().max_num_compose_mergers.get()),
     );
     drop(gs);
@@ -498,8 +502,6 @@ pub(crate) async fn create_block_transaction_from(
     job_options: TritonVmProofJobOptions,
     tx_merge_origin: TxMergeOrigin,
 ) -> Result<(BlockTransaction, Vec<ExpectedUtxo>)> {
-    let block_capacity_for_transactions = SIZE_20MB_IN_BYTES;
-
     let predecessor_block_ms = predecessor_block
         .mutator_set_accumulator_after()
         .expect("predecessor should be valid");
@@ -531,6 +533,11 @@ pub(crate) async fn create_block_transaction_from(
     )
     .await?;
 
+    // Cap max size of kernel, conservatively. Does not account for input
+    // packing so upper limit is probably much higher than this value. Also
+    // does not account for the coinbase transaction.
+    let max_kernel_len = new_rules.max_recommended_block_tx_kernel_size();
+
     // Get most valuable transactions from mempool.
     let max_num_mergers = global_state_lock.cli().max_num_compose_mergers.get();
     let mut transactions_to_merge = match &tx_merge_origin {
@@ -538,10 +545,7 @@ pub(crate) async fn create_block_transaction_from(
             .lock_guard()
             .await
             .mempool()
-            .get_transactions_for_block_composition(
-                block_capacity_for_transactions,
-                Some(max_num_mergers),
-            ),
+            .get_transactions_for_block_composition(max_kernel_len, Some(max_num_mergers)),
         #[cfg(test)]
         TxMergeOrigin::ExplicitList(transactions) => transactions.to_owned(),
     };
@@ -646,10 +650,7 @@ pub(crate) async fn create_block_transaction_from(
             .lock_guard()
             .await
             .mempool()
-            .get_transactions_for_block_composition(
-                block_capacity_for_transactions,
-                Some(max_num_mergers),
-            );
+            .get_transactions_for_block_composition(max_kernel_len, Some(max_num_mergers));
 
         transactions_to_merge = if txs_from_mempool.is_empty() || old_rules != new_rules {
             vec![nop]
@@ -1316,7 +1317,7 @@ pub(crate) mod tests {
                 .lock_guard_mut()
                 .await
                 .mempool()
-                .get_transactions_for_block_composition(SIZE_20MB_IN_BYTES, None)
+                .get_transactions_for_block_composition(10_000_000, None)
                 .is_empty(),
             "May not have synced tx in mempool"
         );
@@ -1354,7 +1355,7 @@ pub(crate) mod tests {
                 .lock_guard_mut()
                 .await
                 .mempool()
-                .get_transactions_for_block_composition(SIZE_20MB_IN_BYTES, None)
+                .get_transactions_for_block_composition(10_000_000, None)
                 .is_empty(),
             "Updated transaction must have been inserted into mempool"
         );

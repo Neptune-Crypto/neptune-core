@@ -249,6 +249,23 @@ impl ConsensusRuleSet {
         }
     }
 
+    /// Conservative max size of the encoded length of the transaction kernel
+    /// of a block transaction.
+    ///
+    /// If you attempt to construct blocks with transaction kernels bigger than
+    /// this, then you risk making a block proposal that exceed the maximum
+    /// allowed size.
+    pub fn max_recommended_block_tx_kernel_size(&self) -> usize {
+        /// Conservative upper range of the number of b-field elements in a
+        /// block proof. Normal proof size at the time of writing is  ~130,000
+        /// b-field elements, so a value of 160,000 is very conservative.
+        const BIG_BLOCK_PROOF_LEN: usize = 160_000;
+
+        self.max_block_size()
+            .checked_sub(BIG_BLOCK_PROOF_LEN)
+            .expect("Max block size cannot be less than that of a big proof")
+    }
+
     pub fn max_num_inputs(&self) -> usize {
         match self {
             ConsensusRuleSet::Reboot
