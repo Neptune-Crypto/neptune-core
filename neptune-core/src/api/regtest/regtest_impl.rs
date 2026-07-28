@@ -147,9 +147,10 @@ impl RegTestPrivate {
 
         // retrieve selected tx from mempool for block inclusion.
         let txs_from_mempool = if include_mempool_txs {
-            let max_kernel_len = ConsensusRuleSet::infer_from(network, next_block_height)
-                .max_recommended_block_tx_kernel_size();
+            let consensus_rule_set = ConsensusRuleSet::infer_from(network, next_block_height);
+            let max_kernel_len = consensus_rule_set.max_recommended_block_tx_kernel_size();
             gs.mempool().get_transactions_for_block_composition(
+                consensus_rule_set,
                 max_kernel_len,
                 Some(gsl.cli().max_num_compose_mergers.get()),
             )

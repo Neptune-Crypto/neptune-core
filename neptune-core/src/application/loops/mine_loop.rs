@@ -149,10 +149,11 @@ pub(crate) async fn mock_compose_block(
         gs.mining_state.overridden_coinbase_distribution(),
     );
 
-    let max_kernel_len =
-        ConsensusRuleSet::infer_from(network, next_height).max_recommended_block_tx_kernel_size();
+    let consensus_rule_set = ConsensusRuleSet::infer_from(network, next_height);
+    let max_kernel_len = consensus_rule_set.max_recommended_block_tx_kernel_size();
     let (guesser_address, _) = gs.mining_rewards_address();
     let txs = gs.mempool().get_transactions_for_block_composition(
+        consensus_rule_set,
         max_kernel_len,
         Some(gs.cli().max_num_compose_mergers.get()),
     );
@@ -545,7 +546,11 @@ pub(crate) async fn create_block_transaction_from(
             .lock_guard()
             .await
             .mempool()
-            .get_transactions_for_block_composition(max_kernel_len, Some(max_num_mergers)),
+            .get_transactions_for_block_composition(
+                new_rules,
+                max_kernel_len,
+                Some(max_num_mergers),
+            ),
         #[cfg(test)]
         TxMergeOrigin::ExplicitList(transactions) => transactions.to_owned(),
     };
@@ -650,7 +655,11 @@ pub(crate) async fn create_block_transaction_from(
             .lock_guard()
             .await
             .mempool()
-            .get_transactions_for_block_composition(max_kernel_len, Some(max_num_mergers));
+            .get_transactions_for_block_composition(
+                new_rules,
+                max_kernel_len,
+                Some(max_num_mergers),
+            );
 
         transactions_to_merge = if txs_from_mempool.is_empty() || old_rules != new_rules {
             vec![nop]
@@ -1317,7 +1326,11 @@ pub(crate) mod tests {
                 .lock_guard_mut()
                 .await
                 .mempool()
-                .get_transactions_for_block_composition(10_000_000, None)
+                .get_transactions_for_block_composition(
+                    ConsensusRuleSet::default(),
+                    10_000_000,
+                    None
+                )
                 .is_empty(),
             "May not have synced tx in mempool"
         );
@@ -1355,7 +1368,11 @@ pub(crate) mod tests {
                 .lock_guard_mut()
                 .await
                 .mempool()
-                .get_transactions_for_block_composition(10_000_000, None)
+                .get_transactions_for_block_composition(
+                    ConsensusRuleSet::default(),
+                    10_000_000,
+                    None
+                )
                 .is_empty(),
             "Updated transaction must have been inserted into mempool"
         );
