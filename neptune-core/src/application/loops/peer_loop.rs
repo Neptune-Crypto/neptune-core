@@ -709,6 +709,7 @@ impl PeerLoopHandler {
                 if peers.len() > MAX_PEER_LIST_LENGTH {
                     self.punish(NegativePeerSanction::FloodPeerListResponse)
                         .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
                 let peers = peers
