@@ -1131,22 +1131,51 @@ impl PeerLoopHandler {
                 // If sync mode is active, incoming blocks are destined for the
                 // sync loop.
                 let network = self.global_state_lock.cli().network;
-                let mut state_lock = self.global_state_lock.lock_guard_mut().await;
-                if let Some(sync_anchor) = &mut state_lock.net.sync_anchor {
+                let champion = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .net
+                    .sync_anchor
+                    .as_ref()
+                    .map(|sync_anchor| sync_anchor.champion);
+                if let Some((champion_height, champion_digest)) = champion {
                     let height = block.header().height;
                     let digest = block.hash();
+
+                    // A block above the champion that does not extend it is
+                    // ignored below, so don't pay for verifying its proof.
+                    // Verification is the expensive part of handling a block,
+                    // and an unauthenticated peer decides when we do it.
+                    let extends_champion = block.header().prev_block_digest == champion_digest;
+                    if champion_height < height && !extends_champion {
+                        warn!(
+                            "Block {} / {:x} from peer {} is above the sync champion without \
+                             extending it; ignoring without verifying its proof.",
+                            height, digest, self.peer_id
+                        );
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    }
 
                     // Ensure that at least the block proof is valid, before
                     // storing. Otherwise this path is open to a DOS attack.
                     // Full validation in relation to the predecessor happens in
                     // the sync loop.
+                    // No locks may be held here, since proof validation takes milliseconds.
                     let is_valid = block.validate_block_proof(network).await.is_ok();
                     if !is_valid {
-                        drop(state_lock);
                         self.punish(NegativePeerSanction::InvalidBlock((height, digest)))
                             .await?;
                         return Ok(KEEP_CONNECTION_ALIVE);
                     }
+
+                    // Hold lock as state mutation must be atomic
+                    let mut state_lock = self.global_state_lock.lock_guard_mut().await;
+                    let Some(sync_anchor) = &mut state_lock.net.sync_anchor else {
+                        // Handle race condition
+                        warn!("Sync status dropped while processing block. Discarding latest block received from peer");
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    };
 
                     let is_successor = block.header().prev_block_digest == sync_anchor.champion.1;
                     let is_new_champion = sync_anchor.incoming_block_is_new_champion(height);
@@ -1189,7 +1218,6 @@ impl PeerLoopHandler {
                     }
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
-                drop(state_lock);
 
                 // Activate the shallow fork reconciliation mechanism if
                 // necessary, otherwise immediately proceed to processing the
