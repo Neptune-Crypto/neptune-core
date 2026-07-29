@@ -2043,12 +2043,11 @@ impl GlobalState {
         encrypted_utxo_notification: String,
         max_search_depth: Option<u64>,
     ) -> Result<Option<ClaimUtxoData>, ClaimError> {
-        // deserialize UtxoTransferEncrypted from bech32m string.
         let network = self.cli().network;
+
         let utxo_transfer_encrypted =
             EncryptedUtxoNotification::from_bech32m(&encrypted_utxo_notification, network)?;
 
-        // find known spending key by receiver_identifier
         let spending_key = self
             .wallet_state
             .find_known_spending_key_for_receiver_identifier(
@@ -2056,7 +2055,6 @@ impl GlobalState {
             )
             .ok_or(ClaimError::UtxoUnknown)?;
 
-        // decrypt utxo_transfer_encrypted into UtxoTransfer
         let utxo_notification = utxo_transfer_encrypted.decrypt_with_spending_key(&spending_key)?;
 
         debug!("claim-utxo: decrypted {:#?}", utxo_notification);
@@ -2079,6 +2077,12 @@ impl GlobalState {
 
         if !incoming_utxo.utxo.all_type_script_states_are_valid() {
             let err = ClaimError::InvalidTypeScript;
+            warn!("{}", err.to_string());
+            return Err(err);
+        }
+
+        if incoming_utxo.utxo.lock_script_hash() != spending_key.lock_script_hash() {
+            let err = ClaimError::ForeignLockScript;
             warn!("{}", err.to_string());
             return Err(err);
         }
@@ -3545,6 +3549,7 @@ mod tests {
     use neptune_wallet::transaction_output::TxOutput;
     use neptune_wallet::transaction_output::TxOutputList;
     use neptune_wallet::utxo_notification::UtxoNotificationMedium;
+    use neptune_wallet::utxo_notification::UtxoNotificationPayload;
     use neptune_wallet::wallet_entropy::WalletEntropy;
     use num_traits::CheckedSub;
     use num_traits::Zero;
@@ -4476,6 +4481,63 @@ mod tests {
             new_tx.kernel.inputs.len(),
             "tx must have exactly one input, a genesis UTXO"
         );
+    }
+
+    mod claim_utxo {
+        use super::*;
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn foreign_lock_script_fails() {
+            // Verify that UTXO must match that of the key decrypting the
+            // off-chain notification.
+            let network = Network::Main;
+            let mut state = mock_genesis_global_state(
+                2,
+                WalletEntropy::new_random(),
+                cli_args::Args::default_with_network(network),
+            )
+            .await;
+
+            let own_address = state
+                .lock_guard_mut()
+                .await
+                .wallet_state
+                .next_unused_spending_key(KeyType::Generation)
+                .await
+                .to_address();
+
+            let sender_randomness: Digest = random();
+            let off_chain_notification = |utxo: Utxo| {
+                let payload = UtxoNotificationPayload::new(utxo, sender_randomness);
+                own_address.private_notification(payload, network)
+            };
+
+            let foreign_utxo = Utxo::new_native_currency(random(), NativeCurrencyAmount::coins(5));
+            let foreign_utxo_result = state
+                .lock_guard()
+                .await
+                .claim_utxo(off_chain_notification(foreign_utxo), None)
+                .await;
+            assert!(
+                matches!(foreign_utxo_result, Err(ClaimError::ForeignLockScript)),
+                "claiming a UTXO with a foreign lock script must fail"
+            );
+
+            let own_utxo = Utxo::new_native_currency(
+                own_address.lock_script_hash(),
+                NativeCurrencyAmount::coins(5),
+            );
+            let own_utxo_result = state
+                .lock_guard()
+                .await
+                .claim_utxo(off_chain_notification(own_utxo), None)
+                .await;
+            assert!(
+                own_utxo_result.is_ok_and(|claim_data| claim_data.is_some()),
+                "claiming a UTXO with own lock script must succeed"
+            );
+        }
     }
 
     mod rescan_wallet {

@@ -19,6 +19,9 @@ pub enum ClaimError {
     #[error("invalid type script in claim utxo")]
     InvalidTypeScript,
 
+    #[error("claimed utxo is not spendable by the matching wallet key")]
+    ForeignLockScript,
+
     // catch-all error, eg for anyhow errors
     #[error("claim unsuccessful")]
     Failed(String),
