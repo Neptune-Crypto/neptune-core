@@ -7,14 +7,15 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use itertools::Itertools;
 use neptune_consensus::block::Block;
-use neptune_consensus::block::FUTUREDATING_LIMIT;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_consensus::transaction::transaction_kernel::TransactionLustrationError;
 use neptune_consensus::transaction::transaction_proof::TransactionProof;
 use neptune_consensus::transaction::Transaction;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_database::storage::storage_vec::traits::StorageVecStream;
-use neptune_mempool::mempool::MEMPOOL_TX_THRESHOLD_AGE;
 use neptune_mempool::transaction_kernel_id::Txid;
+use neptune_mempool::tx_admission;
+use neptune_mempool::tx_admission::TxAdmissionError;
 use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use neptune_primitives::announcement_flag::AnnouncementFlag;
@@ -681,62 +682,51 @@ impl RpcApi for RpcServer {
         let network = self.state.cli().network;
         let consensus_rule_set = self.state.lock_guard().await.consensus_rule_set();
 
-        if !transaction.is_valid(network, consensus_rule_set).await {
-            return Err(RpcError::SubmitTransaction(
-                SubmitTransactionError::InvalidTransaction,
-            ));
-        }
+        // Which transactions are admitted is policy shared with the peer
+        // gossip path; see `tx_admission`.
+        let (tip_mutator_set, lustration_status) = {
+            let state = self.state.lock_guard().await;
+            (
+                state.chain.tip_mutator_set_after(),
+                state.chain.lustration_status(),
+            )
+        };
 
-        let lustration_status = self.state.lock_guard().await.chain.lustration_status();
-        if let Some(lustration_status) = lustration_status {
-            let lustrated = transaction.kernel.verified_lustration_amount(
-                lustration_status.max_lustrating_aocl_leaf_index,
-                consensus_rule_set.fix_lustration_double_counting(),
-            );
+        // Transactions submitted here are not relayed on to us by a peer, so
+        // the mempool is not consulted for a duplicate: re-submitting one's own
+        // transaction is not an error.
+        let already_known = false;
 
-            let Ok(lustrated) = lustrated else {
-                return Err(RpcError::SubmitTransaction(
-                    SubmitTransactionError::MissingLustration,
-                ));
-            };
-
-            if lustrated > lustration_status.counter {
-                return Err(RpcError::SubmitTransaction(
-                    SubmitTransactionError::LustrationMakesCounterNegative,
-                ));
-            }
-        }
-
-        if transaction.kernel.coinbase.is_some() {
-            return Err(RpcError::SubmitTransaction(
-                SubmitTransactionError::CoinbaseTransaction,
-            ));
-        }
-
-        if transaction.kernel.fee.is_negative() {
-            return Err(RpcError::SubmitTransaction(
-                SubmitTransactionError::FeeNegative,
-            ));
-        }
-
-        let timestamp = transaction.kernel.timestamp;
-        let now = self.now();
-        if timestamp < now - MEMPOOL_TX_THRESHOLD_AGE {
-            return Err(RpcError::SubmitTransaction(SubmitTransactionError::TooOld));
-        }
-
-        if timestamp >= now + FUTUREDATING_LIMIT {
-            return Err(RpcError::SubmitTransaction(
-                SubmitTransactionError::FutureDated,
-            ));
-        }
-
-        let msa = self.state.lock_guard().await.chain.tip_mutator_set_after();
-        if !transaction.is_confirmable_relative_to(&msa) {
-            return Err(RpcError::SubmitTransaction(
-                SubmitTransactionError::NotConfirmable,
-            ));
-        }
+        tx_admission::admissible(
+            &transaction,
+            &tip_mutator_set,
+            lustration_status,
+            already_known,
+            self.now(),
+            network,
+            consensus_rule_set,
+        )
+        .await
+        .map_err(|rejection| {
+            RpcError::SubmitTransaction(match rejection {
+                TxAdmissionError::HasCoinbase => SubmitTransactionError::CoinbaseTransaction,
+                TxAdmissionError::NegativeFee => SubmitTransactionError::FeeNegative,
+                TxAdmissionError::TooOld => SubmitTransactionError::TooOld,
+                TxAdmissionError::FutureDated => SubmitTransactionError::FutureDated,
+                TxAdmissionError::NotConfirmable(_) | TxAdmissionError::CannotApplyToMutatorSet => {
+                    SubmitTransactionError::NotConfirmable
+                }
+                TxAdmissionError::Lustration(
+                    TransactionLustrationError::MissingLustrationAnnouncement,
+                ) => SubmitTransactionError::MissingLustration,
+                TxAdmissionError::LustrationsWouldMakeCounterNegative => {
+                    SubmitTransactionError::LustrationMakesCounterNegative
+                }
+                TxAdmissionError::Lustration(_)
+                | TxAdmissionError::Invalid
+                | TxAdmissionError::AlreadyKnown => SubmitTransactionError::InvalidTransaction,
+            })
+        })?;
 
         let response = self
             .to_main_tx

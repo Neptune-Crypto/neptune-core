@@ -17,16 +17,16 @@ use futures::FutureExt;
 use libp2p::multiaddr::Protocol;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
-use neptune_consensus::block::mutator_set_update::MutatorSetUpdate;
 use neptune_consensus::block::Block;
-use neptune_consensus::block::FUTUREDATING_LIMIT;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_consensus::transaction::transaction_kernel::TransactionConfirmabilityError;
 use neptune_consensus::transaction::transaction_kernel::TransactionLustrationError;
 use neptune_consensus::transaction::Transaction;
-use neptune_mempool::mempool::MEMPOOL_TX_THRESHOLD_AGE;
 use neptune_mempool::transaction_kernel_id::Txid;
 use neptune_mempool::transaction_proof_quality::TransactionProofQualityExt;
+use neptune_mempool::tx_admission;
+use neptune_mempool::tx_admission::TxAdmissionError;
+use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_mutator_set::removal_record::RemovalRecordValidityError;
 use neptune_p2p::peer::handshake_data::HandshakeData;
 use neptune_p2p::peer::peer_info::PeerConnectionInfo;
@@ -281,6 +281,51 @@ impl PeerLoopHandler {
         }
 
         Some(ret)
+    }
+
+    /// Log why a transaction cannot be confirmed, and pick the sanction that
+    /// its sender has earned.
+    fn sanction_for_unconfirmable(
+        transaction: &Transaction,
+        mutator_set_accumulator: &MutatorSetAccumulator,
+        error: TransactionConfirmabilityError,
+    ) -> NegativePeerSanction {
+        match error {
+            TransactionConfirmabilityError::InvalidRemovalRecord(index) => {
+                warn!("invalid removal record (at index {index})");
+                let invalid_removal_record = &transaction.kernel.inputs[index];
+                debug!(
+                    "Absolute index set of removal record {index}: {:?}",
+                    invalid_removal_record.absolute_indices
+                );
+                match invalid_removal_record.validate_inner(mutator_set_accumulator) {
+                    Ok(_) => (),
+                    Err(RemovalRecordValidityError::AbsentAuthenticatedChunk) => {
+                        debug!("invalid because membership proof is missing");
+                    }
+                    Err(RemovalRecordValidityError::InvalidSwbfiMmrMp { chunk_index }) => {
+                        debug!(
+                            "invalid because membership proof for chunk index {chunk_index} is \
+                             invalid"
+                        );
+                    }
+                }
+
+                NegativePeerSanction::UnconfirmableTransaction
+            }
+            TransactionConfirmabilityError::DuplicateInputs => {
+                warn!("duplicate inputs");
+                NegativePeerSanction::DoubleSpendingTransaction
+            }
+            TransactionConfirmabilityError::AlreadySpentInput(index) => {
+                warn!("already spent input (at index {index})");
+                NegativePeerSanction::DoubleSpendingTransaction
+            }
+            TransactionConfirmabilityError::RemovalRecordUnpackFailure => {
+                warn!("Failed to unpack removal records");
+                NegativePeerSanction::InvalidTransaction
+            }
+        }
     }
 
     /// Handle validation and send all blocks to the main task if they're all
@@ -1551,37 +1596,12 @@ impl PeerLoopHandler {
                     )
                 };
 
-                // 1. If transaction is invalid, punish.
                 let network = self.global_state_lock.cli().network;
                 let consensus_rule_set =
                     ConsensusRuleSet::infer_from(network, current_block_height);
-                if !transaction.is_valid(network, consensus_rule_set).await {
-                    warn!("Received invalid tx");
-                    self.punish(NegativePeerSanction::InvalidTransaction)
-                        .await?;
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
 
-                // 2. If transaction has coinbase, punish.
-                // Transactions received from peers have not been mined yet.
-                // Only the miner is allowed to produce transactions with non-empty coinbase fields.
-                if transaction.kernel.coinbase.is_some() {
-                    warn!("Received non-mined transaction with coinbase.");
-                    self.punish(NegativePeerSanction::NonMinedTransactionHasCoinbase)
-                        .await?;
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
-                // 3. If negative fee, punish.
-                if transaction.kernel.fee.is_negative() {
-                    warn!("Received negative-fee transaction.");
-                    self.punish(NegativePeerSanction::TransactionWithNegativeFee)
-                        .await?;
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
-                // 4. Check if transaction is already known.
-                if !self
+                // Which transactions are admitted to the mempool is policy
+                let already_known = !self
                     .global_state_lock
                     .lock_guard()
                     .await
@@ -1590,146 +1610,110 @@ impl PeerLoopHandler {
                         transaction.kernel.txid(),
                         transaction.proof.proof_quality()?,
                         transaction.kernel.mutator_set_hash,
-                    )
-                {
-                    warn!("Received transaction that was already known");
-
-                    // We received a transaction that we *probably* haven't requested.
-                    // Consider punishing here, if this is abused.
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
-                // 5. if transaction is not confirmable, punish.
-                if !transaction.is_confirmable_relative_to(&mutator_set_accumulator_after) {
-                    warn!(
-                        "Received unconfirmable transaction with TXID {}. Unconfirmable because:",
-                        transaction.kernel.txid()
                     );
-                    // get fine-grained error code for informative logging
-                    let confirmability_error_code = transaction
-                        .kernel
-                        .is_confirmable_relative_to(&mutator_set_accumulator_after);
-                    match confirmability_error_code {
-                        Ok(_) => unreachable!(),
-                        Err(TransactionConfirmabilityError::InvalidRemovalRecord(index)) => {
-                            warn!("invalid removal record (at index {index})");
-                            let invalid_removal_record = transaction.kernel.inputs[index].clone();
-                            let removal_record_error_code = invalid_removal_record
-                                .validate_inner(&mutator_set_accumulator_after);
-                            debug!(
-                                "Absolute index set of removal record {index}: {:?}",
-                                invalid_removal_record.absolute_indices
+                let lustration_status = if current_block_height
+                    > ConsensusRuleSet::first_lustration_block(network)
+                {
+                    Some(
+                        self.global_state_lock
+                            .lock_guard()
+                            .await
+                            .chain
+                            .tip()
+                            .header()
+                            .pow
+                            .lustration_status()
+                            .expect("Lustration status of tip must be parseable after hardfork"),
+                    )
+                } else {
+                    None
+                };
+
+                let admission = tx_admission::admissible(
+                    &transaction,
+                    &mutator_set_accumulator_after,
+                    lustration_status,
+                    already_known,
+                    self.now(),
+                    network,
+                    consensus_rule_set,
+                )
+                .await;
+
+                if let Err(rejection) = admission {
+                    let txid = transaction.kernel.txid();
+                    let sanction = match rejection {
+                        TxAdmissionError::HasCoinbase => {
+                            warn!("Received non-mined transaction with coinbase.");
+                            Some(NegativePeerSanction::NonMinedTransactionHasCoinbase)
+                        }
+                        TxAdmissionError::NegativeFee => {
+                            warn!("Received negative-fee transaction.");
+                            Some(NegativePeerSanction::TransactionWithNegativeFee)
+                        }
+                        TxAdmissionError::AlreadyKnown => {
+                            // Not held against the peer: the same transaction
+                            // is requested from several peers, so duplicates
+                            // arrive whenever more than one of them answers.
+                            warn!("Received transaction that was already known");
+                            None
+                        }
+                        TxAdmissionError::TooOld => {
+                            // TODO: Consider punishing here
+                            warn!("Received too old tx");
+                            None
+                        }
+                        TxAdmissionError::FutureDated => {
+                            // TODO: Consider punishing here
+                            warn!(
+                                "Received tx too far into the future. Got timestamp: {:?}",
+                                transaction.kernel.timestamp
                             );
-                            match removal_record_error_code {
-                                Ok(_) => unreachable!(),
-                                Err(RemovalRecordValidityError::AbsentAuthenticatedChunk) => {
-                                    debug!("invalid because membership proof is missing");
-                                }
-                                Err(RemovalRecordValidityError::InvalidSwbfiMmrMp {
-                                    chunk_index,
-                                }) => {
-                                    debug!("invalid because membership proof for chunk index {chunk_index} is invalid");
-                                }
-                            };
-                            self.punish(NegativePeerSanction::UnconfirmableTransaction)
-                                .await?;
-                            return Ok(KEEP_CONNECTION_ALIVE);
+                            None
                         }
-                        Err(TransactionConfirmabilityError::DuplicateInputs) => {
-                            warn!("duplicate inputs");
-                            self.punish(NegativePeerSanction::DoubleSpendingTransaction)
-                                .await?;
-                            return Ok(KEEP_CONNECTION_ALIVE);
+                        TxAdmissionError::NotConfirmable(error) => {
+                            warn!(
+                                "Received unconfirmable transaction with TXID {txid}. \
+                                 Unconfirmable because:"
+                            );
+                            Some(Self::sanction_for_unconfirmable(
+                                &transaction,
+                                &mutator_set_accumulator_after,
+                                error,
+                            ))
                         }
-                        Err(TransactionConfirmabilityError::AlreadySpentInput(index)) => {
-                            warn!("already spent input (at index {index})");
-                            self.punish(NegativePeerSanction::DoubleSpendingTransaction)
-                                .await?;
-                            return Ok(KEEP_CONNECTION_ALIVE);
+                        TxAdmissionError::CannotApplyToMutatorSet => {
+                            warn!("Cannot apply transaction to current mutator set.");
+                            warn!("Transaction ID: {txid}");
+                            Some(NegativePeerSanction::CannotApplyTransactionToMutatorSet)
                         }
-                        Err(TransactionConfirmabilityError::RemovalRecordUnpackFailure) => {
-                            warn!("Failed to unpack removal records");
-                            self.punish(NegativePeerSanction::InvalidTransaction)
-                                .await?;
-                            return Ok(KEEP_CONNECTION_ALIVE);
-                        }
-                    };
-                }
-
-                // If transaction cannot be applied to mutator set, punish.
-                // I don't think this can happen when above checks pass but we include
-                // the check to ensure that transaction can be applied.
-                let ms_update = MutatorSetUpdate::new(
-                    transaction.kernel.inputs.clone(),
-                    transaction.kernel.outputs.clone(),
-                );
-                let can_apply = ms_update
-                    .apply_to_accumulator(&mut mutator_set_accumulator_after.clone())
-                    .is_ok();
-                if !can_apply {
-                    warn!("Cannot apply transaction to current mutator set.");
-                    warn!("Transaction ID: {}", transaction.kernel.txid());
-                    self.punish(NegativePeerSanction::CannotApplyTransactionToMutatorSet)
-                        .await?;
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
-                let tx_timestamp = transaction.kernel.timestamp;
-
-                // 6. Ignore if transaction is too old
-                let now = self.now();
-                if tx_timestamp < now - MEMPOOL_TX_THRESHOLD_AGE {
-                    // TODO: Consider punishing here
-                    warn!("Received too old tx");
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
-                // 7. Ignore if transaction is too far into the future
-                if tx_timestamp >= now + FUTUREDATING_LIMIT {
-                    // TODO: Consider punishing here
-                    warn!("Received tx too far into the future. Got timestamp: {tx_timestamp:?}");
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
-                // 8. If transaction is missing lustrations, punish.
-                if current_block_height > ConsensusRuleSet::first_lustration_block(network) {
-                    let lustration_status = self
-                        .global_state_lock
-                        .lock_guard()
-                        .await
-                        .chain
-                        .tip()
-                        .header()
-                        .pow
-                        .lustration_status()
-                        .expect("Lustration status of tip must be parseable after hardfork");
-                    match transaction.kernel.verified_lustration_amount(
-                        lustration_status.max_lustrating_aocl_leaf_index,
-                        consensus_rule_set.fix_lustration_double_counting(),
-                    ) {
-                        Ok(amt) => {
-                            if amt > lustration_status.counter {
-                                warn!("Rejecting transaction that would make lustration counter negative");
-                                self.punish(
-                                    NegativePeerSanction::LustrationsWouldMakeCounterNegative,
-                                )
-                                .await?;
-                                return Ok(KEEP_CONNECTION_ALIVE);
-                            }
-                        }
-                        Err(TransactionLustrationError::MissingLustrationAnnouncement) => {
+                        TxAdmissionError::Lustration(
+                            TransactionLustrationError::MissingLustrationAnnouncement,
+                        ) => {
                             warn!("Missing lustration announcement in incoming transaction");
-                            self.punish(NegativePeerSanction::MissingLustrationAnnouncement)
-                                .await?;
-                            return Ok(KEEP_CONNECTION_ALIVE);
+                            Some(NegativePeerSanction::MissingLustrationAnnouncement)
                         }
-                        Err(_) => {
+                        TxAdmissionError::Lustration(_) => {
                             warn!("Invalid transaction");
-                            self.punish(NegativePeerSanction::InvalidTransaction)
-                                .await?;
-                            return Ok(KEEP_CONNECTION_ALIVE);
+                            Some(NegativePeerSanction::InvalidTransaction)
+                        }
+                        TxAdmissionError::LustrationsWouldMakeCounterNegative => {
+                            warn!(
+                                "Rejecting transaction that would make lustration counter negative"
+                            );
+                            Some(NegativePeerSanction::LustrationsWouldMakeCounterNegative)
+                        }
+                        TxAdmissionError::Invalid => {
+                            warn!("Received invalid tx");
+                            Some(NegativePeerSanction::InvalidTransaction)
                         }
                     };
+
+                    if let Some(sanction) = sanction {
+                        self.punish(sanction).await?;
+                    }
+
+                    return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
                 // Otherwise, relay to main
