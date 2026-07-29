@@ -3,11 +3,10 @@ use std::ops::BitOr;
 use std::ops::Not;
 
 use itertools::Itertools;
+use neptune_p2p::peer::transfer_sync_bit_mask::TransferSyncBitMask;
+use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
-use rand::rngs::StdRng;
-use serde::Deserialize;
-use serde::Serialize;
 
 /// A [`SynchronizationBitMask`] is a representation of the synchronization
 /// state of a set of indexed elements (such as blocks). It captures the state
@@ -36,7 +35,7 @@ use serde::Serialize;
 // to the highest possible value. So in particular, the bit at index
 // `lower_bound` must always be 0. Whenever this bit is set to 1, the
 // `lower_bound` increases.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct SynchronizationBitMask {
     // inclusive
     pub lower_bound: u64,
@@ -141,6 +140,59 @@ impl BitOr for SynchronizationBitMask {
             limbs,
         }
         .canonize()
+    }
+}
+
+impl From<SynchronizationBitMask> for TransferSyncBitMask {
+    fn from(bit_map: SynchronizationBitMask) -> Self {
+        TransferSyncBitMask {
+            lower_bound: bit_map.lower_bound,
+            upper_bound: bit_map.upper_bound,
+            limbs: bit_map.limbs,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, thiserror::Error)]
+pub enum SynchronizationBitMaskTransferError {
+    #[error("too few limbs")]
+    TooFewLimbs,
+    #[error("too many limbs")]
+    TooManyLimbs,
+    #[error("inverted bounds")]
+    InvertedBounds,
+}
+
+impl TryFrom<TransferSyncBitMask> for SynchronizationBitMask {
+    type Error = SynchronizationBitMaskTransferError;
+
+    fn try_from(t: TransferSyncBitMask) -> Result<Self, Self::Error> {
+        if t.upper_bound < t.lower_bound {
+            return Err(SynchronizationBitMaskTransferError::InvertedBounds);
+        }
+
+        let offset = t.lower_bound / 32;
+        let onset = t.upper_bound.saturating_sub(1) / 32;
+        let expected_num_limbs = if t.lower_bound == t.upper_bound {
+            0
+        } else {
+            1 + onset - offset
+        };
+        let actual_num_limbs = u64::try_from(t.limbs.len()).expect("usize fits in u64");
+
+        if expected_num_limbs < actual_num_limbs {
+            return Err(SynchronizationBitMaskTransferError::TooManyLimbs);
+        }
+
+        if expected_num_limbs > actual_num_limbs {
+            return Err(SynchronizationBitMaskTransferError::TooFewLimbs);
+        }
+
+        Ok(SynchronizationBitMask {
+            lower_bound: t.lower_bound,
+            upper_bound: t.upper_bound,
+            limbs: t.limbs,
+        })
     }
 }
 
@@ -422,6 +474,7 @@ impl SynchronizationBitMask {
         assert!(max < self.upper_bound);
         assert!(min < self.upper_bound);
         assert!(max >= min);
+        let min = u64::max(min, self.lower_bound);
         let first_full_limb = min.div_ceil(32);
         let first_index_in_full_limb = min.div_ceil(32) * 32;
         let successor_of_last_full_limb = max / 32;
@@ -463,15 +516,15 @@ impl SynchronizationBitMask {
         let mut limbs = (0..num_limbs)
             .map(|_| rng.next_u32())
             .collect::<VecDeque<u32>>();
-        if let Some(first) = limbs.front_mut()
-            && !lower_bound.is_multiple_of(32)
-        {
-            *first |= (1 << (lower_bound % 32)) - 1;
+        if !lower_bound.is_multiple_of(32) {
+            if let Some(first) = limbs.front_mut() {
+                *first |= (1 << (lower_bound % 32)) - 1;
+            }
         }
-        if let Some(last) = limbs.back_mut()
-            && !upper_bound.is_multiple_of(32)
-        {
-            *last &= u32::MAX >> (32 - (upper_bound % 32));
+        if !upper_bound.is_multiple_of(32) {
+            if let Some(last) = limbs.back_mut() {
+                *last &= u32::MAX >> (32 - (upper_bound % 32));
+            }
         }
 
         SynchronizationBitMask {
@@ -491,6 +544,7 @@ pub mod test {
     use proptest::prelude::Just;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
+    use proptest::prop_oneof;
     use proptest_arbitrary_interop::arb;
     use rand::rng;
     use test_strategy::proptest;
@@ -519,17 +573,71 @@ pub mod test {
             while self.limbs.len() > num_limbs {
                 self.limbs.pop_back();
             }
-            if let Some(last) = self.limbs.back_mut()
-                && !new_upper_bound.is_multiple_of(32)
-            {
-                let shamt = 32 - (new_upper_bound % 32);
-                *last &= u32::MAX >> shamt;
+            if !new_upper_bound.is_multiple_of(32) {
+                if let Some(last) = self.limbs.back_mut() {
+                    let shamt = 32 - (new_upper_bound % 32);
+                    *last &= u32::MAX >> shamt;
+                }
             }
 
             self.upper_bound = new_upper_bound;
             self.lower_bound = new_lower_bound;
             self
         }
+    }
+
+    #[test]
+    fn transfer_rejects_inconsistent_bit_mask() {
+        for (lower_bound, upper_bound, limbs) in [
+            (0_u64, u64::MAX, vec![0_u32]), // far too few limbs for the range
+            (0, 64, vec![]),                // no limbs at all
+            (0, 32, vec![0, 0]),            // too many limbs
+            (100, 0, vec![]),               // inverted bounds
+        ] {
+            // Bincode encodes a struct exactly like a tuple of its fields, so
+            // this is the wire encoding of a peer-chosen bit mask.
+            let transfer = TransferSyncBitMask {
+                lower_bound,
+                upper_bound,
+                limbs: limbs.into(),
+            };
+            assert!(
+                SynchronizationBitMask::try_from(transfer).is_err(),
+                "must reject bit mask over [{lower_bound}, {upper_bound})"
+            );
+        }
+    }
+
+    #[proptest]
+    fn transfer_bit_mask_cannot_panic_reconciliation(
+        // Bounds must sometimes be small: a `lower_bound` of astronomical size
+        // makes `limb` short-circuit before it indexes anything.
+        #[strategy(prop_oneof![0u64..2048, arb::<u64>()])] lower_bound: u64,
+        #[strategy(prop_oneof![0u64..2048, arb::<u64>()])] upper_bound: u64,
+        #[strategy(vec(arb::<u32>(), 0..5))] limbs: Vec<u32>,
+    ) {
+        let transfer = TransferSyncBitMask {
+            lower_bound,
+            upper_bound,
+            limbs: limbs.into(),
+        };
+        if let Ok(peer_coverage) = SynchronizationBitMask::try_from(transfer) {
+            let own_coverage = SynchronizationBitMask::new(0, 1000);
+            black_box(own_coverage.reconcile(&peer_coverage));
+        }
+    }
+
+    #[proptest]
+    fn transfer_round_trip(
+        #[strategy(0_u64..(1<<15))] lower_bound: u64,
+        #[strategy(1u64..(1<<8))] length: u64,
+        #[strategy(0u64..(1<<8))] expansion: u64,
+    ) {
+        let bit_mask = SynchronizationBitMask::random(lower_bound, lower_bound + length)
+            .expand(lower_bound + length + expansion);
+        let transfer = TransferSyncBitMask::from(bit_mask.clone());
+        let bit_mask2 = SynchronizationBitMask::try_from(transfer).unwrap();
+        prop_assert_eq!(bit_mask, bit_mask2);
     }
 
     #[proptest]

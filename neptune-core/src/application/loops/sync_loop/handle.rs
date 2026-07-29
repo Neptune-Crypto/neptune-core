@@ -1,5 +1,4 @@
 use neptune_consensus::block::Block;
-use neptune_p2p::synchronization_bit_mask::SynchronizationBitMask;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::network::Network;
 use tokio::sync::mpsc::Receiver;
@@ -9,6 +8,7 @@ use tokio::task::JoinHandle;
 use crate::application::loops::sync_loop::block_validator::BlockValidator;
 use crate::application::loops::sync_loop::channel::MainToSync;
 use crate::application::loops::sync_loop::channel::SyncToMain;
+use crate::application::loops::sync_loop::synchronization_bit_mask::SynchronizationBitMask;
 use crate::application::loops::sync_loop::PeerHandle;
 use crate::application::loops::sync_loop::SyncLoop;
 

@@ -66,6 +66,7 @@ use crate::application::loops::main_loop::MAX_NUM_DIGESTS_IN_BATCH_REQUEST;
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
 use crate::application::loops::peer_loop::channel::PeerTaskToMain;
 use crate::application::loops::peer_loop::channel::PeerTaskToMainTransaction;
+use crate::application::loops::sync_loop::synchronization_bit_mask::SynchronizationBitMask;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
 use crate::state::mining::block_proposal::BlockProposalRejectError;
@@ -1916,7 +1917,7 @@ impl PeerLoopHandler {
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
-            PeerMessage::SyncCoverage(synchronization_bit_mask) => {
+            PeerMessage::SyncCoverage(transfer_sync_bit_mask) => {
                 log_slow_scope!(fn_name!() + "::PeerMessage::SyncCoverage");
 
                 // Test if sync mode is active.
@@ -1928,8 +1929,17 @@ impl PeerLoopHandler {
                     .sync_anchor
                     .is_some()
                 {
-                    // If so, pass bit mask on to main loop for relaying to sync
-                    // loop.
+                    // Decode
+                    let Ok(synchronization_bit_mask) =
+                        SynchronizationBitMask::try_from(transfer_sync_bit_mask)
+                    else {
+                        // decode failure: peer sent malicious bit mask
+                        self.punish(NegativePeerSanction::InvalidSyncCoverage)
+                            .await?;
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    };
+
+                    // Pass bit mask on to main loop for relaying to sync loop.
                     self.to_main_tx
                         .send(PeerTaskToMain::SyncCoverage(
                             synchronization_bit_mask,
@@ -2104,7 +2114,8 @@ impl PeerLoopHandler {
                 peer_handle,
             } => {
                 if self.peer_id == peer_handle {
-                    peer.send(PeerMessage::SyncCoverage(coverage)).await?;
+                    peer.send(PeerMessage::SyncCoverage(coverage.into()))
+                        .await?;
                 }
                 Ok(KEEP_CONNECTION_ALIVE)
             }

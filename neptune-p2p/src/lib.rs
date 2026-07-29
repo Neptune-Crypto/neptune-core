@@ -15,4 +15,3 @@
 
 pub mod block_proposal_notification;
 pub mod peer;
-pub mod synchronization_bit_mask;

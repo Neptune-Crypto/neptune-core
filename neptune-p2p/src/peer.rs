@@ -3,6 +3,7 @@ pub mod peer_block_notifications;
 pub mod peer_info;
 pub mod transaction_notification;
 pub mod transfer_block;
+pub mod transfer_sync_bit_mask;
 pub mod transfer_transaction;
 
 use std::fmt::Display;
@@ -43,7 +44,7 @@ use transfer_transaction::TransferTransaction;
 
 use crate::block_proposal_notification::BlockProposalNotification;
 use crate::peer::transfer_block::TransferBlock;
-use crate::synchronization_bit_mask::SynchronizationBitMask;
+use crate::peer::transfer_sync_bit_mask::TransferSyncBitMask;
 
 pub type InstanceId = u128;
 
@@ -119,6 +120,9 @@ pub enum NegativePeerSanction {
     /// A transaction was received that would make the lustration counter
     /// negative.
     LustrationsWouldMakeCounterNegative,
+
+    /// Peer shared invalid synchronization bit mask.
+    InvalidSyncCoverage,
 }
 
 /// The reason for improving a peer's standing
@@ -180,6 +184,7 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::UnrelayableTransaction => -10,
             NegativePeerSanction::MissingLustrationAnnouncement => -1,
             NegativePeerSanction::LustrationsWouldMakeCounterNegative => -1,
+            NegativePeerSanction::InvalidSyncCoverage => -100,
         }
     }
 }
@@ -418,7 +423,7 @@ pub enum PeerMessage {
     /// Inform peer that we are disconnecting them.
     Bye,
     ConnectionStatus(TransferConnectionStatus),
-    SyncCoverage(SynchronizationBitMask),
+    SyncCoverage(TransferSyncBitMask),
     // New variants must be added here at the bottom to be backwards compatible.
 }
 
@@ -948,6 +953,8 @@ impl rand::distr::Distribution<NegativePeerSanction> for rand::distr::StandardUn
 
             39 => NegativePeerSanction::MissingLustrationAnnouncement,
             40 => NegativePeerSanction::LustrationsWouldMakeCounterNegative,
+
+            41 => NegativePeerSanction::InvalidSyncCoverage,
 
             _ => unreachable!(),
         }
