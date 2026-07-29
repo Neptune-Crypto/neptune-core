@@ -6,7 +6,7 @@ use serde::Serialize;
 use tasm_lib::prelude::Digest;
 
 use crate::consensus_rule_set::ConsensusRuleSet;
-use crate::proof_abstractions::verifier::verify;
+use crate::proof_abstractions::verifier::verify_transaction_proof;
 use crate::transaction::validity::neptune_proof::NeptuneProof;
 use crate::transaction::validity::single_proof::single_proof_claim;
 use crate::transaction::BFieldCodec;
@@ -143,7 +143,7 @@ impl TransactionProof {
             }
             TransactionProof::SingleProof(single_proof) => {
                 let claim = single_proof_claim(kernel_mast_hash, consensus_rule_set);
-                verify(claim, single_proof.clone(), network).await
+                verify_transaction_proof(claim, single_proof.clone(), network).await
             }
             TransactionProof::ProofCollection(proof_collection) => {
                 proof_collection.verify(kernel_mast_hash, network).await
