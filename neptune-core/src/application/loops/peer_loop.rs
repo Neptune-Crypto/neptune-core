@@ -332,8 +332,6 @@ impl PeerLoopHandler {
             let new_block_has_proof_of_work =
                 new_block.has_proof_of_work(network, previous_block.header());
             debug!("new block has proof of work? {new_block_has_proof_of_work}");
-            let new_block_is_valid = new_block.is_valid(previous_block, now, network).await;
-            debug!("new block is valid? {new_block_is_valid}");
             if !new_block_has_proof_of_work {
                 warn!(
                     "Received invalid proof-of-work for block of height {} from peer with IP {}",
@@ -352,7 +350,11 @@ impl PeerLoopHandler {
                 .await?;
                 warn!("Failed to validate block due to insufficient PoW");
                 return Ok(None);
-            } else if !new_block_is_valid {
+            }
+
+            let new_block_is_valid = new_block.is_valid(previous_block, now, network).await;
+            debug!("new block is valid? {new_block_is_valid}");
+            if !new_block_is_valid {
                 warn!(
                     "Received invalid block of height {} from peer with IP {}",
                     new_block.kernel.header.height, self.peer_id
