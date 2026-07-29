@@ -682,9 +682,16 @@ impl WalletState {
     }
 
     /// Add an [`ExpectedUtxo`] to the database, ensuring no duplicates.
+    ///
+    /// Expected UTXOs with unknown type scripts or invalid type script states
+    /// are rejected, as the wallet cannot spend them.
     pub(crate) async fn add_expected_utxo(&mut self, expected_utxo: ExpectedUtxo) {
         if !expected_utxo.utxo.all_type_script_states_are_valid() {
-            warn!("adding expected UTXO with unknown type scripts or invalid states to expected UTXOs database");
+            warn!(
+                "refusing to add expected UTXO with unknown type scripts or invalid states to \
+                 expected UTXOs database"
+            );
+            return;
         }
 
         self.wallet_db.insert_expected_utxo(expected_utxo).await;
@@ -1941,8 +1948,8 @@ impl WalletState {
             .into_iter()
             .chain(outputs_recovered_through_scan_mode)
             .chain(offchain_received_outputs.iter().cloned())
-            .filter(|announced_utxo| announced_utxo.utxo.all_type_script_states_are_valid())
-            .chain(guesser_fee_outputs);
+            .chain(guesser_fee_outputs)
+            .filter(|incoming_utxo| incoming_utxo.utxo.all_type_script_states_are_valid());
         let incoming: HashMap<AdditionRecord, IncomingUtxo> = incoming
             .map(|incoming_utxo| (incoming_utxo.addition_record(), incoming_utxo))
             .collect();
