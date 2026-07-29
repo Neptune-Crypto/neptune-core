@@ -66,6 +66,9 @@ impl Difficulty {
 
     /// Convert a difficulty to a target threshold so as to test a block's
     /// proof-of-work.
+    ///
+    /// # Panics
+    /// - If the difficulty is zero.
     pub fn target(&self) -> Digest {
         let difficulty_as_bui: BigUint = BigUint::from(*self);
         let max_threshold_as_bui: BigUint =

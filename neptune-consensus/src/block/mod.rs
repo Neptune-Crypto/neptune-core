@@ -974,6 +974,12 @@ impl Block {
         let target = if consensus_rule_set.use_parent_difficulty() {
             parent_target
         } else {
+            // Reject values that the difficulty control mechanism can never
+            // produce, rather than dividing by zero.
+            if self.header().difficulty < Difficulty::MINIMUM {
+                return false;
+            }
+
             self.header().difficulty.target()
         };
         let auth_paths = self.pow_mast_paths();
@@ -1458,6 +1464,44 @@ pub(crate) mod tests {
             "bb1fa49a35a294dd2c09811c648c4d76f6ea17acc61fe7a6f1c3c8d81c967bc68e7cdb41f472544e",
             Block::genesis(Network::Testnet(0)).hash().to_hex()
         );
+    }
+
+    #[test]
+    fn pow_verify_rejects_difficulty_below_minimum() {
+        let network = Network::Testnet(42);
+        let genesis = Block::genesis(network);
+        let parent_target = genesis.header().difficulty.target();
+
+        // `Difficulty`'s derived decoders build the value field-by-field,
+        // without going through the constructor that enforces the minimum. A
+        // peer can therefore put any value on the wire, including zero.
+        let encoding_len = Difficulty::MINIMUM.encode().len();
+        let zero_difficulty =
+            *Difficulty::decode(&vec![BFieldElement::new(0); encoding_len]).unwrap();
+        assert!(
+            zero_difficulty < Difficulty::MINIMUM,
+            "test assumption: decoding bypasses the minimum difficulty"
+        );
+
+        for consensus_rule_set in [
+            ConsensusRuleSet::HardforkBeta,
+            ConsensusRuleSet::HardforkGamma,
+        ] {
+            assert!(
+                !consensus_rule_set.use_parent_difficulty(),
+                "test assumption: {consensus_rule_set} must use the block's own difficulty"
+            );
+
+            let mut block = invalid_empty_block(&genesis, network);
+            block.kernel.header.difficulty = zero_difficulty;
+            block.unset_digest();
+
+            assert!(
+                !block.pow_verify(parent_target, consensus_rule_set),
+                "block with zero difficulty must be rejected, not panicked on, \
+                 under {consensus_rule_set}"
+            );
+        }
     }
 
     #[test]
