@@ -76,7 +76,9 @@ use crate::state::GlobalStateLock;
 
 const STANDARD_BLOCK_BATCH_SIZE: usize = 35;
 const MAX_PEER_LIST_LENGTH: usize = 10;
-const MINIMUM_BLOCK_BATCH_SIZE: usize = 2;
+
+/// A batch response and request must carry at least this many blocks.
+const MINIMUM_BLOCK_BATCH_SIZE: usize = 1;
 
 /// Maximum size in bytes for a single block during fork reconciliation. Blocks
 /// larger than this are rejected to prevent RAM exhaustion attacks.
@@ -1436,7 +1438,7 @@ impl PeerLoopHandler {
                     authenticated_blocks.len()
                 );
 
-                // (Alan:) why is there even a minimum?
+                // Guards the indexing of the first block, below.
                 if authenticated_blocks.len() < MINIMUM_BLOCK_BATCH_SIZE {
                     warn!("Got smaller batch response than allowed");
                     self.punish(NegativePeerSanction::TooShortBlockBatch)
