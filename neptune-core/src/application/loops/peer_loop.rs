@@ -1208,12 +1208,20 @@ impl PeerLoopHandler {
                         return Ok(KEEP_CONNECTION_ALIVE);
                     }
 
-                    // Ensure that at least the block proof is valid, before
-                    // storing. Otherwise this path is open to a DOS attack.
-                    // Full validation in relation to the predecessor happens in
-                    // the sync loop.
-                    // No locks may be held here, since proof validation takes milliseconds.
-                    let is_valid = block.validate_block_proof(network).await.is_ok();
+                    // Establish everything about the block that can be
+                    // established without its predecessor, before storing it.
+                    // Otherwise this path is open to a DOS attack. Validation
+                    // relative to the predecessor happens in the sync loop,
+                    // which is where the predecessor becomes known.
+                    //
+                    // Note that this leaves the block's place in the chain
+                    // unchecked: its `prev_block_digest` names a block we may
+                    // not have, and nothing here ties the block to the fork
+                    // being synced.
+                    //
+                    // No locks may be held here, since proof validation takes
+                    // milliseconds.
+                    let is_valid = block.solo_validate(self.now(), network).await.is_ok();
                     if !is_valid {
                         self.punish(NegativePeerSanction::InvalidBlock((height, digest)))
                             .await?;
