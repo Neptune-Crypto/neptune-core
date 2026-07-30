@@ -25,10 +25,12 @@ use neptune_cash::api::tx_initiation::builder::tx_output_list_builder::OutputFor
 use neptune_cash::application::rpc::auth;
 use neptune_cash::application::rpc::server::coinbase_output_readable::CoinbaseOutputReadable;
 use neptune_cash::application::rpc::server::error::RpcError;
+use neptune_cash::application::rpc::server::mempool_transaction_info::MempoolTransactionInfo;
 use neptune_cash::application::rpc::server::RPCClient;
 use neptune_cash::state::wallet::wallet_status::WalletStatus;
 use neptune_cash::state::wallet::wallet_status::WalletStatusExportFormat;
 use neptune_mempool::transaction_kernel_id::Txid;
+use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::block_selector::BlockSelector;
 use neptune_primitives::block_selector::BlockSelectorLiteral;
@@ -627,6 +629,41 @@ async fn main() -> Result<()> {
                 println!("{res}");
             } else {
                 println!("Block did not exist in database.");
+            }
+        }
+        Command::Blockchain(BlockchainCommand::AdditionRecordStatus {
+            addition_record,
+            max_search_depth,
+        }) => {
+            let addition_record = AdditionRecord::new(addition_record.0);
+            let origin_block = client
+                .utxo_origin_block(ctx, token, addition_record, max_search_depth)
+                .await??;
+
+            if let Some(block_digest) = origin_block {
+                let block_info = client
+                    .block_info(ctx, token, BlockSelector::Digest(block_digest))
+                    .await??;
+                match block_info {
+                    Some(block_info) => {
+                        println!("Mined in block {} ({:x})", block_info.height, block_digest)
+                    }
+                    None => println!("Mined in block {block_digest:x}"),
+                }
+            } else if let Some((tx_info, position, queue_len)) =
+                find_addition_record_in_mempool(&client, ctx, token, addition_record).await?
+            {
+                println!("In mempool, in transaction {}", tx_info.id);
+                println!("fee: {}", tx_info.fee);
+                println!("proof type: {}", tx_info.proof_type);
+                println!("synced: {}", if tx_info.synced { "yes" } else { "no" });
+                println!(
+                    "mempool queue position: {} of {} (by descending fee density)",
+                    position + 1,
+                    queue_len
+                );
+            } else {
+                println!("Unknown");
             }
         }
         Command::Blockchain(BlockchainCommand::RevalidateHistory { first, last }) => {
@@ -1290,6 +1327,36 @@ async fn find_index_of(
     }
 
     bail!("unreachable");
+}
+
+/// Return the mempool transaction that contains the given addition record, if
+/// any such transaction is in the mempool, along with its position in the
+/// mempool's queue and the queue's length.
+///
+/// The queue is ordered by descending fee density, so position 0 is the
+/// transaction a miner is expected to pick first.
+async fn find_addition_record_in_mempool(
+    client: &RPCClient,
+    ctx: context::Context,
+    token: auth::Token,
+    addition_record: AdditionRecord,
+) -> Result<Option<(MempoolTransactionInfo, usize, usize)>> {
+    let num_txs = client.mempool_tx_count(ctx, token).await??;
+    let queue = client.mempool_overview(ctx, token, 0, num_txs).await??;
+    let queue_len = queue.len();
+
+    for (position, tx_info) in queue.into_iter().enumerate() {
+        let Some(kernel) = client.mempool_tx_kernel(ctx, token, tx_info.id).await?? else {
+            // transaction left the mempool while we were scanning it
+            continue;
+        };
+
+        if kernel.outputs.contains(&addition_record) {
+            return Ok(Some((tx_info, position, queue_len)));
+        }
+    }
+
+    Ok(None)
 }
 
 // processes utxo-notifications in TxParams outputs, if any.

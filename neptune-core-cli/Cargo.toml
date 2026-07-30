@@ -27,6 +27,7 @@ path = "src/main.rs"
 neptune-cash = { version = "0.15.0", path = "../neptune-core" }
 neptune-consensus = { version = "0.15.0", path = "../neptune-consensus" }
 neptune-mempool = { version = "0.15.0", path = "../neptune-mempool" }
+neptune-mutator-set = { version = "0.15.0", path = "../neptune-mutator-set" }
 neptune-primitives = { version = "0.15.0", path = "../neptune-primitives" }
 neptune-wallet = { version = "0.15.0", path = "../neptune-wallet" }
 anyhow = { version = "1.0" }

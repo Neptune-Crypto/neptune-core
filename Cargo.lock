@@ -3705,6 +3705,7 @@ dependencies = [
  "neptune-cash",
  "neptune-consensus",
  "neptune-mempool",
+ "neptune-mutator-set",
  "neptune-primitives",
  "neptune-wallet",
  "proptest",
