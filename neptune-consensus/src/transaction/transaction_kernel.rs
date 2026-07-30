@@ -10,6 +10,7 @@ use neptune_mutator_set::removal_record::RemovalRecord;
 use neptune_primitives::mast_hash::HasDiscriminant;
 use neptune_primitives::mast_hash::MastHash;
 use neptune_primitives::timestamp::Timestamp;
+use num_traits::CheckedAdd;
 use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
@@ -113,6 +114,10 @@ pub enum TransactionConfirmabilityError {
 pub enum TransactionLustrationError {
     InvalidAoclRangeForIndexSet,
     MissingLustrationAnnouncement,
+
+    /// The announced lustrations sum to something that is not a representable
+    /// amount.
+    LustrationAmountOutOfRange,
 }
 
 impl From<RemovalRecordListUnpackError> for TransactionConfirmabilityError {
@@ -286,7 +291,9 @@ impl TransactionKernel {
                 let is_before_barrier =
                     lustration.aocl_leaf_index <= max_lustrating_aocl_leaf_index;
                 if is_before_barrier || !fix_lustration_double_counting {
-                    acc_amount += lustration.utxo.get_native_currency_amount();
+                    acc_amount = acc_amount
+                        .checked_add(&lustration.utxo.get_native_currency_amount())
+                        .ok_or(TransactionLustrationError::LustrationAmountOutOfRange)?;
                 }
             }
         }
