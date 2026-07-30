@@ -618,26 +618,9 @@ impl Block {
             return Err(BlockValidationError::CumulativeProofOfWork);
         }
 
-        // 0.g)
-        let future_limit = now + FUTUREDATING_LIMIT;
-        if self.kernel.header.timestamp >= future_limit {
-            return Err(BlockValidationError::FutureDating);
-        }
-
-        // 1.a, 1.b, 1.c, 1.d
-        self.validate_block_proof(network).await?;
-
-        // 1.e)
-        if self.size() > consensus_rule_set.max_block_size() {
-            return Err(BlockValidationError::MaxSize);
-        }
-
-        // 1.f)
-        if consensus_rule_set.requires_version_in_pow()
-            && self.header().version != self.header().pow.version_in_pow()
-        {
-            return Err(BlockValidationError::VersionMismatch);
-        }
+        // Everything that does not depend on the predecessor, including the
+        // block's proof.
+        self.solo_validate(now, network).await?;
 
         // 2.a)
         let inputs = RemovalRecordList::try_unpack(self.body().transaction_kernel.inputs.clone())
@@ -656,17 +639,6 @@ impl Block {
             return Err(BlockValidationError::TransactionMutatorSetMismatch);
         }
 
-        // 2.c)
-        let mut absolute_index_sets = inputs
-            .iter()
-            .map(|removal_record| removal_record.absolute_indices.to_vec())
-            .collect_vec();
-        absolute_index_sets.sort();
-        absolute_index_sets.dedup();
-        if absolute_index_sets.len() != inputs.len() {
-            return Err(BlockValidationError::RemovalRecordsUniqueness);
-        }
-
         let mutator_set_update = MutatorSetUpdate::new(
             inputs.clone(),
             self.body().transaction_kernel.outputs.clone(),
@@ -682,54 +654,6 @@ impl Block {
         // 2.e)
         if msa.hash() != self.body().mutator_set_accumulator.hash() {
             return Err(BlockValidationError::MutatorSetUpdateIntegrity);
-        }
-
-        // 2.f)
-        let tx_timestamp = self.body().transaction_kernel.timestamp;
-        let block_timestamp = self.header().timestamp;
-        if tx_timestamp > block_timestamp
-            || consensus_rule_set
-                .transaction_backdating_threshold()
-                .is_some_and(|limit| block_timestamp - tx_timestamp > limit)
-        {
-            return Err(BlockValidationError::TransactionTimestamp);
-        }
-
-        let block_subsidy = Self::block_subsidy(self.kernel.header.height);
-        let coinbase = self.kernel.body.transaction_kernel.coinbase;
-        if let Some(coinbase) = coinbase {
-            // 2.g)
-            if coinbase > block_subsidy {
-                return Err(BlockValidationError::CoinbaseTooBig);
-            }
-
-            // 2.h)
-            if coinbase.is_negative() {
-                return Err(BlockValidationError::NegativeCoinbase);
-            }
-        }
-
-        // 2.i)
-        let fee = self.kernel.body.transaction_kernel.fee;
-        if fee.is_negative() {
-            return Err(BlockValidationError::NegativeFee);
-        }
-
-        // 2.j)
-        if inputs.len() > consensus_rule_set.max_num_inputs() {
-            return Err(BlockValidationError::TooManyInputs);
-        }
-
-        // 2.k)
-        if self.body().transaction_kernel.outputs.len() > consensus_rule_set.max_num_outputs() {
-            return Err(BlockValidationError::TooManyOutputs);
-        }
-
-        // 2.l)
-        if self.body().transaction_kernel.announcements.len()
-            > consensus_rule_set.max_num_announcements()
-        {
-            return Err(BlockValidationError::TooManyAnnouncements);
         }
 
         let first_lustration_block = ConsensusRuleSet::first_lustration_block(network);
@@ -826,6 +750,149 @@ impl Block {
                 }
             }
         }
+
+        Ok(())
+    }
+
+    /// Validate everything about a block that can be established in isolation,
+    /// without knowledge of its predecessor.
+    ///
+    /// This is exactly the subset of [`Self::validate`]'s rules that does not
+    /// mention the previous block, and `validate` calls this function, so every
+    /// block that validates in full also validates in isolation. The rules that
+    /// necessarily fall outside are those comparing the block against its
+    /// predecessor: its height relative to the parent's, the parent's digest,
+    /// the mutator set it starts from, the difficulty, and the accumulated
+    /// proof-of-work.
+    ///
+    /// Note in particular what this does *not* establish: that the block
+    /// belongs to any chain. A block can pass here and still be unusable.
+    ///
+    /// Intended for judging a block before its predecessor is known.
+    ///
+    /// The block's proof is verified last, as that costs orders of magnitude
+    /// more than everything else here put together, and the block comes from a
+    /// peer who chooses when we do it.
+    pub async fn solo_validate(
+        &self,
+        now: Timestamp,
+        network: Network,
+    ) -> Result<(), BlockValidationError> {
+        let height = self.header().height;
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, height);
+
+        // 0.a) The height is implied by the block MMR accumulator, which lives
+        // in the body and is therefore covered by the proof. Genesis carries no
+        // leafs, and every block appends exactly its predecessor, so on a chain
+        // descending from genesis the leaf count is the height. Checking it
+        // pins the header's height without reference to any predecessor.
+        //
+        // TODO: Enable this check in tests too. It is disabled there because the
+        // test-block generators populate the block MMR accumulator arbitrarily,
+        // so the blocks they produce have a leaf count unrelated to their
+        // height and could not exist on a real chain. Fixing the generators
+        // means new block bodies, hence new proofs which takes many hours on
+        // our most powerful machines. Once that is done, drop the `cfg` and add
+        // a test that a block whose height disagrees with its block MMR
+        // accumulator is rejected.
+        #[cfg(not(any(test, feature = "test-helpers")))]
+        {
+            let height_according_to_body: BlockHeight =
+                self.body().block_mmr_accumulator.num_leafs().into();
+            if height_according_to_body != height {
+                return Err(BlockValidationError::BlockHeight);
+            }
+        }
+
+        // 0.g)
+        let future_limit = now + FUTUREDATING_LIMIT;
+        if self.kernel.header.timestamp >= future_limit {
+            return Err(BlockValidationError::FutureDating);
+        }
+
+        // 1.e)
+        if self.size() > consensus_rule_set.max_block_size() {
+            return Err(BlockValidationError::MaxSize);
+        }
+
+        // 1.f)
+        if consensus_rule_set.requires_version_in_pow()
+            && self.header().version != self.header().pow.version_in_pow()
+        {
+            return Err(BlockValidationError::VersionMismatch);
+        }
+
+        // 2.f)
+        let tx_timestamp = self.body().transaction_kernel.timestamp;
+        let block_timestamp = self.header().timestamp;
+        if tx_timestamp > block_timestamp
+            || consensus_rule_set
+                .transaction_backdating_threshold()
+                .is_some_and(|limit| block_timestamp - tx_timestamp > limit)
+        {
+            return Err(BlockValidationError::TransactionTimestamp);
+        }
+
+        let block_subsidy = Self::block_subsidy(height);
+        if let Some(coinbase) = self.kernel.body.transaction_kernel.coinbase {
+            // 2.g)
+            if coinbase > block_subsidy {
+                return Err(BlockValidationError::CoinbaseTooBig);
+            }
+
+            // 2.h)
+            if coinbase.is_negative() {
+                return Err(BlockValidationError::NegativeCoinbase);
+            }
+        }
+
+        // 2.i)
+        if self.kernel.body.transaction_kernel.fee.is_negative() {
+            return Err(BlockValidationError::NegativeFee);
+        }
+
+        // 2.k)
+        if self.body().transaction_kernel.outputs.len() > consensus_rule_set.max_num_outputs() {
+            return Err(BlockValidationError::TooManyOutputs);
+        }
+
+        // 2.l)
+        if self.body().transaction_kernel.announcements.len()
+            > consensus_rule_set.max_num_announcements()
+        {
+            return Err(BlockValidationError::TooManyAnnouncements);
+        }
+
+        // 2.a)
+        let inputs = RemovalRecordList::try_unpack(self.body().transaction_kernel.inputs.clone())
+            .map_err(BlockValidationError::from)?;
+
+        // 2.j)
+        if inputs.len() > consensus_rule_set.max_num_inputs() {
+            return Err(BlockValidationError::TooManyInputs);
+        }
+
+        // 2.c)
+        let mut absolute_index_sets = inputs
+            .iter()
+            .map(|removal_record| removal_record.absolute_indices.to_vec())
+            .collect_vec();
+        absolute_index_sets.sort();
+        absolute_index_sets.dedup();
+        if absolute_index_sets.len() != inputs.len() {
+            return Err(BlockValidationError::RemovalRecordsUniqueness);
+        }
+
+        // 2.m) only the part that reads this block's own counter. Whether the
+        // counter evolved legally from the parent's cannot be judged here.
+        if height >= ConsensusRuleSet::first_lustration_block(network)
+            && self.header().pow.lustration_status().is_err()
+        {
+            return Err(BlockValidationError::BadLustrationCounterEncoding);
+        }
+
+        // 1.a) 1.b) 1.c) 1.d)
+        self.validate_block_proof(network).await?;
 
         Ok(())
     }
@@ -1415,6 +1482,7 @@ proptest::prop_compose! {
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
 
+    use macro_rules_attr::apply;
     use neptune_primitives::network::Network;
     use proptest_arbitrary_interop::arb;
     use rand::rng;
@@ -1422,6 +1490,7 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::block::test_helpers::invalid_empty_block;
+    use crate::proof_abstractions::test_runtime::shared_tokio_runtime;
     use crate::type_scripts::native_currency::NativeCurrency;
     use crate::type_scripts::TypeScript;
 
@@ -1455,6 +1524,39 @@ pub(crate) mod tests {
         assert_eq!(
             "7962e48729acd97e08efa77b5b28d49f2dc0e5609a4f1f1affca5b4549c78e520462a7f955371386",
             Block::genesis(Network::Main).hash().to_hex()
+        );
+    }
+
+    /// Nothing in [`Block::solo_validate`] may reject a well-formed block
+    /// before its proof is reached. Were some rule there over-strict, blocks
+    /// would be rejected during syncing that full validation accepts.
+    #[apply(shared_tokio_runtime)]
+    async fn solo_validate_accepts_well_formed_block_up_to_its_proof() {
+        let network = Network::Testnet(42);
+        let genesis = Block::genesis(network);
+        let block1 = invalid_empty_block(&genesis, network);
+        let now = block1.header().timestamp;
+
+        // The first check inside `validate_block_proof`, so reaching it means
+        // every rule preceding the proof accepted the block.
+        assert_eq!(
+            Err(BlockValidationError::AppendixMissingClaim),
+            block1.solo_validate(now, network).await,
+            "a well-formed block must be rejected by its proof, not before"
+        );
+    }
+
+    /// A timestamp moved far enough ahead is caught without a predecessor.
+    #[apply(shared_tokio_runtime)]
+    async fn solo_validate_rejects_future_dated_block() {
+        let network = Network::Testnet(42);
+        let genesis = Block::genesis(network);
+        let block1 = invalid_empty_block(&genesis, network);
+        let now = block1.header().timestamp - FUTUREDATING_LIMIT - Timestamp::seconds(1);
+
+        assert_eq!(
+            Err(BlockValidationError::FutureDating),
+            block1.solo_validate(now, network).await
         );
     }
 
