@@ -1,5 +1,43 @@
 Note: (!) indicates a breaking change.
 
+
+## [0.15.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.14.3..v0.15.0) - 2026-07-30
+
+### 🐛 Bug Fixes
+
+- *(mine_loop)* Cap num inputs/outputs/announcements in block-tx ([ea1e45ae](https://github.com/Neptune-Crypto/neptune-core/commit/ea1e45ae))
+- *(mempool)* Account for packing of inputs when calculating tx size ([b5784f4e](https://github.com/Neptune-Crypto/neptune-core/commit/b5784f4e))
+- *(wallet)* Verify lockscript is satisfiable ([898e24c0](https://github.com/Neptune-Crypto/neptune-core/commit/898e24c0))
+- *(wallet)* Verify owned lock script hash in scanning mode ([35ba2aeb](https://github.com/Neptune-Crypto/neptune-core/commit/35ba2aeb))
+- *(wallet)* Verify matching lock script when handling off-chain notifications ([29dae2d6](https://github.com/Neptune-Crypto/neptune-core/commit/29dae2d6))
+- *(peer_loop)* Drop message handling on too long peer list response ([72cab4f6](https://github.com/Neptune-Crypto/neptune-core/commit/72cab4f6))
+
+### 🚀 Performance
+
+- *(peer_loop)* Don't hold write lock during proof validation ([0d9b31b8](https://github.com/Neptune-Crypto/neptune-core/commit/0d9b31b8))
+
+### 🔒️ Security
+
+- *(composer)* Reject transactions carrying superfluous proof items ([7e7acebb](https://github.com/Neptune-Crypto/neptune-core/commit/7e7acebb))
+- *(pow)* Pre-check that difficulty is not below minimum ([044f02ab](https://github.com/Neptune-Crypto/neptune-core/commit/044f02ab))
+- *(peer_loop)* Short-circuit on cheap pow check before expensive check ([a69f46f8](https://github.com/Neptune-Crypto/neptune-core/commit/a69f46f8))
+- (!) *(sync_loop)* Validate peer-supplied synchronization bit mask ([a05e48d1](https://github.com/Neptune-Crypto/neptune-core/commit/a05e48d1))
+- (!) *(tx_validation)* Use checked add when accumulating lustrated amount ([f695c58d](https://github.com/Neptune-Crypto/neptune-core/commit/f695c58d))
+- *(peer_loop)* Add more checks to early block validation ([e7177782](https://github.com/Neptune-Crypto/neptune-core/commit/e7177782))
+
+### ♻️ Refactor
+
+- Cap block-tx-kernel using encoding len, not byte size ([6512e6b3](https://github.com/Neptune-Crypto/neptune-core/commit/6512e6b3))
+- *(wallet)* Tighten type-script validation on UTXO imports ([116ed4dc](https://github.com/Neptune-Crypto/neptune-core/commit/116ed4dc))
+- Reorder mempool-admission checks ([940126b2](https://github.com/Neptune-Crypto/neptune-core/commit/940126b2))
+- Lower mining block batch size from 2 to 1 ([7b10d994](https://github.com/Neptune-Crypto/neptune-core/commit/7b10d994))
+- *(block)* Check block without reference to parent ([e592f8b3](https://github.com/Neptune-Crypto/neptune-core/commit/e592f8b3))
+
+### 🪢 Merge
+
+- Merge([#955](https://github.com/Neptune-Crypto/neptune-core/issues/955)): Neptune-Crypto/cap-block-txkernel-size ([6d2e10f7](https://github.com/Neptune-Crypto/neptune-core/commit/6d2e10f7))
+
+
 ## [0.14.3](https://github.com/Neptune-Crypto/neptune-core/compare/v0.14.2..v0.14.3) - 2026-07-23
 
 ### ✨ Features

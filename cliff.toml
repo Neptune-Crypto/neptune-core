@@ -60,6 +60,7 @@ commit_parsers = [
   { message = "^chore\\(deps\\)", skip = true },
   { message = "^chore\\(pr\\)", skip = true },
   { message = "^chore\\(pull\\)", skip = true },
+  { message = "^security", group = "<!-- 040 --> 🔒️ Security" },
   { body = ".*security", group = "<!-- 040 --> 🔒️ Security" },
   { message = "^refactor", group = "<!-- 050 --> ♻️ Refactor" },
   { message = "^test", group = "<!-- 060 --> ✅ Testing" },
