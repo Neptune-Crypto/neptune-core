@@ -188,6 +188,7 @@ impl SyncLoop {
                         }
                         SuccessorsToSync::BlockValidationError => {
                             tracing::error!("Block validation error occurred during syncing. Possible cause: a reorg happened while syncing. Terminating sync loop.");
+                            break;
                         }
                         SuccessorsToSync::BlockPowError => {
                             tracing::error!("Block PoW check failed during syncing. Terminating sync loop.");
@@ -1323,6 +1324,33 @@ mod tests {
             main_loop.current_tip_height,
             main_loop.sync_target_height
         );
+    }
+
+    /// A tip-successor that fails validation must terminate the sync loop. If
+    /// it does not, the loop respawns the successors subtask against the same
+    /// tip and the same (undeleted) block forever, re-verifying it each time.
+    #[tracing_test::traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn invalid_tip_successor_terminates_sync_loop() {
+        let mut rng = rng();
+        let mut current_tip = rng.random::<Block>();
+        current_tip.set_header_height(BlockHeight::from(rng.random_range(0u64..10000)));
+        let sync_target_height = BlockHeight::from(current_tip.header().height.value() + 10);
+        let mut main_loop = MockMainLoop::new(current_tip, sync_target_height).await;
+        main_loop
+            .sync_loop_handle
+            .set_block_validator(BlockValidator::TestReject);
+
+        main_loop.connect(MockPeer::Good(GoodPeer::new())).await;
+        main_loop.start_sync_loop();
+        let sync_loop = main_loop.take_sync_loop_join_handle().unwrap();
+        let main_loop_handle = tokio::spawn(async move { main_loop.run().await });
+
+        tokio::time::timeout(Duration::from_secs(10), sync_loop)
+            .await
+            .expect("sync loop must terminate when a tip-successor fails validation")
+            .unwrap();
+        main_loop_handle.abort();
     }
 
     #[ignore = "cannot run in parallel with other tests"]
