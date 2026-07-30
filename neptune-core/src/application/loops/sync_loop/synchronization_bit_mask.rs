@@ -370,6 +370,45 @@ impl SynchronizationBitMask {
         *self = self.clone().canonize();
     }
 
+    /// Unset the ith bit.
+    ///
+    /// Ensure it is set to zero. Bits below the lower bound are implicitly one,
+    /// so unsetting one of those means walking the lower bound back down to the
+    /// index, materializing the limbs that [`Self::canonize`] dropped on the
+    /// way up. This is the exact inverse of that walk.
+    ///
+    /// # Panics
+    ///
+    ///  - If the given index is greater than or equal to the upper bound.
+    pub fn unset(&mut self, index: u64) {
+        assert!(index < self.upper_bound);
+
+        // `canonize` drops every limb of a complete bit mask, so there is
+        // nothing to walk back into. Put back the limb holding the lower bound.
+        // This is about the representation, not about `index`: only the bits
+        // below the bound are set, since the bits at and beyond it are the
+        // implicit zeros and must stay that way -- `pop_count` reads them raw.
+        // The walk below covers the case where the bound sits on a limb
+        // boundary, as it then pushes that limb itself.
+        if self.is_complete() && !self.lower_bound.is_multiple_of(32) {
+            self.limbs
+                .push_front((1_u32 << (self.lower_bound % 32)) - 1);
+        }
+
+        // Every limb reclaimed here lies entirely below the lower bound, and
+        // hence entirely inside the implicitly-covered prefix: all ones.
+        while self.lower_bound > index {
+            if self.lower_bound.is_multiple_of(32) {
+                self.limbs.push_front(u32::MAX);
+            }
+            self.lower_bound -= 1;
+        }
+
+        let limb_index = usize::try_from(index / 32).unwrap();
+        let offset = usize::try_from(self.lower_bound / 32).unwrap();
+        self.limbs[limb_index - offset] &= !(1_u32 << (index % 32));
+    }
+
     /// Return the vector of indices of unset bits in between lower bound and
     /// upper bound.
     pub fn to_vec_complement(&self) -> Vec<u64> {
@@ -758,6 +797,89 @@ pub mod test {
 
         bit_mask.set_range(lower_bound, upper_bound - 1);
         prop_assert!(bit_mask.is_complete());
+    }
+
+    /// The interesting case is unsetting a bit that `canonize` has already
+    /// folded below the lower bound, where bits are implicitly one.
+    #[proptest]
+    fn unset_undoes_set(
+        #[strategy(0_u64..(1<<15))] lower_bound: u64,
+        #[strategy(2u64..(1<<12))] _length: u64,
+        #[strategy(Just(#lower_bound + #_length))] upper_bound: u64,
+        #[strategy(#lower_bound..#upper_bound)] index: u64,
+    ) {
+        let reference = SynchronizationBitMask::new(lower_bound, upper_bound);
+        let mut bit_mask = reference.clone();
+
+        bit_mask.set(index);
+        prop_assert!(bit_mask.contains(index));
+
+        bit_mask.unset(index);
+        for i in lower_bound..upper_bound {
+            prop_assert_eq!(reference.contains(i), bit_mask.contains(i), "at index {}", i);
+        }
+        prop_assert_eq!(reference, bit_mask);
+    }
+
+    #[test]
+    fn unset_reclaims_implicitly_covered_prefix() {
+        // Everything up to and including 99 is covered, so `canonize` has moved
+        // the lower bound to 100 and bit 99 is only implicitly set.
+        let mut bit_mask = SynchronizationBitMask::new(0, 200);
+        bit_mask.set_range(0, 99);
+        assert!(bit_mask.contains(99));
+
+        bit_mask.unset(99);
+        assert!(!bit_mask.contains(99));
+        assert!(bit_mask.contains(98));
+        assert!(!bit_mask.contains(100));
+
+        // the reclaimed height is back in the set of heights to request
+        assert!(bit_mask.to_vec_complement().contains(&99));
+    }
+
+    /// Unsetting deep inside the covered prefix has to walk the lower bound
+    /// back across whole limbs. `pop_count` reads the limbs directly, so it
+    /// catches any bit the walk sets that should have stayed zero.
+    #[proptest]
+    fn unset_reclaims_across_limbs(
+        #[strategy(0_u64..(1<<10))] lower_bound: u64,
+        #[strategy(40u64..(1<<10))] _length: u64,
+        #[strategy(Just(#lower_bound + #_length))] upper_bound: u64,
+        #[strategy(#lower_bound..(#upper_bound-1))] range_stop: u64,
+        #[strategy(#lower_bound..=#range_stop)] index: u64,
+    ) {
+        let mut bit_mask = SynchronizationBitMask::new(lower_bound, upper_bound);
+        bit_mask.set_range(lower_bound, range_stop);
+        bit_mask.unset(index);
+
+        for i in lower_bound..upper_bound {
+            prop_assert_eq!(
+                (lower_bound..=range_stop).contains(&i) && i != index,
+                bit_mask.contains(i),
+                "at index {}",
+                i
+            );
+        }
+        // `pop_count` reads the limbs raw and counts only what lies between the
+        // bounds; `contains` is bounds-aware. They must agree.
+        let expected_pop_count = (bit_mask.lower_bound..upper_bound)
+            .filter(|i| bit_mask.contains(*i))
+            .count();
+        prop_assert_eq!(expected_pop_count as u64, bit_mask.pop_count());
+    }
+
+    /// A complete bit mask keeps no limbs at all; unsetting must rebuild them.
+    #[test]
+    fn unset_on_complete_bit_mask() {
+        let mut bit_mask = SynchronizationBitMask::new(0, 100);
+        bit_mask.set_range(0, 99);
+        assert!(bit_mask.is_complete());
+
+        bit_mask.unset(99);
+        assert!(!bit_mask.is_complete());
+        assert!(!bit_mask.contains(99));
+        assert!(bit_mask.contains(98));
     }
 
     #[proptest]

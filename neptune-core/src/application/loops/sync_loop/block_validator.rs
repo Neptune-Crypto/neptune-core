@@ -30,6 +30,11 @@ pub(crate) enum BlockValidator {
     /// tip-successor that fails validation.
     #[cfg(test)]
     TestReject,
+    /// Rejects one specific block; for testing how the sync loop handles a
+    /// height slot poisoned with a block that does not belong to the chain
+    /// being synced.
+    #[cfg(test)]
+    TestRejectDigest(tasm_lib::prelude::Digest),
 }
 
 impl BlockValidator {
@@ -58,6 +63,9 @@ impl BlockValidator {
 
             #[cfg(test)]
             BlockValidator::TestReject => false,
+
+            #[cfg(test)]
+            BlockValidator::TestRejectDigest(digest) => successor.hash() != *digest,
         }
     }
 
@@ -70,7 +78,9 @@ impl BlockValidator {
             }
 
             #[cfg(test)]
-            BlockValidator::Test | BlockValidator::TestReject => true,
+            BlockValidator::Test
+            | BlockValidator::TestReject
+            | BlockValidator::TestRejectDigest(_) => true,
         }
     }
 }
