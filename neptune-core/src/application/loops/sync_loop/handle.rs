@@ -170,6 +170,11 @@ pub(crate) mod tests {
     use super::*;
 
     impl SyncLoopHandle {
+        /// Override the block validator, before the sync loop is started.
+        pub(crate) fn set_block_validator(&mut self, block_validator: BlockValidator) {
+            self.task_state.as_mut().unwrap().block_validator = block_validator;
+        }
+
         pub(crate) fn take_join_handle(&mut self) -> Option<JoinHandle<()>> {
             self.task_join_handle.take()
         }

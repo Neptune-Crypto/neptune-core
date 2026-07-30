@@ -20,12 +20,16 @@ use neptune_primitives::timestamp::Timestamp;
 /// the caller needs to pass a `Network` object instead. The correct
 /// `BlockValidator` is inferred from this object.
 #[derive(Debug, Clone)]
-pub(super) enum BlockValidator {
+pub(crate) enum BlockValidator {
     Production {
         network: Network,
     },
     #[cfg(test)]
     Test,
+    /// Rejects every block; for testing how the sync loop handles a
+    /// tip-successor that fails validation.
+    #[cfg(test)]
+    TestReject,
 }
 
 impl BlockValidator {
@@ -51,6 +55,9 @@ impl BlockValidator {
 
             #[cfg(test)]
             BlockValidator::Test => true,
+
+            #[cfg(test)]
+            BlockValidator::TestReject => false,
         }
     }
 
@@ -63,7 +70,7 @@ impl BlockValidator {
             }
 
             #[cfg(test)]
-            BlockValidator::Test => true,
+            BlockValidator::Test | BlockValidator::TestReject => true,
         }
     }
 }
