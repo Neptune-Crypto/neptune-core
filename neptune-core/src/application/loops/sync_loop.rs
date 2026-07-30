@@ -49,6 +49,13 @@ const PEER_RESPONSE_REMINDER_TIMEOUT: Duration = Duration::from_millis(1);
 /// After this long without a response from a peer, that peer will be punished.
 const PEER_RESPONSE_PUNISHMENT_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// How many blocks may fail validation before the sync loop gives up.
+///
+/// A block that fails is discarded and requested again, so an honest sync
+/// survives the occasional reorg or bad peer. A sync that keeps failing is not
+/// making progress and should not spin forever.
+const MAX_REJECTED_BLOCKS: usize = 10;
+
 /// Time between successive ticks of the event loop's internal clock.
 const FAST_TICK_PERIOD: Duration = Duration::from_micros(100);
 
@@ -149,6 +156,11 @@ impl SyncLoop {
         // order; *i.e.*, without time-outs.
         let mut pending_block_requests = vec![];
 
+        // How many downloaded blocks turned out not to belong to the chain
+        // being synced. Each one is discarded and requested again; too many
+        // means we are getting nowhere and should give up.
+        let mut rejected_blocks = 0_usize;
+
         // Process events as they come in.
         loop {
             tokio::select! {
@@ -186,14 +198,30 @@ impl SyncLoop {
                             tracing::error!("Could not send tip-successor block to main loop. Terminating sync loop.");
                             break;
                         }
-                        SuccessorsToSync::BlockValidationError => {
-                            tracing::error!("Block validation error occurred during syncing. Possible cause: a reorg happened while syncing. Terminating sync loop.");
-                            break;
+                        SuccessorsToSync::BlockValidationError{ new_tip, height }
+                        | SuccessorsToSync::BlockPowError{ new_tip, height } => {
+                            tracing::warn!(
+                                "Block {height} does not belong to the chain being synced: it \
+                                failed validation or the PoW check against its predecessor. \
+                                Possible causes: a reorg happened while syncing, or a peer \
+                                served a block that is not the one at this height. Discarding \
+                                it and asking for that height again."
+                            );
+
+                            self.tip = new_tip;
+                            self.download_state.reject_block(height).await;
+
+                            // The height is missing again, so there is more to
+                            // download and more to process.
+                            finished_downloading = false;
+                            finished_processing = false;
+
+                            rejected_blocks += 1;
+                            if rejected_blocks > MAX_REJECTED_BLOCKS {
+                                tracing::error!("Too many blocks ({rejected_blocks}) failed validation during syncing. Terminating sync loop.");
+                                break;
+                            }
                         }
-                        SuccessorsToSync::BlockPowError => {
-                            tracing::error!("Block PoW check failed during syncing. Terminating sync loop.");
-                            break;
-                        },
                     }
 
                     // Start a new successors subtask, but only if it makes
@@ -831,16 +859,19 @@ impl SyncLoop {
             };
 
             // validate
+            let height = successor.header().height;
             if !block_validator.verify(&successor, &tip).await {
                 let _ = return_channel
-                    .send(SuccessorsToSync::BlockValidationError)
+                    .send(SuccessorsToSync::BlockValidationError { new_tip: tip, height })
                     .await;
                 return;
             }
 
             // check PoW
             if !block_validator.check_pow(&successor, &tip) {
-                let _ = return_channel.send(SuccessorsToSync::BlockPowError).await;
+                let _ = return_channel
+                    .send(SuccessorsToSync::BlockPowError { new_tip: tip, height })
+                    .await;
                 return;
             }
 
@@ -1107,6 +1138,7 @@ mod tests {
         Good(GoodPeer),
         Flaky(FlakyPeer),
         Syncing(SyncingPeer),
+        Poisoning(PoisoningPeer),
     }
 
     impl MockPeer {
@@ -1115,6 +1147,7 @@ mod tests {
                 MockPeer::Good(good_peer) => good_peer.request(block_height).await,
                 MockPeer::Flaky(flaky_peer) => flaky_peer.request(block_height).await,
                 MockPeer::Syncing(syncing_peer) => syncing_peer.request(block_height).await,
+                MockPeer::Poisoning(poisoning_peer) => poisoning_peer.request(block_height).await,
             }
         }
 
@@ -1123,7 +1156,65 @@ mod tests {
                 MockPeer::Good(good_peer) => good_peer.handle(),
                 MockPeer::Flaky(flaky_peer) => flaky_peer.handle(),
                 MockPeer::Syncing(syncing_peer) => syncing_peer.handle(),
+                MockPeer::Poisoning(poisoning_peer) => poisoning_peer.handle(),
             }
+        }
+    }
+
+    /// Answers one particular height with a block that does not belong to the
+    /// chain being synced, and behaves like a [`GoodPeer`] from then on.
+    ///
+    /// Models an attacker who wins the race for one height slot, followed by
+    /// the honest network serving the right block on the retry. The poison is
+    /// withheld until every other height has been served, so that the download
+    /// is complete at the moment the poison is found to be bad.
+    #[derive(Debug, Clone)]
+    struct PoisoningPeer {
+        peer_handle: PeerHandle,
+        poison_height: BlockHeight,
+        poison: Box<Block>,
+        poison_served: bool,
+        requests_served: usize,
+        withhold_until: usize,
+    }
+
+    impl PoisoningPeer {
+        fn new(poison_height: BlockHeight, withhold_until: usize) -> Self {
+            let mut poison = rng().random::<Block>();
+            poison.set_header_height(poison_height);
+            Self {
+                peer_handle: random_peer_handle(),
+                poison_height,
+                poison: Box::new(poison),
+                poison_served: false,
+                requests_served: 0,
+                withhold_until,
+            }
+        }
+
+        fn poison_digest(&self) -> tasm_lib::prelude::Digest {
+            self.poison.hash()
+        }
+
+        async fn request(&mut self, block_height: BlockHeight) -> Option<Block> {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+            self.requests_served += 1;
+
+            if block_height == self.poison_height && !self.poison_served {
+                if self.requests_served < self.withhold_until {
+                    return None;
+                }
+                self.poison_served = true;
+                return Some(*self.poison.clone());
+            }
+
+            let mut block = rng().random::<Block>();
+            block.set_header_height(block_height);
+            Some(block)
+        }
+
+        fn handle(&self) -> PeerHandle {
+            self.peer_handle
         }
     }
 
@@ -1351,6 +1442,43 @@ mod tests {
             .expect("sync loop must terminate when a tip-successor fails validation")
             .unwrap();
         main_loop_handle.abort();
+    }
+
+    /// A block that fails validation must not bind its height slot. If it does,
+    /// that height is never requested again -- requests are drawn from the
+    /// complement of the coverage bit mask -- and sync can never complete, no
+    /// matter how many honest peers are around.
+    #[tracing_test::traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn poisoned_height_slot_does_not_prevent_sync() {
+        let mut rng = rng();
+        let mut current_tip = rng.random::<Block>();
+        current_tip.set_header_height(BlockHeight::from(rng.random_range(0u64..10000)));
+        let current_tip_height = current_tip.header().height;
+        let sync_target_height = BlockHeight::from(current_tip_height.value() + 10);
+        let mut main_loop = MockMainLoop::new(current_tip, sync_target_height).await;
+
+        // The attacker poisons the slot immediately above our tip, and does so
+        // only once every other height has been downloaded.
+        let poisoning_peer = PoisoningPeer::new(current_tip_height.next(), 30);
+        main_loop
+            .sync_loop_handle
+            .set_block_validator(BlockValidator::TestRejectDigest(
+                poisoning_peer.poison_digest(),
+            ));
+        main_loop.connect(MockPeer::Poisoning(poisoning_peer)).await;
+
+        main_loop.start_sync_loop();
+        tokio::time::timeout(Duration::from_secs(20), main_loop.run())
+            .await
+            .expect("sync must not hang after a height slot is poisoned");
+        assert!(
+            main_loop.sync_is_finished(),
+            "sync must recover from a poisoned height slot; \
+             current tip height {} versus sync target height {}",
+            main_loop.current_tip_height,
+            main_loop.sync_target_height
+        );
     }
 
     #[ignore = "cannot run in parallel with other tests"]

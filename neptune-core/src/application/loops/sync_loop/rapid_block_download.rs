@@ -319,6 +319,27 @@ impl RapidBlockDownload {
         Ok(block)
     }
 
+    /// Un-bind a height: throw away the block stored there and mark the height
+    /// as not received, so that it gets requested again.
+    ///
+    /// Blocks are stored before anything can be established about their place
+    /// in the chain -- that only becomes checkable once the chain reaches them.
+    /// So the height a block occupies is not a claim we can verify up front,
+    /// and binding it permanently lets one peer deny the whole sync by winning
+    /// the race for a single height. This is how that binding is undone.
+    pub(crate) async fn reject_block(&mut self, height: BlockHeight) {
+        if let Some(file_name) = self.index_to_filename.remove(&height.value()) {
+            if let Err(e) = tokio::fs::remove_file(&file_name).await {
+                tracing::warn!(
+                    "Could not delete rejected block at height {height} from '{}': {e}. \
+                    Not critical.",
+                    file_name.to_string_lossy()
+                );
+            }
+        }
+        self.coverage.unset(height.value());
+    }
+
     /// Get the [`SynchronizationBitMask`] corresponding to covered blocks
     /// (blocks we have, whether cached or in the database). The complement of
     /// this bit mask indicates which blocks we do not yet have.
@@ -389,6 +410,54 @@ mod tests {
 
     use super::*;
     use crate::tests::shared_tokio_runtime;
+
+    /// A rejected block must free its height slot, so that the height is asked
+    /// for again and the download counts as unfinished. Requests are drawn from
+    /// the complement of the coverage bit mask, so a slot that stays bound is
+    /// never re-requested.
+    #[apply(shared_tokio_runtime)]
+    async fn rejected_block_frees_its_height_slot() {
+        let mut rng = rng();
+        let tip_height = 100_u64;
+        let target = BlockHeight::from(tip_height + 1);
+        let mut rapid_block_download =
+            RapidBlockDownload::new(target, false, None, Network::Main)
+                .await
+                .unwrap();
+        rapid_block_download.fast_forward(BlockHeight::from(tip_height));
+
+        // The one outstanding height gets filled, completing the download.
+        let mut block = rng.random::<Block>();
+        block.set_header_height(target);
+        rapid_block_download.receive_block(&block).await.unwrap();
+        assert!(rapid_block_download.have_received(target));
+        assert!(rapid_block_download.is_complete());
+
+        // Rejecting it puts the height back on the to-do list.
+        rapid_block_download.reject_block(target).await;
+        assert!(!rapid_block_download.have_received(target));
+        assert!(!rapid_block_download.is_complete());
+        assert!(rapid_block_download
+            .coverage()
+            .to_vec_complement()
+            .contains(&target.value()));
+
+        // And the height can be filled again, by a different block.
+        let mut replacement = rng.random::<Block>();
+        replacement.set_header_height(target);
+        rapid_block_download
+            .receive_block(&replacement)
+            .await
+            .unwrap();
+        assert_eq!(
+            replacement.hash(),
+            rapid_block_download
+                .get_received_block(target)
+                .await
+                .unwrap()
+                .hash()
+        );
+    }
 
     #[apply(shared_tokio_runtime)]
     async fn can_get_stored_block_iff_received() {

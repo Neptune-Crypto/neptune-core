@@ -59,6 +59,15 @@ pub(crate) enum SuccessorsToSync {
     Continue { new_tip: Block },
     RapidBlockDownloadError,
     SendError,
-    BlockValidationError,
-    BlockPowError,
+    /// The block at `height` is not a valid successor of `new_tip`. Carries the
+    /// tip reached before the failure, since the subtask may have processed
+    /// blocks before hitting the bad one.
+    BlockValidationError {
+        new_tip: Block,
+        height: BlockHeight,
+    },
+    BlockPowError {
+        new_tip: Block,
+        height: BlockHeight,
+    },
 }
