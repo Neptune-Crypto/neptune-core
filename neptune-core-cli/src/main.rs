@@ -631,6 +631,52 @@ async fn main() -> Result<()> {
                 println!("Block did not exist in database.");
             }
         }
+        Command::Blockchain(BlockchainCommand::BlockOutputs { block_selector }) => {
+            match client.block_info(ctx, token, block_selector).await?? {
+                Some(block_info) => {
+                    // The notice goes to stderr so that the records remain the
+                    // only thing on stdout, for piping into other commands.
+                    if !block_info.is_canonical {
+                        eprintln!(
+                            "Note: block {} is orphaned; its outputs are not in the mutator set \
+                             and are listed in arbitrary order.",
+                            block_info.height
+                        );
+                    }
+
+                    // The addition records come back in arbitrary order. A
+                    // canonical block has an AOCL leaf index for every record,
+                    // and sorting by it restores the order the records have in
+                    // the block. The AOCL leaf indices of an orphaned block
+                    // are not known in this case, so they just get printed in
+                    // an arbitrary order.
+                    let mut outputs = client
+                        .addition_record_indices_for_block(
+                            ctx,
+                            token,
+                            BlockSelector::Digest(block_info.digest),
+                        )
+                        .await??;
+                    outputs.sort_by_key(|(_, aocl_index)| *aocl_index);
+
+                    for (addition_record, _) in outputs {
+                        println!("{:x}", addition_record.canonical_commitment);
+                    }
+                }
+                None => println!("Block did not exist in database."),
+            }
+        }
+        Command::Mempool(MempoolCommand::MempoolTxOutputs { txid }) => {
+            let kernel = client.mempool_tx_kernel(ctx, token, txid).await??;
+            match kernel {
+                Some(kernel) => {
+                    for addition_record in &kernel.outputs {
+                        println!("{:x}", addition_record.canonical_commitment);
+                    }
+                }
+                None => println!("Transaction not found in mempool."),
+            }
+        }
         Command::Blockchain(BlockchainCommand::AdditionRecordStatus {
             addition_record,
             max_search_depth,

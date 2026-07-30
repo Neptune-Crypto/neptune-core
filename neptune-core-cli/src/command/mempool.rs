@@ -1,4 +1,5 @@
 use clap::Parser;
+use neptune_mempool::transaction_kernel_id::TransactionKernelId;
 
 /// Mempool Command -- a command related to the mempool (where transactions go
 /// before they are confirmed).
@@ -12,6 +13,12 @@ pub(crate) enum MempoolCommand {
 
     /// list mempool transaction IDs
     ListMempoolTransactionIds,
+
+    /// retrieve the addition records in a mempool transaction, one per line
+    MempoolTxOutputs {
+        /// the transaction's kernel ID, as hex
+        txid: TransactionKernelId,
+    },
 
     /// Delete all transactions from the mempool.
     ClearMempool,

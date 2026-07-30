@@ -40,6 +40,14 @@ pub(crate) enum BlockchainCommand {
         block_selector: BlockSelector,
     },
 
+    /// retrieve the addition records in a block, one per line.
+    ///
+    /// Includes guesser rewards.
+    BlockOutputs {
+        /// one of: `genesis, tip, height/<n>, digest/<hex>`
+        block_selector: BlockSelector,
+    },
+
     /// retrieve the status of an addition record: whether it was mined into a
     /// canonical block, is sitting in the mempool, or is unknown
     AdditionRecordStatus {
