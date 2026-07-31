@@ -16,6 +16,8 @@ use tasm_lib::field_with_size;
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
 use tasm_lib::hashing::merkle_verify::MerkleVerify;
 use tasm_lib::library::Library;
+use tasm_lib::list::contains::Contains;
+use tasm_lib::list::higher_order::all::All;
 use tasm_lib::list::higher_order::inner_function::InnerFunction;
 use tasm_lib::list::higher_order::inner_function::RawCode;
 use tasm_lib::list::higher_order::map::ChainMap;
@@ -57,9 +59,10 @@ const NEW_FEE_IS_NOT_SUM_OF_OPERAND_FEES_ERROR: i128 = 1_000_543;
 const INPUTS_ARE_NOT_THE_OPERANDS_INPUTS_ERROR: i128 = 1_000_544;
 const OUTPUTS_ARE_NOT_CUT_THROUGH_ERROR: i128 = 1_000_545;
 const THRUPUTS_ARE_NOT_CUT_THROUGH_ERROR: i128 = 1_000_546;
-const ANNOUNCEMENTS_ARE_NOT_THE_OPERANDS_ANNOUNCEMENTS_ERROR: i128 = 1_000_547;
-const TIMESTAMP_IS_NOT_MAX_OF_OPERAND_TIMESTAMPS_ERROR: i128 = 1_000_548;
-const MUTATOR_SET_HASH_MISMATCH_ERROR: i128 = 1_000_549;
+const CUT_THROUGH_IS_NOT_MAXIMAL_ERROR: i128 = 1_000_547;
+const ANNOUNCEMENTS_ARE_NOT_THE_OPERANDS_ANNOUNCEMENTS_ERROR: i128 = 1_000_548;
+const TIMESTAMP_IS_NOT_MAX_OF_OPERAND_TIMESTAMPS_ERROR: i128 = 1_000_549;
+const MUTATOR_SET_HASH_MISMATCH_ERROR: i128 = 1_000_550;
 
 /// The witness consumed by [`Chain`](super::chain::Chain).
 ///
@@ -87,8 +90,11 @@ pub struct ChainWitness {
     /// matching on the addition record itself means the pairing is on the
     /// UTXO's canonical commitment.
     ///
-    /// Cut-through need not be maximal: a prover may leave a matching pair
-    /// standing. [`Self::chained_kernel`] cancels everything it can.
+    /// Cut-through must be maximal: no output of the chained kernel may equal
+    /// one of its thruputs. [`Self::chained_kernel`] cancels everything it can,
+    /// and the branch asserts the result, which the two cut-through equations
+    /// on their own would not -- they are satisfied by any sub-multiset of the
+    /// intersection, a short one included.
     pub(super) cut_through: Vec<AdditionRecord>,
 
     pub(super) left_proof: Proof,
@@ -97,7 +103,8 @@ pub struct ChainWitness {
 
 impl ChainWitness {
     /// Chain two link transactions, cutting through every thruput of the one
-    /// that is an output of the other.
+    /// that is an output of the other -- every one, since the branch rejects a
+    /// cut-through that is not maximal.
     ///
     /// Both arguments must be proof-backed and valid; the `Chain` branch is
     /// what actually establishes that, and this constructor assumes it. Takes
@@ -131,13 +138,13 @@ impl ChainWitness {
     /// chained transaction does not leak which operand contributed what --
     /// except that the outputs and the thruputs each lose the cut-through set.
     ///
-    /// Cut-through is computed as the multiset intersection of the concatenated
+    /// Cut-through is the *full* multiset intersection of the concatenated
     /// outputs with the concatenated thruputs: a thruput is an unconfirmed
-    /// input, so pairing it with the output it spends resolves both. Note that
-    /// this treats the two operands symmetrically, and even cancels an
-    /// operand's thruput against its own output; that pairing is still a
-    /// value-conserving one, and the branch imposes no more than value
-    /// conservation.
+    /// input, so pairing it with the output it spends resolves both, and
+    /// maximality demands every such pair be taken. Note that this treats the
+    /// two operands symmetrically, and even cancels an operand's thruput against
+    /// its own output; that pairing resolves the thruput like any other, so it
+    /// is taken like any other.
     fn chained_kernel(
         left: &LinkKernel,
         right: &LinkKernel,
@@ -316,7 +323,8 @@ impl SecretWitness for ChainWitness {
 /// - inputs and announcements are the concatenations, in any order;
 /// - outputs and thruputs are the concatenations minus the same cut-through
 ///   multiset, removed from both sides together, so cut-through neither creates
-///   nor destroys value;
+///   nor destroys value; and that cut-through is maximal -- the chained outputs
+///   and the chained thruputs are disjoint;
 /// - the fee is the sum, both operand fees being non-negative and in range;
 /// - the timestamp is the larger of the two;
 /// - all three kernels share one mutator-set hash;
@@ -425,6 +433,46 @@ impl BasicSnippet for Chain {
             InnerFunction::RawCode(hash_announcement),
         )));
 
+        // Maximality is a disjointness check, and disjointness does not reduce
+        // to a multiset equation, so it gets its own quadratic scan: for each
+        // chained thruput, is it among the chained outputs? An `AdditionRecord`
+        // is a `Digest` in a one-field struct, so it is its own commitment and
+        // compares as one -- no hashing pass first, unlike the multiset
+        // comparisons above, which need digests because that is what
+        // `MultisetEqualityDigests` eats.
+        //
+        // The inner function takes only its element, so the list being scanned
+        // reaches it through static memory.
+        let contains_addition_record = library.import(Box::new(Contains::new(DataType::Digest)));
+        let chained_outputs_alloc = library.kmalloc(1);
+        let thruput_is_not_a_chained_output = RawCode::new(
+            triton_asm! {
+                neptune_consensus_chaintx_chain_thruput_is_not_a_chained_output:
+                    // _ [thruput]
+                    push {chained_outputs_alloc.read_address()}
+                    read_mem 1
+                    pop 1
+                    // _ [thruput] *n_out
+
+                    place 5
+                    // _ *n_out [thruput]
+
+                    call {contains_addition_record}
+                    // _ (thruput in n_out)
+
+                    push 0
+                    eq
+                    // _ (thruput not in n_out)
+
+                    return
+            },
+            DataType::Digest,
+            DataType::Bool,
+        );
+        let no_thruput_is_a_chained_output = library.import(Box::new(All::new(
+            InnerFunction::RawCode(thruput_is_not_a_chained_output),
+        )));
+
         let overflowing_add_u128 = library.import(Box::new(
             tasm_lib::arithmetic::u128::overflowing_add::OverflowingAdd,
         ));
@@ -452,8 +500,10 @@ impl BasicSnippet for Chain {
         // A `LinkKernel` composes a legacy `TransactionKernel`, so every legacy
         // field is reached through this one extra hop.
         let field_inner_kernel = field!(LinkKernel::kernel);
+        let field_thruputs = field!(LinkKernel::thruputs);
         let field_with_size_thruputs = field_with_size!(LinkKernel::thruputs);
         let field_with_size_inputs = field_with_size!(TransactionKernel::inputs);
+        let field_outputs = field!(TransactionKernel::outputs);
         let field_with_size_outputs = field_with_size!(TransactionKernel::outputs);
         let field_with_size_announcements = field_with_size!(TransactionKernel::announcements);
         let field_fee = field!(TransactionKernel::fee);
@@ -560,6 +610,38 @@ impl BasicSnippet for Chain {
                     // _ *witness *l_lk *r_lk *n_lk
                 )
             };
+
+        // Cut-through is maximal: no chained output is also a chained thruput.
+        // The two equations above do not imply it -- they are satisfied by
+        // *any* sub-multiset of the intersection, so on their own a prover may
+        // name a short cut-through set and leave a matching pair standing --
+        // and it is disjointness that pins the cut-through set to the whole
+        // intersection: for a record held `a` times by the operands' outputs
+        // and `b` times by their thruputs, the equations force the cut-through
+        // multiplicity `c <= min(a, b)`, and disjointness of the `a - c` and
+        // `b - c` survivors then forces `c = min(a, b)`.
+        //
+        // Both lists were authenticated against `lkmh` just above, by the
+        // `assert_cut_through` pair; this only re-reads them.
+        let assert_cut_through_is_maximal = triton_asm!(
+            // _ *witness *l_lk *r_lk *n_lk
+            dup 0
+            {&inner(&field_outputs)}
+            // _ *witness *l_lk *r_lk *n_lk *n_out
+
+            push {chained_outputs_alloc.write_address()}
+            write_mem 1
+            pop 1
+            // _ *witness *l_lk *r_lk *n_lk
+
+            dup 0
+            {&field_thruputs}
+            // _ *witness *l_lk *r_lk *n_lk *n_thru
+
+            call {no_thruput_is_a_chained_output}
+            assert error_id {CUT_THROUGH_IS_NOT_MAXIMAL_ERROR}
+            // _ *witness *l_lk *r_lk *n_lk
+        );
 
         let assert_announcements_are_the_operands_announcements = triton_asm!(
             // _ *witness *l_lk *r_lk *n_lk
@@ -904,6 +986,7 @@ impl BasicSnippet for Chain {
                 &authenticate_thruputs,
                 THRUPUTS_ARE_NOT_CUT_THROUGH_ERROR,
             )}
+            {&assert_cut_through_is_maximal}
             {&assert_announcements_are_the_operands_announcements}
             {&assert_fee_is_sum_of_operand_fees}
             {&assert_timestamp_is_max_of_operand_timestamps}
@@ -1077,6 +1160,13 @@ pub(crate) mod tests {
                 .sorted()
                 .collect_vec(),
         );
+
+        /* cut-through is maximal: nothing cancellable is left standing. The two
+        equations above hold for any sub-multiset of the intersection; this is
+        what pins the cut-through set to all of it */
+        for thruput in &new.thruputs {
+            assert!(!new.kernel.outputs.contains(thruput));
+        }
 
         /* announcements: the concatenation, in any order */
         authenticate(
@@ -1492,6 +1582,29 @@ mod negative_tests {
         };
 
         expect_failure(witness, &[OUTPUTS_ARE_NOT_CUT_THROUGH_ERROR]).unwrap();
+    }
+
+    /// Cut-through must be maximal. Here the prover declines one cancellation
+    /// it could have made: the record leaves the cut-through set and goes back
+    /// onto *both* sides, so both cut-through equations still hold -- the
+    /// concatenations are unchanged and so is the pairing -- and nothing but the
+    /// maximality assert stands between this witness and a valid chain.
+    ///
+    /// That is the whole hole: the equations bound the cut-through set to a
+    /// sub-multiset of the intersection, and only this assert pins it to all of
+    /// it.
+    #[test]
+    fn non_maximal_cut_through_is_rejected() {
+        let mut witness = pokeable_witness();
+        let uncut = witness.cut_through.pop().unwrap();
+
+        let outputs = [witness.new_kernel.kernel.outputs.clone(), vec![uncut]].concat();
+        witness.new_kernel.kernel = TransactionKernelModifier::default()
+            .outputs(outputs)
+            .modify(witness.new_kernel.kernel);
+        witness.new_kernel.thruputs.push(uncut);
+
+        expect_failure(witness, &[CUT_THROUGH_IS_NOT_MAXIMAL_ERROR]).unwrap();
     }
 
     /// `Chain` bounds both operand fees to `[0, MAX_NAU]` and *then* adds them,

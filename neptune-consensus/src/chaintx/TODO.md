@@ -43,6 +43,17 @@ txs):
   `confirmed_inputs || thruputs` (and validate only the confirmed ones via MSA
   membership; thruputs are copied and validated transitively in `Chain`). The
   type script trusts this digest blindly, so *a gap here is an inflation path.*
+- **Cut-through is maximal.** A `LinkKernel`'s outputs and its thruputs are
+  disjoint: every (output, thruput) pair on a matching addition record is
+  cancelled, always, and on both sides together. So a `LinkTx` never carries a
+  thruput one of its own outputs already resolves, and `Chain` is a *function*
+  of its two operands rather than a relation — which is what associativity
+  (§New Tests) and the mempool's reckoning of which thruputs are still
+  outstanding (§Mempool) both stand on. Induced obligation: every branch that
+  cuts through must assert that disjointness outright. The two cut-through
+  equations do not imply it — they are satisfied by any sub-multiset of the
+  intersection, a short `cut_through` included. `Chain` asserts it; see §Tasm >
+  `Chain`.
 - **The `SingleProof` digest is a *parameter* of the `LinkProof` claim, never a
   constant inside it.** See §Breaking the `Fix`/`Cast` cycle.
 
@@ -249,9 +260,18 @@ would bind that check to the wrong tree without crashing.
         are *not* re-checked: every branch asserts both on the kernel it
         produces, so an operand that verifies has them by induction. Any branch
         added later owes the same assertion.
-  - [ ] a positive test in which cut-through is *partial* -- the prover leaves a
-        matching (output, thruput) pair standing. Permitted by design; currently
-        only maximal cut-through is exercised.
+  - [x] **cut-through is maximal**: the chained kernel's outputs and its
+        thruputs are disjoint, asserted outright. The two cut-through equations
+        do not imply it -- they hold for *any* sub-multiset of the intersection,
+        so on their own a prover could name a short `cut_through` and leave a
+        matching (output, thruput) pair standing. Disjointness pins it to the
+        whole intersection: the equations force cut-through multiplicity
+        `c <= min(a, b)` for a record the operands hold `a` times as an output
+        and `b` times as a thruput, and disjointness of the survivors then
+        forces `c = min(a, b)`. A quadratic scan (`Contains` under `All`), since
+        disjointness does not reduce to a multiset equation; an `AdditionRecord`
+        is its own commitment, so it compares unhashed.
+        (`non_maximal_cut_through_is_rejected`)
 - [ ] **Update** `LinkTx -> LinkTx`: re-target a new mutator-set hash without
       re-forging (mirror `single_proof/update_branch`). Same verbatim `D`
       pass-through onto the operand claim. `Update` re-targets the *mutator set*,
@@ -589,8 +609,10 @@ Positive counterparts (so the negatives cannot pass vacuously):
 - [x] cut-through value conservation (positive): a cut-through cancels a
       (thruput, output) pair only when their canonical commitments are equal,
       and removes it from both sides together — so no value is created or
-      destroyed. (Maximal cut-through only; see §Tasm > `Chain` for the partial
-      case.)
+      destroyed.
+- [x] Cut-through is maximal: a short `cut_through`, leaving a cancellable
+      (output, thruput) pair standing, is rejected
+      (`non_maximal_cut_through_is_rejected`).
 - [x] Cut-through value conservation (negative): one-sided removal, or a cancel
       on unequal commitments, is rejected.
 
