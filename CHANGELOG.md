@@ -1,5 +1,30 @@
 Note: (!) indicates a breaking change.
 
+## [0.15.1](https://github.com/Neptune-Crypto/neptune-core/compare/v0.15.0..v0.15.1) - 2026-07-31
+
+### ✨ Features
+
+- *(neptune-cli)* Add command for checking addition record status ([ab4bd866](https://github.com/Neptune-Crypto/neptune-core/commit/ab4bd866))
+- *(neptune-cli)* Two new commands for addition records checks ([e9f8f9fb](https://github.com/Neptune-Crypto/neptune-core/commit/e9f8f9fb))
+
+### 🐛 Bug Fixes
+
+- *(mutator_set)* Off-by-one error in activity split ([8da518cf](https://github.com/Neptune-Crypto/neptune-core/commit/8da518cf))
+
+### 📚 Documentation
+
+- Fix comment saying claim's cache is only test code ([12df1dfc](https://github.com/Neptune-Crypto/neptune-core/commit/12df1dfc))
+
+### 🔒️ Security
+
+- *(sync_loop)* Terminate sync loop on block validation error ([67d94e5f](https://github.com/Neptune-Crypto/neptune-core/commit/67d94e5f))
+- *(sync_loop)* Free the height slot of a rejected block ([2142d4dd](https://github.com/Neptune-Crypto/neptune-core/commit/2142d4dd))
+
+### ✅ Testing
+
+- Fix MMRA/height discrepancy in tests ([#957](https://github.com/Neptune-Crypto/neptune-core/issues/957)) ([030a1bcf](https://github.com/Neptune-Crypto/neptune-core/commit/030a1bcf))
+- Negative tests for transactions and block validity ([21202a1f](https://github.com/Neptune-Crypto/neptune-core/commit/21202a1f))
+
 
 ## [0.15.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.14.3..v0.15.0) - 2026-07-30
 
