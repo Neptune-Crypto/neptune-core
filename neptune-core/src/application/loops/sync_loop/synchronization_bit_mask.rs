@@ -816,7 +816,12 @@ pub mod test {
 
         bit_mask.unset(index);
         for i in lower_bound..upper_bound {
-            prop_assert_eq!(reference.contains(i), bit_mask.contains(i), "at index {}", i);
+            prop_assert_eq!(
+                reference.contains(i),
+                bit_mask.contains(i),
+                "at index {}",
+                i
+            );
         }
         prop_assert_eq!(reference, bit_mask);
     }

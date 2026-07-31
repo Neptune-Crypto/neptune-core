@@ -862,7 +862,10 @@ impl SyncLoop {
             let height = successor.header().height;
             if !block_validator.verify(&successor, &tip).await {
                 let _ = return_channel
-                    .send(SuccessorsToSync::BlockValidationError { new_tip: tip, height })
+                    .send(SuccessorsToSync::BlockValidationError {
+                        new_tip: tip,
+                        height,
+                    })
                     .await;
                 return;
             }
@@ -870,7 +873,10 @@ impl SyncLoop {
             // check PoW
             if !block_validator.check_pow(&successor, &tip) {
                 let _ = return_channel
-                    .send(SuccessorsToSync::BlockPowError { new_tip: tip, height })
+                    .send(SuccessorsToSync::BlockPowError {
+                        new_tip: tip,
+                        height,
+                    })
                     .await;
                 return;
             }

@@ -412,18 +412,15 @@ mod tests {
     use crate::tests::shared_tokio_runtime;
 
     /// A rejected block must free its height slot, so that the height is asked
-    /// for again and the download counts as unfinished. Requests are drawn from
-    /// the complement of the coverage bit mask, so a slot that stays bound is
-    /// never re-requested.
+    /// for again and the download counts as unfinished.
     #[apply(shared_tokio_runtime)]
     async fn rejected_block_frees_its_height_slot() {
         let mut rng = rng();
         let tip_height = 100_u64;
         let target = BlockHeight::from(tip_height + 1);
-        let mut rapid_block_download =
-            RapidBlockDownload::new(target, false, None, Network::Main)
-                .await
-                .unwrap();
+        let mut rapid_block_download = RapidBlockDownload::new(target, false, None, Network::Main)
+            .await
+            .unwrap();
         rapid_block_download.fast_forward(BlockHeight::from(tip_height));
 
         // The one outstanding height gets filled, completing the download.

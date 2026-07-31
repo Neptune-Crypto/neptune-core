@@ -55,8 +55,12 @@ pub(crate) enum MainToSync {
 }
 
 pub(crate) enum SuccessorsToSync {
-    Finished { new_tip: Block },
-    Continue { new_tip: Block },
+    Finished {
+        new_tip: Block,
+    },
+    Continue {
+        new_tip: Block,
+    },
     RapidBlockDownloadError,
     SendError,
     /// The block at `height` is not a valid successor of `new_tip`. Carries the
