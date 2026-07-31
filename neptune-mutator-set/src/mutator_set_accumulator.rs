@@ -103,6 +103,7 @@ impl MutatorSetAccumulator {
 
     /// Return the lowest and the highest chunk index that are represented in
     /// the active window, inclusive.
+    ///
     /// The returned limits are inclusive, i.e. they point to the chunk with
     /// the lowest chunk index and the chunk with the highest chunk index that
     /// are still contained in the active window.
@@ -110,7 +111,7 @@ impl MutatorSetAccumulator {
         let batch_index = self.get_batch_index();
         (
             batch_index,
-            batch_index + u64::from(WINDOW_SIZE / CHUNK_SIZE),
+            batch_index + u64::from(WINDOW_SIZE / CHUNK_SIZE) - 1,
         )
     }
 
@@ -665,11 +666,45 @@ mod tests {
     }
 
     #[test]
+    fn can_remove_rejects_index_one_past_the_active_window() {
+        let accumulator = MutatorSetAccumulator::default();
+        let active_window_start =
+            u128::from(accumulator.get_batch_index()) * u128::from(CHUNK_SIZE);
+        let last_index_in_window = active_window_start + u128::from(WINDOW_SIZE) - 1;
+        let first_index_past_window = active_window_start + u128::from(WINDOW_SIZE);
+
+        let removal_record = |index| RemovalRecord {
+            absolute_indices: AbsoluteIndexSet::new([index; NUM_TRIALS as usize]),
+            target_chunks: ChunkDictionary::empty(),
+        };
+
+        assert!(
+            accumulator.can_remove(&removal_record(0)),
+            "first index, not rejected"
+        );
+
+        assert!(
+            accumulator.can_remove(&removal_record(u128::from(WINDOW_SIZE) / 2)),
+            "middle index, not rejected"
+        );
+
+        assert!(
+            accumulator.can_remove(&removal_record(last_index_in_window)),
+            "the last index the active window can represent must be read, not rejected"
+        );
+
+        assert!(
+            !accumulator.can_remove(&removal_record(first_index_past_window)),
+            "an index past the active window must be rejected"
+        );
+    }
+
+    #[test]
     fn active_window_chunk_interval_unit_test() {
         let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
         let (start_empty, end_empty) = accumulator.active_window_chunk_interval();
         assert_eq!(0, start_empty);
-        assert_eq!(u64::from(WINDOW_SIZE / CHUNK_SIZE), end_empty);
+        assert_eq!(u64::from(WINDOW_SIZE / CHUNK_SIZE) - 1, end_empty);
 
         // Insert batch-size items and verify that a new batch interval is reported
         for _ in 0..BATCH_SIZE + 1 {
@@ -678,25 +713,28 @@ mod tests {
 
             let (start, end) = accumulator.active_window_chunk_interval();
             assert_eq!(0, start);
-            assert_eq!(u64::from(WINDOW_SIZE / CHUNK_SIZE), end);
+            assert_eq!(u64::from(WINDOW_SIZE / CHUNK_SIZE) - 1, end);
             accumulator.add(&addition_record);
         }
 
         let (start_final, end_final) = accumulator.active_window_chunk_interval();
         assert_eq!(1, start_final);
-        assert_eq!(u64::from(WINDOW_SIZE / CHUNK_SIZE) + 1, end_final);
+        assert_eq!(u64::from(WINDOW_SIZE / CHUNK_SIZE), end_final);
     }
 
-    #[proptest(cases = 10)]
+    #[proptest(cases = 20)]
     fn batch_index_and_active_window_chunk_interval_agree(
-        #[strategy(1u64..10u64 * u64::from(BATCH_SIZE))] num_insertions: u64,
+        #[strategy(1u64..20u64 * u64::from(BATCH_SIZE))] num_insertions: u64,
     ) {
         let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
         for _ in 0..num_insertions {
             let (start, end) = accumulator.active_window_chunk_interval();
             let batch_interval = accumulator.get_batch_index();
             prop_assert_eq!(batch_interval, start);
-            prop_assert_eq!(batch_interval + u64::from(WINDOW_SIZE / CHUNK_SIZE), end);
+            prop_assert_eq!(
+                batch_interval + u64::from(WINDOW_SIZE / CHUNK_SIZE) - 1,
+                end
+            );
 
             let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
             let addition_record = commit(item, sender_randomness, receiver_preimage.hash());

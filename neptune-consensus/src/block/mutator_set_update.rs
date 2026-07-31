@@ -157,35 +157,55 @@ impl MutatorSetUpdate {
 mod tests {
     use neptune_mutator_set::msa_and_records::MsaAndRecords;
     use proptest::collection::vec;
+    use proptest::prelude::TestCaseError;
+    use proptest::prop_assert;
     use proptest_arbitrary_interop::arb;
     use tasm_lib::prelude::Digest;
     use test_strategy::proptest;
 
     use super::MutatorSetUpdate;
 
-    #[proptest]
-    fn can_remove_agrees_with_update_result(
-        #[strategy(0usize..30)] _num_removals: usize,
-        #[strategy((#_num_removals as u64)..=(u64::from(u8::MAX)))] _num_leafs_aocl: u64,
-        #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
-        _removables: Vec<(Digest, Digest, Digest)>,
-        #[strategy(MsaAndRecords::arbitrary_with((#_removables, #_num_leafs_aocl)))]
-        msa_and_records: MsaAndRecords,
-    ) {
+    fn prop(msa_and_records: MsaAndRecords) -> std::result::Result<(), TestCaseError> {
         let removal_records = msa_and_records.unpacked_removal_records();
         for rr in &removal_records {
-            assert!(msa_and_records.mutator_set_accumulator.can_remove(rr));
+            prop_assert!(msa_and_records.mutator_set_accumulator.can_remove(rr));
         }
 
         let original_msa = msa_and_records.mutator_set_accumulator;
         for rr in removal_records {
             let mut mutated_msa = original_msa.clone();
             let as_msu = MutatorSetUpdate::new(vec![rr.clone()], vec![]);
-            assert!(as_msu.apply_to_accumulator(&mut mutated_msa).is_ok());
-            assert!(
+            prop_assert!(as_msu.apply_to_accumulator(&mut mutated_msa).is_ok());
+            prop_assert!(
                 !mutated_msa.can_remove(&rr),
                 "Can remove must return false after RR has been applied"
             );
         }
+
+        Ok(())
+    }
+
+    #[proptest]
+    fn can_remove_agrees_with_update_result_u8(
+        #[strategy(0usize..40)] _num_removals: usize,
+        #[strategy((#_num_removals as u64)..=(u64::from(u8::MAX)))] _num_leafs_aocl: u64,
+        #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
+        _removables: Vec<(Digest, Digest, Digest)>,
+        #[strategy(MsaAndRecords::arbitrary_with((#_removables, #_num_leafs_aocl)))]
+        msa_and_records: MsaAndRecords,
+    ) {
+        prop_assert!(prop(msa_and_records).is_ok())
+    }
+
+    #[proptest(cases = 10)]
+    fn can_remove_agrees_with_update_result_u16(
+        #[strategy(0usize..40)] _num_removals: usize,
+        #[strategy((#_num_removals as u64)..=(u64::from(u16::MAX)))] _num_leafs_aocl: u64,
+        #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
+        _removables: Vec<(Digest, Digest, Digest)>,
+        #[strategy(MsaAndRecords::arbitrary_with((#_removables, #_num_leafs_aocl)))]
+        msa_and_records: MsaAndRecords,
+    ) {
+        prop_assert!(prop(msa_and_records).is_ok())
     }
 }
