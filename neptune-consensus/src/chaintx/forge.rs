@@ -830,21 +830,20 @@ impl BasicSnippet for Forge {
         // shared `AuthenticateLinkKernelField` snippet, so no two branches can
         // drift on how a `LinkKernel` leaf is proven. `field_accessor` turns
         // `*witness` into `*field size`.
-        let authenticate_field =
-            |snippet: &str, field_accessor: &[LabelledInstruction]| {
-                triton_asm!(
-                    // _ [lkmh] *witness
-                    dup 5 dup 5 dup 5 dup 5 dup 5
-                    // _ [lkmh] *witness [lkmh]
+        let authenticate_field = |snippet: &str, field_accessor: &[LabelledInstruction]| {
+            triton_asm!(
+                // _ [lkmh] *witness
+                dup 5 dup 5 dup 5 dup 5 dup 5
+                // _ [lkmh] *witness [lkmh]
 
-                    dup 5
-                    {&field_accessor}
-                    // _ [lkmh] *witness [lkmh] *field size
+                dup 5
+                {&field_accessor}
+                // _ [lkmh] *witness [lkmh] *field size
 
-                    call {snippet}
-                    // _ [lkmh] *witness
-                )
-            };
+                call {snippet}
+                // _ [lkmh] *witness
+            )
+        };
 
         // A leaf whose value consensus fixes is *not* one of those: pushing the
         // constant digest straight into `merkle_verify` asserts the field's
