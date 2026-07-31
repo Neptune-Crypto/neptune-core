@@ -190,6 +190,7 @@ mod test_support {
     use super::*;
     use crate::block::block_appendix::BlockAppendix;
     use crate::block::block_kernel::BlockKernel;
+    use crate::block::test_helpers::block_mmra_with_num_leafs;
     use crate::block::BlockProof;
     use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
     use crate::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
@@ -318,6 +319,18 @@ mod test_support {
                                 );
                                 (parent_header, parent_body, parent_appendix).prop_flat_map(
                                     move |(header, body, appendix)| {
+                                        // Ensure that block MMR leaf count
+                                        // agrees with the block height.
+                                        let body = BlockBody::new(
+                                            body.transaction_kernel().to_owned(),
+                                            body.mutator_set_accumulator.clone(),
+                                            body.lock_free_mmr_accumulator.clone(),
+                                            block_mmra_with_num_leafs(
+                                                parent_height.value(),
+                                                body.block_mmr_accumulator.peaks(),
+                                            ),
+                                        );
+
                                         let parent_kernel = BlockKernel {
                                             header,
                                             body: body.clone(),
