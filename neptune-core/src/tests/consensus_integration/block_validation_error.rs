@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use neptune_consensus::block::arbitrary_kernel as block_with_arbkernel;
 use neptune_consensus::block::block_appendix::BlockAppendix;
 use neptune_consensus::block::block_appendix::MAX_NUM_CLAIMS;
@@ -13,11 +14,17 @@ use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_consensus::consensus_rule_set::BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET;
 use neptune_consensus::consensus_rule_set::TX_BACKDATING_LIMIT;
 use neptune_consensus::proof_abstractions::verifier::cache_true_claims;
+use neptune_consensus::transaction::announcement::Announcement;
 use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier;
 use neptune_consensus::transaction::transaction_kernel::TransactionKernelProxy;
+use neptune_consensus::transaction::transparent_input::TransparentInput;
+use neptune_consensus::transaction::utxo::Utxo;
 use neptune_consensus::transaction::validity::neptune_proof::NeptuneProof;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_mutator_set::addition_record::AdditionRecord;
+use neptune_mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
+use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
+use neptune_mutator_set::removal_record::RemovalRecord;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::difficulty_control;
 use neptune_primitives::difficulty_control::Difficulty;
@@ -29,6 +36,7 @@ use proptest::prop_assert_eq;
 use proptest::prop_assume;
 use proptest::test_runner::RngSeed;
 use proptest_arbitrary_interop::arb;
+use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::twenty_first::bfe;
@@ -743,4 +751,199 @@ async fn version_mismatch(
 
     b_new.set_version_in_header_only(version);
     assert_eq!(Ok(()), b_new.validate(&b_prev, ts, network).await);
+}
+
+#[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
+async fn lustration_counter_exceeds_initial_value_2s(
+    #[strategy(setup())] s: (Block, Timestamp, Randomness<2, 2>),
+) {
+    let network = Network::Main;
+    let (mut b_prev, ts, rness) = s;
+
+    prop_assume!(b_prev.header().height > ConsensusRuleSet::first_lustration_block(network));
+    let parent_lustration_status = LustrationStatus {
+        max_lustrating_aocl_leaf_index: 101,
+        counter: NativeCurrencyAmount::coins(600),
+    };
+    b_prev.set_lustration_status(parent_lustration_status);
+
+    let mut b_new = fake_valid_successor_for_tests(&b_prev, ts, rness, network).await;
+
+    // A counter exceeding the entire coin supply, and thus also the value the
+    // counter was initialized to. Note that this is checked before the counter
+    // is compared against its expected value, so this error surfaces rather
+    // than 2.p's.
+    b_new.set_lustration_status(LustrationStatus {
+        counter: NativeCurrencyAmount::coins(42_000_000),
+        max_lustrating_aocl_leaf_index: parent_lustration_status.max_lustrating_aocl_leaf_index,
+    });
+
+    let consensus_rule_set = ConsensusRuleSet::infer_from(network, b_new.header().height);
+    cache_true_claims([BlockProgram::claim(
+        b_new.body(),
+        b_new.kernel.appendix(),
+        consensus_rule_set,
+    )])
+    .await;
+
+    let err = b_new.validate(&b_prev, ts, network).await.err().unwrap();
+    assert!(
+        matches!(
+            err,
+            BlockValidationError::LustrationCounterExceedsInitialValue { .. }
+        ),
+        "got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn missing_lustration_announcement_2o() {
+    let network = Network::Testnet(42);
+    let (parent, block, now) = block_spending_lustration_bound_inputs(
+        NativeCurrencyAmount::coins(600),
+        &[NativeCurrencyAmount::coins(1)],
+        false,
+        network,
+    )
+    .await;
+
+    let err = block.validate(&parent, now, network).await.err().unwrap();
+    assert!(
+        matches!(err, BlockValidationError::MissingLustrationAnnouncement),
+        "got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn lustrating_more_than_the_counter_holds_2r() {
+    let network = Network::Testnet(42);
+    let (parent, block, now) = block_spending_lustration_bound_inputs(
+        NativeCurrencyAmount::coins(1),
+        &[NativeCurrencyAmount::coins(2)],
+        true,
+        network,
+    )
+    .await;
+
+    let err = block.validate(&parent, now, network).await.err().unwrap();
+    assert!(
+        matches!(err, BlockValidationError::NegativeLustrationCounter { .. }),
+        "got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn lustrated_amount_out_of_range_is_an_unknown_lustration_problem() {
+    // Two lustrations of the entire coin supply each; their sum does not fit
+    // in the amount type.
+    let network = Network::Testnet(42);
+    let whole_supply = NativeCurrencyAmount::coins(42_000_000);
+    let (parent, block, now) = block_spending_lustration_bound_inputs(
+        NativeCurrencyAmount::coins(1),
+        &[whole_supply; 2],
+        true,
+        network,
+    )
+    .await;
+
+    let err = block.validate(&parent, now, network).await.err().unwrap();
+    assert!(
+        matches!(err, BlockValidationError::UnknownLustrationProblem),
+        "got {err:?}"
+    );
+}
+
+/// A parent block, and a block spending one input per element of `amounts`,
+/// each of which is required to lustrate. Iff `with_announcements`, the block
+/// contains the required lustration announcements.
+///
+/// The parent's lustration counter is set to `parent_counter`, and its AOCL
+/// threshold above every leaf index in existence such that all inputs must
+/// lustrate.
+async fn block_spending_lustration_bound_inputs(
+    parent_counter: NativeCurrencyAmount,
+    amounts: &[NativeCurrencyAmount],
+    with_announcements: bool,
+    network: Network,
+) -> (Block, Block, Timestamp) {
+    let genesis = Block::genesis(network);
+    let now = genesis.header().timestamp + Timestamp::hours(1);
+    let mut parent =
+        fake_valid_successor_for_tests(&genesis, now, Default::default(), network).await;
+
+    // The parent must carry the lustration status before the block under test
+    // is derived from it, since that block commits to the parent's digest.
+    let lustration_status = LustrationStatus {
+        max_lustrating_aocl_leaf_index: u64::MAX,
+        counter: parent_counter,
+    };
+    parent.set_lustration_status(lustration_status);
+    assert!(
+        parent.header().height.next() > ConsensusRuleSet::first_lustration_block(network),
+        "the block tested must be past the block that initializes the counter"
+    );
+
+    // One AOCL leaf per input, taken from the end of the parent's AOCL, so
+    // that the leaves exist and their indices fall in the batch the mutator
+    // set is currently accumulating. The latter means the inputs can be
+    // removed without any chunk-dictionary entries.
+    let parent_msa = parent.mutator_set_accumulator_after().unwrap();
+    let transparent_inputs = amounts
+        .iter()
+        .enumerate()
+        .map(|(i, &amount)| TransparentInput {
+            utxo: Utxo::new(Digest::default(), amount.to_native_coins()),
+            aocl_leaf_index: parent_msa.aocl.num_leafs() - 1 - i as u64,
+            sender_randomness: Digest::default(),
+            receiver_preimage: Digest::default(),
+        })
+        .collect_vec();
+    let inputs = transparent_inputs
+        .iter()
+        .map(|input| RemovalRecord {
+            absolute_indices: input.absolute_index_set(),
+            target_chunks: ChunkDictionary::empty(),
+        })
+        .collect_vec();
+    assert!(
+        inputs.iter().all(|input| parent_msa.can_remove(input)),
+        "test assumption: the inputs must be removable, or validation fails \
+         over the mutator set rather than over the lustrations"
+    );
+    let announcements = if with_announcements {
+        Announcement::lustration_announcements(lustration_status, &transparent_inputs)
+    } else {
+        vec![]
+    };
+
+    let now = now + Timestamp::hours(1);
+    let mut block = fake_valid_successor_for_tests(&parent, now, Default::default(), network).await;
+    let transaction_kernel = TransactionKernelModifier::default()
+        .inputs(RemovalRecordList::pack(inputs))
+        .announcements(announcements)
+        .modify(block.body().transaction_kernel.clone());
+    block.set_transaction_kernel(transaction_kernel);
+    block.fix_mutator_set_fields(&parent);
+
+    // Adopting the parent's threshold verbatim keeps rule 2.q happy, so that
+    // the lustrations themselves are what the validator complains about.
+    block.set_lustration_status(lustration_status);
+
+    // The block proof is defined to be true rather than produced, so that
+    // these tests need no proving.
+    let consensus_rule_set = ConsensusRuleSet::infer_from(network, block.header().height);
+    block.set_appendix(BlockAppendix::new(BlockAppendix::consensus_claims(
+        block.body(),
+        consensus_rule_set,
+    )));
+    block.set_proof(BlockProof::SingleProof(NeptuneProof::invalid()));
+    block.satisfy_pow(parent.header().difficulty, consensus_rule_set);
+    cache_true_claims([BlockProgram::claim(
+        block.body(),
+        block.kernel.appendix(),
+        consensus_rule_set,
+    )])
+    .await;
+
+    (parent, block, now)
 }

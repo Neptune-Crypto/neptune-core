@@ -157,3 +157,95 @@ pub async fn admissible(
 
     Ok(())
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use neptune_consensus::transaction::TransactionProof;
+    use neptune_consensus::transaction::test_helpers::txkernel;
+    use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
+    use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier;
+    use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+    use neptune_mutator_set::addition_record::AdditionRecord;
+    use neptune_mutator_set::removal_record::RemovalRecord;
+    use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+    use neptune_mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
+    use neptune_mutator_set::shared::CHUNK_SIZE;
+    use neptune_mutator_set::shared::NUM_TRIALS;
+    use neptune_mutator_set::shared::WINDOW_SIZE;
+    use proptest_arbitrary_interop::arb;
+    use tasm_lib::prelude::Digest;
+    use test_strategy::proptest;
+
+    use super::*;
+
+    /// Admission runs on untrusted data. So it is not allowed to panic.
+    #[proptest(cases = 15, async = "tokio")]
+    async fn admissible_never_panics(
+        #[strategy(txkernel::with_lengths(0..5, 0..5, 0..5, false))] kernel: TransactionKernel,
+        #[strategy(proptest::collection::vec(arb::<Digest>(), 0..40))] canonical_commitments: Vec<
+            Digest,
+        >,
+        #[strategy(arb())] now: Timestamp,
+        already_known: bool,
+        with_lustration_status: bool,
+        #[strategy(arb())] max_lustrating_aocl_leaf_index: u64,
+        #[strategy(arb::<u8>())] boundary_selector: u8,
+    ) {
+        let lustration_status = with_lustration_status.then(|| LustrationStatus {
+            counter: NativeCurrencyAmount::coins(42),
+            max_lustrating_aocl_leaf_index,
+        });
+
+        // The mutator set is ours, not the sender's, so it is always internally
+        // consistent.
+        let mut tip_mutator_set = MutatorSetAccumulator::default();
+        for canonical_commitment in canonical_commitments {
+            tip_mutator_set.add(&AdditionRecord::new(canonical_commitment));
+        }
+
+        // Purely random absolute indices never land on the edges of the active
+        // window, which is where this code's bugs have lived. So aim some of
+        // them there: at the window's first and last representable index, and
+        // at the first index just past it.
+        let batch_index = u128::from(tip_mutator_set.get_batch_index());
+        let active_window_start = batch_index * u128::from(CHUNK_SIZE);
+        let boundary_index = match boundary_selector % 5 {
+            0 => active_window_start.saturating_sub(1),
+            1 => active_window_start,
+            2 => active_window_start + u128::from(WINDOW_SIZE) - 1,
+            3 => active_window_start + u128::from(WINDOW_SIZE),
+            _ => active_window_start + u128::from(WINDOW_SIZE) + 1,
+        };
+
+        // The cheap checks come first and reject almost every arbitrary
+        // transaction, so satisfy them: otherwise the code that reads the
+        // mutator set -- where the interesting panics are -- is never reached.
+        let kernel = TransactionKernelModifier::default()
+            .inputs(vec![RemovalRecord {
+                absolute_indices: AbsoluteIndexSet::new([boundary_index; NUM_TRIALS as usize]),
+                target_chunks: ChunkDictionary::empty(),
+            }])
+            .coinbase(None)
+            .fee(NativeCurrencyAmount::coins(1))
+            .timestamp(now)
+            .modify(kernel);
+
+        // Everything this test is about happens before proof verification.
+        let transaction = Transaction {
+            kernel,
+            proof: TransactionProof::invalid(),
+        };
+
+        let _ = admissible(
+            &transaction,
+            &tip_mutator_set,
+            lustration_status,
+            already_known,
+            now,
+            Network::Main,
+            ConsensusRuleSet::default(),
+        )
+        .await;
+    }
+}

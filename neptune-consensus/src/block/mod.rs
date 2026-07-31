@@ -1351,6 +1351,17 @@ mod test_support {
             self.unset_digest();
         }
 
+        /// Replace the transaction kernel of this block's body. Leaves the
+        /// block's mutator-set fields untouched; see also
+        /// [`Block::fix_mutator_set_fields`].
+        pub fn set_transaction_kernel(
+            &mut self,
+            transaction_kernel: crate::transaction::transaction_kernel::TransactionKernel,
+        ) {
+            self.kernel.body.transaction_kernel = transaction_kernel;
+            self.unset_digest();
+        }
+
         pub fn set_appendix(&mut self, appendix: BlockAppendix) {
             self.kernel.appendix = appendix;
             self.unset_digest();
@@ -1478,14 +1489,25 @@ proptest::prop_compose! {
 pub(crate) mod tests {
 
     use macro_rules_attr::apply;
+    use neptune_mutator_set::addition_record::AdditionRecord;
+    use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+    use neptune_mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
+    use neptune_mutator_set::removal_record::RemovalRecord;
     use neptune_primitives::network::Network;
+    use proptest::prop_assert_eq;
+    use proptest::prop_assume;
     use proptest_arbitrary_interop::arb;
     use rand::rng;
     use rand::Rng;
+    use test_strategy::proptest;
 
     use super::*;
     use crate::block::test_helpers::invalid_empty_block;
     use crate::proof_abstractions::test_runtime::shared_tokio_runtime;
+    use crate::transaction::announcement::Announcement;
+    use crate::transaction::transaction_kernel::TransactionKernel;
+    use crate::transaction::transaction_kernel::TransactionKernelModifier;
+    use crate::transaction::validity::neptune_proof::NeptuneProof;
     use crate::type_scripts::native_currency::NativeCurrency;
     use crate::type_scripts::TypeScript;
 
@@ -1578,6 +1600,209 @@ pub(crate) mod tests {
             Err(BlockValidationError::FutureDating),
             block1.solo_validate(now, network).await
         );
+    }
+
+    /// Negative tests for [`Block::solo_validate`]: one per rule by which it
+    /// can reject a block. Each starts from a block that would otherwise be
+    /// rejected only by its proof, so that the rule named is the rule
+    /// observed.
+    mod negative_validity {
+        use super::*;
+
+        #[proptest(cases = 5, async = "tokio")]
+        async fn helper_yields_block_rejected_only_by_its_proof(
+            #[strategy(arbitrary_kernel())] block: Block,
+        ) {
+            let (block, now) = block_rejected_only_by_its_proof(block);
+
+            prop_assert_eq!(
+                Err(BlockValidationError::AppendixMissingClaim),
+                block.solo_validate(now, Network::Main).await,
+                "the first check inside `validate_block_proof`, so every earlier rule passed"
+            );
+        }
+
+        #[proptest(cases = 5, async = "tokio")]
+        async fn block_with_unpackable_inputs_fails_2a(
+            #[strategy(arbitrary_kernel())] arbitrary_block: Block,
+        ) {
+            let (block, now) = block_rejected_only_by_its_proof(arbitrary_block.clone());
+
+            // The arbitrary block's own inputs, which are not a packed list.
+            let unpackable = arbitrary_block.body().transaction_kernel.inputs.clone();
+            prop_assume!(RemovalRecordList::try_unpack(unpackable.clone()).is_err());
+            let block = block_with_inputs(block, unpackable);
+
+            prop_assert_eq!(
+                Err(BlockValidationError::RemovalRecordsUnpackFailure),
+                block.solo_validate(now, Network::Main).await
+            );
+        }
+
+        #[proptest(cases = 5, async = "tokio")]
+        async fn block_with_duplicate_removal_records_fails_2c(
+            #[strategy(arbitrary_kernel())] arbitrary_block: Block,
+            #[strategy(arb())] absolute_indices: AbsoluteIndexSet,
+        ) {
+            let (block, now) = block_rejected_only_by_its_proof(arbitrary_block);
+
+            let removal_record = RemovalRecord {
+                absolute_indices,
+                target_chunks: ChunkDictionary::empty(),
+            };
+            let duplicated = RemovalRecordList::pack(vec![removal_record.clone(), removal_record]);
+            prop_assume!(RemovalRecordList::try_unpack(duplicated.clone()).is_ok());
+            let block = block_with_inputs(block, duplicated);
+
+            prop_assert_eq!(
+                Err(BlockValidationError::RemovalRecordsUniqueness),
+                block.solo_validate(now, Network::Main).await
+            );
+        }
+
+        #[proptest(cases = 5, async = "tokio")]
+        async fn block_with_too_many_outputs_fails_2k(
+            #[strategy(arbitrary_kernel())] arbitrary_block: Block,
+        ) {
+            let (block, now) = block_rejected_only_by_its_proof(arbitrary_block);
+            let network = Network::Main;
+            let consensus_rule_set = ConsensusRuleSet::infer_from(network, block.header().height);
+            let too_many = consensus_rule_set.max_num_outputs() + 1;
+
+            let transaction_kernel = TransactionKernelModifier::default()
+                .outputs(vec![AdditionRecord::new(Digest::default()); too_many])
+                .modify(block.body().transaction_kernel.clone());
+            let block = block_with_transaction_kernel(block, transaction_kernel);
+
+            prop_assert_eq!(
+                Err(BlockValidationError::TooManyOutputs),
+                block.solo_validate(now, network).await
+            );
+        }
+
+        #[proptest(cases = 5, async = "tokio")]
+        async fn block_with_too_many_announcements_fails_2l(
+            #[strategy(arbitrary_kernel())] arbitrary_block: Block,
+        ) {
+            let (block, now) = block_rejected_only_by_its_proof(arbitrary_block);
+            let network = Network::Main;
+            let consensus_rule_set = ConsensusRuleSet::infer_from(network, block.header().height);
+            let too_many = consensus_rule_set.max_num_announcements() + 1;
+
+            let transaction_kernel = TransactionKernelModifier::default()
+                .announcements(vec![Announcement::new(vec![]); too_many])
+                .modify(block.body().transaction_kernel.clone());
+            let block = block_with_transaction_kernel(block, transaction_kernel);
+
+            prop_assert_eq!(
+                Err(BlockValidationError::TooManyAnnouncements),
+                block.solo_validate(now, network).await
+            );
+        }
+
+        #[proptest(cases = 3, async = "tokio")]
+        async fn block_with_invalid_proof_fails_1d(
+            #[strategy(arbitrary_kernel())] arbitrary_block: Block,
+        ) {
+            let (block, now) = block_rejected_only_by_its_proof(arbitrary_block);
+            let network = Network::Main;
+            let consensus_rule_set = ConsensusRuleSet::infer_from(network, block.header().height);
+
+            // Give the block the appendix its body calls for, so that validation
+            // gets past 1.a and reaches the proof itself, then hand it a proof that
+            // attests to nothing.
+            let appendix = BlockAppendix::new(BlockAppendix::consensus_claims(
+                block.body(),
+                consensus_rule_set,
+            ));
+            let block = Block::new(
+                *block.header(),
+                block.body().to_owned(),
+                appendix,
+                BlockProof::SingleProof(NeptuneProof::invalid()),
+            );
+
+            prop_assert_eq!(
+                Err(BlockValidationError::ProofValidity),
+                block.solo_validate(now, network).await
+            );
+        }
+
+        #[proptest(cases = 1, async = "tokio")]
+        async fn block_with_too_many_inputs_fails_2j(
+            #[strategy(arbitrary_kernel())] arbitrary_block: Block,
+            #[strategy(arb())] absolute_indices: AbsoluteIndexSet,
+        ) {
+            let (block, now) = block_rejected_only_by_its_proof(arbitrary_block);
+            let network = Network::Main;
+            let consensus_rule_set = ConsensusRuleSet::infer_from(network, block.header().height);
+
+            // Identical records, so the list packs; the count is what is under
+            // test, and it is checked before the duplicates are.
+            let removal_record = RemovalRecord {
+                absolute_indices,
+                target_chunks: ChunkDictionary::empty(),
+            };
+            let too_many = consensus_rule_set.max_num_inputs() + 1;
+            let inputs = RemovalRecordList::pack(vec![removal_record; too_many]);
+            prop_assume!(RemovalRecordList::try_unpack(inputs.clone()).is_ok());
+            let block = block_with_inputs(block, inputs);
+
+            prop_assert_eq!(
+                Err(BlockValidationError::TooManyInputs),
+                block.solo_validate(now, network).await
+            );
+        }
+
+        /// A block reaching the end of [`Block::solo_validate`], i.e. rejected only
+        /// by its proof.
+        fn block_rejected_only_by_its_proof(block: Block) -> (Block, Timestamp) {
+            let header = *block.header();
+            let transaction_kernel = TransactionKernelModifier::default()
+                .timestamp(header.timestamp)
+                .coinbase(None)
+                .inputs(RemovalRecordList::pack(vec![]))
+                .modify(block.body().transaction_kernel.clone());
+            let body = BlockBody::new(
+                transaction_kernel,
+                block.body().mutator_set_accumulator.clone(),
+                block.body().lock_free_mmr_accumulator.clone(),
+                block.body().block_mmr_accumulator.clone(),
+            );
+            let mut block = Block::new(header, body, block.appendix().clone(), block.proof.clone());
+            block.set_version_consistently(header.version);
+
+            (block, header.timestamp)
+        }
+
+        /// Replace a block's inputs, leaving everything else alone.
+        fn block_with_inputs(block: Block, inputs: Vec<RemovalRecord>) -> Block {
+            let transaction_kernel = TransactionKernelModifier::default()
+                .inputs(inputs)
+                .modify(block.body().transaction_kernel.clone());
+
+            block_with_transaction_kernel(block, transaction_kernel)
+        }
+
+        /// Replace a block's transaction kernel, leaving everything else alone.
+        fn block_with_transaction_kernel(
+            block: Block,
+            transaction_kernel: TransactionKernel,
+        ) -> Block {
+            let body = BlockBody::new(
+                transaction_kernel,
+                block.body().mutator_set_accumulator.clone(),
+                block.body().lock_free_mmr_accumulator.clone(),
+                block.body().block_mmr_accumulator.clone(),
+            );
+
+            Block::new(
+                *block.header(),
+                body,
+                block.appendix().clone(),
+                block.proof.clone(),
+            )
+        }
     }
 
     #[test]
