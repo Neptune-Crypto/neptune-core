@@ -31,6 +31,18 @@ use crate::transaction::transaction_kernel::TransactionKernelModifier;
 use crate::transaction::validity::neptune_proof::Proof;
 use crate::transaction::Transaction;
 
+/// An [`MmrAccumulator`] holding exactly `num_leafs` leafs, built from the
+/// given peaks.
+///
+/// Only the leaf count is constrained. The peaks are truncated or padded to the
+/// `num_leafs.count_ones()` peaks an accumulator of that size has; their values
+/// are arbitrary.
+pub fn block_mmra_with_num_leafs(num_leafs: u64, mut peaks: Vec<Digest>) -> MmrAccumulator {
+    peaks.resize(num_leafs.count_ones() as usize, Digest::default());
+
+    MmrAccumulator::init(peaks, num_leafs)
+}
+
 pub fn invalid_block_with_tx_kernel(previous_block: &Block, tx_kernel: TransactionKernel) -> Block {
     // 60s min block time on main and testnet
     let minimum_block_time = Timestamp::seconds(60);
@@ -146,7 +158,7 @@ pub fn invalid_block_with_kernel_and_mutator_set(
         difficulty: Difficulty::MINIMUM,
     };
 
-    let block_mmr = MmrAccumulator::new_from_leafs(vec![]);
+    let block_mmr = MmrAccumulator::new_from_leafs(vec![block_header.prev_block_digest]);
     let ms_update = MutatorSetUpdate::new(
         transaction_kernel.inputs.clone(),
         transaction_kernel.outputs.clone(),

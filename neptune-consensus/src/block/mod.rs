@@ -786,22 +786,10 @@ impl Block {
         // leafs, and every block appends exactly its predecessor, so on a chain
         // descending from genesis the leaf count is the height. Checking it
         // pins the header's height without reference to any predecessor.
-        //
-        // TODO: Enable this check in tests too. It is disabled there because the
-        // test-block generators populate the block MMR accumulator arbitrarily,
-        // so the blocks they produce have a leaf count unrelated to their
-        // height and could not exist on a real chain. Fixing the generators
-        // means new block bodies, hence new proofs which takes many hours on
-        // our most powerful machines. Once that is done, drop the `cfg` and add
-        // a test that a block whose height disagrees with its block MMR
-        // accumulator is rejected.
-        #[cfg(not(any(test, feature = "test-helpers")))]
-        {
-            let height_according_to_body: BlockHeight =
-                self.body().block_mmr_accumulator.num_leafs().into();
-            if height_according_to_body != height {
-                return Err(BlockValidationError::BlockHeight);
-            }
+        let height_according_to_body: BlockHeight =
+            self.body().block_mmr_accumulator.num_leafs().into();
+        if height_according_to_body != height {
+            return Err(BlockValidationError::BlockHeight);
         }
 
         // 0.g)
@@ -1462,6 +1450,13 @@ proptest::prop_compose! {
         appendix in proptest_arbitrary_interop::arb::<BlockAppendix>(),
         mutator_set_accumulator in proptest_arbitrary_interop::arb::<MutatorSetAccumulator>(),
     ) -> Block {
+        // The arbitrary block MMR accumulator's leaf count is unrelated to the
+        // arbitrary header's height. Fix this discrepancy.
+        let block_mmr_accumulator = test_helpers::block_mmra_with_num_leafs(
+            header.height.value(),
+            block_mmr_accumulator.peaks(),
+        );
+
         Block {
             kernel: BlockKernel {
                 header, body: BlockBody::new(
@@ -1527,9 +1522,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// Nothing in [`Block::solo_validate`] may reject a well-formed block
-    /// before its proof is reached. Were some rule there over-strict, blocks
-    /// would be rejected during syncing that full validation accepts.
     #[apply(shared_tokio_runtime)]
     async fn solo_validate_accepts_well_formed_block_up_to_its_proof() {
         let network = Network::Testnet(42);
@@ -1544,6 +1536,34 @@ pub(crate) mod tests {
             block1.solo_validate(now, network).await,
             "a well-formed block must be rejected by its proof, not before"
         );
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn solo_validate_rejects_height_disagreeing_with_block_mmr() {
+        let network = Network::Testnet(42);
+        let genesis = Block::genesis(network);
+        let block1 = invalid_empty_block(&genesis, network);
+        let now = block1.header().timestamp;
+
+        for wrong_num_leafs in [0, 2, 17] {
+            let body = block1.body();
+            let mut wrong = block1.clone();
+            wrong.kernel.body = BlockBody::new(
+                body.transaction_kernel().to_owned(),
+                body.mutator_set_accumulator.clone(),
+                body.lock_free_mmr_accumulator.clone(),
+                test_helpers::block_mmra_with_num_leafs(
+                    wrong_num_leafs,
+                    body.block_mmr_accumulator.peaks(),
+                ),
+            );
+            wrong.unset_digest();
+
+            assert_eq!(
+                Err(BlockValidationError::BlockHeight),
+                wrong.solo_validate(now, network).await,
+            );
+        }
     }
 
     /// A timestamp moved far enough ahead is caught without a predecessor.
