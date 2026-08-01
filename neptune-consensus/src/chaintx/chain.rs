@@ -52,8 +52,9 @@ use crate::transaction::validity::tasm::claims::generate_single_proof_claim::Gen
 use crate::transaction::validity::tasm::hash_removal_record_index_sets::HashRemovalRecordIndexSets;
 use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
-const LEFT_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT_ERROR: i128 = 1_000_540;
-const RIGHT_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT_ERROR: i128 = 1_000_541;
+// 1_000_540 and 1_000_541 were the per-operand fee bounds; the two asserts on
+// the sum imply them. Not reused: error IDs are how a failed proof is diagnosed
+// in the field, and a recycled one reads as the old check.
 const NEW_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT_ERROR: i128 = 1_000_542;
 const NEW_FEE_IS_NOT_SUM_OF_OPERAND_FEES_ERROR: i128 = 1_000_543;
 const INPUTS_ARE_NOT_THE_OPERANDS_INPUTS_ERROR: i128 = 1_000_544;
@@ -659,11 +660,9 @@ impl BasicSnippet for Chain {
             // _ *witness *l_lk *r_lk *n_lk
         );
 
-        // Read one kernel's fee, authenticate it, and leave its value on the
-        // stack, having established that it is a non-negative, in-range amount.
-        // (An amount is a two's-complement `i128` in `u128` clothing, so
-        // `fee <= max` excludes the negatives too.)
-        let bounded_fee = |kernel_depth: usize, mast_hash_address, error_id: i128| {
+        // Read one kernel's fee, authenticate it against that kernel's MAST
+        // hash, and leave its value on the stack.
+        let authenticated_fee = |kernel_depth: usize, mast_hash_address| {
             triton_asm!(
                 // _ *witness *l_lk *r_lk *n_lk [fees..]
                 dup {kernel_depth}
@@ -685,40 +684,26 @@ impl BasicSnippet for Chain {
                 read_mem {fee_size}
                 pop 1
                 // _ ... [fee; 4]
-
-                dup 3 dup 3 dup 3 dup 3
-                {&push_max_amount}
-                call {lt_u128}
-                // _ ... [fee; 4] (max_amount < fee)
-
-                push 0 eq
-                assert error_id {error_id}
-                // _ ... [fee; 4]
             )
         };
 
         let assert_fee_is_sum_of_operand_fees = triton_asm!(
             // _ *witness *l_lk *r_lk *n_lk
-            {&bounded_fee(2, left_lkmh, LEFT_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT_ERROR)}
+            {&authenticated_fee(2, left_lkmh)}
             // _ *witness *l_lk *r_lk *n_lk [left_fee; 4]
 
-            {&bounded_fee(5, right_lkmh, RIGHT_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT_ERROR)}
+            {&authenticated_fee(5, right_lkmh)}
             // _ *witness *l_lk *r_lk *n_lk [left_fee; 4] [right_fee; 4]
 
             call {overflowing_add_u128}
             // _ *witness *l_lk *r_lk *n_lk [sum; 4] overflow
 
-            // Unreachable *for two summands*, and only just: both are in
-            // `[0, MAX_NAU]` by the bounds above, and `MAX_NAU` is 98.74% of
-            // `2**127` (`two_bounded_fees_cannot_overflow` pins that), so their
-            // sum clears `u128::MAX` with 1.26% to spare. A third bounded
-            // summand would *not* -- so this assert is load-bearing the moment
-            // anything chains more than two fees in one addition, or lets a
-            // negative fee (huge as a `u128`) reach here.
+            /* assert no overflow */
             push 0 eq
             assert error_id {NEW_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT_ERROR}
             // _ *witness *l_lk *r_lk *n_lk [sum; 4]
 
+            /* assert valid native currency amount */
             dup 3 dup 3 dup 3 dup 3
             {&push_max_amount}
             call {lt_u128}
@@ -1201,24 +1186,28 @@ pub(crate) mod tests {
             announcements(new).into_iter().sorted().collect_vec(),
         );
 
-        /* fee: the sum, both operand fees being non-negative and in range */
+        /* fee: the sum, which being in `[0, MAX_NAU]` puts both operands there
+        too -- neither is bounded on its own */
         authenticate(
             left_lkmh,
             LinkKernelField::Fee,
             Tip5::hash(&left.kernel.fee),
         );
-        assert!(left.kernel.fee <= NativeCurrencyAmount::max());
         authenticate(
             right_lkmh,
             LinkKernelField::Fee,
             Tip5::hash(&right.kernel.fee),
         );
-        assert!(right.kernel.fee <= NativeCurrencyAmount::max());
-        // the tasm adds the two as `u128`s, asserts no carry, then asserts the
-        // sum is in range; `checked_add` is `None` in exactly those two cases
-        let sum = left.kernel.fee.checked_add(&right.kernel.fee).unwrap();
+        // Added on the raw `u128`s, exactly as the tasm adds them -- which is
+        // where a negative amount is enormous rather than negative. So the
+        // carry is the real thing here too, and the two asserts are the tasm's
+        // two, not a signed surrogate for them.
+        let raw = |amount: NativeCurrencyAmount| amount.to_nau() as u128;
+        let (sum, carry) = raw(left.kernel.fee).overflowing_add(raw(right.kernel.fee));
+        assert!(!carry);
+        assert!(sum <= NativeCurrencyAmount::MAX_NAU as u128);
         authenticate(lkmh, LinkKernelField::Fee, Tip5::hash(&new.kernel.fee));
-        assert_eq!(sum, new.kernel.fee);
+        assert_eq!(sum, raw(new.kernel.fee));
 
         /* timestamp: the later of the two */
         authenticate(
@@ -1435,6 +1424,95 @@ pub(crate) mod tests {
         );
     }
 
+    /// How many distinct addition records `chain_is_associative` draws from.
+    const POOL: usize = 5;
+
+    /// Everything a chained kernel is, up to the order of its multisets --
+    /// which is all `Chain` fixes, the concatenations being shuffled.
+    fn canonical(kernel: &LinkKernel) -> impl std::fmt::Debug + PartialEq {
+        let sorted = |digests: Vec<Digest>| digests.into_iter().sorted().collect_vec();
+        (
+            sorted(kernel.kernel.inputs.iter().map(Tip5::hash).collect_vec()),
+            sorted(kernel.kernel.outputs.iter().map(Tip5::hash).collect_vec()),
+            sorted(kernel.thruputs.iter().map(Tip5::hash).collect_vec()),
+            sorted(
+                kernel
+                    .kernel
+                    .announcements
+                    .iter()
+                    .map(Tip5::hash)
+                    .collect_vec(),
+            ),
+            kernel.kernel.fee,
+            kernel.kernel.timestamp,
+            kernel.kernel.mutator_set_hash,
+        )
+    }
+
+    /// `Chain` is associative: `Chain(Chain(A, B), C) == Chain(A, Chain(B, C))`,
+    /// up to the order of the multisets. Order of chaining does not matter.
+    #[proptest(cases = 100)]
+    fn chain_is_associative(
+        #[strategy(proptest::collection::vec(0usize..=2, 3 * 2 * POOL))] multiplicities: Vec<usize>,
+    ) {
+        // one record per pool index, distinct and cheap -- `chained_kernel`
+        // compares addition records, it does not interpret them
+        let record = |i: usize| AdditionRecord {
+            canonical_commitment: Digest::new([BFieldElement::new(i as u64); Digest::LEN]),
+        };
+        let multiset = |counts: &[usize]| {
+            counts
+                .iter()
+                .enumerate()
+                .flat_map(|(i, &n)| vec![record(i); n])
+                .collect_vec()
+        };
+
+        let operand = |k: usize| {
+            let side = |half: usize| {
+                let start = 2 * POOL * k + POOL * half;
+                multiset(&multiplicities[start..start + POOL])
+            };
+            LinkKernel {
+                kernel: TransactionKernelProxy {
+                    inputs: vec![],
+                    outputs: side(0),
+                    announcements: vec![],
+                    fee: NativeCurrencyAmount::coins(k as u32),
+                    coinbase: None,
+                    timestamp: Timestamp::hours(k),
+                    mutator_set_hash: Digest::default(),
+                    merge_bit: false,
+                }
+                .into_kernel(),
+                thruputs: side(1),
+            }
+        };
+        let (a, b, c) = (operand(0), operand(1), operand(2));
+
+        // Distinct seeds per step: the result is compared as multisets, so the
+        // shuffling must not be what makes the two sides agree.
+        let (ab, cut_ab) = ChainWitness::chained_kernel(&a, &b, [0u8; 32]);
+        let (ab_c, cut_ab_c) = ChainWitness::chained_kernel(&ab, &c, [1u8; 32]);
+        let (bc, cut_bc) = ChainWitness::chained_kernel(&b, &c, [2u8; 32]);
+        let (a_bc, cut_a_bc) = ChainWitness::chained_kernel(&a, &bc, [3u8; 32]);
+
+        prop_assert_eq!(canonical(&ab_c), canonical(&a_bc));
+
+        // And the same records were cancelled along the way -- the groupings
+        // agreeing on the result but not on what they cut through would mean
+        // value moved between the two sides.
+        let cut = |inner: Vec<AdditionRecord>, outer: Vec<AdditionRecord>| {
+            [inner, outer]
+                .concat()
+                .iter()
+                .map(Tip5::hash)
+                .sorted()
+                .collect_vec()
+        };
+        prop_assert_eq!(cut(cut_ab, cut_ab_c), cut(cut_bc, cut_a_bc));
+    }
+
     /// A successor chained onto the predecessor whose outputs it spends: every
     /// thruput cuts through, and the chained transaction is one the `Fix` branch
     /// could eventually take to a block.
@@ -1540,6 +1618,33 @@ mod negative_tests {
         .unwrap();
     }
 
+    /// With nothing to cut through, the outputs of the chained kernel are the
+    /// union of the operands' outputs, and the cut-through equation degenerates
+    /// to that plain multiset equality. Every other negative here pokes a
+    /// witness whose cut-through is *non-empty*, so this is the case where the
+    /// equation compares against a zero-length list -- and an empty operand is
+    /// exactly where a multiset comparison can pass vacuously without anyone
+    /// noticing.
+    #[test]
+    fn chained_outputs_must_be_union_of_outputs_of_operands() {
+        let (predecessor, mut successor) = chainable_link_primitive_witnesses(2, 1);
+
+        // drop the thruput the predecessor's output would have resolved; the
+        // operands now share no record, so nothing cancels
+        successor.kernel.thruputs.clear();
+        let mut witness =
+            ChainWitness::without_proofs(&predecessor.kernel, &successor.kernel, [0u8; 32]);
+        assert!(witness.cut_through.is_empty());
+
+        let mut outputs = witness.new_kernel.kernel.outputs.clone();
+        outputs.pop().unwrap();
+        witness.new_kernel.kernel = TransactionKernelModifier::default()
+            .outputs(outputs)
+            .modify(witness.new_kernel.kernel);
+
+        expect_failure(witness, &[OUTPUTS_ARE_NOT_CUT_THROUGH_ERROR]).unwrap();
+    }
+
     /// Cut-through must be two-sided. Dropping a record from the output side
     /// alone -- keeping the thruput that pays for it -- destroys value; the
     /// mirror image creates it. Both are one cancellation that only happened
@@ -1607,31 +1712,59 @@ mod negative_tests {
         expect_failure(witness, &[CUT_THROUGH_IS_NOT_MAXIMAL_ERROR]).unwrap();
     }
 
-    /// `Chain` bounds both operand fees to `[0, MAX_NAU]` and *then* adds them,
-    /// asserting the `u128` addition did not carry. That assert is unreachable
-    /// only because two bounded amounts fit in a `u128` -- which they do by a
-    /// margin of 1.26%, since `MAX_NAU` is 98.74% of `2**127`.
+    /// Chain the two operand fees and the chained fee, all in nau, and expect
+    /// `Chain` to reject the combination. `sum` is stated rather than computed:
+    /// the point of every caller below is which side of `[0, MAX_NAU]` it falls
+    /// on, so it should be readable off the call.
+    fn expect_fee_failure(left: i128, right: i128, sum: i128) {
+        let mut witness = pokeable_witness();
+        let set_fee = |kernel: &mut LinkKernel, nau: i128| {
+            kernel.kernel = TransactionKernelModifier::default()
+                .fee(NativeCurrencyAmount::from_nau(nau))
+                .modify(kernel.kernel.clone());
+        };
+        set_fee(&mut witness.left_kernel, left);
+        set_fee(&mut witness.right_kernel, right);
+        set_fee(&mut witness.new_kernel, sum);
+
+        expect_failure(witness, &[NEW_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT_ERROR]).unwrap();
+    }
+
+    /// A fee sum outside `[0, MAX_NAU]` is rejected, over the top and under the
+    /// bottom, and on either operand.
     ///
-    /// So the margin is pinned here rather than asserted in prose. Widening the
-    /// conversion factor, or raising the 42-million coin cap, breaks the
-    /// argument -- and would make a fee sum wrap around into a small positive
-    /// amount that passes the `<= max` check below it.
-    ///
-    /// Note what this does *not* say: three bounded amounts do not fit. A branch
-    /// that ever sums more than two fees in one `u128` addition must keep its
-    /// own overflow assert reachable and test it.
+    /// The over-the-top cases use operands that are each *individually* a
+    /// perfectly valid amount, so what is rejected is the sum and nothing else.
+    /// A negative sum cannot be reached that way -- two amounts in `[0, MAX_NAU]`
+    /// cannot add to less than zero -- so those cases put the negative on one
+    /// operand and leave the other at zero, making the sum equal to it.
     #[test]
-    fn two_bounded_fees_cannot_overflow() {
-        let max = u128::try_from(NativeCurrencyAmount::MAX_NAU).unwrap();
-        assert!(
-            max.checked_mul(2).is_some(),
-            "two maximal fees must not overflow a u128"
-        );
-        assert!(
-            max.checked_mul(3).is_none(),
-            "three maximal fees are expected NOT to fit; if they now do, the \
-             comment in `assert_fee_is_sum_of_operand_fees` is stale"
-        );
+    fn fee_sum_outside_the_valid_range_is_rejected() {
+        let max = NativeCurrencyAmount::MAX_NAU;
+
+        // one nau over the maximum
+        expect_fee_failure(max, 1, max + 1);
+        expect_fee_failure(1, max, max + 1);
+
+        // one nau below zero
+        expect_fee_failure(-1, 0, -1);
+        expect_fee_failure(0, -1, -1);
+    }
+
+    /// A negative operand fee is rejected even when the sum it produces is a
+    /// valid amount -- the case the range check above cannot reach, and the only
+    /// thing standing in its way is the assert that the `u128` addition did not
+    /// carry.
+    ///
+    /// This is where `Chain` parts ways with `merge_branch`, which *pops* that
+    /// carry (`merge_branch.rs:520`) precisely so a negative fee on its LHS
+    /// wraps and adds correctly. So it is also the test that pins the
+    /// consequence: fee-gobbling has to happen on standard transactions,
+    /// because a negative-fee `LinkTx` can never be chained.
+    #[test]
+    fn negative_operand_fee_is_rejected_even_when_the_sum_is_valid() {
+        expect_fee_failure(-1, 2, 1);
+        expect_fee_failure(2, -1, 1);
     }
 
     /// The chained fee is the operands' fees added up -- no more (a fee the
