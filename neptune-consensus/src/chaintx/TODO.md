@@ -54,6 +54,15 @@ txs):
   equations do not imply it — they are satisfied by any sub-multiset of the
   intersection, a short `cut_through` included. `Chain` asserts it; see §Tasm >
   `Chain`.
+- **No negative fees anywhere in a chain — so upgraders must gobble fees with
+  standard transactions.** `Chain` adds the operand fees as `u128`s and asserts
+  the addition does not carry, which forbids a negative operand fee outright.
+  `merge_branch` does the opposite: it *pops* the carry (`merge_branch.rs:520`)
+  precisely so that a negative fee on its LHS wraps and adds correctly, and
+  therefore still needs an explicit bound on its RHS. Consequence: an upgrader
+  that pays itself by merging in a negative-fee transaction has to do it on the
+  legacy `Transaction`/`Merge` path; there is no negative-fee `LinkTx` to
+  `Chain` in.
 - **The `SingleProof` digest is a *parameter* of the `LinkProof` claim, never a
   constant inside it.** See §Breaking the `Fix`/`Cast` cycle.
 
@@ -475,17 +484,13 @@ unmatched thruput is un-`Fix`able (see §Motivation).
 - [x] chained inputs are the operands' inputs
 - [x] chained announcements are the operands' announcements
 - [x] chained fee is the sum of the operand fees (too big *and* too small)
-- [ ] fee-sum overflow rejected. **Not testable through the tasm today, and the
-      margin is thinner than it looks.** `Chain` bounds both operand fees to
-      `[0, MAX_NAU]` before adding, and `MAX_NAU` is 98.74% of `2**127`, so two
-      bounded fees clear `u128::MAX` by 1.26% — the overflow assert after
-      `overflowing_add_u128` cannot fire, and no witness can drive it. *Three*
-      bounded fees would overflow. Pinned by
-      `two_bounded_fees_cannot_overflow` rather than left to the argument in a
-      comment. Revisit if: the conversion factor or the 42M coin cap grows; a
-      branch sums more than two amounts in one `u128` addition; or a negative
-      operand fee (huge as a `u128`) ever becomes reachable — the last is what
-      makes `Update`/`Cast` owe the same bounds check `Chain` does.
+- [x] a fee sum outside `[0, MAX_NAU]` is rejected
+      (`fee_sum_outside_the_valid_range_is_rejected`).
+- [x] a negative operand fee is rejected *even when the sum is a valid amount*
+      (`negative_operand_fee_is_rejected_even_when_the_sum_is_valid`) — the case
+      the range check cannot reach, caught by the assert that the `u128`
+      addition did not carry. This is the test behind the no-negative-fees
+      invariant; see §Governing invariants.
 - [x] chained timestamp is the later of the operand timestamps
 - [x] all three kernels agree on the mutator-set hash
 - [x] coinbase / merge bit on the chained kernel rejected
@@ -496,8 +501,8 @@ unmatched thruput is un-`Fix`able (see §Motivation).
 - [x] cut-through on unequal commitments rejected — the phantom-thruput
       argument, as a test: a thruput no predecessor output resolves can never
       be cancelled
-- [ ] chained *outputs* are the operands' outputs when nothing cuts through
-      (the `cut_through == []` case is only covered positively)
+- [x] chained *outputs* are the union of the operands' outputs when nothing cuts
+      through (`chained_outputs_must_be_the_operands_outputs`).
 - [ ] double spend across operands: both operands spending the same input.
       `Chain` does not reject this today — nor does `merge_branch`; index-set
       uniqueness is enforced downstream. Confirm that is still true once a
@@ -567,8 +572,9 @@ Positive counterparts (so the negatives cannot pass vacuously):
 
 
 ## New Tests
-- [ ] Property: `Chain` associativity:
-      `Chain(Chain(A, B), C) = Chain(A, Chain(B, C))`
+- [x] Property: `Chain` associativity:
+      `Chain(Chain(A, B), C) = Chain(A, Chain(B, C))` (`chain_is_associative`),
+      up to the order of the multisets, and on the cut-through sets too.
 - [ ] Property: `Fix` distributivity: `Fix(Chain(A, B)) = Merge(Fix(A), Fix(B))`
       when `thruputs == []`
 - [x] `Chain`: new timestamp unequal to max rejected

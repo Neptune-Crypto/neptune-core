@@ -232,6 +232,6 @@ mod tests {
 
     test_program_snapshot!(
         LinkProof,
-        "c000e23349b05774664e0f2852b75be6441ec0f8407599c23f9ba88eb7de85faf7e4f4503a4ef67c"
+        "f2e0b3a98ad5e10c8acfb96236957b68b9f154cf4d9a3a9fbb1b58518bb508c6931eefbe4ccf0d1a"
     );
 }
