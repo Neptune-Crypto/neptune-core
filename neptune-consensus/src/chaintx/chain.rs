@@ -1365,7 +1365,7 @@ pub(crate) mod tests {
     }
 
     /// Forge a link primitive witness into a proof-backed [`LinkTx`].
-    async fn forge(lpw: &LinkPrimitiveWitness) -> LinkTx {
+    pub(super) async fn forge(lpw: &LinkPrimitiveWitness) -> LinkTx {
         let witness =
             ForgeWitness::produce(lpw, vm_job_queue(), TritonVmProofJobOptions::default())
                 .await
@@ -1530,6 +1530,51 @@ pub(crate) mod tests {
             prop_positive(witness);
         }
     }
+
+    /// Depth 2: a `Chain`-produced link proof is itself a valid operand, which
+    /// is what makes a *chain* out of a binary operation.
+    ///
+    /// Every other test here chains `Forge`-produced operands.
+    ///
+    /// Nothing cuts through: the three operands are independent transactions
+    /// over one mutator set, which is what makes them chainable in the first
+    /// place. Cut-through across a chain is `chain_is_associative`'s job.
+    ///
+    /// This test involves producing proofs and might take a while to complete
+    /// if there is no proof cache.
+    #[tokio::test]
+    async fn chain_accepts_a_chain_produced_operand() {
+        // ..._and_given_coinbase with `None`, not the plain tuple strategy:
+        // that one hands one of the N a coinbase at random, and a link
+        // transaction is never a coinbase transaction.
+        let mut test_runner = TestRunner::deterministic();
+        let [a, b, c] =
+            PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets_and_given_coinbase(
+                [(2, 2, 1); 3],
+                None,
+            )
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current()
+            .map(|pw| LinkPrimitiveWitness::from_primitive_witness(pw, 0));
+
+        let inner = ChainWitness::chain(forge(&a).await, forge(&b).await, [0u8; 32]);
+        let inner_proof = LinkProof
+            .prove(
+                inner.claim(),
+                inner.nondeterminism(),
+                vm_job_queue(),
+                TritonVmProofJobOptions::default(),
+            )
+            .await
+            .unwrap();
+        let inner_tx = LinkTx {
+            kernel: inner.new_kernel,
+            proof: LinkTxProof::Proof(inner_proof),
+        };
+
+        prop_positive(ChainWitness::chain(inner_tx, forge(&c).await, [1u8; 32]));
+    }
 }
 
 #[cfg(test)]
@@ -1540,8 +1585,10 @@ mod negative_tests {
     use tasm_lib::hashing::merkle_verify::MerkleVerify;
 
     use super::tests::chainable_link_primitive_witnesses;
+    use super::tests::forge;
     use super::*;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
+    use crate::proof_abstractions::tasm::program::TritonError;
     use crate::transaction::transaction_kernel::TransactionKernelModifier;
 
     impl ChainWitness {
@@ -1872,5 +1919,61 @@ mod negative_tests {
                 &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
             )
             .unwrap();
+    }
+
+    /// The kernel MAST hash is *divined*, and the field authentication only tie
+    /// that hash to witness data the prover supplies too. Without a valid
+    /// proof, that data is still unauthenticated. Every other negative here runs
+    /// on mock proofs and would pass with the recursion deleted; this is the
+    /// one that would not.
+    ///
+    /// Swapping the two proofs leaves the kernels, and hence every
+    /// authentication path, untouched: the only thing broken is which proof
+    /// attests to which operand.
+    #[tokio::test]
+    async fn operand_proof_must_attest_to_its_own_operand() {
+        let (predecessor, successor) = chainable_link_primitive_witnesses(2, 1);
+        let mut witness = ChainWitness::chain(
+            forge(&predecessor).await,
+            forge(&successor).await,
+            [0u8; 32],
+        );
+        assert_ne!(
+            witness.left_kernel.mast_hash(),
+            witness.right_kernel.mast_hash(),
+            "the two operands must be distinguishable for the swap to be a tamper"
+        );
+
+        // The nondeterminism is the *un*swapped witness's -- its digest stream
+        // is extracted per (proof, claim) pair, which only makes sense for the
+        // pairing the proofs were made for. Swapping in memory afterwards is
+        // what the branch sees, and it is exactly the prover freedom under
+        // test: any proof, in any slot.
+        let mut nondeterminism = witness.nondeterminism();
+        std::mem::swap(&mut witness.left_proof, &mut witness.right_proof);
+        encode_to_memory(
+            &mut nondeterminism.ram,
+            FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+            &LinkProofWitnessMemory::Chain(Box::new(witness.clone())),
+        );
+
+        let input = witness.standard_input();
+        LinkProof
+            .run_rust(&input, nondeterminism.clone())
+            .unwrap_err();
+
+        // Where it fails is the point: an earlier assertion would make this
+        // test pass without the recursion ever running, which is the very
+        // vacuity it exists to rule out. (The rust shadow's panic message does
+        // not survive `catch_unwind`, so only the tasm side can be pinned.)
+        let Err(TritonError::TritonVMPanic(vm_state, _)) =
+            LinkProof.run_tasm(&input, nondeterminism)
+        else {
+            panic!("`Chain` must reject a proof that attests to the other operand");
+        };
+        assert!(
+            vm_state.contains("stark_verify"),
+            "must fail in the recursive verification, not before it:\n{vm_state}"
+        );
     }
 }
