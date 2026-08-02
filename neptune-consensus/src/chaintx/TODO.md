@@ -496,6 +496,11 @@ unmatched thruput is un-`Fix`able (see §Motivation).
 - [x] coinbase / merge bit on the chained kernel rejected
 - [x] bad MAST auth path rejected
 - [x] chained kernel must be the one named in the claim
+- [x] depth 2: a `Chain`-produced link proof is a valid operand
+      (`chain_accepts_a_chain_produced_operand`) -- the only test that proves a
+      `Chain`
+- [x] an operand's link proof must attest to *that* operand: swapping the two
+      proofs is rejected (`operand_proof_must_attest_to_its_own_operand`).
 - [x] one-sided cut-through rejected, in both directions (← §cut-through value
       conservation, negative)
 - [x] cut-through on unequal commitments rejected — the phantom-thruput
