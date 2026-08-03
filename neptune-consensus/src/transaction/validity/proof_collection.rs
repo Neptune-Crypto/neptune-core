@@ -368,54 +368,59 @@ impl ProofCollection {
             })
             .collect_vec();
 
-        // verify
-        debug!("verifying removal records integrity ...");
-        let rri = verify_transaction_proof(
-            removal_records_integrity_claim.clone(),
-            self.removal_records_integrity.clone(),
-            network,
-        )
-        .await;
-        debug!("{rri}");
-        debug!("verifying kernel to outputs ...");
-        let k2o = verify_transaction_proof(
-            kernel_to_outputs_claim.clone(),
-            self.kernel_to_outputs.clone(),
-            network,
-        )
-        .await;
-        debug!("{k2o}");
-        debug!("verifying collect lock scripts ...");
-        let cls = verify_transaction_proof(
-            collect_lock_scripts_claim.clone(),
-            self.collect_lock_scripts.clone(),
-            network,
-        )
-        .await;
-        debug!("{cls}");
-        debug!("verifying collect type scripts ...");
-        let cts = verify_transaction_proof(
-            collect_type_scripts_claim.clone(),
-            self.collect_type_scripts.clone(),
-            network,
-        )
-        .await;
-        debug!("{cts}");
-        debug!("verifying that all lock scripts halt ...");
-        let mut lsh = true;
-        for (cl, pr) in lock_script_claims.iter().zip(self.lock_scripts_halt.iter()) {
-            lsh &= verify_transaction_proof(cl.clone(), pr.clone(), network).await;
+        // Verify, returning on the first proof that fails.
+        //
+        // The two `collect_*_scripts` claims commit to the script-hash lists,
+        // and those lists' lengths decide how many proofs the loop below
+        // verifies. All four claims here are checked before that loop is
+        // entered, which bounds the work an attacker can make the victim do
+        // without constructing a valid transaction.
+        for (name, claim, proof) in [
+            (
+                "removal records integrity",
+                removal_records_integrity_claim,
+                &self.removal_records_integrity,
+            ),
+            (
+                "kernel to outputs",
+                kernel_to_outputs_claim,
+                &self.kernel_to_outputs,
+            ),
+            (
+                "collect lock scripts",
+                collect_lock_scripts_claim,
+                &self.collect_lock_scripts,
+            ),
+            (
+                "collect type scripts",
+                collect_type_scripts_claim,
+                &self.collect_type_scripts,
+            ),
+        ] {
+            debug!("verifying {name} ...");
+            if !verify_transaction_proof(claim, proof.clone(), network).await {
+                debug!("{name} is invalid");
+                return false;
+            }
         }
-        debug!("{lsh}");
-        debug!("verifying that all type scripts halt ...");
-        let mut tsh = true;
-        for (cl, pr) in type_script_claims.iter().zip(self.type_scripts_halt.iter()) {
-            tsh &= verify_transaction_proof(cl.clone(), pr.clone(), network).await;
-        }
-        debug!("{tsh}");
 
-        // and all bits together and return
-        rri && k2o && cls && cts && lsh && tsh
+        debug!("verifying that all lock scripts halt ...");
+        for (claim, proof) in lock_script_claims.into_iter().zip(&self.lock_scripts_halt) {
+            if !verify_transaction_proof(claim, proof.clone(), network).await {
+                debug!("a lock script does not halt gracefully");
+                return false;
+            }
+        }
+
+        debug!("verifying that all type scripts halt ...");
+        for (claim, proof) in type_script_claims.into_iter().zip(&self.type_scripts_halt) {
+            if !verify_transaction_proof(claim, proof.clone(), network).await {
+                debug!("a type script does not halt gracefully");
+                return false;
+            }
+        }
+
+        true
     }
 
     pub fn removal_records_integrity_claim(&self) -> Claim {
