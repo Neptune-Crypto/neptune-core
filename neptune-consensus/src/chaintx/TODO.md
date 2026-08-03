@@ -99,10 +99,20 @@ the witness discriminant. Per-branch obligations:
 Rust side: `LinkProofWitness::standard_input()` returns
 `lkmh.reversed() || D.reversed()`, so `D` must be reachable from the witness —
 an explicit field on each branch witness (`ChainWitness`, `UpdateWitness`,
-`CastWitness`, and `ForgeWitness` too since it is in the claim), populated by
-the builder from `ConsensusRuleSet::infer_from(..)`'s pinned `SingleProof`
-digest. **Not built yet**: the claim input is `[lkmh]` alone until `Cast` gives
-`D` a consumer (see §Data Structures).
+`CastWitness`, and `ForgeWitness` too since it is in the claim). **Built**, for
+`Forge` and `Chain`: `link_proof_public_input(lkmh, D)` in `link_proof.rs` is
+the one place the shape is spelled out, and `link_proof_claim_shape_is_pinned`
+holds it there. Still to come: populating `D` from
+`ConsensusRuleSet::infer_from(..)`'s pinned `SingleProof` digest, which waits on
+a builder path (§Integration); tests name a `D` with
+`chaintx::mock_single_proof_digest`.
+
+Tasm side: the dispatcher reads `D` (`read_io 5` twice) and stashes it in a
+`kmalloc` allocated *first*, ahead of every branch import, so `D`'s address is at
+the top of the static region where no later import can push it around. Branches
+read it from there rather than off the stack: `Chain`'s frame already reaches
+`own_program_digest` with `dup 11`, and five more words would bury it past
+`dup 15`.
 
 **Why this breaks the cycle.** `LinkProof::hash()` becomes computable from
 `LinkProof`'s code alone; `SingleProof::hash()` then depends on it one-
@@ -179,11 +189,12 @@ verified", i.e. universal forgery. Covered by §Negative tests for `D`.
         no memory projection.
   - [ ] `Update` (2), `Cast` (3) — land with their witnesses
   - [x] `SecretWitness` impl — dispatches to the branch witness.
-  - [ ] `standard_input()` gains `|| D.reversed()`, `D` = the `SingleProof`
-        program digest (§Breaking the `Fix`/`Cast` cycle). Deferred until `Cast`
-        lands: today no branch reads `D`, and sourcing it means plumbing
-        `ConsensusRuleSet` into every branch witness for a value nothing
-        consumes. Claim input is `[lkmh]` until then.
+  - [x] `standard_input()` gains `|| D.reversed()`, `D` = the `SingleProof`
+        program digest (§Breaking the `Fix`/`Cast` cycle). Landed ahead of
+        `Cast`: the claim shape is consensus-visible and every later branch has
+        to agree on it, so it is cheaper to establish -- and to test -- on two
+        branches than on four. `Forge` carries `D` without reading it; `Chain`
+        passes it through.
 - [ ] `SingleProofWitness::Fix(FixWitness)` — new variant on the *existing*
       enum; recursively verifies a LinkProof, asserts `thruputs == []`
 
@@ -215,12 +226,14 @@ would bind that check to the wrong tree without crashing.
         payload at `*witness + 2`, past the discriminant and field-size words.
   - [x] `test_program_snapshot!` — pins the `LinkProof` program hash (replaces
         the `Forge`-as-a-program pin; `Forge` no longer has a hash of its own)
-  - [x] Import order is consensus-critical: `Forge` must be imported *first*,
-        because four of its `kmalloc`s have to land at
-        `RemovalRecordsIntegrity`'s addresses (`forge_confirmed_loop_matches_rri`
-        compares the emitted instructions, `push`ed addresses included). Every
-        branch added later imports after it. (`Chain` does; re-check the guard
-        test again when `Update`/`Cast` land.)
+  - [x] ~~Import order is consensus-critical~~ — retired. It used to be, because
+        four of `Forge`'s `kmalloc`s had to land at `RemovalRecordsIntegrity`'s
+        *absolute* addresses. `forge_confirmed_loop_matches_rri` now rebases
+        static-memory addresses on the block each loop touches, so it compares
+        relative layout and the block may start anywhere. What survives is local
+        to `forge.rs`: those four allocations must stay contiguous and in order,
+        which is why `StarkVerify` and the other verifier-side imports still come
+        after them.
   - [x] `main` reads the own program digest off the initial stack and hands it
         to every branch below `lkmh`. `Chain` needs it to name `LinkProof` in
         its operand claims; `Forge` ignores it. Mirrors `SingleProof`'s `main`.
@@ -255,9 +268,14 @@ would bind that check to the wrong tree without crashing.
       `single_proof/merge_branch`).
   - [x] both operand claims: program = `own_program_digest()`, input =
         `[lkmh_operand]`.
-  - [ ] append `D`, **copied verbatim** from own public input, to both operand
-        claims (audit-critical; §Breaking the `Fix`/`Cast` cycle). Blocked on
-        `D` entering the claim at all, which is deferred until `Cast`.
+  - [x] append `D`, **copied verbatim** from own public input, to both operand
+        claims (audit-critical; §Breaking the `Fix`/`Cast` cycle). Read from the
+        dispatcher's static slot, never from the witness -- which does carry a
+        `single_proof_digest`, unread, precisely so that
+        `witness_supplied_single_proof_digest_is_ignored` can prove it inert.
+        Claims are built by `GenerateLinkProofClaim`, the two-digest analog of
+        `GenerateSingleProofClaim`, living in `chaintx/` so the Rust edge to
+        `single_proof` stays gone.
   - [x] cut-through as one witness-supplied multiset removed from the
         concatenated outputs *and* the concatenated thruputs, so a record can
         only leave the output side by leaving the input side with it. Matching
@@ -293,14 +311,19 @@ would bind that check to the wrong tree without crashing.
 - [ ] **Fix** = new `SingleProof` branch: recursively verify the `LinkProof`
       against `{ program: <hardcoded LinkProof digest>, input:
       [lkmh, own_program_digest()] }`, assert `thruputs == []`, produce a
-      standard `SingleProof`. The `own_program_digest()` in that claim is the
+      standard `SingleProof`. `D` is already the claim's second input, so `Fix`
+      only has to *name* `own_program_digest()` there -- no claim-shape change
+      left to make. The `own_program_digest()` in that claim is the
       sole tie between the two programs. Changes the `SingleProof` program hash
       (see §Consensus change).
-- [ ] claim generators for each (parallel to `validity/tasm/claims/`); the
-      `LinkProof` claim generator takes `(lkmh, D)` — mirror
+- [x] claim generators for each; the `LinkProof` claim generator takes
+      `(lkmh, D)` — `chaintx/generate_link_proof_claim.rs`, mirroring
       `GenerateSingleProofClaim`, whose second parameter is already a
       runtime-supplied program digest
-      (`validity/tasm/claims/generate_single_proof_claim.rs:12`).
+      (`validity/tasm/claims/generate_single_proof_claim.rs:12`). It takes its
+      three digests in stack order `[lkmh] [program_digest] [D]`, not claim
+      order: `Chain` has to `dup` the program digest off its frame before `D`
+      goes on, or it lands past `dup 15`.
 
 ## Consensus change (because SingleProof gains `Fix`)
 - [ ] New `ConsensusRuleSet` variant + per-network activation `BlockHeight`s
@@ -525,24 +548,36 @@ difference between recursion and universal forgery, so *every* branch that
 touches `D` gets a negative.
 
 Claim / plumbing:
-- [ ] Claim shape pinned: `LinkProofWitness::standard_input()` ==
+- [x] Claim shape pinned: `LinkProofWitness::standard_input()` ==
       `lkmh.reversed() || D.reversed()`, length `2 * Digest::LEN`. Order and
       length must never drift (analog of the `Forge` program-hash pin).
-- [ ] Proof/claim binding: a valid `LinkProof` for `[lkmh, D₁]` does **not**
-      verify against `[lkmh, D₂]`, `D₁ ≠ D₂`. (Cheap; catches a `D` that is read
-      but never actually made part of the claim.)
-- [ ] `LinkProof` program hash does not change when the `SingleProof` program
+      (`link_proof_claim_shape_is_pinned`)
+- [~] Proof/claim binding: a valid `LinkProof` for `[lkmh, D₁]` does **not**
+      verify against `[lkmh, D₂]`, `D₁ ≠ D₂`. Not written: the claim is part of
+      the Fiat-Shamir transcript, so this holds whatever our program does with
+      `D` — it tests Triton VM, not us. The gap it was meant to cover, `D` read
+      but never put in the claim, is covered by the shape pin above (which fixes
+      what `claim()` contains) and by
+      `operand_forged_under_another_single_proof_digest_is_rejected` (which fixes
+      that the *branch* uses it).
+- [~] `LinkProof` program hash does not change when the `SingleProof` program
       changes — i.e. `LinkProof::hash()` is stable across `ConsensusRuleSet`
-      variants. This *is* the cycle-break, as a test.
+      variants. Not written as its own test: `test_program_snapshot!(LinkProof)`
+      already fails the moment that stops holding, and there is no second
+      `SingleProof` version to parameterise over yet.
 
 `Chain`:
-- [ ] mismatched operands: `Chain(A with D₁, B with D₂)`, `D₁ ≠ D₂` → rejected.
-- [ ] substituted operand `D`: own claim says `D`, but an operand claim is built
-      with `D' ≠ D` (left operand, and separately right operand) → rejected. Two
-      tests; the pass-through is per-operand and a copy-paste slip hits one side.
-- [ ] divined `D`: operand claims built from a witness-supplied digest instead of
-      public input → rejected. (Whitebox: poke the nondeterminism so the
-      would-be-divined value differs from stdin.)
+- [x] substituted operand `D`: the operands are proven under `D'` while the claim
+      names `D` → rejected, inside `stark_verify`
+      (`operand_forged_under_another_single_proof_digest_is_rejected`). Covers
+      the mismatched-operands case too: what a wrong `D` on one operand does is
+      exactly this. One test, not two: `verify_operand` is a single closure
+      applied to both operands, reading `D` from the same static address either
+      time, so the copy-paste slip has nowhere to live.
+- [x] divined `D`: poke `single_proof_digest` in the witness's memory image,
+      leave the public input alone → must still verify
+      (`witness_supplied_single_proof_digest_is_ignored`). The negative stated as
+      a positive: a branch that divined would fail it.
 - [ ] mixed provenance: `Chain(Forge'd with D₁, Cast'd with D₂)` → rejected —
       the case that would otherwise launder a junk-`D` `Cast` into a real chain.
 

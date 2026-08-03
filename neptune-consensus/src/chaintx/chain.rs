@@ -34,8 +34,10 @@ use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 
 use super::authenticate_link_kernel_field::AuthenticateLinkKernelField;
+use super::generate_link_proof_claim::GenerateLinkProofClaim;
 use super::link_kernel::LinkKernel;
 use super::link_kernel::LinkKernelField;
+use super::link_proof::link_proof_public_input;
 use super::link_proof::merge_bit_false_leaf;
 use super::link_proof::no_coinbase_leaf;
 use super::link_proof::LinkProof;
@@ -48,7 +50,6 @@ use crate::proof_abstractions::SecretWitness;
 use crate::transaction::transaction_kernel::TransactionKernel;
 use crate::transaction::transaction_kernel::TransactionKernelProxy;
 use crate::transaction::validity::neptune_proof::Proof;
-use crate::transaction::validity::tasm::claims::generate_single_proof_claim::GenerateSingleProofClaim;
 use crate::transaction::validity::tasm::hash_removal_record_index_sets::HashRemovalRecordIndexSets;
 use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
@@ -100,6 +101,13 @@ pub struct ChainWitness {
 
     pub(super) left_proof: Proof,
     pub(super) right_proof: Proof,
+
+    /// The `SingleProof` program digest `D` this chain is claimed under, and
+    /// which both operand proofs must have been made under too.
+    ///
+    /// Rust-side only: it is here to build the public input and the two operand
+    /// claims. The tasm branch reads `D` off the public input instead.
+    pub(super) single_proof_digest: Digest,
 }
 
 impl ChainWitness {
@@ -111,7 +119,17 @@ impl ChainWitness {
     /// what actually establishes that, and this constructor assumes it. Takes
     /// randomness for shuffling the concatenations, mirroring
     /// [`MergeWitness::from_transactions`](crate::transaction::validity::tasm::single_proof::merge_branch::MergeWitness::from_transactions).
-    pub fn chain(left: LinkTx, right: LinkTx, shuffle_seed: [u8; 32]) -> Self {
+    ///
+    /// Both operands must already be proven under `single_proof_digest`: it goes
+    /// into their claims verbatim, so an operand proven under any other one
+    /// simply fails to verify. A `LinkTx` does not carry the digest it was proven
+    /// under, so there is nothing to check here.
+    pub fn chain(
+        left: LinkTx,
+        right: LinkTx,
+        single_proof_digest: Digest,
+        shuffle_seed: [u8; 32],
+    ) -> Self {
         let LinkTxProof::Proof(left_proof) = left.proof else {
             panic!("cannot chain a link transaction that is not backed by a link proof");
         };
@@ -129,6 +147,7 @@ impl ChainWitness {
             cut_through,
             left_proof,
             right_proof,
+            single_proof_digest,
         }
     }
 
@@ -220,15 +239,16 @@ impl ChainWitness {
     }
 
     /// The claim an operand's link proof is verified against: this very
-    /// program, on the operand's kernel MAST hash.
-    fn operand_claim(kernel: &LinkKernel) -> Claim {
-        Claim::new(LinkProof.hash()).with_input(kernel.mast_hash().reversed().values())
+    /// program, on the operand's kernel MAST hash, under the same `D`.
+    fn operand_claim(&self, kernel: &LinkKernel) -> Claim {
+        let input = link_proof_public_input(kernel.mast_hash(), self.single_proof_digest);
+        Claim::new(LinkProof.hash()).with_input(input.individual_tokens)
     }
 }
 
 impl SecretWitness for ChainWitness {
     fn standard_input(&self) -> PublicInput {
-        PublicInput::new(self.kernel_mast_hash().reversed().values().to_vec())
+        link_proof_public_input(self.kernel_mast_hash(), self.single_proof_digest)
     }
 
     fn output(&self) -> Vec<BFieldElement> {
@@ -305,7 +325,7 @@ impl SecretWitness for ChainWitness {
             stark_verify.update_nondeterminism(
                 &mut nondeterminism,
                 proof,
-                &Self::operand_claim(kernel),
+                &self.operand_claim(kernel),
             );
         }
 
@@ -336,7 +356,12 @@ impl SecretWitness for ChainWitness {
 /// so an operand that verifies has them by induction. Any branch added later
 /// owes the same assertion.
 #[derive(Debug, Copy, Clone)]
-pub struct Chain;
+pub struct Chain {
+    /// Where the dispatcher stashed the `SingleProof` program digest `D` it read
+    /// off the public input. `Chain` copies it verbatim into both operand
+    /// claims; see [`LinkProof`].
+    pub(super) single_proof_digest_address: BFieldElement,
+}
 
 impl BasicSnippet for Chain {
     fn parameters(&self) -> Vec<(DataType, String)> {
@@ -364,10 +389,9 @@ impl BasicSnippet for Chain {
     fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
         let audit_preloaded_data =
             library.import(Box::new(VerifyNdSiIntegrity::<ChainWitness>::default()));
-        // The claim generator is program-digest-agnostic -- it takes the digest
-        // as an argument -- so the `SingleProof`-flavored name is the only thing
-        // specific about it. Here that argument is `LinkProof`'s own digest.
-        let generate_link_proof_claim = library.import(Box::new(GenerateSingleProofClaim));
+        let generate_link_proof_claim = library.import(Box::new(GenerateLinkProofClaim {
+            single_proof_digest_address: self.single_proof_digest_address,
+        }));
         let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
             Stark::default(),
         )));
@@ -917,6 +941,10 @@ impl BasicSnippet for Chain {
                 dup 11 dup 11 dup 11 dup 11 dup 11
                 // _ [own_program_digest] disc *witness [operand_lkmh] [own_program_digest]
 
+                // The claim generator appends `D` itself, reading it from where
+                // the dispatcher put the public input. Audit-critical: never
+                // divined, never taken from the witness -- a gap there is
+                // universal forgery.
                 call {generate_link_proof_claim}
                 // _ [own_program_digest] disc *witness *claim
 
@@ -1026,6 +1054,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::chaintx::forge::ForgeWitness;
     use crate::chaintx::link_primitive_witness::LinkPrimitiveWitness;
+    use crate::chaintx::mock_single_proof_digest;
     use crate::proof_abstractions::tasm::builtins as tasm;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
@@ -1034,12 +1063,17 @@ pub(crate) mod tests {
 
     /// The `Chain` branch of the `LinkProof` rust shadow, called by
     /// [`LinkProof::source`](super::super::link_proof::LinkProof) once it has
-    /// read the own program digest and `lkmh`, and matched the witness
+    /// read the own program digest, `lkmh` and `D`, and matched the witness
     /// discriminant -- mirroring the tasm, where the dispatcher does exactly
     /// that before `call`ing this branch.
+    ///
+    /// `single_proof_digest` comes from the dispatcher, i.e. from the public
+    /// input. Never from `witness.single_proof_digest`, which is present in the
+    /// memory image and must stay unread!
     pub(in crate::chaintx) fn chain_branch_source(
         own_program_digest: Digest,
         lkmh: Digest,
+        single_proof_digest: Digest,
         witness: ChainWitness,
     ) {
         /* the operands' kernel MAST hashes; unconstrained until the recursive
@@ -1255,13 +1289,20 @@ pub(crate) mod tests {
         authenticate(lkmh, LinkKernelField::MergeBit, merge_bit_false_leaf());
 
         /* last: recursively verify both operands' link proofs */
-        let left_claim =
-            Claim::new(own_program_digest).with_input(left_lkmh.reversed().values().to_vec());
-        tasm::verify_stark(Stark::default(), &left_claim, &witness.left_proof);
-
-        let right_claim =
-            Claim::new(own_program_digest).with_input(right_lkmh.reversed().values().to_vec());
-        tasm::verify_stark(Stark::default(), &right_claim, &witness.right_proof);
+        let operand_claim = |operand_lkmh: Digest| {
+            let input = link_proof_public_input(operand_lkmh, single_proof_digest);
+            Claim::new(own_program_digest).with_input(input.individual_tokens)
+        };
+        tasm::verify_stark(
+            Stark::default(),
+            &operand_claim(left_lkmh),
+            &witness.left_proof,
+        );
+        tasm::verify_stark(
+            Stark::default(),
+            &operand_claim(right_lkmh),
+            &witness.right_proof,
+        );
     }
 
     /// A predecessor/successor pair over one mutator set: the successor's
@@ -1365,11 +1406,15 @@ pub(crate) mod tests {
     }
 
     /// Forge a link primitive witness into a proof-backed [`LinkTx`].
-    pub(super) async fn forge(lpw: &LinkPrimitiveWitness) -> LinkTx {
-        let witness =
-            ForgeWitness::produce(lpw, vm_job_queue(), TritonVmProofJobOptions::default())
-                .await
-                .unwrap();
+    pub(super) async fn forge(lpw: &LinkPrimitiveWitness, single_proof_digest: Digest) -> LinkTx {
+        let witness = ForgeWitness::produce(
+            lpw,
+            single_proof_digest,
+            vm_job_queue(),
+            TritonVmProofJobOptions::default(),
+        )
+        .await
+        .unwrap();
         let proof = LinkProof
             .prove(
                 witness.claim(),
@@ -1520,9 +1565,11 @@ pub(crate) mod tests {
     async fn chain_accepts_a_predecessor_successor_pair() {
         for num_thruputs in 0..=2 {
             let (predecessor, successor) = chainable_link_primitive_witnesses(2, num_thruputs);
+            let d = mock_single_proof_digest(0);
             let witness = ChainWitness::chain(
-                forge(&predecessor).await,
-                forge(&successor).await,
+                forge(&predecessor, d).await,
+                forge(&successor, d).await,
+                d,
                 [0u8; 32],
             );
             assert_eq!(num_thruputs, witness.cut_through.len());
@@ -1558,7 +1605,8 @@ pub(crate) mod tests {
             .current()
             .map(|pw| LinkPrimitiveWitness::from_primitive_witness(pw, 0));
 
-        let inner = ChainWitness::chain(forge(&a).await, forge(&b).await, [0u8; 32]);
+        let d = mock_single_proof_digest(0);
+        let inner = ChainWitness::chain(forge(&a, d).await, forge(&b, d).await, d, [0u8; 32]);
         let inner_proof = LinkProof
             .prove(
                 inner.claim(),
@@ -1573,7 +1621,12 @@ pub(crate) mod tests {
             proof: LinkTxProof::Proof(inner_proof),
         };
 
-        prop_positive(ChainWitness::chain(inner_tx, forge(&c).await, [1u8; 32]));
+        prop_positive(ChainWitness::chain(
+            inner_tx,
+            forge(&c, d).await,
+            d,
+            [1u8; 32],
+        ));
     }
 }
 
@@ -1587,6 +1640,7 @@ mod negative_tests {
     use super::tests::chainable_link_primitive_witnesses;
     use super::tests::forge;
     use super::*;
+    use crate::chaintx::mock_single_proof_digest;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::proof_abstractions::tasm::program::TritonError;
     use crate::transaction::transaction_kernel::TransactionKernelModifier;
@@ -1607,6 +1661,7 @@ mod negative_tests {
                 cut_through,
                 left_proof: Proof::invalid_mock(),
                 right_proof: Proof::invalid_mock(),
+                single_proof_digest: mock_single_proof_digest(0),
             }
         }
     }
@@ -1914,7 +1969,7 @@ mod negative_tests {
 
         LinkProof
             .test_assertion_failure(
-                PublicInput::new(other_lkmh.reversed().values().to_vec()),
+                link_proof_public_input(other_lkmh, witness.single_proof_digest),
                 witness.nondeterminism(),
                 &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
             )
@@ -1933,9 +1988,11 @@ mod negative_tests {
     #[tokio::test]
     async fn operand_proof_must_attest_to_its_own_operand() {
         let (predecessor, successor) = chainable_link_primitive_witnesses(2, 1);
+        let d = mock_single_proof_digest(0);
         let mut witness = ChainWitness::chain(
-            forge(&predecessor).await,
-            forge(&successor).await,
+            forge(&predecessor, d).await,
+            forge(&successor, d).await,
+            d,
             [0u8; 32],
         );
         assert_ne!(
@@ -1975,5 +2032,94 @@ mod negative_tests {
             vm_state.contains("stark_verify"),
             "must fail in the recursive verification, not before it:\n{vm_state}"
         );
+    }
+
+    /// `D` is *in* the operand claims, and it is the one off the public input.
+    ///
+    /// The operands here are proven under `D'`, and everything -- witness,
+    /// nondeterminism, authentication paths -- is built consistently around
+    /// `D'`; only the claim the chain is run against names `D`. Both ways of
+    /// getting `D` wrong therefore fail this test: a branch that dropped `D`
+    /// from the operand claims, and a branch that took it from the witness
+    /// instead of the public input, would each verify the operands happily.
+    ///
+    /// Only the left operand needs its own test. `verify_operand` is one closure
+    /// applied to both, reading `D` from the same static address either time, so
+    /// the per-operand copy-paste slip has nowhere to live.
+    #[tokio::test]
+    async fn operand_forged_under_another_single_proof_digest_is_rejected() {
+        let (predecessor, successor) = chainable_link_primitive_witnesses(2, 1);
+        let other_d = mock_single_proof_digest(1);
+        let witness = ChainWitness::chain(
+            forge(&predecessor, other_d).await,
+            forge(&successor, other_d).await,
+            other_d,
+            [0u8; 32],
+        );
+
+        // The claim, and only the claim, names the real `D`. `lkmh` is
+        // untouched, so every field authentication still passes and the branch
+        // gets all the way to the recursion.
+        let input =
+            link_proof_public_input(witness.kernel_mast_hash(), mock_single_proof_digest(0));
+        let nondeterminism = witness.nondeterminism();
+        LinkProof
+            .run_rust(&input, nondeterminism.clone())
+            .unwrap_err();
+
+        let Err(TritonError::TritonVMPanic(vm_state, _)) =
+            LinkProof.run_tasm(&input, nondeterminism)
+        else {
+            panic!("`Chain` must reject an operand proven under another `D`");
+        };
+        assert!(
+            vm_state.contains("stark_verify"),
+            "must fail in the recursive verification, not before it:\n{vm_state}"
+        );
+    }
+
+    /// The converse: `D` sits in the witness's memory image, and the branch must
+    /// never look at it.
+    ///
+    /// Poked to a value the operand proofs were *not* made under, while the
+    /// public input keeps the real one. A branch that divined `D` from the
+    /// witness would build two claims no proof answers and fail; this one
+    /// passes, which is the guard, not the accident.
+    ///
+    /// It also pins the dispatcher-to-branch handoff, which nothing else does.
+    /// The rust shadow takes `D` as an argument, the way it takes
+    /// `own_program_digest` and `lkmh`; the tasm reads it out of the static slot
+    /// the dispatcher wrote. Running *both* over real operand proofs, with a
+    /// third `D` in the witness so neither side can be reading that one, is what
+    /// says the two routes deliver the same digest. Verified by mutation:
+    /// shifting the branch's read address by one word leaves `run_rust` happy
+    /// and fails `run_tasm` inside `stark_verify`. Keep both runs, and keep the
+    /// witness's `D` distinct from the claim's, or that coverage goes away
+    /// silently.
+    #[tokio::test]
+    async fn witness_supplied_single_proof_digest_is_ignored() {
+        let (predecessor, successor) = chainable_link_primitive_witnesses(2, 1);
+        let d = mock_single_proof_digest(0);
+        let mut witness = ChainWitness::chain(
+            forge(&predecessor, d).await,
+            forge(&successor, d).await,
+            d,
+            [0u8; 32],
+        );
+
+        // Both derived from the honest witness, before the poke: the claim the
+        // operands answer, and the digest stream extracted against it.
+        let input = witness.standard_input();
+        let mut nondeterminism = witness.nondeterminism();
+
+        witness.single_proof_digest = mock_single_proof_digest(1);
+        encode_to_memory(
+            &mut nondeterminism.ram,
+            FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+            &LinkProofWitnessMemory::Chain(Box::new(witness)),
+        );
+
+        LinkProof.run_rust(&input, nondeterminism.clone()).unwrap();
+        LinkProof.run_tasm(&input, nondeterminism).unwrap();
     }
 }

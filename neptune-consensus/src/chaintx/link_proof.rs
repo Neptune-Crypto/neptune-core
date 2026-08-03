@@ -26,6 +26,21 @@ pub(crate) const NO_BRANCH_TAKEN_ERROR: i128 = 1_000_530;
 /// *claims* `-1` would otherwise sail through the dispatcher untouched.
 pub(crate) const INVALID_WITNESS_DISCRIMINANT_ERROR: i128 = 1_000_531;
 
+/// The public input of a `LinkProof` claim: the MAST hash of the
+/// [`LinkKernel`](super::link_kernel::LinkKernel) it attests to, then the
+/// `SingleProof` program digest `D` it is indexed by.
+pub(super) fn link_proof_public_input(
+    kernel_mast_hash: Digest,
+    single_proof_digest: Digest,
+) -> PublicInput {
+    PublicInput::new(
+        [kernel_mast_hash, single_proof_digest]
+            .into_iter()
+            .flat_map(|digest| digest.reversed().values())
+            .collect(),
+    )
+}
+
 /// The MAST leaf a [`LinkKernel`](super::link_kernel::LinkKernel) must carry at
 /// [`LinkKernelField::Coinbase`](super::link_kernel::LinkKernelField::Coinbase).
 ///
@@ -68,10 +83,14 @@ pub(super) fn merge_bit_false_leaf() -> Digest {
 /// does not recurse into `LinkProof` -- `Forge` -- simply leaves the digest
 /// buried; the dispatcher pops it.
 ///
-/// The claim is `{ program: LinkProof, input: [lkmh] }`. It gains the
-/// `SingleProof` program digest as a second input when `Cast` lands -- that
-/// parameter is what breaks the `Fix`/`Cast` circular dependency; see the
-/// design note in `chaintx/TODO.md`.
+/// The claim is `{ program: LinkProof, input: [lkmh] || [D] }`, where `D` is the
+/// `SingleProof` program digest. `LinkProof` never chooses `D` for itself: it is
+/// a family `Link[D]` indexed by a digest its verifier names, which is what
+/// breaks the `Fix`/`Cast` circular dependency.
+///
+/// The dispatcher reads `D` and stashes it in static memory, where every branch
+/// that recurses into `LinkProof` reads it from. It must be *copied* from there
+/// into each operand claim -- never divined, never re-derived from witness data.
 #[derive(Debug, Copy, Clone)]
 pub struct LinkProof;
 
@@ -79,14 +98,15 @@ impl TritonProgram for LinkProof {
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         let mut library = Library::new();
 
-        // `Forge` must be imported first. Four of its `kmalloc`s have to land at
-        // the same addresses as `RemovalRecordsIntegrity`'s (it inlines that
-        // program's confirmed-input loop verbatim; see
-        // `forge_confirmed_loop_matches_rri`), which holds only as long as
-        // nothing allocates ahead of them. Every other branch -- `Chain` below,
-        // and any future one -- imports *after* this one.
+        // `D`'s slot is allocated before anything else, so that it sits at the
+        // very top of the static region: the one value every branch has to agree
+        // on gets the one address that no later import can push around.
+        let single_proof_digest_alloc = library.kmalloc(u32::try_from(Digest::LEN).unwrap());
+
         let forge_branch = library.import(Box::new(Forge));
-        let chain_branch = library.import(Box::new(Chain));
+        let chain_branch = library.import(Box::new(Chain {
+            single_proof_digest_address: single_proof_digest_alloc.read_address(),
+        }));
 
         // Sum the per-branch equality flags: exactly one may be set. Extend with
         // `dup n push {DISCRIMINANT_FOR_X} eq` + one more `add` per branch.
@@ -118,6 +138,17 @@ impl TritonProgram for LinkProof {
 
             read_io {Digest::LEN}
             hint link_kernel_mast_hash = stack[0..5]
+            // _ [own_program_digest] [lkmh]
+
+            // The `SingleProof` program digest `D`: read here, once, and stashed
+            // where every branch can reach it. Deliberately not handed down on
+            // the stack -- `Chain`'s frame already reaches `own_program_digest`
+            // with `dup 11`, and five more words would bury it past `dup 15`.
+            read_io {Digest::LEN}
+            hint single_proof_program_digest = stack[0..5]
+            push {single_proof_digest_alloc.write_address()}
+            write_mem {Digest::LEN}
+            pop 1
             // _ [own_program_digest] [lkmh]
 
             push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
@@ -179,38 +210,68 @@ impl TritonProgram for LinkProof {
 mod tests {
     use std::collections::HashMap;
 
+    use itertools::Itertools;
+    use neptune_primitives::mast_hash::MastHash;
+    use proptest::prop_assert_eq;
     use tasm_lib::twenty_first::bfe_array;
     use tasm_lib::twenty_first::bfe_vec;
+    use test_strategy::proptest;
 
     use super::*;
     use crate::chaintx::chain::tests::chain_branch_source;
     use crate::chaintx::forge::tests::forge_branch_source;
+    use crate::chaintx::forge::ForgeWitness;
+    use crate::chaintx::link_primitive_witness::LinkPrimitiveWitness;
     use crate::chaintx::link_proof_witness::LinkProofWitnessMemory;
+    use crate::chaintx::mock_single_proof_digest;
     use crate::proof_abstractions::tasm::builtins as tasm;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::proof_abstractions::tasm::program::tests::test_program_snapshot;
+    use crate::proof_abstractions::SecretWitness;
 
     impl TritonProgramSpecification for LinkProof {
         fn source(&self) {
             let own_program_digest: Digest = tasm::own_program_digest();
             let lkmh: Digest = tasm::tasmlib_io_read_stdin___digest();
+            let single_proof_digest: Digest = tasm::tasmlib_io_read_stdin___digest();
 
             match tasm::decode_from_memory::<LinkProofWitnessMemory>(
                 FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
             ) {
                 LinkProofWitnessMemory::Forge(witness) => forge_branch_source(lkmh, *witness),
                 LinkProofWitnessMemory::Chain(witness) => {
-                    chain_branch_source(own_program_digest, lkmh, *witness)
+                    chain_branch_source(own_program_digest, lkmh, single_proof_digest, *witness)
                 }
             }
         }
+    }
+
+    /// The claim shape is consensus-visible, and every branch -- including the
+    /// ones not written yet -- has to agree on it. Pinned here in the form the
+    /// design note gives it: `lkmh.reversed() || D.reversed()`, ten words, in
+    /// that order. Neither the order nor the length may ever drift.
+    ///
+    /// `ForgeWitness` stands in for all of them: every branch witness reaches
+    /// the public input through [`link_proof_public_input`].
+    #[proptest(cases = 1)]
+    fn link_proof_claim_shape_is_pinned(
+        #[strategy(LinkPrimitiveWitness::arbitrary_strategy())] lpw: LinkPrimitiveWitness,
+    ) {
+        let witness = ForgeWitness::without_proofs(&lpw);
+        let expected = [lpw.kernel.mast_hash(), mock_single_proof_digest(0)]
+            .into_iter()
+            .flat_map(|digest| digest.reversed().values())
+            .collect_vec();
+
+        prop_assert_eq!(2 * Digest::LEN, expected.len());
+        prop_assert_eq!(expected, witness.standard_input().individual_tokens);
     }
 
     /// A discriminant no branch claims must halt the program, not fall through
     /// it. Mirrors `SingleProof`'s `invalid_discriminant_crashes_execution`.
     #[test]
     fn invalid_discriminant_crashes_execution() {
-        let public_input = PublicInput::new(bfe_vec![0, 0, 0, 0, 0]);
+        let public_input = PublicInput::new(bfe_vec![0; 2 * Digest::LEN]);
         for illegal_discriminant in bfe_array![-1, 2, 3, 1u64 << 40] {
             let memory: HashMap<_, _> = [(
                 FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
@@ -232,6 +293,6 @@ mod tests {
 
     test_program_snapshot!(
         LinkProof,
-        "f2e0b3a98ad5e10c8acfb96236957b68b9f154cf4d9a3a9fbb1b58518bb508c6931eefbe4ccf0d1a"
+        "3b75d8b680b0fa331b90d0af42675900351911fd7f3587ec79645ba3bf7c95e1f332804456afcfd9"
     );
 }
