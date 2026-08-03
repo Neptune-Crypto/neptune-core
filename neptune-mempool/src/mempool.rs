@@ -188,6 +188,19 @@ pub struct Mempool {
     /// "unconflicted" again. This list can only grow when [`Self::insert`] is
     /// called and can shrink when [`Self::update_with_block`] is called.
     merge_input_cache: MergeInputCache,
+
+    /// Transactions whose proof upgrade was attempted and failed since the
+    /// last block.
+    ///
+    /// Proof upgrade candidate selection is deterministic, so a transaction
+    /// whose upgrade fails is picked again on every following attempt, and no
+    /// other transaction behind it is ever upgraded. Recording the failure
+    /// keeps the upgrader moving and gives other txs a chance. Cleared whenever
+    /// a new block is processed such that a transient failure doesn't prevent
+    /// the transaction from ever being upgraded. A transaction is never dropped
+    /// on account of upgrade failures.
+    #[get_size(ignore)]
+    upgrade_failures: HashSet<TransactionKernelId>,
 }
 
 /// Enumerate ways that transactions in the mempool can be filtered.
@@ -238,7 +251,18 @@ impl Mempool {
             tip_mutator_set_hash,
             tx_proving_capability,
             merge_input_cache,
+            upgrade_failures: HashSet::default(),
         }
+    }
+
+    /// Record that upgrading the proofs of these transactions failed, so that
+    /// they are passed over when picking the next upgrade candidate.
+    ///
+    /// The transactions are not removed, and the record is discarded by
+    /// [`Self::update_with_block`], so a failure that was transient only delays
+    /// an upgrade by one block.
+    pub fn record_upgrade_failure(&mut self, txids: impl IntoIterator<Item = TransactionKernelId>) {
+        self.upgrade_failures.extend(txids);
     }
 
     /// Update mempool with chain information.
@@ -412,6 +436,10 @@ impl Mempool {
             .chain(self.fee_density_iter().map(|(txid, _)| txid))
         {
             let candidate = self.tx_dictionary.get(&candidate_txid).unwrap();
+            if self.upgrade_failures.contains(&candidate_txid) {
+                continue;
+            }
+
             if self.tx_is_synced(&candidate.transaction.kernel) {
                 continue;
             }
@@ -469,6 +497,10 @@ impl Mempool {
         {
             let candidate = self.tx_dictionary.get(&candidate_txid).unwrap();
 
+            if self.upgrade_failures.contains(&candidate_txid) {
+                continue;
+            }
+
             let TransactionProof::ProofCollection(proof_collection) = &candidate.transaction.proof
             else {
                 continue;
@@ -517,6 +549,10 @@ impl Mempool {
             .chain(self.fee_density_iter().map(|(txid, _)| txid))
         {
             let candidate = self.tx_dictionary.get(&candidate_txid).unwrap();
+
+            if self.upgrade_failures.contains(&candidate_txid) {
+                continue;
+            }
 
             if !self.tx_is_synced(&candidate.transaction.kernel) {
                 continue;
@@ -1275,6 +1311,10 @@ impl Mempool {
         &mut self,
         new_block: &Block,
     ) -> anyhow::Result<(Vec<MempoolEvent>, Vec<MempoolUpdateJob>)> {
+        // Ensure transactions are not permanently block on transient upgrade
+        // failures.
+        self.upgrade_failures.clear();
+
         // If the mempool is empty, there is nothing to do.
         if self.is_empty() && self.merge_input_cache.is_empty() {
             self.set_sync_labels(new_block)?;
@@ -1588,6 +1628,7 @@ mod tests {
     use itertools::Itertools;
     use macro_rules_attr::apply;
     use neptune_consensus::block::Block;
+    use neptune_consensus::block::test_helpers::invalid_empty_block_with_timestamp;
     use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
     use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
     use neptune_consensus::transaction::Transaction;
@@ -1600,6 +1641,7 @@ mod tests {
     use neptune_consensus::transaction::test_helpers::txkernel;
     use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier;
     use neptune_consensus::transaction::transaction_proof::TransactionProofType;
+    use neptune_consensus::transaction::validity::proof_collection::ProofCollection;
     use neptune_mutator_set::addition_record::AdditionRecord;
     use neptune_mutator_set::msa_and_records::MsaAndRecords;
     use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
@@ -1689,6 +1731,61 @@ mod tests {
         assert_eq!(num_txs, mempool.len());
 
         mempool
+    }
+
+    #[traced_test]
+    #[test]
+    fn failed_upgrade_lets_the_next_upgrade_candidate_through() {
+        let network = Network::Main;
+        let genesis_block = Block::genesis(network);
+        let mutator_set_hash = genesis_block
+            .mutator_set_accumulator_after()
+            .unwrap()
+            .hash();
+
+        let mut mempool = mock_mempool_singleproofs(0, &genesis_block);
+        for mut tx in make_plenty_mock_transaction_supported_by_primitive_witness(2) {
+            tx.kernel = TransactionKernelModifier::default()
+                .mutator_set_hash(mutator_set_hash)
+                .modify(tx.kernel);
+            tx.proof = TransactionProof::ProofCollection(ProofCollection::invalid());
+            mempool.insert(tx, UpgradePriority::Irrelevant);
+        }
+        assert_eq!(2, mempool.len(), "sanity: two distinct candidates");
+
+        let preferred = |pool: &Mempool| {
+            pool.preferred_proof_collection(usize::MAX, TxUpgradeFilter::match_all())
+                .map(|(kernel, _, _)| kernel.txid())
+        };
+
+        let first = preferred(&mempool).expect("sanity: a candidate must be picked");
+        mempool.record_upgrade_failure([first]);
+
+        let second = preferred(&mempool)
+            .expect("a transaction whose upgrade failed must not block the next candidate");
+        assert_ne!(
+            first, second,
+            "the failed candidate must not be picked again"
+        );
+
+        mempool.record_upgrade_failure([second]);
+        assert!(
+            preferred(&mempool).is_none(),
+            "no candidate remains once every transaction's upgrade has failed"
+        );
+
+        // A new block gives both transactions another chance.
+        let block1 = invalid_empty_block_with_timestamp(
+            &genesis_block,
+            genesis_block.header().timestamp + Timestamp::hours(1),
+            network,
+        );
+        mempool.update_with_block(&block1).unwrap();
+        assert_eq!(
+            Some(first),
+            preferred(&mempool),
+            "a new block must clear the recorded upgrade failures"
+        );
     }
 
     #[apply(shared_tokio_runtime)]

@@ -3273,6 +3273,18 @@ impl GlobalState {
         self.wallet_state.handle_mempool_events(events).await;
     }
 
+    /// Record that upgrading the proofs of these transactions failed, so the
+    /// proof upgrader picks a different candidate next time.
+    ///
+    /// Produces no mempool events: nothing is removed, the transactions are
+    /// only passed over until the next block arrives.
+    pub(crate) fn mempool_record_upgrade_failure(
+        &mut self,
+        txids: impl IntoIterator<Item = TransactionKernelId>,
+    ) {
+        self.mempool.record_upgrade_failure(txids);
+    }
+
     /// clears all Tx from mempool and notifies wallet of changes.
     pub async fn mempool_clear(&mut self) {
         let events = self.mempool.clear();

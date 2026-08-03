@@ -443,13 +443,25 @@ impl UpgradeJob {
                     (upgraded_tx, expected_utxo)
                 }
                 Err(e) => {
-                    error!("UpgradeProof job failed. error: {e}");
+                    error!(
+                        "UpgradeProof job failed for transaction(s) {}. error: {e}",
+                        affected_txids.iter().join("; ")
+                    );
                     error!(
                         "Consider lowering your proving capability to {}, in case it is set higher.\nCurrent proving \
                         capability is set to: {}.",
                         TxProvingCapability::ProofCollection,
                         global_state_lock.cli().proving_capability()
                     );
+
+                    // Pass over these transactions until the next block, so
+                    // that one job that cannot succeed does not keep every
+                    // other candidate from being upgraded.
+                    global_state_lock
+                        .lock_guard_mut()
+                        .await
+                        .mempool_record_upgrade_failure(affected_txids);
+
                     return;
                 }
             };
