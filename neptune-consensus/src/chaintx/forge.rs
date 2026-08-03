@@ -36,6 +36,7 @@ use super::authenticate_link_kernel_field::AuthenticateLinkKernelField;
 use super::link_kernel::LinkKernel;
 use super::link_kernel::LinkKernelField;
 use super::link_primitive_witness::LinkPrimitiveWitness;
+use super::link_proof::link_proof_public_input;
 use super::link_proof::merge_bit_false_leaf;
 use super::link_proof::no_coinbase_leaf;
 use super::link_proof::LinkProof;
@@ -104,6 +105,14 @@ pub struct ForgeWitness {
     /// Commitment randomness for the thruputs, parallel to `thruputs`.
     thruput_sender_randomnesses: Vec<Digest>,
     thruput_receiver_digests: Vec<Digest>,
+
+    /// The `SingleProof` program digest `D` this witness is claimed under.
+    ///
+    /// `Forge` ignores its value -- it recurses into nothing, so it has no
+    /// operand claim to pass `D` onto -- but `D` is in the claim regardless, and
+    /// so has to be here to build the public input. Deliberately absent from
+    /// [`ForgeWitnessMemory`]: what the branch never sees, it cannot read.
+    single_proof_digest: Digest,
 
     /// Halting proofs for the input lock scripts, parallel to `input_utxos`:
     /// `lock_scripts_halt[i]` proves the lock script whose hash is
@@ -236,6 +245,7 @@ impl ForgeWitness {
     /// must succeed.
     pub async fn produce(
         lpw: &LinkPrimitiveWitness,
+        single_proof_digest: Digest,
         job_queue: Arc<TritonVmJobQueue>,
         options: TritonVmProofJobOptions,
     ) -> Result<Self, CreateProofError> {
@@ -285,6 +295,7 @@ impl ForgeWitness {
 
         Ok(Self::build_from_parts(
             lpw,
+            single_proof_digest,
             lock_scripts_halt,
             type_scripts_halt,
         ))
@@ -299,6 +310,7 @@ impl ForgeWitness {
     // `validate_integrity`, which is does every check except the proofs.
     fn build_from_parts(
         lpw: &LinkPrimitiveWitness,
+        single_proof_digest: Digest,
         lock_scripts_halt: Vec<Proof>,
         type_scripts_halt: Vec<Proof>,
     ) -> Self {
@@ -327,6 +339,7 @@ impl ForgeWitness {
             thruput_sender_randomnesses: lpw.thruput_sender_randomnesses.clone(),
             thruput_receiver_digests: lpw.thruput_receiver_digests.clone(),
 
+            single_proof_digest,
             lock_scripts_halt,
             type_scripts_halt,
 
@@ -511,7 +524,7 @@ impl ForgeWitness {
 
 impl SecretWitness for ForgeWitness {
     fn standard_input(&self) -> PublicInput {
-        PublicInput::new(self.mast_tree().root().reversed().values().to_vec())
+        link_proof_public_input(self.mast_tree().root(), self.single_proof_digest)
     }
 
     fn output(&self) -> Vec<BFieldElement> {
@@ -702,11 +715,13 @@ impl BasicSnippet for Forge {
             ForgeWitnessMemory,
         >::default()));
 
-        // The confirmed-input loop's static-memory addresses must coincide with
-        // `RemovalRecordsIntegrity`'s (see `forge_confirmed_loop_matches_rri`),
-        // which holds only if these four `kmalloc`s land at the same ordinal in
-        // both programs. `StarkVerify`'s import `kmalloc`s heavily, so it -- and
-        // every other verifier-side import -- must come *after* these four.
+        // The confirmed-input loop's static-memory addresses must lie the same
+        // way relative to each other as `RemovalRecordsIntegrity`'s (see
+        // `forge_confirmed_loop_matches_rri`), which holds only if these four
+        // `kmalloc`s stay contiguous and in this order. `StarkVerify`'s import
+        // `kmalloc`s heavily, so it -- and every other verifier-side import --
+        // must come *after* these four. Where the block as a whole starts does
+        // not matter; the guard rebases that away.
         let u64_stack_size: u32 = DataType::U64.stack_size().try_into().unwrap();
         let aocl_leaf_index_alloc = library.kmalloc(u64_stack_size);
         let digest_stack_size: u32 = DataType::Digest.stack_size().try_into().unwrap();
@@ -1576,6 +1591,7 @@ pub(crate) mod tests {
     use test_strategy::proptest;
 
     use super::*;
+    use crate::chaintx::mock_single_proof_digest;
     use crate::proof_abstractions::tasm::builtins as tasm;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::proof_abstractions::triton_vm_job_queue::vm_job_queue;
@@ -1598,34 +1614,85 @@ pub(crate) mod tests {
         /// positive proof-verifying tests pay the steep price for `produce`.
         #[cfg(test)]
         pub(crate) fn without_proofs(lpw: &LinkPrimitiveWitness) -> Self {
-            Self::build_from_parts(lpw, vec![], vec![])
+            Self::build_from_parts(lpw, mock_single_proof_digest(0), vec![], vec![])
         }
     }
 
     /// The real instructions of the subroutine `label` -- everything between
     /// its label definition and the next one, keeping only `Instruction`
-    /// elements. That drops the label, the assertion error ids
-    /// (`AssertionContext`), and type hints, i.e. exactly the parts that may
+    /// elements, with static-memory addresses rebased by
+    /// [`rebase_static_addresses`]. That drops the label, the assertion error
+    /// ids (`AssertionContext`), type hints, and where in the static region the
+    /// program happened to put its `kmalloc`s: exactly the parts that may
     /// legitimately differ between two copies of the same loop.
     fn extract_loop_body(code: &[LabelledInstruction], label: &str) -> Vec<LabelledInstruction> {
         let start = code
             .iter()
             .position(|i| matches!(i, LabelledInstruction::Label(l) if l == label))
             .unwrap_or_else(|| panic!("loop label `{label}` not found"));
-        code[start + 1..]
+        let body = code[start + 1..]
             .iter()
             .take_while(|i| !matches!(i, LabelledInstruction::Label(_)))
             .filter(|i| matches!(i, LabelledInstruction::Instruction(_)))
             .cloned()
+            .collect_vec();
+
+        rebase_static_addresses(&body)
+    }
+
+    /// Rewrite every `push` of a static-memory address to that address's
+    /// distance below the top of the block the body touches.
+    ///
+    /// Two copies of a loop make the same `kmalloc`s, but not necessarily at the
+    /// same ordinal: a program that allocates anything ahead of them pushes the
+    /// whole block down, and every address in the copy shifts by a constant. The
+    /// block's *internal* layout is the shared property, so that is what gets
+    /// compared. An allocation inserted among the block's own slots, or one of
+    /// them resized, moves the offsets relative to each other and still fails
+    /// the comparison.
+    ///
+    /// The static region is a narrow, fixed range at the very top of the address
+    /// space, so no honest small constant is mistaken for an address.
+    fn rebase_static_addresses(body: &[LabelledInstruction]) -> Vec<LabelledInstruction> {
+        use tasm_lib::library::STATIC_MEMORY_FIRST_ADDRESS;
+        use tasm_lib::library::STATIC_MEMORY_LAST_ADDRESS;
+        use tasm_lib::triton_vm::isa::instruction::AnInstruction;
+
+        let offset_below_top = |address: BFieldElement| {
+            (STATIC_MEMORY_LAST_ADDRESS.value()..=STATIC_MEMORY_FIRST_ADDRESS.value())
+                .contains(&address.value())
+                .then(|| STATIC_MEMORY_FIRST_ADDRESS.value() - address.value())
+        };
+        let pushed_offset = |instruction: &LabelledInstruction| match instruction {
+            LabelledInstruction::Instruction(AnInstruction::Push(address)) => {
+                offset_below_top(*address)
+            }
+            _ => None,
+        };
+
+        // The block's top: the smallest distance below the static region's top
+        // that this body reaches. Nothing to rebase if it touches no addresses.
+        let Some(base) = body.iter().filter_map(pushed_offset).min() else {
+            return body.to_vec();
+        };
+
+        body.iter()
+            .map(|instruction| match pushed_offset(instruction) {
+                Some(offset) => {
+                    LabelledInstruction::Instruction(AnInstruction::Push(bfe!(offset - base)))
+                }
+                None => instruction.clone(),
+            })
             .collect()
     }
 
     /// `Forge` inlines a byte-for-byte copy of `RemovalRecordsIntegrity`'s
     /// confirmed-input loop (see the comment at its definition for why it is a
     /// copy and not a shared emitter). This guard fails the moment the two
-    /// diverge. Static-memory addresses and imported-snippet call labels
-    /// coincide because both programs make the same four `kmalloc`s and import
-    /// the same snippets.
+    /// diverge. Imported-snippet call labels coincide because both programs
+    /// import the same snippets; static-memory addresses coincide only up to
+    /// where each program's block of four `kmalloc`s starts, which is what
+    /// [`rebase_static_addresses`] normalizes away.
     #[test]
     fn forge_confirmed_loop_matches_rri() {
         let (_, rri_code) = RemovalRecordsIntegrity.library_and_code();
@@ -1666,6 +1733,55 @@ pub(crate) mod tests {
         assert!(!base_body.is_empty());
         assert_eq!(base_body, extract_loop_body(&parametric, "other"));
         assert_ne!(base_body, extract_loop_body(&diverged, "entry"));
+    }
+
+    /// The other half of the teeth: [`rebase_static_addresses`] must forgive a
+    /// block of `kmalloc`s starting lower in the static region, and only that.
+    /// Two slots that move *relative to each other* -- an allocation inserted
+    /// among them, or one of them resized -- must still compare unequal.
+    #[test]
+    fn rebasing_forgives_a_shifted_block_and_nothing_else() {
+        use tasm_lib::library::STATIC_MEMORY_FIRST_ADDRESS;
+
+        let top = STATIC_MEMORY_FIRST_ADDRESS;
+        let two_slots = |first: BFieldElement, second: BFieldElement| {
+            triton_asm!(
+                entry:
+                    push {first} read_mem 5 pop 1
+                    push {second} write_mem 2
+                    push 5
+                    recurse
+            )
+        };
+
+        // The same two slots, five words further down: must compare equal.
+        let block = two_slots(top, top - bfe!(4));
+        let shifted_block = two_slots(top - bfe!(5), top - bfe!(9));
+        assert_eq!(
+            extract_loop_body(&block, "entry"),
+            extract_loop_body(&shifted_block, "entry"),
+        );
+
+        // The gap between the two slots widened: must compare unequal.
+        let resized_slot = two_slots(top, top - bfe!(5));
+        assert_ne!(
+            extract_loop_body(&block, "entry"),
+            extract_loop_body(&resized_slot, "entry"),
+        );
+
+        // `push 5` is not an address and must survive rebasing untouched --
+        // otherwise the normalization would forgive a real divergence.
+        let diverged = triton_asm!(
+            entry:
+                push {top} read_mem 5 pop 1
+                push {top - bfe!(4)} write_mem 2
+                push 6
+                recurse
+        );
+        assert_ne!(
+            extract_loop_body(&block, "entry"),
+            extract_loop_body(&diverged, "entry"),
+        );
     }
 
     /// Rewrite calls to program-local subroutines (labelled `neptune_consensus_*`
@@ -1934,6 +2050,7 @@ pub(crate) mod tests {
     ) -> ForgeWitness {
         ForgeWitness::produce(
             &deterministic_lpw(num_inputs, num_thruputs),
+            mock_single_proof_digest(0),
             vm_job_queue(),
             TritonVmProofJobOptions::default(),
         )
@@ -2046,10 +2163,14 @@ pub(crate) mod tests {
                 .len()
         );
 
-        let witness =
-            ForgeWitness::produce(&lpw, vm_job_queue(), TritonVmProofJobOptions::default())
-                .await
-                .unwrap();
+        let witness = ForgeWitness::produce(
+            &lpw,
+            mock_single_proof_digest(0),
+            vm_job_queue(),
+            TritonVmProofJobOptions::default(),
+        )
+        .await
+        .unwrap();
         assert_eq!(2, witness.type_scripts_halt.len());
         prop_positive(witness.clone());
         assert!(witness.validate(Network::Main).await);
