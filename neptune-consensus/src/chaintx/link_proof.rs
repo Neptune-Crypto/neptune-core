@@ -8,6 +8,8 @@ use super::chain::Chain;
 use super::forge::Forge;
 use super::link_proof_witness::DISCRIMINANT_FOR_CHAIN;
 use super::link_proof_witness::DISCRIMINANT_FOR_FORGE;
+use super::link_proof_witness::DISCRIMINANT_FOR_UPDATE;
+use super::update::Update;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
@@ -75,8 +77,8 @@ pub(super) fn merge_bit_false_leaf() -> Digest {
 /// and structured the same way: a thin dispatcher over the branches of
 /// [`LinkProofWitness`](super::link_proof_witness::LinkProofWitness), each of
 /// which is a [`BasicSnippet`] that establishes the same claim by a different
-/// route. `Forge` is the entry point and `Chain` combines two link
-/// transactions; `Update` and `Cast` follow.
+/// route. `Forge` is the entry point, `Chain` combines two link transactions,
+/// and `Update` re-targets one at a newer mutator set; `Cast` follows.
 ///
 /// The dispatcher hands each branch `[own_program_digest] [lkmh] *witness disc`
 /// and expects `[own_program_digest] [scratch] *witness -1` back. A branch that
@@ -107,6 +109,9 @@ impl TritonProgram for LinkProof {
         let chain_branch = library.import(Box::new(Chain {
             single_proof_digest_address: single_proof_digest_alloc.read_address(),
         }));
+        let update_branch = library.import(Box::new(Update {
+            single_proof_digest_address: single_proof_digest_alloc.read_address(),
+        }));
 
         // Sum the per-branch equality flags: exactly one may be set. Extend with
         // `dup n push {DISCRIMINANT_FOR_X} eq` + one more `add` per branch.
@@ -123,8 +128,14 @@ impl TritonProgram for LinkProof {
             eq
             // _ disc (disc == forge) (disc == chain)
 
+            dup 2
+            push {DISCRIMINANT_FOR_UPDATE}
+            eq
+            // _ disc (disc == forge) (disc == chain) (disc == update)
+
             add
-            // _ disc (disc == forge || disc == chain)
+            add
+            // _ disc (disc == forge || disc == chain || disc == update)
 
             assert error_id {INVALID_WITNESS_DISCRIMINANT_ERROR}
             // _ disc
@@ -168,6 +179,9 @@ impl TritonProgram for LinkProof {
 
             dup 0 push {DISCRIMINANT_FOR_CHAIN} eq
             skiz call {chain_branch}
+
+            dup 0 push {DISCRIMINANT_FOR_UPDATE} eq
+            skiz call {update_branch}
             // _ [own_program_digest] [lkmh] *link_proof_witness discriminant
 
             // a discriminant of -1 indicates that some branch was executed
@@ -224,6 +238,7 @@ mod tests {
     use crate::chaintx::link_primitive_witness::LinkPrimitiveWitness;
     use crate::chaintx::link_proof_witness::LinkProofWitnessMemory;
     use crate::chaintx::mock_single_proof_digest;
+    use crate::chaintx::update::tests::update_branch_source;
     use crate::proof_abstractions::tasm::builtins as tasm;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::proof_abstractions::tasm::program::tests::test_program_snapshot;
@@ -241,6 +256,9 @@ mod tests {
                 LinkProofWitnessMemory::Forge(witness) => forge_branch_source(lkmh, *witness),
                 LinkProofWitnessMemory::Chain(witness) => {
                     chain_branch_source(own_program_digest, lkmh, single_proof_digest, *witness)
+                }
+                LinkProofWitnessMemory::Update(witness) => {
+                    update_branch_source(own_program_digest, lkmh, single_proof_digest, *witness)
                 }
             }
         }
@@ -272,7 +290,7 @@ mod tests {
     #[test]
     fn invalid_discriminant_crashes_execution() {
         let public_input = PublicInput::new(bfe_vec![0; 2 * Digest::LEN]);
-        for illegal_discriminant in bfe_array![-1, 2, 3, 1u64 << 40] {
+        for illegal_discriminant in bfe_array![-1, 3, 4, 1u64 << 40] {
             let memory: HashMap<_, _> = [(
                 FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
                 illegal_discriminant,
@@ -293,6 +311,6 @@ mod tests {
 
     test_program_snapshot!(
         LinkProof,
-        "3b75d8b680b0fa331b90d0af42675900351911fd7f3587ec79645ba3bf7c95e1f332804456afcfd9"
+        "f392f783aa403b097a25c51286786c9272541aa3e3548d8f510bc34acc12a8cde2d603c492f6d9e9"
     );
 }
