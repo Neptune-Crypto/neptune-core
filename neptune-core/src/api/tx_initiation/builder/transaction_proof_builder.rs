@@ -291,15 +291,27 @@ impl<'a> TransactionProofBuilder<'a> {
             else if let Some(w) = update_witness {
                 let spw = SingleProofWitness::from_update(w.clone());
                 let c = spw.claim();
-                let nd = spw.nondeterminism();
-                return gen_single(c, || nd, job_queue, proof_job_options, valid_mock).await;
+                return gen_single(
+                    c,
+                    || spw.nondeterminism(),
+                    job_queue,
+                    proof_job_options,
+                    valid_mock,
+                )
+                .await;
             }
             // proof-collection --> single proof
             else if let Some(pc) = proof_collection {
                 let spw = SingleProofWitness::from_collection(pc);
                 let c = spw.claim();
-                let nd = spw.nondeterminism();
-                return gen_single(c, || nd, job_queue, proof_job_options, valid_mock).await;
+                return gen_single(
+                    c,
+                    || spw.nondeterminism(),
+                    job_queue,
+                    proof_job_options,
+                    valid_mock,
+                )
+                .await;
             }
         }
 
