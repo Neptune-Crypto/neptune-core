@@ -54,6 +54,19 @@ txs):
   equations do not imply it — they are satisfied by any sub-multiset of the
   intersection, a short `cut_through` included. `Chain` asserts it; see §Tasm >
   `Chain`.
+- **A `LinkTx` may hold zero confirmed inputs, so `Update` does not require
+  otherwise.** An all-thruputs link -- one funded entirely by its predecessors
+  -- is a normal shape in this pipeline, and it still has to follow the mutator
+  set: `Chain` requires all three of its kernels to agree on the mutator set
+  hash, so a link that cannot be updated is stranded the moment any chain
+  partner moves. This is a deliberate divergence from `update_branch`, which
+  rejects an empty input set outright (`INPUT_SET_IS_EMPTY_ERROR`). The legacy
+  restriction's rationale is recorded nowhere -- not in the code, not in the
+  (squashed) history -- so the divergence rests on the reasoning above rather
+  than on a demonstrated equivalence. Induced obligation: the audit has to
+  either confirm that reasoning or recover what the legacy check was defending,
+  in which case whatever it defends has to be re-established for the chain
+  pipeline some other way.
 - **No negative fees anywhere in a chain — so upgraders must gobble fees with
   standard transactions.** `Chain` adds the operand fees as `u128`s and asserts
   the addition does not carry, which forbids a negative operand fee outright.
@@ -187,7 +200,11 @@ verified", i.e. universal forgery. Covered by §Negative tests for `D`.
   - [x] `Chain(Box<ChainWitness>)` — holds the two operand kernels, the chained
         kernel, the cut-through set, and the two operand link proofs. It needs
         no memory projection.
-  - [ ] `Update` (2), `Cast` (3) — land with their witnesses
+  - [x] `Update(Box<UpdateWitness>)` — holds both kernels, both mutator set
+        accumulators (pre-reduced, as `AuthenticateMsaAgainstTxk` eats them),
+        the AOCL successor proof, and the old link proof. Its own memory
+        projection, like `Chain`'s.
+  - [ ] `Cast` (3) — lands with its witness
   - [x] `SecretWitness` impl — dispatches to the branch witness.
   - [x] `standard_input()` gains `|| D.reversed()`, `D` = the `SingleProof`
         program digest (§Breaking the `Fix`/`Cast` cycle). Landed ahead of
@@ -299,10 +316,30 @@ would bind that check to the wrong tree without crashing.
         disjointness does not reduce to a multiset equation; an `AdditionRecord`
         is its own commitment, so it compares unhashed.
         (`non_maximal_cut_through_is_rejected`)
-- [ ] **Update** `LinkTx -> LinkTx`: re-target a new mutator-set hash without
+- [x] **Update** `LinkTx -> LinkTx`: re-target a new mutator-set hash without
       re-forging (mirror `single_proof/update_branch`). Same verbatim `D`
       pass-through onto the operand claim. `Update` re-targets the *mutator set*,
-      never `D`.
+      never `D` -- and cannot: there is only one `D` in the program, the one the
+      dispatcher read, and it goes into the operand claim verbatim.
+  - [x] both mutator set accumulators authenticated against their own kernels'
+        MAST hashes (shared `AuthenticateMsaAgainstTxk`, at `LinkKernel`'s
+        height), and the new AOCL a successor of the old one.
+  - [x] the inputs' absolute index sets are unchanged. The removal records
+        themselves may be rewritten -- that is what re-targeting *is* -- but
+        what a double spend collides on may not move.
+  - [x] outputs, thruputs, announcements and fee carried over byte-for-byte:
+        the *old* kernel's field bytes authenticated against *both* roots, which
+        is one hash instead of two and rules out equal-hash-different-bytes by
+        construction.
+  - [x] thruputs unchanged is not a simplification: an `AdditionRecord` is a
+        canonical commitment, which no mutator-set state enters into, so a
+        thruput means the same thing before and after. Resolving one is `Chain`'s
+        job.
+  - [x] timestamp does not go backwards; new kernel carries no coinbase and no
+        merge bit. The old kernel's two constant leafs are not re-checked --
+        induction, as in `Chain`.
+  - Deliberately *no* non-empty-input-set requirement, unlike `update_branch`;
+        see §Governing invariants.
 - [ ] **Cast** `Transaction -> LinkTx`: recursively verify the input
       `SingleProof`, produce `LinkProof(thruputs = [])` so a regular
       `Transaction` can join a chain. The inner claim is
@@ -495,11 +532,20 @@ partition *is* the kernel, every input carries a lock-script proof, and an
 unmatched thruput is un-`Fix`able (see §Motivation).
 
 ### onto `Update`
-- [ ] new timestamp older than old rejected (← `new_timestamp_older_than_old_prop`)
-- [ ] bad new AOCL rejected (← `bad_new_aocl_prop`)
-- [ ] bad old AOCL rejected (← `bad_old_aocl_prop`)
-- [ ] tampered absolute-index-set value rejected (← `bad_absolute_index_set_value_prop`)
-- [ ] tampered absolute-index-set length rejected (← `bad_absolute_index_set_length_too_short_prop`)
+- [x] new timestamp older than old rejected (← `new_timestamp_older_than_old_prop`)
+- [x] bad new AOCL rejected (← `bad_new_aocl_prop`)
+- [x] bad old AOCL rejected (← `bad_old_aocl_prop`)
+      (both in `mutator_set_accumulator_must_be_the_one_the_kernel_names`)
+- [x] tampered absolute-index-set value rejected (← `bad_absolute_index_set_value_prop`)
+- [x] tampered absolute-index-set length rejected (← `bad_absolute_index_set_length_too_short_prop`)
+      (both in `tampered_absolute_index_set_is_rejected`)
+- [x] changing a carried-over field -- outputs, thruputs, announcements, fee --
+      rejected (`changing_a_carried_over_field_is_rejected`)
+- [x] coinbase or merge bit on the new kernel rejected
+- [x] the new kernel must be the one named in the claim
+- Not applicable: merge-bit-unchanged (`update_branch` divines the bit and
+  carries it across; a `LinkTx` never has it set, so the constant leaf is
+  stronger)
 
 ### onto `Chain`
 - Not applicable: coinbase-specific merge tests (`too_big_time_diff`,
@@ -582,8 +628,21 @@ Claim / plumbing:
       the case that would otherwise launder a junk-`D` `Cast` into a real chain.
 
 `Update`:
-- [ ] operand claim with `D' ≠ D` → rejected.
-- [ ] `Update` cannot re-target `D`: output claim `D_new ≠ D_old` → rejected.
+- [x] operand claim with `D' ≠ D` → rejected
+      (`old_proof_forged_under_another_single_proof_digest_is_rejected`).
+- [x] divined `D`: poke `single_proof_digest` in the witness's memory image,
+      leave the public input alone → must still verify
+      (`witness_supplied_single_proof_digest_is_ignored`). Narrower than
+      `Chain`'s namesake: the dispatcher-slot-to-claim route is
+      `GenerateLinkProofClaim`, shared and pinned there, so what this adds is
+      that `Update` does not read the witness's copy on top of it.
+-     `Update` cannot re-target `D`: output claim `D_new ≠ D_old` → rejected.
+      Not written as its own test: there is no second `D` for the branch to
+      name. It reads one digest, from the dispatcher's slot, and copies it into
+      the operand claim; the *output* claim is not built by the branch at all --
+      it is the public input. So re-targeting can only *look* like the two tests
+      above: an operand proven under one digest and claimed under another
+      (rejected), or a witness-supplied second digest (ignored).
 
 `Cast`:
 - [ ] inner `SingleProof` claim built with a program digest ≠ `D` from public

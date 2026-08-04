@@ -1406,7 +1406,10 @@ pub(crate) mod tests {
     }
 
     /// Forge a link primitive witness into a proof-backed [`LinkTx`].
-    pub(super) async fn forge(lpw: &LinkPrimitiveWitness, single_proof_digest: Digest) -> LinkTx {
+    pub(in crate::chaintx) async fn forge(
+        lpw: &LinkPrimitiveWitness,
+        single_proof_digest: Digest,
+    ) -> LinkTx {
         let witness = ForgeWitness::produce(
             lpw,
             single_proof_digest,

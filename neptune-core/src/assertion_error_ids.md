@@ -34,4 +34,5 @@ often.
 |  510..520 | [`CollectTypeScripts`](protocol/consensus/transaction/validity/collect_type_scripts.rs)                                         |
 |  520..530 | [`Forge`](../../neptune-consensus/src/chaintx/forge.rs)                                                                         |
 |  530..540 | [`LinkProof`](../../neptune-consensus/src/chaintx/link_proof.rs)                                                                |
-|  540..550 | [`Chain`](../../neptune-consensus/src/chaintx/chain.rs)                                                                        |
+|  540..560 | [`Chain`](../../neptune-consensus/src/chaintx/chain.rs)                                                                        |
+|  560..570 | [`Update`](../../neptune-consensus/src/chaintx/update.rs)                                                                       |

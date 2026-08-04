@@ -14,17 +14,18 @@ use super::chain::ChainWitness;
 use super::forge::ForgeWitness;
 use super::forge::ForgeWitnessMemory;
 use super::link_proof::LinkProof;
+use super::update::UpdateWitness;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::proof_abstractions::SecretWitness;
 
 /// Discriminant of the various pathways into `LinkProof`.
 ///
 /// Consensus-critical: the `LinkProof` program branches on this value, so it is
-/// pinned here and must never be reassigned. The remaining branches append:
-///  - `Update` = 2,
+/// pinned here and must never be reassigned. The remaining branch appends:
 ///  - `Cast` = 3.
 pub(crate) const DISCRIMINANT_FOR_FORGE: u64 = 0;
 pub(crate) const DISCRIMINANT_FOR_CHAIN: u64 = 1;
+pub(crate) const DISCRIMINANT_FOR_UPDATE: u64 = 2;
 
 /// The witness for a link proof: which of the `LinkProof` branches produced this
 /// [`LinkTx`](super::link_tx::LinkTx), plus that branch's secret
@@ -36,9 +37,9 @@ pub(crate) const DISCRIMINANT_FOR_CHAIN: u64 = 1;
 /// Note that `Fix` is deliberately *not* a variant here: `Fix` produces a
 /// `SingleProof`, not a `LinkProof`, and therefore lives on `SingleProofWitness`.
 ///
-/// The remaining branches -- `Update` and `Cast` -- are added together with
-/// their witnesses and tasm programs, appended in that order so the wire layout
-/// of the existing branches never shifts underneath them.
+/// The remaining branch -- `Cast` -- is added together with its witness and tasm
+/// program, appended after these so the wire layout of the existing branches
+/// never shifts underneath it.
 #[derive(Debug, Clone, BFieldCodec)]
 pub enum LinkProofWitness {
     /// `LinkPrimitiveWitness -> LinkTx`: the entry point into the chain pipeline.
@@ -47,6 +48,9 @@ pub enum LinkProofWitness {
     /// `LinkTx * LinkTx -> LinkTx`: chain two link transactions, cutting
     /// through the thruputs that the other operand's outputs resolve.
     Chain(Box<ChainWitness>),
+
+    /// `LinkTx -> LinkTx`: re-target a link transaction at a newer mutator set.
+    Update(Box<UpdateWitness>),
 }
 
 /// The memory image of a [`LinkProofWitness`]: what the `LinkProof` program
@@ -65,6 +69,9 @@ pub(super) enum LinkProofWitnessMemory {
     /// projection. Boxed only to keep the enum small; `Box<T>` encodes exactly
     /// as `T`, so the image `LinkProof` decodes is unaffected.
     Chain(Box<ChainWitness>),
+
+    /// Likewise its own projection.
+    Update(Box<UpdateWitness>),
 }
 
 // Required for `decode_from_memory`; `derive(TasmObject)` does not handle enums.
@@ -97,6 +104,9 @@ impl TasmObject for LinkProofWitnessMemory {
         match discriminant.value() {
             DISCRIMINANT_FOR_FORGE => Ok(Box::new(Self::Forge(BFieldCodec::decode(&field_data)?))),
             DISCRIMINANT_FOR_CHAIN => Ok(Box::new(Self::Chain(BFieldCodec::decode(&field_data)?))),
+            DISCRIMINANT_FOR_UPDATE => {
+                Ok(Box::new(Self::Update(BFieldCodec::decode(&field_data)?)))
+            }
             // TODO: decode other variants here
             _ => Err(Box::new(BFieldCodecError::ElementOutOfRange)),
         }
@@ -112,12 +122,17 @@ impl LinkProofWitness {
         Self::Chain(Box::new(witness))
     }
 
+    pub fn from_update(witness: UpdateWitness) -> Self {
+        Self::Update(Box::new(witness))
+    }
+
     /// MAST hash of the [`LinkKernel`](super::link_kernel::LinkKernel) this
     /// witness attests to -- the public input of the `LinkProof` claim.
     pub fn kernel_mast_hash(&self) -> Digest {
         match self {
             Self::Forge(witness) => witness.kernel_mast_hash(),
             Self::Chain(witness) => witness.kernel_mast_hash(),
+            Self::Update(witness) => witness.kernel_mast_hash(),
         }
     }
 }
@@ -128,6 +143,7 @@ impl SecretWitness for LinkProofWitness {
         match self {
             Self::Forge(witness) => witness.standard_input(),
             Self::Chain(witness) => witness.standard_input(),
+            Self::Update(witness) => witness.standard_input(),
         }
     }
 
@@ -135,6 +151,7 @@ impl SecretWitness for LinkProofWitness {
         match self {
             Self::Forge(witness) => witness.output(),
             Self::Chain(witness) => witness.output(),
+            Self::Update(witness) => witness.output(),
         }
     }
 
@@ -146,6 +163,7 @@ impl SecretWitness for LinkProofWitness {
         match self {
             Self::Forge(witness) => witness.nondeterminism(),
             Self::Chain(witness) => witness.nondeterminism(),
+            Self::Update(witness) => witness.nondeterminism(),
         }
     }
 }
