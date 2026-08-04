@@ -571,7 +571,7 @@ pub(crate) async fn create_block_transaction_from(
         info!("No synced single-proof tx found for merge. Looking for one to update.");
         let min_gobbling_fee = NativeCurrencyAmount::zero();
         let update_job = global_state_lock
-            .lock_guard_mut()
+            .lock_guard()
             .await
             .preferred_update_job_from_mempool(min_gobbling_fee, TxUpgradeFilter::match_all())
             .await;

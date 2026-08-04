@@ -29,7 +29,6 @@ use neptune_database::NeptuneLevelDb;
 use neptune_database::WriteBatchAsync;
 use neptune_database::create_db_if_missing;
 use neptune_database::storage::storage_schema::traits::*;
-use neptune_database::storage::storage_vec::traits::StorageVecBase;
 use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::commit;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -1798,7 +1797,7 @@ impl ArchivalState {
     /// max search depth, as it loads all the blocks in the search path into
     /// memory. A max search depth of 0 means that only the tip is checked.
     async fn mutator_set_to_tip_internal(
-        &mut self,
+        &self,
         old_ms_digest: Digest,
         old_aocl_num_leafs: Option<u64>,
         max_search_depth: usize,
@@ -1830,13 +1829,15 @@ impl ArchivalState {
                 return None;
             }
 
-            let MutatorSetUpdate {
-                removals,
-                additions,
-            } = haystack
+            let mutator_set_update = haystack
                 .mutator_set_update()
                 .expect("Block from state must have mutator set update");
-            block_mutations.push((additions, removals));
+            let predecessor_msa = parent
+                .as_ref()
+                .unwrap()
+                .mutator_set_accumulator_after()
+                .expect("Block from state must have mutator set after");
+            block_mutations.push((predecessor_msa, mutator_set_update));
 
             haystack = parent.unwrap();
             parent = self
@@ -1845,67 +1846,20 @@ impl ArchivalState {
                 .expect("Must succeed in reading block");
         };
 
-        // The removal records collected above were valid for each block but
-        // are in the general case not valid for the `mutator_set` which was
-        // given as input to this function. In order to find the right removal
-        // records, we, temporarily, roll back the state of the archival mutator
-        // set. This allows us to read out MMR-authentication paths from a
-        // previous state of the mutator set. It's crucial that these changes
-        // are not persisted, as that would leave the archival mutator set in a
-        // state incompatible with the tip.
-        self.archival_mutator_set.persist().await;
-        for (additions, removals) in &block_mutations {
-            for rr in removals.iter().rev() {
-                self.archival_mutator_set.ams_mut().revert_remove(rr).await;
-            }
-
-            for ar in additions.iter().rev() {
-                self.archival_mutator_set.ams_mut().revert_add(ar).await;
-            }
+        let timer = std::time::Instant::now();
+        let mutator_set_update = MutatorSetUpdate::compose(&block_mutations);
+        if block_mutations.len() > 1 {
+            info!(
+                "Composed mutator-set update to tip spanning {} blocks, with {} removals \
+                 and {} additions, in {:?}",
+                block_mutations.len(),
+                mutator_set_update.removals.len(),
+                mutator_set_update.additions.len(),
+                timer.elapsed(),
+            );
         }
 
-        let (mut addition_records, mut removal_records): (
-            Vec<Vec<AdditionRecord>>,
-            Vec<Vec<RemovalRecord>>,
-        ) = block_mutations.clone().into_iter().unzip();
-
-        addition_records.reverse();
-        removal_records.reverse();
-
-        let addition_records = addition_records.concat();
-        let mut removal_records = removal_records.concat();
-
-        let swbf_length = self.archival_mutator_set.ams().chunks.len().await;
-        for rr in &mut removal_records {
-            let mut removals = vec![];
-            for (chkidx, (mp, chunk)) in rr
-                .target_chunks
-                .chunk_indices_and_membership_proofs_and_leafs_iter_mut()
-            {
-                if swbf_length <= *chkidx {
-                    removals.push(*chkidx);
-                } else {
-                    *mp = self
-                        .archival_mutator_set
-                        .ams()
-                        .swbf_inactive
-                        .prove_membership_async(*chkidx)
-                        .await;
-                    *chunk = self.archival_mutator_set.ams().chunks.get(*chkidx).await;
-                }
-            }
-
-            for remove in removals {
-                rr.target_chunks.retain(|(x, _)| *x != remove);
-            }
-        }
-
-        self.archival_mutator_set.drop_unpersisted().await;
-
-        Some((
-            old_msa,
-            MutatorSetUpdate::new(removal_records, addition_records),
-        ))
+        Some((old_msa, mutator_set_update))
     }
 
     /// Returns the old mutator set matching the provided digest as well as the
@@ -1917,7 +1871,7 @@ impl ArchivalState {
     /// max search depth, as it loads all the blocks in the search path into
     /// memory. A max search depth of 0 means that only the tip is checked.
     pub async fn old_mutator_set_and_mutator_set_update_to_tip(
-        &mut self,
+        &self,
         old_mutator_set_digest: Digest,
         max_search_depth: usize,
     ) -> Option<(MutatorSetAccumulator, MutatorSetUpdate)> {
@@ -1934,7 +1888,7 @@ impl ArchivalState {
     /// max search depth, as it loads all the blocks in the search path into
     /// memory. A max search depth of 0 means that only the tip is checked.
     pub async fn get_mutator_set_update_to_tip(
-        &mut self,
+        &self,
         mutator_set: &MutatorSetAccumulator,
         max_search_depth: usize,
     ) -> Option<MutatorSetUpdate> {
@@ -2700,7 +2654,7 @@ mod tests {
     #[apply(shared_tokio_runtime)]
     async fn ms_update_to_tip_genesis() {
         let network = Network::Main;
-        let mut archival_state = make_test_archival_state(network, false).await;
+        let archival_state = make_test_archival_state(network, false).await;
         let current_msa = archival_state
             .archival_mutator_set
             .ams()
@@ -3461,7 +3415,7 @@ mod tests {
         }
 
         // Walking the opposite way returns None, and does not crash.
-        let mut genesis_archival_state = make_test_archival_state(network, false).await;
+        let genesis_archival_state = make_test_archival_state(network, false).await;
         for i in 0..10 {
             assert!(
                 genesis_archival_state
@@ -3469,6 +3423,31 @@ mod tests {
                     .await
                     .is_none()
             );
+        }
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn ms_update_to_tip_across_removal_records() {
+        let network = Network::Main;
+        let mut archival_state = make_test_archival_state(network, false).await;
+
+        let genesis = Block::genesis(network);
+        let mut msas = vec![genesis.mutator_set_accumulator_after().unwrap()];
+        let mut current_block = genesis;
+
+        // The first block only adds, but enough to slide the mutator-set
+        // window; the following blocks remove UTXOs too.
+        for (num_inputs, num_outputs) in [(0, 32), (5, 33), (7, 58), (3, 0), (5, 104)] {
+            let next_block = block_with_num_puts(network, &current_block, num_inputs, num_outputs);
+            archival_state.set_new_tip(&next_block).await.unwrap();
+            msas.push(next_block.mutator_set_accumulator_after().unwrap());
+            current_block = next_block;
+        }
+
+        let search_depth = 10;
+        for past_msa in &msas {
+            positive_prop_ms_update_to_tip(past_msa, &mut archival_state, search_depth).await;
         }
     }
 

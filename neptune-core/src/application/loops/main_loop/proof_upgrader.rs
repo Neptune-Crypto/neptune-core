@@ -580,7 +580,7 @@ impl UpgradeJob {
 
                 let Some(ms_update) = global_state
                     .chain
-                    .archival_state_mut()
+                    .archival_state()
                     .get_mutator_set_update_to_tip(
                         &mutator_set_for_tx,
                         SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE,
@@ -861,7 +861,7 @@ impl UpgradeJob {
 /// of this job to the wallet of this node. The value reported will be zero for
 /// all 3rd party transactions.
 pub(super) async fn get_upgrade_task_from_mempool(
-    global_state: &mut GlobalState,
+    global_state: &GlobalState,
 ) -> Option<UpgradeJob> {
     let tip_mutator_set = global_state.chain.tip_mutator_set_after();
     let gobbling_fraction = global_state.gobbling_fraction();
@@ -1084,7 +1084,7 @@ mod tests {
             bob.mempool_insert(px_tx_for_raise.clone().into(), UpgradePriority::Irrelevant)
                 .await;
 
-            get_upgrade_task_from_mempool(&mut bob).await.unwrap()
+            get_upgrade_task_from_mempool(&bob).await.unwrap()
         };
 
         assert!(
@@ -1105,8 +1105,8 @@ mod tests {
         let block1 = invalid_empty_block(&genesis, network);
         bob.set_new_tip(block1.clone()).await.unwrap();
 
-        let mut bob = bob.lock_guard_mut().await;
-        let new_job = get_upgrade_task_from_mempool(&mut bob).await.unwrap();
+        let bob = bob.lock_guard().await;
+        let new_job = get_upgrade_task_from_mempool(&bob).await.unwrap();
 
         let UpgradeJob::UpdateMutatorSetData(new_job) = new_job else {
             panic!("Expected ms-update job");
@@ -1167,7 +1167,7 @@ mod tests {
         let block1 = invalid_empty_block(&genesis, network);
         bob.set_new_tip(block1.clone()).await.unwrap();
 
-        let mut bob = bob.lock_guard_mut().await;
+        let bob = bob.lock_guard().await;
         assert!(
             bob.mempool().contains(pc_tx.kernel.txid()),
             "unsynced ProofCollection must be retained across a new block (#946a)"
@@ -1175,7 +1175,7 @@ mod tests {
 
         // The upgrader still returns a raise job for the now-unsynced PC.
         let Some(job @ UpgradeJob::ProofCollectionToSingleProof(_)) =
-            get_upgrade_task_from_mempool(&mut bob).await
+            get_upgrade_task_from_mempool(&bob).await
         else {
             panic!("unsynced foreign ProofCollection must still yield a raise job (#946b)");
         };
@@ -1247,8 +1247,8 @@ mod tests {
 
         // Fetch and execute the raise job for the now-unsynced ProofCollection.
         let job = {
-            let mut bob = bob.lock_guard_mut().await;
-            get_upgrade_task_from_mempool(&mut bob).await.unwrap()
+            let bob = bob.lock_guard().await;
+            get_upgrade_task_from_mempool(&bob).await.unwrap()
         };
         assert!(
             matches!(job, UpgradeJob::ProofCollectionToSingleProof(_)),
@@ -1320,9 +1320,9 @@ mod tests {
                 .await;
             assert!(
                 !upgrade_priority.is_irrelevant()
-                    && get_upgrade_task_from_mempool(&mut rando).await.is_some()
+                    && get_upgrade_task_from_mempool(&rando).await.is_some()
                     || upgrade_priority.is_irrelevant()
-                        && get_upgrade_task_from_mempool(&mut rando).await.is_none()
+                        && get_upgrade_task_from_mempool(&rando).await.is_none()
             );
 
             // A high-fee paying transaction must be returned for upgrading
@@ -1337,7 +1337,7 @@ mod tests {
             rando
                 .mempool_insert(pc_tx_high_fee.clone().into(), UpgradePriority::Irrelevant)
                 .await;
-            let job = get_upgrade_task_from_mempool(&mut rando).await.unwrap();
+            let job = get_upgrade_task_from_mempool(&rando).await.unwrap();
             let UpgradeJob::ProofCollectionToSingleProof(pc2sp) = job else {
                 panic!("Expected proof-collection to single-proof job");
             };
@@ -1672,7 +1672,7 @@ mod tests {
         rando
             .mempool_insert(pc_tx.clone().into(), UpgradePriority::Irrelevant)
             .await;
-        let job = get_upgrade_task_from_mempool(&mut rando).await.unwrap();
+        let job = get_upgrade_task_from_mempool(&rando).await.unwrap();
 
         let UpgradeJob::ProofCollectionToSingleProof(pc2sp) = job else {
             panic!("Expected PC to SP job");
@@ -1733,8 +1733,8 @@ mod tests {
         }
 
         let merge_upgrade_job = {
-            let mut alice = alice.lock_guard_mut().await;
-            get_upgrade_task_from_mempool(&mut alice).await.unwrap()
+            let alice = alice.lock_guard().await;
+            get_upgrade_task_from_mempool(&alice).await.unwrap()
         };
         assert!(
             matches!(merge_upgrade_job, UpgradeJob::Merge { .. }),
