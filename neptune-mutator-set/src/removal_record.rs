@@ -30,7 +30,10 @@ use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use super::mutator_set_accumulator::MutatorSetAccumulator;
 use super::removal_record::chunk_dictionary::ChunkDictionary;
 use super::shared::get_batch_mutation_argument_for_removal_record;
+use super::shared::get_batch_mutation_argument_for_removal_records;
 use super::shared::indices_to_hash_map;
+use super::shared::prepare_authenticated_batch_modification_for_removal_record_reversion;
+use super::shared::prepare_authenticated_batch_modification_for_removal_records_reversion;
 use super::shared::BATCH_SIZE;
 use super::shared::CHUNK_SIZE;
 use super::MutatorSetError;
@@ -197,6 +200,189 @@ impl RemovalRecord {
                 .map(|(i, p, l)| LeafMutation::new(*i, *l, p.clone()))
                 .collect_vec(),
         );
+    }
+
+    /// Update a batch of removal records that are synced to a given mutator
+    /// set, in anticipation of the application of any number of removal
+    /// records.
+    ///
+    /// Equivalent to applying [`Self::batch_update_from_remove`] for each
+    /// applied removal record in turn — with the applied records themselves
+    /// kept in sync between applications — but performs only a single batch
+    /// mutation of the underlying MMR membership proofs. The combined
+    /// mutation is well-defined because the chunk modifications of the
+    /// individual applications commute.
+    ///
+    /// The applied removal records must be synced to the same mutator-set
+    /// state as the removal records being updated. The batch being updated
+    /// may contain copies of the applied records; such copies end up synced
+    /// to the state after the application of the entire batch, including
+    /// themselves.
+    pub fn batch_update_from_removals(
+        removal_records: &mut [&mut Self],
+        applied_removal_records: &[RemovalRecord],
+    ) {
+        // Set all chunk values to the new values and calculate the mutation argument
+        // for the batch updating of the MMR membership proofs.
+        let mut chunk_dictionaries: Vec<&mut ChunkDictionary> = removal_records
+            .iter_mut()
+            .map(|rr| &mut rr.target_chunks)
+            .collect();
+        let (_mutated_chunks_by_rr_indices, mutation_argument) =
+            get_batch_mutation_argument_for_removal_records(
+                applied_removal_records,
+                &mut chunk_dictionaries,
+            );
+
+        // Collect all the MMR membership proofs from the chunk dictionaries.
+        let mut own_mmr_mps: Vec<&mut mmr::mmr_membership_proof::MmrMembershipProof> = vec![];
+        let mut leaf_indices = vec![];
+        for chunk_dict in &mut chunk_dictionaries {
+            for (chunk_index, (mp, _)) in chunk_dict.iter_mut() {
+                own_mmr_mps.push(mp);
+                leaf_indices.push(*chunk_index);
+            }
+        }
+
+        // Perform the batch mutation of the MMR membership proofs
+        mmr::mmr_membership_proof::MmrMembershipProof::batch_update_from_batch_leaf_mutation(
+            &mut own_mmr_mps,
+            &leaf_indices,
+            mutation_argument
+                .iter()
+                .map(|(i, p, l)| LeafMutation::new(*i, *l, p.clone()))
+                .collect_vec(),
+        );
+    }
+
+    /// Revert a batch of removal records to their state prior to the
+    /// application of any number of removal records.
+    ///
+    /// Reverse of [`Self::batch_update_from_removals`]: applying that
+    /// function and then this one, with the same batch of applied removal
+    /// records, is the identity. Unlike
+    /// [`Self::batch_revert_update_from_remove`], which takes the reverted
+    /// record in its as-applied form, the reverted removal records here must
+    /// be synced to the same mutator-set state as the records being reverted
+    /// — the state after the application of the entire batch, including
+    /// themselves.
+    pub fn batch_revert_update_from_removals(
+        removal_records: &mut [&mut Self],
+        reverted_removal_records: &[RemovalRecord],
+    ) {
+        // Set all chunk values back to the old values and calculate the
+        // mutation argument for the batch updating of the MMR membership
+        // proofs.
+        let mut chunk_dictionaries: Vec<&mut ChunkDictionary> = removal_records
+            .iter_mut()
+            .map(|rr| &mut rr.target_chunks)
+            .collect();
+        let (_mutated_chunks_by_rr_indices, mutation_argument) =
+            prepare_authenticated_batch_modification_for_removal_records_reversion(
+                reverted_removal_records,
+                &mut chunk_dictionaries,
+            );
+
+        // Collect all the MMR membership proofs from the chunk dictionaries.
+        let mut own_mmr_mps: Vec<&mut mmr::mmr_membership_proof::MmrMembershipProof> = vec![];
+        let mut leaf_indices = vec![];
+        for chunk_dict in &mut chunk_dictionaries {
+            for (chunk_index, (mp, _)) in chunk_dict.iter_mut() {
+                own_mmr_mps.push(mp);
+                leaf_indices.push(*chunk_index);
+            }
+        }
+
+        // Perform the batch mutation of the MMR membership proofs
+        mmr::mmr_membership_proof::MmrMembershipProof::batch_update_from_batch_leaf_mutation(
+            &mut own_mmr_mps,
+            &leaf_indices,
+            mutation_argument
+                .iter()
+                .map(|(i, p, l)| LeafMutation::new(*i, *l, p.clone()))
+                .collect_vec(),
+        );
+    }
+
+    /// Revert a batch of removal records to their state prior to being
+    /// updated with the application of another removal record.
+    ///
+    /// Reverse of [`Self::batch_update_from_remove`]: applying that function
+    /// and then this one, with the same `reverted_removal_record`, is the
+    /// identity.
+    pub fn batch_revert_update_from_remove(
+        removal_records: &mut [&mut Self],
+        reverted_removal_record: &RemovalRecord,
+    ) {
+        // Set all chunk values back to the old values and calculate the
+        // mutation argument for the batch updating of the MMR membership
+        // proofs.
+        let mut chunk_dictionaries: Vec<&mut ChunkDictionary> = removal_records
+            .iter_mut()
+            .map(|rr| &mut rr.target_chunks)
+            .collect();
+        let (_mutated_chunks_by_rr_indices, mutation_argument) =
+            prepare_authenticated_batch_modification_for_removal_record_reversion(
+                reverted_removal_record,
+                &mut chunk_dictionaries,
+            );
+
+        // Collect all the MMR membership proofs from the chunk dictionaries.
+        let mut own_mmr_mps: Vec<&mut mmr::mmr_membership_proof::MmrMembershipProof> = vec![];
+        let mut leaf_indices = vec![];
+        for chunk_dict in &mut chunk_dictionaries {
+            for (chunk_index, (mp, _)) in chunk_dict.iter_mut() {
+                own_mmr_mps.push(mp);
+                leaf_indices.push(*chunk_index);
+            }
+        }
+
+        // Perform the batch mutation of the MMR membership proofs
+        mmr::mmr_membership_proof::MmrMembershipProof::batch_update_from_batch_leaf_mutation(
+            &mut own_mmr_mps,
+            &leaf_indices,
+            mutation_argument
+                .iter()
+                .map(|(i, p, l)| LeafMutation::new(*i, *l, p.clone()))
+                .collect_vec(),
+        );
+    }
+
+    /// Revert a batch of removal records to their state at a previous mutator
+    /// set accumulator, prior to being updated with one or more additions.
+    ///
+    /// The previous accumulator is identified by the number of leafs in its
+    /// inactive sliding-window Bloom filter, i.e. its batch index; nothing
+    /// else about it is needed.
+    ///
+    /// Reverse of [`Self::batch_update_from_addition`], but can revert any
+    /// number of additions in one call. Only additions may separate the
+    /// records' current state from the previous accumulator; removals in
+    /// between must be reverted with [`Self::batch_revert_update_from_remove`]
+    /// first.
+    pub fn batch_revert_update_from_addition(
+        removal_records: &mut [&mut Self],
+        previous_swbfi_leaf_count: u64,
+    ) {
+        for removal_record in removal_records.iter_mut() {
+            // Chunks that the reverted additions slid out of the active window
+            // have their dictionary entries removed.
+            removal_record
+                .target_chunks
+                .retain(|(chunk_index, _)| *chunk_index < previous_swbfi_leaf_count);
+
+            // Appending to an MMR only ever extends the authentication path of
+            // an existing leaf, so the appends are reverted by truncating each
+            // path back to the height of its leaf's Merkle tree in the
+            // previous MMR.
+            for (chunk_index, (mp, _chunk)) in removal_record.target_chunks.iter_mut() {
+                let chunk_discrepancies = previous_swbfi_leaf_count ^ *chunk_index;
+                let chunk_mt_height = u128::from(chunk_discrepancies).ilog2();
+                while mp.authentication_path.len() > chunk_mt_height as usize {
+                    mp.authentication_path.pop();
+                }
+            }
+        }
     }
 
     fn has_required_authenticated_chunks(
@@ -720,6 +906,188 @@ mod tests {
                     .unwrap()
             );
         }
+    }
+
+    #[test]
+    fn batch_revert_update_from_addition_round_trip() {
+        let num_additions = 4 * BATCH_SIZE + 4;
+        let mut accumulator = MutatorSetAccumulator::default();
+        let mut removal_records: Vec<RemovalRecord> = vec![];
+
+        // The (accumulator, removal records) state before each addition.
+        let mut snapshots: Vec<(MutatorSetAccumulator, Vec<RemovalRecord>)> = vec![];
+
+        for _ in 0..num_additions {
+            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
+            let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
+            let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
+
+            snapshots.push((accumulator.clone(), removal_records.clone()));
+
+            RemovalRecord::batch_update_from_addition(
+                &mut removal_records.iter_mut().collect::<Vec<_>>(),
+                &accumulator,
+            );
+            accumulator.add(&addition_record);
+
+            let removal_record = accumulator.drop(item, &mp);
+            removal_records.push(removal_record);
+        }
+
+        let final_records = removal_records.clone();
+
+        // Revert one addition at a time, all the way back to the empty
+        // mutator set, and verify that each step reproduces the recorded
+        // state exactly.
+        for (previous_accumulator, previous_removal_records) in snapshots.iter().rev() {
+            // The removal record born of this addition does not exist in the
+            // previous state.
+            removal_records.pop();
+
+            RemovalRecord::batch_revert_update_from_addition(
+                &mut removal_records.iter_mut().collect::<Vec<_>>(),
+                previous_accumulator.swbf_inactive.num_leafs(),
+            );
+
+            assert_eq!(*previous_removal_records, removal_records);
+            for removal_record in &removal_records {
+                assert!(removal_record.validate(previous_accumulator));
+                assert!(previous_accumulator.can_remove(removal_record));
+            }
+        }
+
+        // Also revert many additions in one call: take the oldest removal
+        // record at the final state directly back to its birth state.
+        let (birth_accumulator, _) = &snapshots[1];
+        let mut oldest = final_records[0].clone();
+        RemovalRecord::batch_revert_update_from_addition(
+            &mut [&mut oldest],
+            birth_accumulator.swbf_inactive.num_leafs(),
+        );
+        assert_eq!(snapshots[1].1[0], oldest);
+        assert!(oldest.validate(birth_accumulator));
+    }
+
+    #[test]
+    fn batch_revert_update_from_remove_round_trip() {
+        let num_additions = 16 * BATCH_SIZE + 4;
+        let mut accumulator = MutatorSetAccumulator::default();
+        let mut removal_records: Vec<RemovalRecord> = vec![];
+
+        // Add all items, keeping all removal records in sync.
+        for _ in 0..num_additions {
+            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
+            let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
+            let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
+
+            RemovalRecord::batch_update_from_addition(
+                &mut removal_records.iter_mut().collect::<Vec<_>>(),
+                &accumulator,
+            );
+            accumulator.add(&addition_record);
+
+            let removal_record = accumulator.drop(item, &mp);
+            removal_records.push(removal_record);
+        }
+
+        // Apply half the removal records one at a time, keeping the rest in
+        // sync and recording the state before each removal.
+        let num_removals = num_additions as usize / 2;
+        let mut history = vec![];
+        for _ in 0..num_removals {
+            let remove_idx = rand::rng().random_range(0..removal_records.len());
+            let snapshot = (accumulator.clone(), removal_records.clone());
+            let applied = removal_records.remove(remove_idx);
+            RemovalRecord::batch_update_from_remove(
+                &mut removal_records.iter_mut().collect::<Vec<_>>(),
+                &applied,
+            );
+            accumulator.remove(&applied);
+            history.push((remove_idx, applied, snapshot));
+        }
+
+        // Revert one removal at a time and verify that each step reproduces
+        // the recorded state exactly. The applied record itself was not
+        // updated past its application, so re-inserting it restores the full
+        // record list.
+        for (remove_idx, applied, (snapshot_accumulator, snapshot_records)) in
+            history.into_iter().rev()
+        {
+            RemovalRecord::batch_revert_update_from_remove(
+                &mut removal_records.iter_mut().collect::<Vec<_>>(),
+                &applied,
+            );
+            removal_records.insert(remove_idx, applied);
+
+            assert_eq!(snapshot_records, removal_records);
+            for removal_record in &removal_records {
+                assert!(removal_record.validate(&snapshot_accumulator));
+                assert!(snapshot_accumulator.can_remove(removal_record));
+            }
+        }
+    }
+
+    #[test]
+    fn batch_removals_agree_with_sequential_application() {
+        let num_additions = 16 * BATCH_SIZE + 4;
+        let mut accumulator = MutatorSetAccumulator::default();
+        let mut all_records: Vec<RemovalRecord> = vec![];
+
+        // Add all items, keeping all removal records in sync.
+        for _ in 0..num_additions {
+            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
+            let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
+            let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
+
+            RemovalRecord::batch_update_from_addition(
+                &mut all_records.iter_mut().collect::<Vec<_>>(),
+                &accumulator,
+            );
+            accumulator.add(&addition_record);
+
+            all_records.push(accumulator.drop(item, &mp));
+        }
+
+        // The first `num_removals` records are applied; the rest are
+        // bystanders. `all_records` also keeps copies of the applied records
+        // themselves in sync, through their own application and past it.
+        let num_removals = 20;
+        let applied_records: Vec<RemovalRecord> = all_records[..num_removals].to_vec();
+        let pre_removal_records = all_records.clone();
+
+        // Sequential ground truth, applying one removal record at a time.
+        let mut seq_records = all_records.clone();
+        for i in 0..num_removals {
+            let applied = seq_records[i].clone();
+            RemovalRecord::batch_update_from_remove(
+                &mut seq_records.iter_mut().collect::<Vec<_>>(),
+                &applied,
+            );
+            assert!(accumulator.can_remove(&applied));
+            accumulator.remove(&applied);
+        }
+        for removal_record in &seq_records[num_removals..] {
+            assert!(removal_record.validate(&accumulator));
+            assert!(accumulator.can_remove(removal_record));
+        }
+
+        // The combined application must reproduce the sequential result
+        // exactly.
+        let mut batch_records = pre_removal_records.clone();
+        RemovalRecord::batch_update_from_removals(
+            &mut batch_records.iter_mut().collect::<Vec<_>>(),
+            &applied_records,
+        );
+        assert_eq!(seq_records, batch_records);
+
+        // The combined reversion, fed the applied records in their
+        // post-application form, must restore the pre-removal state exactly.
+        let post_removal_applied_forms = batch_records[..num_removals].to_vec();
+        RemovalRecord::batch_revert_update_from_removals(
+            &mut batch_records.iter_mut().collect::<Vec<_>>(),
+            &post_removal_applied_forms,
+        );
+        assert_eq!(pre_removal_records, batch_records);
     }
 
     proptest::proptest! {

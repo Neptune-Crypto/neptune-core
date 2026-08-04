@@ -63,6 +63,21 @@ impl Chunk {
         self.relative_indices.sort();
     }
 
+    /// Insert a batch of indices. Equivalent to calling [`Self::insert`] for
+    /// each of them, but sorts only once.
+    pub fn insert_many(&mut self, indices: &[u32]) {
+        for index in indices {
+            assert!(
+                *index < CHUNK_SIZE,
+                "index cannot exceed chunk size in `insert`. CHUNK_SIZE = {}, got index = {}",
+                CHUNK_SIZE,
+                index
+            );
+        }
+        self.relative_indices.extend_from_slice(indices);
+        self.relative_indices.sort();
+    }
+
     pub fn remove_once(&mut self, index: u32) {
         assert!(
             index < CHUNK_SIZE,
