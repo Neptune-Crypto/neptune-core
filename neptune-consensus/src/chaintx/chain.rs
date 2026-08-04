@@ -1321,17 +1321,13 @@ pub(crate) mod tests {
     /// thruputs. Balanced by construction (same UTXOs in and out, zero fee), so
     /// no re-balancing is needed.
     pub(super) fn chainable_link_primitive_witnesses(
-        num_inputs: usize,
+        successor_pw: PrimitiveWitness,
         num_thruputs: usize,
     ) -> (LinkPrimitiveWitness, LinkPrimitiveWitness) {
         use crate::transaction::transaction_kernel::TransactionKernelProxy;
         use crate::type_scripts::known_type_scripts::match_type_script_and_generate_witness;
 
-        let mut test_runner = TestRunner::deterministic();
-        let successor_pw = PrimitiveWitness::arbitrary_with_size_numbers(Some(num_inputs), 2, 1)
-            .new_tree(&mut test_runner)
-            .unwrap()
-            .current();
+        let num_inputs = successor_pw.input_utxos.utxos.len();
         assert!(num_thruputs <= num_inputs);
         let num_confirmed = num_inputs - num_thruputs;
 
@@ -1409,6 +1405,26 @@ pub(crate) mod tests {
         )
     }
 
+    /// [`chainable_link_primitive_witnesses`] over a fixed fixture.
+    ///
+    /// Deterministic on purpose: the tests that reach the recursion have to
+    /// `Forge` their operands, and a fixture that moved between runs would mean
+    /// a fresh claim, hence a fresh proof, every time. The mock-proof negatives
+    /// draw at random instead -- they pay no proving cost, so there is nothing
+    /// to amortize and everything to gain.
+    pub(super) fn deterministic_chainable_link_primitive_witnesses(
+        num_inputs: usize,
+        num_thruputs: usize,
+    ) -> (LinkPrimitiveWitness, LinkPrimitiveWitness) {
+        let mut test_runner = TestRunner::deterministic();
+        let successor_pw = PrimitiveWitness::arbitrary_with_size_numbers(Some(num_inputs), 2, 1)
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+
+        chainable_link_primitive_witnesses(successor_pw, num_thruputs)
+    }
+
     /// Forge a link primitive witness into a proof-backed [`LinkTx`].
     pub(in crate::chaintx) async fn forge(
         lpw: &LinkPrimitiveWitness,
@@ -1456,7 +1472,8 @@ pub(crate) mod tests {
         #[strategy(0usize..=3)] num_thruputs: usize,
         #[strategy(arb())] shuffle_seed: [u8; 32],
     ) {
-        let (predecessor, successor) = chainable_link_primitive_witnesses(3, num_thruputs);
+        let (predecessor, successor) =
+            deterministic_chainable_link_primitive_witnesses(3, num_thruputs);
         let (chained, cut_through) =
             ChainWitness::chained_kernel(&predecessor.kernel, &successor.kernel, shuffle_seed);
 
@@ -1571,7 +1588,8 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn chain_accepts_a_predecessor_successor_pair() {
         for num_thruputs in 0..=2 {
-            let (predecessor, successor) = chainable_link_primitive_witnesses(2, num_thruputs);
+            let (predecessor, successor) =
+                deterministic_chainable_link_primitive_witnesses(2, num_thruputs);
             let d = mock_single_proof_digest(0);
             let witness = ChainWitness::chain(
                 forge(&predecessor, d).await,
@@ -1644,12 +1662,19 @@ mod negative_tests {
     use num_traits::CheckedSub;
     use tasm_lib::hashing::merkle_verify::MerkleVerify;
 
+    use proptest::prop_assume;
+    use proptest::strategy::Strategy;
+    use test_strategy::proptest;
+
     use super::tests::chainable_link_primitive_witnesses;
+    use super::tests::deterministic_chainable_link_primitive_witnesses;
     use super::tests::forge;
     use super::*;
+    use crate::chaintx::link_primitive_witness::LinkPrimitiveWitness;
     use crate::chaintx::mock_single_proof_digest;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::proof_abstractions::tasm::program::TritonError;
+    use crate::transaction::primitive_witness::PrimitiveWitness;
     use crate::transaction::transaction_kernel::TransactionKernelModifier;
 
     impl ChainWitness {
@@ -1673,12 +1698,28 @@ mod negative_tests {
         }
     }
 
-    /// A chainable pair whose successor holds one thruput that the predecessor's
-    /// single output resolves -- so there is a cut-through to tamper with, an
-    /// input on either side, and a non-empty everything.
-    fn pokeable_witness() -> ChainWitness {
-        let (predecessor, successor) = chainable_link_primitive_witnesses(2, 1);
-        ChainWitness::without_proofs(&predecessor.kernel, &successor.kernel, [0u8; 32])
+    /// A chainable pair of random contents whose successor holds one thruput
+    /// that a predecessor output resolves -- so there is a cut-through to tamper
+    /// with, an input on either side, and a non-empty everything.
+    ///
+    /// The *shape* is held fixed (2 inputs, 1 of them a thruput) so that every
+    /// index the negatives poke exists; only the contents vary. Mirrors
+    /// [`pokeable_lpw`](super::super::forge::tests) on the `Forge` side.
+    fn pokeable_witness() -> proptest::strategy::BoxedStrategy<ChainWitness> {
+        pokeable_pair()
+            .prop_map(|(predecessor, successor)| {
+                ChainWitness::without_proofs(&predecessor.kernel, &successor.kernel, [0u8; 32])
+            })
+            .boxed()
+    }
+
+    /// The chainable pair behind [`pokeable_witness`], for the negatives that
+    /// have to reach past the witness and poke an operand first.
+    fn pokeable_pair(
+    ) -> proptest::strategy::BoxedStrategy<(LinkPrimitiveWitness, LinkPrimitiveWitness)> {
+        PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 1)
+            .prop_map(|pw| chainable_link_primitive_witnesses(pw, 1))
+            .boxed()
     }
 
     /// Poke the chained kernel and re-derive everything from it: the claim's
@@ -1698,9 +1739,10 @@ mod negative_tests {
 
     /// Dropping one of the operands' removal records from the chained kernel is
     /// value creation: an input vanishes without its funds being accounted for.
-    #[test]
-    fn chained_inputs_must_be_the_operands_inputs() {
-        let mut witness = pokeable_witness();
+    #[proptest(cases = 4)]
+    fn chained_inputs_must_be_the_operands_inputs(
+        #[strategy(pokeable_witness())] mut witness: ChainWitness,
+    ) {
         let mut inputs = witness.new_kernel.kernel.inputs.clone();
         inputs.pop().unwrap();
         witness.new_kernel.kernel = TransactionKernelModifier::default()
@@ -1711,9 +1753,10 @@ mod negative_tests {
     }
 
     /// Announcements likewise carry over wholesale.
-    #[test]
-    fn chained_announcements_must_be_the_operands_announcements() {
-        let mut witness = pokeable_witness();
+    #[proptest(cases = 4)]
+    fn chained_announcements_must_be_the_operands_announcements(
+        #[strategy(pokeable_witness())] mut witness: ChainWitness,
+    ) {
         let mut announcements = witness.new_kernel.kernel.announcements.clone();
         announcements.pop().unwrap();
         witness.new_kernel.kernel = TransactionKernelModifier::default()
@@ -1734,9 +1777,11 @@ mod negative_tests {
     /// equation compares against a zero-length list -- and an empty operand is
     /// exactly where a multiset comparison can pass vacuously without anyone
     /// noticing.
-    #[test]
-    fn chained_outputs_must_be_union_of_outputs_of_operands() {
-        let (predecessor, mut successor) = chainable_link_primitive_witnesses(2, 1);
+    #[proptest(cases = 4)]
+    fn chained_outputs_must_be_union_of_outputs_of_operands(
+        #[strategy(pokeable_pair())] pair: (LinkPrimitiveWitness, LinkPrimitiveWitness),
+    ) {
+        let (predecessor, mut successor) = pair;
 
         // drop the thruput the predecessor's output would have resolved; the
         // operands now share no record, so nothing cancels
@@ -1759,10 +1804,10 @@ mod negative_tests {
     /// mirror image creates it. Both are one cancellation that only happened
     /// once, and both are caught by the *outputs* equation, which is checked
     /// first.
-    #[test]
-    fn one_sided_cut_through_is_rejected() {
+    #[proptest(cases = 4)]
+    fn one_sided_cut_through_is_rejected(#[strategy(pokeable_witness())] original: ChainWitness) {
         // the thruput leaves, its matching output stays
-        let mut witness = pokeable_witness();
+        let mut witness = original.clone();
         let outputs = [
             witness.new_kernel.kernel.outputs.clone(),
             witness.cut_through.clone(),
@@ -1774,7 +1819,7 @@ mod negative_tests {
         expect_failure(witness, &[OUTPUTS_ARE_NOT_CUT_THROUGH_ERROR]).unwrap();
 
         // the output leaves, its matching thruput stays
-        let mut witness = pokeable_witness();
+        let mut witness = original.clone();
         witness.new_kernel.thruputs = [
             witness.new_kernel.thruputs.clone(),
             witness.cut_through.clone(),
@@ -1788,9 +1833,10 @@ mod negative_tests {
     /// nothing, so naming it in the cut-through set fails the same equation --
     /// which is what stops a thruput being resolved by a predecessor output that
     /// does not exist.
-    #[test]
-    fn cut_through_on_unequal_commitments_is_rejected() {
-        let mut witness = pokeable_witness();
+    #[proptest(cases = 4)]
+    fn cut_through_on_unequal_commitments_is_rejected(
+        #[strategy(pokeable_witness())] mut witness: ChainWitness,
+    ) {
         witness.cut_through[0] = AdditionRecord {
             canonical_commitment: Digest::default(),
         };
@@ -1807,9 +1853,10 @@ mod negative_tests {
     /// That is the whole hole: the equations bound the cut-through set to a
     /// sub-multiset of the intersection, and only this assert pins it to all of
     /// it.
-    #[test]
-    fn non_maximal_cut_through_is_rejected() {
-        let mut witness = pokeable_witness();
+    #[proptest(cases = 4)]
+    fn non_maximal_cut_through_is_rejected(
+        #[strategy(pokeable_witness())] mut witness: ChainWitness,
+    ) {
         let uncut = witness.cut_through.pop().unwrap();
 
         let outputs = [witness.new_kernel.kernel.outputs.clone(), vec![uncut]].concat();
@@ -1825,8 +1872,7 @@ mod negative_tests {
     /// `Chain` to reject the combination. `sum` is stated rather than computed:
     /// the point of every caller below is which side of `[0, MAX_NAU]` it falls
     /// on, so it should be readable off the call.
-    fn expect_fee_failure(left: i128, right: i128, sum: i128) {
-        let mut witness = pokeable_witness();
+    fn expect_fee_failure(mut witness: ChainWitness, left: i128, right: i128, sum: i128) {
         let set_fee = |kernel: &mut LinkKernel, nau: i128| {
             kernel.kernel = TransactionKernelModifier::default()
                 .fee(NativeCurrencyAmount::from_nau(nau))
@@ -1847,17 +1893,19 @@ mod negative_tests {
     /// A negative sum cannot be reached that way -- two amounts in `[0, MAX_NAU]`
     /// cannot add to less than zero -- so those cases put the negative on one
     /// operand and leave the other at zero, making the sum equal to it.
-    #[test]
-    fn fee_sum_outside_the_valid_range_is_rejected() {
+    #[proptest(cases = 4)]
+    fn fee_sum_outside_the_valid_range_is_rejected(
+        #[strategy(pokeable_witness())] witness: ChainWitness,
+    ) {
         let max = NativeCurrencyAmount::MAX_NAU;
 
         // one nau over the maximum
-        expect_fee_failure(max, 1, max + 1);
-        expect_fee_failure(1, max, max + 1);
+        expect_fee_failure(witness.clone(), max, 1, max + 1);
+        expect_fee_failure(witness.clone(), 1, max, max + 1);
 
         // one nau below zero
-        expect_fee_failure(-1, 0, -1);
-        expect_fee_failure(0, -1, -1);
+        expect_fee_failure(witness.clone(), -1, 0, -1);
+        expect_fee_failure(witness.clone(), 0, -1, -1);
     }
 
     /// A negative operand fee is rejected even when the sum it produces is a
@@ -1870,23 +1918,29 @@ mod negative_tests {
     /// wraps and adds correctly. So it is also the test that pins the
     /// consequence: fee-gobbling has to happen on standard transactions,
     /// because a negative-fee `LinkTx` can never be chained.
-    #[test]
-    fn negative_operand_fee_is_rejected_even_when_the_sum_is_valid() {
-        expect_fee_failure(-1, 2, 1);
-        expect_fee_failure(2, -1, 1);
+    #[proptest(cases = 4)]
+    fn negative_operand_fee_is_rejected_even_when_the_sum_is_valid(
+        #[strategy(pokeable_witness())] witness: ChainWitness,
+    ) {
+        expect_fee_failure(witness.clone(), -1, 2, 1);
+        expect_fee_failure(witness.clone(), 2, -1, 1);
     }
 
     /// The chained fee is the operands' fees added up -- no more (a fee the
     /// operands never paid is minted out of nothing) and no less (short-changing
     /// the miner while the operands' balances still say otherwise).
-    #[test]
-    fn chained_fee_must_be_the_sum_of_the_operand_fees() {
+    #[proptest(cases = 4)]
+    fn chained_fee_must_be_the_sum_of_the_operand_fees(
+        #[strategy(pokeable_witness())] original: ChainWitness,
+    ) {
         let one_nau = NativeCurrencyAmount::one_nau();
-        let base_fee = pokeable_witness().new_kernel.kernel.fee;
-        assert!(
-            base_fee >= one_nau,
-            "the fixture's fee must leave room to go both up and down"
-        );
+        let base_fee = original.new_kernel.kernel.fee;
+
+        // A drawn fixture may chain to a zero fee, which has no room to go
+        // down. Rejected rather than clamped: the point is that the equation is
+        // tight in *both* directions, and a case that only tests one of them
+        // would pass while saying less than the test name claims.
+        prop_assume!(base_fee >= one_nau);
 
         for fee in [
             base_fee + one_nau,
@@ -1894,7 +1948,7 @@ mod negative_tests {
                 .checked_sub(&one_nau)
                 .expect("fee stays non-negative"),
         ] {
-            let mut witness = pokeable_witness();
+            let mut witness = original.clone();
             witness.new_kernel.kernel = TransactionKernelModifier::default()
                 .fee(fee)
                 .modify(witness.new_kernel.kernel);
@@ -1906,9 +1960,10 @@ mod negative_tests {
     /// A chained transaction is no older than the later of its operands --
     /// otherwise chaining would be a way to walk a transaction backwards past a
     /// time lock.
-    #[test]
-    fn chained_timestamp_must_be_the_later_of_the_operand_timestamps() {
-        let mut witness = pokeable_witness();
+    #[proptest(cases = 4)]
+    fn chained_timestamp_must_be_the_later_of_the_operand_timestamps(
+        #[strategy(pokeable_witness())] mut witness: ChainWitness,
+    ) {
         let timestamp = witness.new_kernel.kernel.timestamp - Timestamp::seconds(1);
         witness.new_kernel.kernel = TransactionKernelModifier::default()
             .timestamp(timestamp)
@@ -1918,9 +1973,10 @@ mod negative_tests {
     }
 
     /// All three kernels are relative to one and the same mutator set.
-    #[test]
-    fn mismatched_mutator_set_hash_is_rejected() {
-        let mut witness = pokeable_witness();
+    #[proptest(cases = 4)]
+    fn mismatched_mutator_set_hash_is_rejected(
+        #[strategy(pokeable_witness())] mut witness: ChainWitness,
+    ) {
         witness.new_kernel.kernel = TransactionKernelModifier::default()
             .mutator_set_hash(Digest::default())
             .modify(witness.new_kernel.kernel);
@@ -1932,15 +1988,17 @@ mod negative_tests {
     /// the merge bit. Both leafs are constants the branch authenticates
     /// directly, so a kernel holding anything else has the wrong leaf, not
     /// merely the wrong value.
-    #[test]
-    fn coinbase_or_merge_bit_on_the_chained_kernel_is_rejected() {
-        let mut witness = pokeable_witness();
+    #[proptest(cases = 4)]
+    fn coinbase_or_merge_bit_on_the_chained_kernel_is_rejected(
+        #[strategy(pokeable_witness())] original: ChainWitness,
+    ) {
+        let mut witness = original.clone();
         witness.new_kernel.kernel = TransactionKernelModifier::default()
             .coinbase(Some(NativeCurrencyAmount::coins(1)))
             .modify(witness.new_kernel.kernel);
         expect_failure(witness, &[MerkleVerify::ROOT_MISMATCH_ERROR_ID]).unwrap();
 
-        let mut witness = pokeable_witness();
+        let mut witness = original.clone();
         witness.new_kernel.kernel = TransactionKernelModifier::default()
             .merge_bit(true)
             .modify(witness.new_kernel.kernel);
@@ -1950,9 +2008,8 @@ mod negative_tests {
     /// Every field the branch reads is bound to the kernel it was read from: a
     /// bad authentication path fails before any of the equations above get a
     /// chance to hold.
-    #[test]
-    fn bad_authentication_path_is_rejected() {
-        let witness = pokeable_witness();
+    #[proptest(cases = 4)]
+    fn bad_authentication_path_is_rejected(#[strategy(pokeable_witness())] witness: ChainWitness) {
         let mut nondeterminism = witness.nondeterminism();
         nondeterminism.digests[0].0[0].increment();
 
@@ -1969,9 +2026,10 @@ mod negative_tests {
     /// kernel's fields against `lkmh` straight off the public input, so a
     /// witness proven against some *other* transaction's kernel fails at the
     /// first field.
-    #[test]
-    fn chained_kernel_must_be_the_one_in_the_claim() {
-        let witness = pokeable_witness();
+    #[proptest(cases = 4)]
+    fn chained_kernel_must_be_the_one_in_the_claim(
+        #[strategy(pokeable_witness())] witness: ChainWitness,
+    ) {
         let other_lkmh = witness.left_kernel.mast_hash();
 
         LinkProof
@@ -1994,7 +2052,7 @@ mod negative_tests {
     /// attests to which operand.
     #[tokio::test]
     async fn operand_proof_must_attest_to_its_own_operand() {
-        let (predecessor, successor) = chainable_link_primitive_witnesses(2, 1);
+        let (predecessor, successor) = deterministic_chainable_link_primitive_witnesses(2, 1);
         let d = mock_single_proof_digest(0);
         let mut witness = ChainWitness::chain(
             forge(&predecessor, d).await,
@@ -2055,7 +2113,7 @@ mod negative_tests {
     /// the per-operand copy-paste slip has nowhere to live.
     #[tokio::test]
     async fn operand_forged_under_another_single_proof_digest_is_rejected() {
-        let (predecessor, successor) = chainable_link_primitive_witnesses(2, 1);
+        let (predecessor, successor) = deterministic_chainable_link_primitive_witnesses(2, 1);
         let other_d = mock_single_proof_digest(1);
         let witness = ChainWitness::chain(
             forge(&predecessor, other_d).await,
@@ -2105,7 +2163,7 @@ mod negative_tests {
     /// silently.
     #[tokio::test]
     async fn witness_supplied_single_proof_digest_is_ignored() {
-        let (predecessor, successor) = chainable_link_primitive_witnesses(2, 1);
+        let (predecessor, successor) = deterministic_chainable_link_primitive_witnesses(2, 1);
         let d = mock_single_proof_digest(0);
         let mut witness = ChainWitness::chain(
             forge(&predecessor, d).await,
