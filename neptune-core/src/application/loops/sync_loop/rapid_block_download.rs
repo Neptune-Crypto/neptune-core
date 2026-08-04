@@ -409,18 +409,21 @@ mod tests {
     use rand::SeedableRng;
 
     use super::*;
+    use crate::tests::shared::files::unit_test_path;
     use crate::tests::shared_tokio_runtime;
 
     /// A rejected block must free its height slot, so that the height is asked
     /// for again and the download counts as unfinished.
     #[apply(shared_tokio_runtime)]
     async fn rejected_block_frees_its_height_slot() {
+        let network = Network::Main;
         let mut rng = rng();
         let tip_height = 100_u64;
         let target = BlockHeight::from(tip_height + 1);
-        let mut rapid_block_download = RapidBlockDownload::new(target, false, None, Network::Main)
-            .await
-            .unwrap();
+        let mut rapid_block_download =
+            RapidBlockDownload::new(target, false, Some(unit_test_path()), network)
+                .await
+                .unwrap();
         rapid_block_download.fast_forward(BlockHeight::from(tip_height));
 
         // The one outstanding height gets filled, completing the download.
@@ -454,6 +457,8 @@ mod tests {
                 .unwrap()
                 .hash()
         );
+
+        let _ = rapid_block_download.clean_up().await;
     }
 
     #[apply(shared_tokio_runtime)]
@@ -462,10 +467,14 @@ mod tests {
         let mut tip = rng.random::<Block>();
         let high = 200;
         tip.set_header_height(high.into());
-        let mut rapid_block_download =
-            RapidBlockDownload::new(BlockHeight::from(high), false, None, Network::Main)
-                .await
-                .unwrap();
+        let mut rapid_block_download = RapidBlockDownload::new(
+            BlockHeight::from(high),
+            false,
+            Some(unit_test_path()),
+            Network::Main,
+        )
+        .await
+        .unwrap();
 
         // receive 10 blocks
         let mut received_heights = vec![];
@@ -508,7 +517,6 @@ mod tests {
             );
         }
 
-        // clean up
         let _ = rapid_block_download.clean_up().await;
     }
 
@@ -518,10 +526,14 @@ mod tests {
         let mut tip = rng.random::<Block>();
         let high = 200;
         tip.set_header_height(high.into());
-        let mut rapid_block_download =
-            RapidBlockDownload::new(BlockHeight::from(high), false, None, Network::Main)
-                .await
-                .unwrap();
+        let mut rapid_block_download = RapidBlockDownload::new(
+            BlockHeight::from(high),
+            false,
+            Some(unit_test_path()),
+            Network::Main,
+        )
+        .await
+        .unwrap();
 
         // receive all blocks in random order
         let mut blocks_remaining = (1..=high).map(BlockHeight::from).collect_vec();
@@ -540,11 +552,9 @@ mod tests {
         // verify that we are finished
         assert!(rapid_block_download.is_complete());
 
-        // clean up
         let _ = rapid_block_download.clean_up().await;
     }
 
-    #[ignore = "cannot run in parallel with other tests"]
     #[tracing_test::traced_test]
     #[apply(shared_tokio_runtime)]
     async fn can_resume_block_download_from_saved_incomplete_state() {
@@ -555,10 +565,18 @@ mod tests {
         let high = 200;
         tip.set_header_height(high.into());
 
-        let mut rapid_block_download_a =
-            RapidBlockDownload::new(BlockHeight::from(high), false, None, network)
-                .await
-                .unwrap();
+        // Shared by both download states, so that the second can resume from
+        // the first.
+        let sync_dir = unit_test_path();
+
+        let mut rapid_block_download_a = RapidBlockDownload::new(
+            BlockHeight::from(high),
+            false,
+            Some(sync_dir.clone()),
+            network,
+        )
+        .await
+        .unwrap();
         rapid_block_download_a.fast_forward(BlockHeight::from(low));
 
         // receive half the blocks in random order
@@ -579,7 +597,7 @@ mod tests {
 
         // setup new rapid block download state
         let mut rapid_block_download_b =
-            RapidBlockDownload::new(BlockHeight::from(high), true, None, network)
+            RapidBlockDownload::new(BlockHeight::from(high), true, Some(sync_dir), network)
                 .await
                 .unwrap();
         rapid_block_download_b.fast_forward(BlockHeight::from(low));
@@ -607,7 +625,6 @@ mod tests {
             rapid_block_download_b.coverage.sample(rng.random())
         );
 
-        // clean up
         let _ = rapid_block_download_b.clean_up().await;
     }
 
@@ -619,7 +636,6 @@ mod tests {
     /// abort the sync, reconnect, and then sync from server B which itself is
     /// not fully synced yet. In this case you will end up using B's tip as the
     /// sync anchor, but there may be descendants of this tip in the sync dir.
-    #[ignore = "cannot run in parallel with other tests"]
     #[tracing_test::traced_test]
     #[apply(shared_tokio_runtime)]
     async fn can_resume_block_download_from_saved_overcomplete_state() {
@@ -631,10 +647,18 @@ mod tests {
         let second_high = 200;
         tip.set_header_height(first_high.into());
 
-        let mut rapid_block_download_a =
-            RapidBlockDownload::new(BlockHeight::from(first_high), false, None, network)
-                .await
-                .unwrap();
+        // Shared by both download states, so that the second can resume from
+        // the first.
+        let sync_dir = unit_test_path();
+
+        let mut rapid_block_download_a = RapidBlockDownload::new(
+            BlockHeight::from(first_high),
+            false,
+            Some(sync_dir.clone()),
+            network,
+        )
+        .await
+        .unwrap();
         rapid_block_download_a.fast_forward(BlockHeight::from(low));
 
         // receive all the blocks in random order
@@ -646,17 +670,20 @@ mod tests {
         }
 
         // setup new rapid block download state
-        let mut rapid_block_download_b =
-            RapidBlockDownload::new(BlockHeight::from(second_high), true, None, network)
-                .await
-                .unwrap();
+        let mut rapid_block_download_b = RapidBlockDownload::new(
+            BlockHeight::from(second_high),
+            true,
+            Some(sync_dir),
+            network,
+        )
+        .await
+        .unwrap();
         rapid_block_download_b.fast_forward(BlockHeight::from(low));
         assert!(rapid_block_download_b.is_complete());
 
         // verify that we are finished
         assert!(rapid_block_download_b.is_complete(),);
 
-        // clean up
         let _ = rapid_block_download_b.clean_up().await;
     }
 
@@ -664,10 +691,14 @@ mod tests {
     async fn can_receive_same_block_twice() {
         let mut rng = rng();
         let high = 200;
-        let mut rapid_block_download =
-            RapidBlockDownload::new(BlockHeight::from(high), false, None, Network::Main)
-                .await
-                .unwrap();
+        let mut rapid_block_download = RapidBlockDownload::new(
+            BlockHeight::from(high),
+            false,
+            Some(unit_test_path()),
+            Network::Main,
+        )
+        .await
+        .unwrap();
 
         // receive all blocks in random order, with repetitions
         let mut blocks_remaining = (1..=high).map(BlockHeight::from).collect_vec();
@@ -692,7 +723,6 @@ mod tests {
         // verify that we are finished
         assert!(rapid_block_download.is_complete());
 
-        // clean up
         let _ = rapid_block_download.clean_up().await;
     }
 
@@ -706,10 +736,14 @@ mod tests {
             println!("seed: {seed}");
             let mut rng = StdRng::seed_from_u64(seed);
             let mut high = 200;
-            let mut rapid_block_download =
-                RapidBlockDownload::new(BlockHeight::from(high), false, None, Network::Main)
-                    .await
-                    .unwrap();
+            let mut rapid_block_download = RapidBlockDownload::new(
+                BlockHeight::from(high),
+                false,
+                Some(unit_test_path()),
+                Network::Main,
+            )
+            .await
+            .unwrap();
 
             // receive all blocks in random order, with repetitions
             let mut blocks_remaining = (1..=high).map(BlockHeight::from).collect_vec();
@@ -742,7 +776,6 @@ mod tests {
             // verify that we are finished
             assert!(rapid_block_download.is_complete());
 
-            // clean up
             let _ = rapid_block_download.clean_up().await;
         }
     }

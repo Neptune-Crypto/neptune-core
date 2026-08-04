@@ -10,6 +10,19 @@ use rand::distr::SampleString;
 use tokio::time::sleep;
 use tokio::time::timeout;
 
+/// Create a randomly named path so filesystem-bound tests can run
+/// in parallel. If this is not done, parallel execution of unit tests will
+/// fail as they each hold a lock on the database.
+pub(crate) fn unit_test_path() -> PathBuf {
+    let mut rng = rand::rng();
+    let user = env::var("USER").unwrap_or_else(|_| "default".to_string());
+    let pid = std::process::id();
+
+    env::temp_dir()
+        .join(format!("neptune-unit-tests-{user}-{pid}"))
+        .join(Path::new(&Alphanumeric.sample_string(&mut rng, 16)))
+}
+
 /// Create a randomly named `DataDirectory` so filesystem-bound tests can run
 /// in parallel. If this is not done, parallel execution of unit tests will
 /// fail as they each hold a lock on the database.
@@ -18,14 +31,7 @@ use tokio::time::timeout;
 pub(crate) fn unit_test_data_directory(
     network: neptune_primitives::network::Network,
 ) -> Result<DataDirectory> {
-    let mut rng = rand::rng();
-    let user = env::var("USER").unwrap_or_else(|_| "default".to_string());
-    let pid = std::process::id();
-
-    let tmp_root: PathBuf = env::temp_dir()
-        .join(format!("neptune-unit-tests-{user}-{pid}"))
-        .join(Path::new(&Alphanumeric.sample_string(&mut rng, 16)));
-
+    let tmp_root = unit_test_path();
     DataDirectory::get(Some(tmp_root), network)
 }
 
