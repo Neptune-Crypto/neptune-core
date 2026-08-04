@@ -98,6 +98,28 @@ impl ProofCollectionToSingleProof {
             gobble_fee_recipient_preimage,
         }
     }
+
+    /// The gobbling fee charged for this upgrade job, the recipient address for
+    /// this fee, and that address' receiver preimage if one is known.
+    ///
+    /// Gobbling fees are *only* charged when a transaction is upgraded from
+    /// proof-collection to single-proof.
+    ///
+    /// All other cases are not deemed worth it since constructing a transaction
+    /// fee gobbler is ~4x more computationally expensive than merging two
+    /// transactions, and ~8x times more expensive than updating a transaction's
+    /// mutator set.
+    fn gobble_data(&self) -> Option<(NativeCurrencyAmount, ReceivingAddress, Option<Digest>)> {
+        let UpgradeIncentive::Gobble(amount) = &self.upgrade_incentive else {
+            return None;
+        };
+
+        Some((
+            *amount,
+            self.gobble_fee_recipient.to_owned(),
+            self.gobble_fee_recipient_preimage,
+        ))
+    }
 }
 
 /// Task
@@ -274,52 +296,6 @@ impl UpgradeJob {
         }
     }
 
-    /// The gobbling fee charged for an upgrade job, the recipient address for
-    /// this fee, and that address' receiver preimage if one is known.
-    ///
-    /// Gobbling fees are *only* charged when a transaction is upgraded from
-    /// proof-collection to single-proof.
-    ///
-    /// All other cases are not deemed worth it since constructing a transaction
-    /// fee gobbler is ~4x more computationally expensive than merging two
-    /// transactions, and ~8x times more expensive than updating a transaction's
-    /// mutator set.
-    fn gobble_data(&self) -> Option<(NativeCurrencyAmount, ReceivingAddress, Option<Digest>)> {
-        match self {
-            UpgradeJob::ProofCollectionToSingleProof(pc2sp) => {
-                let UpgradeIncentive::Gobble(amount) = &pc2sp.upgrade_incentive else {
-                    return None;
-                };
-                Some((
-                    *amount,
-                    pc2sp.gobble_fee_recipient.to_owned(),
-                    pc2sp.gobble_fee_recipient_preimage,
-                ))
-            }
-            _ => None,
-        }
-    }
-
-    fn old_tx_timestamp(&self) -> Timestamp {
-        match self {
-            UpgradeJob::PrimitiveWitnessToProofCollection(pw_to_pc) => {
-                pw_to_pc.primitive_witness.kernel.timestamp
-            }
-            UpgradeJob::PrimitiveWitnessToSingleProof(pw_to_sp) => {
-                pw_to_sp.primitive_witness.kernel.timestamp
-            }
-            UpgradeJob::ProofCollectionToSingleProof(pc2sp) => pc2sp.kernel.timestamp,
-            UpgradeJob::Merge {
-                left_kernel,
-                right_kernel,
-                ..
-            } => Timestamp::max(left_kernel.timestamp, right_kernel.timestamp),
-            UpgradeJob::UpdateMutatorSetData(update_mutator_set_data_job) => {
-                update_mutator_set_data_job.old_kernel.timestamp
-            }
-        }
-    }
-
     pub(crate) fn upgrade_incentive(&self) -> UpgradeIncentive {
         match self {
             UpgradeJob::PrimitiveWitnessToProofCollection(_) => {
@@ -467,13 +443,25 @@ impl UpgradeJob {
                     (upgraded_tx, expected_utxo)
                 }
                 Err(e) => {
-                    error!("UpgradeProof job failed. error: {e}");
+                    error!(
+                        "UpgradeProof job failed for transaction(s) {}. error: {e}",
+                        affected_txids.iter().join("; ")
+                    );
                     error!(
                         "Consider lowering your proving capability to {}, in case it is set higher.\nCurrent proving \
                         capability is set to: {}.",
                         TxProvingCapability::ProofCollection,
                         global_state_lock.cli().proving_capability()
                     );
+
+                    // Pass over these transactions until the next block, so
+                    // that one job that cannot succeed does not keep every
+                    // other candidate from being upgraded.
+                    global_state_lock
+                        .lock_guard_mut()
+                        .await
+                        .mempool_record_upgrade_failure(affected_txids);
+
                     return;
                 }
             };
@@ -731,35 +719,8 @@ impl UpgradeJob {
         current_block_height: BlockHeight,
         fee_notification_medium: UtxoNotificationMedium,
     ) -> anyhow::Result<(Transaction, Option<ExpectedUtxo>)> {
-        let gobble_data = self.gobble_data();
-        let mutator_set = self.mutator_set();
-        let old_tx_timestamp = self.old_tx_timestamp();
         let network = proof_job_options.job_settings.network();
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, current_block_height);
-
-        let (maybe_gobbler, gobbler_expected_utxo) =
-            if let Some((gobble_amt, gobble_receiver, receiver_preimage)) = gobble_data {
-                let (gobbler, gobbler_eutxo) = Self::build_gobbler(
-                    gobble_amt,
-                    gobble_receiver,
-                    receiver_preimage,
-                    fee_notification_medium,
-                    triton_vm_job_queue.clone(),
-                    proof_job_options.clone(),
-                    current_block_height,
-                    mutator_set,
-                    old_tx_timestamp,
-                )
-                .await?;
-
-                (Some(gobbler), gobbler_eutxo)
-            } else {
-                (None, None)
-            };
-
-        let mut rng: StdRng =
-            SeedableRng::from_seed(own_wallet_entropy.shuffle_seed(current_block_height.next()));
-        let gobble_shuffle_seed: [u8; 32] = rng.random();
 
         match self {
             UpgradeJob::ProofCollectionToSingleProof(pc2sp) => {
@@ -778,25 +739,48 @@ impl UpgradeJob {
                     proof: single_proof,
                 };
 
-                let tx = if let Some(gobbler) = maybe_gobbler {
-                    let lhs = gobbler;
-                    let rhs = upgraded_tx;
+                let gobble_data = pc2sp.gobble_data();
 
-                    info!("Proof-upgrader: Start merging with gobbler");
-                    let ret = lhs
-                        .merge_with(
-                            rhs,
-                            gobble_shuffle_seed,
+                let (tx, gobbler_expected_utxo) =
+                    if let Some((gobble_amt, gobble_receiver, receiver_preimage)) = gobble_data {
+                        // A fee is charged for proof upgrading
+                        let mutator_set = pc2sp.mutator_set;
+                        let old_tx_timestamp = pc2sp.kernel.timestamp;
+                        let mut rng: StdRng = SeedableRng::from_seed(
+                            own_wallet_entropy.shuffle_seed(current_block_height.next()),
+                        );
+                        let gobble_shuffle_seed: [u8; 32] = rng.random();
+
+                        let (gobbler, gobbler_eutxo) = Self::build_gobbler(
+                            gobble_amt,
+                            gobble_receiver,
+                            receiver_preimage,
+                            fee_notification_medium,
                             triton_vm_job_queue.clone(),
-                            proof_job_options,
-                            consensus_rule_set,
+                            proof_job_options.clone(),
+                            current_block_height,
+                            mutator_set,
+                            old_tx_timestamp,
                         )
                         .await?;
-                    info!("Proof-upgrader merging with gobbler: Done");
-                    ret
-                } else {
-                    upgraded_tx
-                };
+
+                        info!("Proof-upgrader: Start merging with gobbler");
+                        let merged = gobbler
+                            .merge_with(
+                                upgraded_tx,
+                                gobble_shuffle_seed,
+                                triton_vm_job_queue.clone(),
+                                proof_job_options,
+                                consensus_rule_set,
+                            )
+                            .await?;
+                        info!("Proof-upgrader merging with gobbler: Done");
+
+                        (merged, gobbler_eutxo)
+                    } else {
+                        // No fee is charged for proof upgrading
+                        (upgraded_tx, None)
+                    };
 
                 Ok((tx, gobbler_expected_utxo))
             }
@@ -828,13 +812,13 @@ impl UpgradeJob {
                 .await?;
                 info!("Proof-upgrader, merge: Done");
 
-                Ok((ret, gobbler_expected_utxo))
+                Ok((ret, None))
             }
             UpgradeJob::PrimitiveWitnessToProofCollection(pw_to_pc) => Ok((
                 pw_to_pc
                     .upgrade(triton_vm_job_queue.clone(), &proof_job_options)
                     .await?,
-                gobbler_expected_utxo,
+                None,
             )),
             UpgradeJob::PrimitiveWitnessToSingleProof(pw_to_sp) => Ok((
                 pw_to_sp
@@ -844,13 +828,13 @@ impl UpgradeJob {
                         consensus_rule_set,
                     )
                     .await?,
-                gobbler_expected_utxo,
+                None,
             )),
             UpgradeJob::UpdateMutatorSetData(update_job) => {
                 let ret = update_job
                     .upgrade(triton_vm_job_queue, proof_job_options)
                     .await?;
-                Ok((ret, gobbler_expected_utxo))
+                Ok((ret, None))
             }
         }
     }

@@ -126,7 +126,7 @@ impl TransactionProof {
         }
     }
 
-    /// verify this proof is valid for a provided transaction id.
+    /// Verify that proof is valid for a provided transaction kernel MAST hash.
     ///
     /// Block height is the height of the block that matches the transaction's
     /// mutator set accumulator.

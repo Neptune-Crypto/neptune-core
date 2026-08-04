@@ -226,7 +226,7 @@ pub struct Args {
     /// involves the computationally expensive task of producing STARK proofs.
     /// You should have plenty of cores and probably at least 128 GB of RAM.
     #[clap(long)]
-    pub(crate) tx_proof_upgrading: bool,
+    pub tx_proof_upgrading: bool,
 
     /// If [`Self::tx_proof_upgrading`] is set, only upgrade transactions that
     /// match this filter. Syntax: `--tx-upgrade-filter <divisor>:<remainder>`
