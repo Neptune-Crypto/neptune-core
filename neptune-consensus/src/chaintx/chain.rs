@@ -903,10 +903,11 @@ impl BasicSnippet for Chain {
             )
         };
 
-        // Divine one operand's kernel MAST hash and stash it. Unconstrained at
-        // this point; the recursive verification below is what binds it to a
-        // link proof, and the field authentications in between are what bind it
-        // to the witness data.
+        // Divine one operand's kernel MAST hash and stash it. Free to be
+        // anything at this point: the field authentications in between bind it
+        // to the witness data, but every input to those is prover-supplied, so
+        // they rule out no value. The recursive verification below is what
+        // forces it to be a root some link proof attests to.
         let divine_operand_mast_hash = |mast_hash_write_address| {
             triton_asm!(
                 // _ [own_program_digest] disc *witness
@@ -1076,8 +1077,11 @@ pub(crate) mod tests {
         single_proof_digest: Digest,
         witness: ChainWitness,
     ) {
-        /* the operands' kernel MAST hashes; unconstrained until the recursive
-        verifications at the very end */
+        /* the operands' kernel MAST hashes. The field authentications below
+        tie each to its operand in the witness -- but root, leafs and paths are
+        all prover-supplied, so they exclude no *value*. The recursive
+        verifications at the very end are what force them to be roots that link
+        proofs attest to. */
         let left_lkmh: Digest = tasm::tasmlib_io_read_secin___digest();
         let right_lkmh: Digest = tasm::tasmlib_io_read_secin___digest();
 
