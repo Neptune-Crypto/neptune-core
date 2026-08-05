@@ -302,12 +302,16 @@ impl PeerLoopHandler {
     /// about the block that can be established without its predecessor, then
     /// hand it to the sync loop through the main loop.
     ///
+    /// If the authentication path is set, the caller *must* have ensured that
+    /// it is valid against the node's syncing anchor.
+    ///
     /// The caller must have established that sync mode is active; `champion`
     /// is the sync anchor's champion as read by the caller.
     async fn receive_sync_block(
         &mut self,
         block: Box<Block>,
         champion: (BlockHeight, Digest),
+        auth_path: Option<MmrMembershipProof>,
     ) -> Result<()> {
         let network = self.global_state_lock.cli().network;
         let (champion_height, champion_digest) = champion;
@@ -348,7 +352,8 @@ impl PeerLoopHandler {
             return Ok(());
         }
 
-        // Hold lock as state mutation must be atomic
+        // Hold lock as state mutation must be atomic. Lock must be until
+        // processing is done.
         let mut state_lock = self.global_state_lock.lock_guard_mut().await;
         let Some(sync_anchor) = &mut state_lock.net.sync_anchor else {
             // Handle race condition
@@ -356,6 +361,7 @@ impl PeerLoopHandler {
             return Ok(());
         };
 
+        // Recalculate under write lock. To avoid race conditions.
         let is_successor = block.header().prev_block_digest == sync_anchor.champion.1;
         let is_new_champion = sync_anchor.incoming_block_is_new_champion(height);
         if is_successor && is_new_champion {
@@ -392,7 +398,7 @@ impl PeerLoopHandler {
         } else {
             // Inform main loop about a new middle block.
             self.to_main_tx
-                .send(PeerTaskToMain::NewSyncBlock(block, self.peer_id))
+                .send(PeerTaskToMain::NewSyncBlock(block, self.peer_id, auth_path))
                 .await?;
         }
 
@@ -1266,6 +1272,7 @@ impl PeerLoopHandler {
                     .send(PeerTaskToMain::PeerWantsSyncBlock(
                         self.peer_id,
                         block_height,
+                        None,
                     ))
                     .await;
 
@@ -1303,7 +1310,31 @@ impl PeerLoopHandler {
                     .as_ref()
                     .map(|sync_anchor| sync_anchor.champion);
                 if let Some(champion) = champion {
-                    self.receive_sync_block(block, champion).await?;
+                    // A peer on a version that understands
+                    // ValidatedBlockRequestByHeight serves middle blocks
+                    // authenticated whenever it can, and declines otherwise.
+                    //
+                    // TODO: Once the minimum supported peer version exceeds
+                    // 0.15.1, every peer serves authenticated blocks, and the
+                    // acceptance of plain middle blocks below can be dropped.
+                    let extends_champion = block.header().prev_block_digest == champion.1;
+                    let peer_serves_validated_blocks = self
+                        .peer_handshake_data
+                        .version
+                        .supports_validated_block_request();
+                    if peer_serves_validated_blocks && !extends_champion {
+                        warn!(
+                            "Ignoring unauthenticated block {} / {:x} from peer {}: the peer \
+                             can serve authenticated blocks, and the block does not extend \
+                             the sync champion.",
+                            block.header().height,
+                            block.hash(),
+                            self.peer_id
+                        );
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    }
+
+                    self.receive_sync_block(block, champion, None).await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
@@ -1591,17 +1622,17 @@ impl PeerLoopHandler {
                     drop(state);
 
                     // If this node is itself syncing, the requested block
-                    // might be managed by the sync loop, which serves it as a
-                    // plain, unauthenticated `Block`: an authentication path
-                    // can only be produced from the archival block MMR. The
-                    // requester accepts plain blocks during sync, so this
-                    // degrades gracefully.
+                    // might be managed by the sync loop. The requester's
+                    // anchor travels along, so that the sync loop can serve
+                    // the block with its stored authentication path where
+                    // that path suits the anchor, and decline otherwise.
                     if sync_mode_active {
                         let _ = self
                             .to_main_tx
                             .send(PeerTaskToMain::PeerWantsSyncBlock(
                                 self.peer_id,
                                 block_height,
+                                Some(anchor),
                             ))
                             .await;
 
@@ -1641,15 +1672,10 @@ impl PeerLoopHandler {
                     }
                     None => {
                         // No authentication path relative to the requester's
-                        // anchor can be produced, e.g. because this node is
-                        // itself syncing and its archival chain is shorter
-                        // than the requester's anchor. The requester accepts
-                        // plain blocks while syncing.
-                        let transfer_block = TransferBlock::try_from(block)
-                            .expect("block fetched from archival state should be valid");
-                        peer.send(PeerMessage::Block(Box::new(transfer_block)))
-                            .await?;
-                        debug!("Sent plain block of height {block_height}");
+                        // anchor can be produced, so decline. How to proceed
+                        // is the caller's decision.
+                        peer.send(PeerMessage::UnableToSatisfyBatchRequest).await?;
+                        debug!("Declined validated block request of height {block_height}");
                     }
                 }
 
@@ -1707,8 +1733,12 @@ impl PeerLoopHandler {
                 // The authentication path ties the block to the chain being
                 // synced, but says nothing about the block's intrinsic
                 // validity; `receive_sync_block` solo-validates.
-                self.receive_sync_block(Box::new(block), sync_anchor.champion)
-                    .await?;
+                self.receive_sync_block(
+                    Box::new(block),
+                    sync_anchor.champion,
+                    Some(membership_proof),
+                )
+                .await?;
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
@@ -2341,12 +2371,37 @@ impl PeerLoopHandler {
                 }
                 Ok(KEEP_CONNECTION_ALIVE)
             }
-            MainToPeerTask::SyncBlock { block, peer_handle } => {
+            MainToPeerTask::UnableToServeValidatedBlock { peer_handle } => {
+                if self.peer_id == peer_handle {
+                    peer.send(PeerMessage::UnableToSatisfyBatchRequest).await?;
+                }
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            MainToPeerTask::SyncBlock {
+                block,
+                peer_handle,
+                auth_path,
+            } => {
                 if self.peer_id == peer_handle {
                     let transfer_block = TransferBlock::try_from(*block)
                         .expect("block fetched from sync loop should be castable into transfer block because that's where it came from");
-                    peer.send(PeerMessage::Block(Box::new(transfer_block)))
-                        .await?;
+
+                    // An authentication path is only produced when the
+                    // requester asked with an anchor, which only peers that
+                    // understand `ValidatedBlock` do.
+                    match auth_path {
+                        Some(auth_path) => {
+                            peer.send(PeerMessage::ValidatedBlock(Box::new((
+                                transfer_block,
+                                auth_path,
+                            ))))
+                            .await?;
+                        }
+                        None => {
+                            peer.send(PeerMessage::Block(Box::new(transfer_block)))
+                                .await?;
+                        }
+                    }
                 }
                 Ok(KEEP_CONNECTION_ALIVE)
             }
@@ -3537,7 +3592,7 @@ mod tests {
             // already processed the requested block. The block is served with
             // a valid authentication path whenever the requester's anchor
             // does not require a longer path than the own chain provides;
-            // otherwise it is served as a plain block, without punishment.
+            // otherwise the request is declined, without punishment.
             let network = Network::Testnet(42);
             let (
                 _peer_broadcast_tx,
@@ -3617,12 +3672,9 @@ mod tests {
             let cases = [
                 (
                     future_anchor,
-                    PeerMessage::ValidatedBlock(Box::new((transfer_block.clone(), expected_path))),
+                    PeerMessage::ValidatedBlock(Box::new((transfer_block, expected_path))),
                 ),
-                (
-                    far_future_anchor,
-                    PeerMessage::Block(Box::new(transfer_block)),
-                ),
+                (far_future_anchor, PeerMessage::UnableToSatisfyBatchRequest),
             ];
             for (anchor, expected_message) in cases {
                 let mock = Mock::new(vec![
@@ -3660,8 +3712,9 @@ mod tests {
             // Scenario: This node is itself syncing and receives a validated
             // block request for a height it does not have in its archival
             // state. The request is forwarded to the sync loop rather than
-            // punished: the sync loop may manage the block and can serve it
-            // as a plain, unauthenticated `Block`.
+            // punished: the sync loop may manage the block, and the anchor
+            // travels along so that the block can be served with its stored
+            // authentication path where possible.
             let network = Network::Testnet(42);
             let (
                 _peer_broadcast_tx,
@@ -3703,7 +3756,7 @@ mod tests {
                 Action::Read(PeerMessage::ValidatedBlockRequestByHeight(
                     ValidatedBlockRequestByHeight {
                         height: requested_height,
-                        anchor,
+                        anchor: anchor.clone(),
                     },
                 )),
                 Action::Read(PeerMessage::Bye),
@@ -3725,14 +3778,242 @@ mod tests {
 
             loop {
                 match to_main_rx1.try_recv() {
-                    Ok(PeerTaskToMain::PeerWantsSyncBlock(sender, height)) => {
+                    Ok(PeerTaskToMain::PeerWantsSyncBlock(sender, height, forwarded_anchor)) => {
                         assert_eq!(peer_id, sender);
                         assert_eq!(requested_height, height);
+                        assert_eq!(
+                            Some(anchor),
+                            forwarded_anchor,
+                            "The requester's anchor must be forwarded to the sync loop"
+                        );
                         break;
                     }
                     Ok(_) => (),
                     Err(_) => bail!("Expected request to be forwarded to the sync loop"),
                 }
+            }
+
+            Ok(())
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn plain_blocks_from_validated_capable_peers_are_ignored_during_sync() -> Result<()> {
+            // Scenario: This node is syncing. A peer whose version can serve
+            // authenticated blocks ([`PeerMessage::ValidatedBlock`]) sends a
+            // plain block. If the block extends the sync champion it is
+            // accepted, since successors lie beyond the sync anchor and
+            // cannot be authenticated against it. Any other plain block from
+            // such a peer is ignored — without punishment, since it might be
+            // the honest answer to a request sent before sync mode became
+            // active. Plain blocks from peers on older versions are still
+            // accepted.
+            use neptune_p2p::peer::handshake_data::VersionString;
+
+            let network = Network::Testnet(42);
+            let genesis_block = Block::genesis(network);
+            let [block_1, block_2, block_3] = fake_valid_sequence_of_blocks_for_tests(
+                &genesis_block,
+                Timestamp::hours(1),
+                StdRng::seed_from_u64(5550004).random(),
+                network,
+            )
+            .await;
+
+            // The sync anchor covers genesis through block 2; block 2 is the
+            // champion. Block 1 is a middle block; block 3 extends the
+            // champion.
+            let anchor = MmrAccumulator::new_from_leafs(vec![
+                genesis_block.hash(),
+                block_1.hash(),
+                block_2.hash(),
+            ]);
+            let capable_version = VersionString::new_from_str("0.99.0");
+            assert!(capable_version.supports_validated_block_request());
+
+            enum Expected {
+                Ignored,
+                NewSyncTarget,
+                NewSyncBlock,
+            }
+            let cases = [
+                (Some(capable_version), block_1.clone(), Expected::Ignored),
+                (
+                    Some(capable_version),
+                    block_3.clone(),
+                    Expected::NewSyncTarget,
+                ),
+                (None, block_1.clone(), Expected::NewSyncBlock),
+            ];
+            for (version_override, sent_block, expected) in cases {
+                let (
+                    _peer_broadcast_tx,
+                    from_main_rx_clone,
+                    to_main_tx,
+                    mut to_main_rx1,
+                    _,
+                    _,
+                    mut state_lock,
+                    mut handshake,
+                ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network))
+                    .await?;
+                if let Some(version) = version_override {
+                    handshake.version = version;
+                } else {
+                    assert!(!handshake.version.supports_validated_block_request());
+                }
+                let peer_address = get_dummy_socket_address(0);
+
+                {
+                    let mut state = state_lock.lock_guard_mut().await;
+                    state.net.sync_anchor = Some(crate::state::networking_state::SyncAnchor::new(
+                        block_2.header().cumulative_proof_of_work,
+                        anchor.clone(),
+                        block_2.header().height,
+                        block_2.hash(),
+                    ));
+                }
+
+                let mock = Mock::new(vec![
+                    Action::Read(PeerMessage::Block(Box::new(
+                        sent_block.clone().try_into().unwrap(),
+                    ))),
+                    Action::Read(PeerMessage::Bye),
+                ]);
+                let peer_id = pseudorandom_peer_id(&peer_address);
+                let mut peer_loop_handler = PeerLoopHandler::new(
+                    to_main_tx.clone(),
+                    state_lock.clone(),
+                    peer_id,
+                    socketaddr_to_multiaddr(peer_address),
+                    handshake,
+                    false,
+                    1,
+                );
+
+                peer_loop_handler
+                    .run_wrapper(mock, from_main_rx_clone.resubscribe())
+                    .await?;
+                drop(to_main_tx);
+
+                let mut received_sync_message = None;
+                loop {
+                    match to_main_rx1.try_recv() {
+                        Ok(
+                            message @ (PeerTaskToMain::NewSyncBlock(..)
+                            | PeerTaskToMain::NewSyncTarget(_)),
+                        ) => {
+                            received_sync_message = Some(message);
+                            break;
+                        }
+                        Ok(_) => (),
+                        Err(_) => break,
+                    }
+                }
+
+                match expected {
+                    Expected::Ignored => {
+                        assert!(
+                            received_sync_message.is_none(),
+                            "Plain non-successor block from a validated-capable peer must be \
+                             ignored"
+                        );
+                        let peer_standing = state_lock
+                            .lock_guard()
+                            .await
+                            .net
+                            .get_peer_standing_from_database(peer_address.ip())
+                            .await;
+                        assert!(
+                            peer_standing.is_none_or(|standing| standing.standing == 0),
+                            "Ignoring a plain block must not punish the sender"
+                        );
+                    }
+                    Expected::NewSyncTarget => {
+                        assert_eq!(
+                            Some(PeerTaskToMain::NewSyncTarget(Box::new(sent_block))),
+                            received_sync_message,
+                            "Plain champion successor must be accepted"
+                        );
+                    }
+                    Expected::NewSyncBlock => {
+                        assert_eq!(
+                            Some(PeerTaskToMain::NewSyncBlock(
+                                Box::new(sent_block),
+                                peer_id,
+                                None
+                            )),
+                            received_sync_message,
+                            "Plain middle block from an old-version peer must be accepted"
+                        );
+                    }
+                }
+            }
+
+            Ok(())
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn sync_blocks_are_sent_validated_when_authenticated() -> Result<()> {
+            // A sync block accompanied by an authentication path is sent as a
+            // `ValidatedBlock`; one without is sent as a plain `Block`.
+            let network = Network::Testnet(42);
+            let (
+                _peer_broadcast_tx,
+                _from_main_rx,
+                to_main_tx,
+                _to_main_rx1,
+                _,
+                _,
+                state_lock,
+                handshake,
+            ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network)).await?;
+            let peer_address = get_dummy_socket_address(0);
+            let peer_id = pseudorandom_peer_id(&peer_address);
+
+            let genesis_block = Block::genesis(network);
+            let [block_1] = fake_valid_sequence_of_blocks_for_tests(
+                &genesis_block,
+                Timestamp::hours(1),
+                StdRng::seed_from_u64(5550004).random(),
+                network,
+            )
+            .await;
+            let transfer_block = TransferBlock::try_from(block_1.clone()).unwrap();
+            let auth_path = MmrMembershipProof::new(vec![Digest::default()]);
+
+            let cases = [
+                (
+                    Some(auth_path.clone()),
+                    PeerMessage::ValidatedBlock(Box::new((transfer_block.clone(), auth_path))),
+                ),
+                (None, PeerMessage::Block(Box::new(transfer_block))),
+            ];
+            for (sent_auth_path, expected_message) in cases {
+                let mut mock = Mock::new(vec![Action::Write(expected_message)]);
+                let mut peer_loop_handler = PeerLoopHandler::new(
+                    to_main_tx.clone(),
+                    state_lock.clone(),
+                    peer_id,
+                    socketaddr_to_multiaddr(peer_address),
+                    handshake,
+                    false,
+                    1,
+                );
+                let mut peer_state = MutablePeerState::new(handshake.tip_header.height);
+
+                peer_loop_handler
+                    .handle_main_task_message(
+                        MainToPeerTask::SyncBlock {
+                            block: Box::new(block_1.clone()),
+                            peer_handle: peer_id,
+                            auth_path: sent_auth_path,
+                        },
+                        &mut mock,
+                        &mut peer_state,
+                    )
+                    .await?;
             }
 
             Ok(())

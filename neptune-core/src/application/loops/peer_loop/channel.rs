@@ -9,6 +9,7 @@ use neptune_p2p::peer::transaction_notification::TransactionNotification;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::difficulty_control::ProofOfWork;
 use tasm_lib::triton_vm::prelude::Digest;
+use tasm_lib::twenty_first::prelude::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
 use crate::application::loops::sync_loop::synchronization_bit_mask::SynchronizationBitMask;
@@ -47,11 +48,21 @@ pub(crate) enum MainToPeerTask {
         peer_handle: PeerId,
     },
 
+    /// Informs a peer that its validated block request cannot be served,
+    /// because no authentication path relative to its anchor could be
+    /// produced.
+    UnableToServeValidatedBlock {
+        peer_handle: PeerId,
+    },
+
     /// Sends a syncing peer a block we have downloaded already but not
     /// processed.
     SyncBlock {
         block: Box<Block>,
         peer_handle: PeerId,
+        /// An authentication path proving the block's membership in the chain
+        /// anchored by the peer's sync anchor, if one could be produced.
+        auth_path: Option<MmrMembershipProof>,
     },
 }
 
@@ -72,6 +83,7 @@ impl MainToPeerTask {
             MainToPeerTask::RequestBlockNotification => "request for block notification",
             MainToPeerTask::SyncCoverage { .. } => "sync coverage",
             MainToPeerTask::SyncBlock { .. } => "sync block",
+            MainToPeerTask::UnableToServeValidatedBlock { .. } => "unable to serve validated block",
         }
         .to_string()
     }
@@ -92,6 +104,7 @@ impl MainToPeerTask {
             MainToPeerTask::RequestBlockNotification => false,
             MainToPeerTask::SyncCoverage { .. } => true,
             MainToPeerTask::SyncBlock { .. } => true,
+            MainToPeerTask::UnableToServeValidatedBlock { .. } => true,
         }
     }
 }
@@ -118,11 +131,18 @@ pub(crate) enum PeerTaskToMain {
     BlockProposal(Box<Block>),
     DisconnectFromLongestLivedPeer,
     NewSyncTarget(Box<Block>),
-    NewSyncBlock(Box<Block>, PeerId),
+    /// A downloaded middle block for the sync loop, along with its
+    /// authentication path relative to the sync anchor, if it arrived with
+    /// one. The peer task *must* have validated the authentication path if one
+    /// is set.
+    NewSyncBlock(Box<Block>, PeerId, Option<MmrMembershipProof>),
     NewPeer(PeerId),
     DroppedPeer(PeerId),
     SyncCoverage(SynchronizationBitMask, PeerId),
-    PeerWantsSyncBlock(PeerId, BlockHeight),
+    /// A peer requests a block that is managed by the sync loop. If the
+    /// request carried an anchor, the served block should be authenticated
+    /// against it.
+    PeerWantsSyncBlock(PeerId, BlockHeight, Option<MmrAccumulator>),
 
     // Node wants to ban the peer. The legacy peer-to-peer stack already takes
     // care of this in the destructor of the peer loop. However, for the ban to
@@ -148,11 +168,11 @@ impl PeerTaskToMain {
             PeerTaskToMain::BlockProposal(_) => "block proposal",
             PeerTaskToMain::DisconnectFromLongestLivedPeer => "disconnect from longest lived peer",
             PeerTaskToMain::NewSyncTarget(_block) => "new sync target",
-            PeerTaskToMain::NewSyncBlock(_block, _socket_addr) => "new sync block",
+            PeerTaskToMain::NewSyncBlock(..) => "new sync block",
             PeerTaskToMain::NewPeer { .. } => "new peer",
             PeerTaskToMain::DroppedPeer(_) => "dropped peer",
             PeerTaskToMain::SyncCoverage(_, _) => "sync coverage",
-            PeerTaskToMain::PeerWantsSyncBlock(_, _) => "peer wants sync block",
+            PeerTaskToMain::PeerWantsSyncBlock(..) => "peer wants sync block",
             PeerTaskToMain::Ban(_) => "node wants to ban a malicious peer",
         }
         .to_string()

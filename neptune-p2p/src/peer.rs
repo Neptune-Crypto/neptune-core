@@ -447,6 +447,9 @@ pub enum PeerMessage {
     /// Request a single block by height, along with an MMR authentication
     /// path relative to the request's anchor. Only peers with a version
     /// exceeding 0.15.1 understand this message.
+    ///
+    /// An unauthenticated block may not be returned as a response to this
+    /// message.
     ValidatedBlockRequestByHeight(ValidatedBlockRequestByHeight),
     /// Response to [`PeerMessage::ValidatedBlockRequestByHeight`]: the block
     /// together with an MMR authentication path relative to the request's

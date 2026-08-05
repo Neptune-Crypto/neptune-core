@@ -10,6 +10,7 @@ use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::network::Network;
 use rand::rng;
 use rand::Rng;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
@@ -270,7 +271,7 @@ impl SyncLoop {
                             self.peers.lock().await.remove(&peer_handle);
                             last_peer_disconnect_time = Some(SystemTime::now());
                         }
-                        MainToSync::ReceiveBlock { peer_handle, block } => {
+                        MainToSync::ReceiveBlock { peer_handle, block, auth_path } => {
                             tracing::info!(
                                 "Sync loop: receiving block {} out of [{}:{}) ...",
                                 block.header().height,
@@ -280,7 +281,7 @@ impl SyncLoop {
 
                             // Store block and update download state.
                             tracing::trace!("storing block ...");
-                            if let Err(e) = self.download_state.receive_block(&block).await
+                            if let Err(e) = self.download_state.receive_block(&block, auth_path.as_ref()).await
                             {
                                 tracing::warn!(
                                     "Could not process received block {:x} of height {}: {}",
@@ -387,7 +388,7 @@ impl SyncLoop {
                                 pending_block_requests.push(peer_handle);
                             }
                         }
-                        MainToSync::TryFetchBlock{ peer_handle, height } => {
+                        MainToSync::TryFetchBlock{ peer_handle, height, requester_anchor } => {
                             tracing::debug!("sync loop received try-fetch-block message from peer {peer_handle} for block {height}");
 
                             // Test if the requested block height lives in the
@@ -413,7 +414,7 @@ impl SyncLoop {
                                 let moved_download_state = self.download_state.clone();
                                 let moved_main_channel_sender = self.main_channel_sender.clone();
                                 let _ = tokio::task::spawn(
-                                    Self::fetch_and_send_block(moved_main_channel_sender, moved_download_state, peer_handle, height)
+                                    Self::fetch_and_send_block(moved_main_channel_sender, moved_download_state, peer_handle, height, requester_anchor)
                                 ).await;
                             }
                         }
@@ -641,22 +642,37 @@ impl SyncLoop {
         download_state: RapidBlockDownload,
         peer_handle: PeerHandle,
         height: BlockHeight,
+        requester_anchor: Option<MmrAccumulator>,
     ) {
-        let block = match download_state.get_received_block(height).await {
-            Ok(b) => b,
-            Err(e) => {
-                tracing::error!("Failed to read block from temp directory: {e}.");
-                return;
-            }
+        let response = match &requester_anchor {
+            // A request that came with an anchor asks for an *authenticated*
+            // block.
+            Some(anchor) => match download_state.get_authenticated_block(height, anchor).await {
+                Ok(Some((block, auth_path))) => SyncToMain::SyncBlock {
+                    block: Box::new(block),
+                    peer_handle,
+                    auth_path: Some(auth_path),
+                },
+                Ok(None) => SyncToMain::UnableToServeValidatedBlock { peer_handle },
+                Err(e) => {
+                    tracing::error!("Failed to read block from temp directory: {e}.");
+                    return;
+                }
+            },
+            None => match download_state.get_received_block(height).await {
+                Ok(block) => SyncToMain::SyncBlock {
+                    block: Box::new(block),
+                    peer_handle,
+                    auth_path: None,
+                },
+                Err(e) => {
+                    tracing::error!("Failed to read block from temp directory: {e}.");
+                    return;
+                }
+            },
         };
 
-        if let Err(e) = main_channel_sender
-            .send(SyncToMain::SyncBlock {
-                block: Box::new(block),
-                peer_handle,
-            })
-            .await
-        {
+        if let Err(e) = main_channel_sender.send(response).await {
             tracing::error!("Could not send sync block to main loop: {e}.");
         }
     }
@@ -1069,7 +1085,7 @@ mod tests {
                                     if let Some(peer) = self.peers.get_mut(&block_request.peer_handle.clone()) {
                                         if let Some(block) = peer.request(block_request.height).await {
                                             tracing::debug!("mock main loop: got block from peer; relaying to sync loop");
-                                            self.sync_loop_handle.send_block(Box::new(block), block_request.peer_handle);
+                                            self.sync_loop_handle.send_block(Box::new(block), block_request.peer_handle, None);
                                             tracing::debug!("mock main loop: done relaying");
                                         } else {
                                             if let MockPeer::Syncing(syncing_peer) = peer {
@@ -1101,9 +1117,13 @@ mod tests {
                             } => {
                                 tracing::info!("mock main loop: Sending coverage to peer {peer_handle}");
                             }
+                            SyncToMain::UnableToServeValidatedBlock { peer_handle } => {
+                                tracing::info!("mock main loop: cannot serve validated block to {peer_handle}");
+                            }
                             SyncToMain::SyncBlock{
                                 block,
                                 peer_handle,
+                                auth_path: _,
                             } => {
                                 tracing::info!("mock main loop: Sending block {} over to {peer_handle}", block.header().height);
                             }

@@ -1147,7 +1147,7 @@ impl MainLoopHandler {
                     }
                 }
             }
-            PeerTaskToMain::NewSyncBlock(block, peer) => {
+            PeerTaskToMain::NewSyncBlock(block, peer, auth_path) => {
                 if let Some(sync_loop) = &main_loop_state.maybe_sync_loop {
                     // If we already know this block and it is on the canonical
                     // chain, then we can fast-forward the sync; we are only
@@ -1173,7 +1173,7 @@ impl MainLoopHandler {
                         info!("Fast-forwarding sync to block {}.", block.header().height);
                         sync_loop.send_fast_forward_block(block).await;
                     } else {
-                        sync_loop.send_block(block, peer);
+                        sync_loop.send_block(block, peer, auth_path);
                     }
                 }
             }
@@ -1182,9 +1182,9 @@ impl MainLoopHandler {
                     sync_loop.send_sync_coverage(socket_addr, synchronization_bit_mask);
                 }
             }
-            PeerTaskToMain::PeerWantsSyncBlock(peer, height) => {
+            PeerTaskToMain::PeerWantsSyncBlock(peer, height, requester_anchor) => {
                 if let Some(sync_loop) = &main_loop_state.maybe_sync_loop {
-                    sync_loop.send_try_fetch_block(peer, height);
+                    sync_loop.send_try_fetch_block(peer, height, requester_anchor);
                 }
             }
             PeerTaskToMain::Ban(malicious_peer_id) => {
@@ -2533,8 +2533,21 @@ impl MainLoopHandler {
                     peer_handle,
                 });
             }
-            SyncToMain::SyncBlock { block, peer_handle } => {
-                self.main_to_peer_broadcast(MainToPeerTask::SyncBlock { block, peer_handle });
+            SyncToMain::UnableToServeValidatedBlock { peer_handle } => {
+                self.main_to_peer_broadcast(MainToPeerTask::UnableToServeValidatedBlock {
+                    peer_handle,
+                });
+            }
+            SyncToMain::SyncBlock {
+                block,
+                peer_handle,
+                auth_path,
+            } => {
+                self.main_to_peer_broadcast(MainToPeerTask::SyncBlock {
+                    block,
+                    peer_handle,
+                    auth_path,
+                });
             }
         }
 
