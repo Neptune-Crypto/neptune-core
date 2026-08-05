@@ -62,6 +62,22 @@ impl VersionString {
 
         true
     }
+
+    /// Whether a peer with this version understands
+    /// [`PeerMessage::ValidatedBlockRequestByHeight`] and can answer it with a
+    /// [`PeerMessage::ValidatedBlock`]. Versions exceeding 0.15.1 do.
+    ///
+    /// Returns false for unparseable version strings.
+    ///
+    /// [`PeerMessage::ValidatedBlockRequestByHeight`]: super::PeerMessage::ValidatedBlockRequestByHeight
+    /// [`PeerMessage::ValidatedBlock`]: super::PeerMessage::ValidatedBlock
+    pub fn supports_validated_block_request(&self) -> bool {
+        let Ok(version) = semver::Version::parse(self) else {
+            return false;
+        };
+
+        version > semver::Version::new(0, 15, 1)
+    }
 }
 
 pub type ExtraDataString = ArrayString<U255>;
@@ -292,6 +308,19 @@ mod tests {
             VersionString::new_from_str("0.11.0"),
             VersionString::new_from_str("0.12.0")
         ));
+    }
+
+    #[test]
+    fn only_versions_above_0_15_1_support_validated_block_requests() {
+        let not_supported = ["0.15.1", "0.15.0", "0.14.9", "0.12.0", "potato", ""];
+        for version in not_supported {
+            assert!(!VersionString::new_from_str(version).supports_validated_block_request());
+        }
+
+        let supported = ["0.15.2", "0.16.0", "1.0.0", "9999.99999.9999"];
+        for version in supported {
+            assert!(VersionString::new_from_str(version).supports_validated_block_request());
+        }
     }
 
     #[test]

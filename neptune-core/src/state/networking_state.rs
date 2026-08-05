@@ -47,12 +47,24 @@ pub(crate) struct SyncAnchor {
 }
 
 impl SyncAnchor {
+    /// # Panics
+    ///
+    /// If the claimed block MMR accumulator does not match the claimed height.
+    ///
+    /// The block defining this anchor must have its digest added to the MMR.
     pub(crate) fn new(
         claimed_cumulative_pow: ProofOfWork,
         claimed_block_mmra: MmrAccumulator,
         claimed_height: BlockHeight,
         claimed_block_digest: Digest,
     ) -> Self {
+        assert_eq!(
+            claimed_height.next().value(),
+            claimed_block_mmra.num_leafs(),
+            "Claimed block MMR accumulator must have one leaf per block up to \
+             and including the claimed tip of height {claimed_height}."
+        );
+
         let status = SyncProgress::new(claimed_block_mmra.num_leafs());
         Self {
             cumulative_proof_of_work: claimed_cumulative_pow,
