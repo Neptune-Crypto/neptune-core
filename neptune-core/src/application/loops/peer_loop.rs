@@ -67,6 +67,7 @@ use crate::application::loops::main_loop::MAX_NUM_DIGESTS_IN_BATCH_REQUEST;
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
 use crate::application::loops::peer_loop::channel::PeerTaskToMain;
 use crate::application::loops::peer_loop::channel::PeerTaskToMainTransaction;
+use crate::application::loops::sync_loop::rapid_block_download::truncate_auth_path;
 use crate::application::loops::sync_loop::synchronization_bit_mask::SynchronizationBitMask;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
@@ -242,8 +243,15 @@ impl PeerLoopHandler {
     /// Construct an anchor-authenticated block response, with blocks and their
     /// MMR membership proofs relative to a specified anchor.
     ///
-    /// Returns `None` if the anchor has a lower leaf count than the blocks, or
-    /// a block height of the response exceeds own tip height.
+    /// The proofs are derived from the own archival block MMR, whose paths
+    /// are, by append-invariance, prefixes of the anchor-relative ones. So
+    /// the anchor may even lie beyond the own chain, as long as it does not
+    /// require longer paths than the own chain provides. Each derived path is
+    /// verified against the anchor before it is included, which also
+    /// establishes that the anchor lies on the own chain at all.
+    ///
+    /// Returns `None` if any block cannot be authenticated relative to the
+    /// anchor, or a block height of the response exceeds own tip height.
     async fn anchor_authenticated_block_response(
         state: &GlobalState,
         blocks: Vec<Block>,
@@ -270,16 +278,19 @@ impl PeerLoopHandler {
 
         let mut ret = vec![];
         for block in blocks {
-            let mmr_mp = state
+            let height: u64 = block.header().height.into();
+            let own_auth_path = state
                 .chain
                 .archival_state()
                 .archival_block_mmr
                 .ammr()
-                .prove_membership_relative_to_smaller_mmr(
-                    block.header().height.into(),
-                    anchor.num_leafs(),
-                )
+                .prove_membership_async(height)
                 .await;
+            let mmr_mp = truncate_auth_path(&own_auth_path, height, anchor.num_leafs()).filter(
+                |auth_path| {
+                    auth_path.verify(height, block.hash(), &anchor.peaks(), anchor.num_leafs())
+                },
+            )?;
             let block: TransferBlock = block.try_into().unwrap();
             ret.push((block, mmr_mp));
         }
@@ -1613,23 +1624,34 @@ impl PeerLoopHandler {
                     .await?
                     .expect("block should live in archival state because fetching the block digest from height worked");
 
-                let response =
-                    Self::anchor_authenticated_block_response(&state, vec![block], &anchor).await;
+                let authenticated_response =
+                    Self::anchor_authenticated_block_response(&state, vec![block.clone()], &anchor)
+                        .await;
 
                 // issue 457. do not hold lock across a peer.send(), nor self.punish()
                 drop(state);
 
-                let Some(mut response) = response else {
-                    warn!("Unable to satisfy validated block request");
-                    self.punish(NegativePeerSanction::BatchBlocksUnknownRequest)
-                        .await?;
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                };
-
-                let authenticated_block = response.pop().expect("response has exactly one block");
-                peer.send(PeerMessage::ValidatedBlock(Box::new(authenticated_block)))
-                    .await?;
-                debug!("Sent validated block of height {block_height}");
+                match authenticated_response {
+                    Some(mut response) => {
+                        let authenticated_block =
+                            response.pop().expect("response has exactly one block");
+                        peer.send(PeerMessage::ValidatedBlock(Box::new(authenticated_block)))
+                            .await?;
+                        debug!("Sent validated block of height {block_height}");
+                    }
+                    None => {
+                        // No authentication path relative to the requester's
+                        // anchor can be produced, e.g. because this node is
+                        // itself syncing and its archival chain is shorter
+                        // than the requester's anchor. The requester accepts
+                        // plain blocks while syncing.
+                        let transfer_block = TransferBlock::try_from(block)
+                            .expect("block fetched from archival state should be valid");
+                        peer.send(PeerMessage::Block(Box::new(transfer_block)))
+                            .await?;
+                        debug!("Sent plain block of height {block_height}");
+                    }
+                }
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
@@ -3505,6 +3527,130 @@ mod tests {
                     .await
                     .unwrap();
             }
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn validated_block_request_by_height_with_future_anchor() -> Result<()> {
+            // Scenario: The requester's sync anchor lies beyond this node's
+            // own chain, e.g. because this node is itself syncing and has
+            // already processed the requested block. The block is served with
+            // a valid authentication path whenever the requester's anchor
+            // does not require a longer path than the own chain provides;
+            // otherwise it is served as a plain block, without punishment.
+            let network = Network::Testnet(42);
+            let (
+                _peer_broadcast_tx,
+                from_main_rx_clone,
+                to_main_tx,
+                _to_main_rx1,
+                _,
+                _,
+                mut state_lock,
+                handshake,
+            ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network)).await?;
+            let genesis_block: Block = Block::genesis(network);
+            let peer_address = get_dummy_socket_address(0);
+            let mut rng = StdRng::seed_from_u64(5550005);
+            let [block_1, block_2, block_3, block_4, block_5] =
+                fake_valid_sequence_of_blocks_for_tests(
+                    &genesis_block,
+                    Timestamp::hours(1),
+                    rng.random(),
+                    network,
+                )
+                .await;
+            let blocks = [genesis_block, block_1, block_2, block_3, block_4, block_5];
+            for block in blocks.iter().skip(1) {
+                state_lock.set_new_tip(block.to_owned()).await.unwrap();
+            }
+
+            let own_leafs = blocks.iter().map(|block| block.hash()).collect_vec();
+            let own_num_leafs = own_leafs.len() as u64;
+            let mut anchor_leafs = own_leafs;
+            anchor_leafs.push(rng.random());
+            let future_anchor = MmrAccumulator::new_from_leafs(anchor_leafs.clone());
+            anchor_leafs.push(rng.random());
+            let far_future_anchor = MmrAccumulator::new_from_leafs(anchor_leafs);
+
+            let requested_height = BlockHeight::from(3u64);
+            let requested_block = &blocks[3];
+            let transfer_block = TransferBlock::try_from(requested_block.clone()).unwrap();
+
+            let own_auth_path = state_lock
+                .lock_guard()
+                .await
+                .chain
+                .archival_state()
+                .archival_block_mmr
+                .ammr()
+                .prove_membership_async(requested_height.into())
+                .await;
+
+            // The one-block-future anchor does not grow the requested block's
+            // local subtree, so the own path serves as-is.
+            let expected_path = truncate_auth_path(
+                &own_auth_path,
+                requested_height.into(),
+                future_anchor.num_leafs(),
+            )
+            .unwrap();
+            assert!(expected_path.verify(
+                requested_height.into(),
+                requested_block.hash(),
+                &future_anchor.peaks(),
+                future_anchor.num_leafs(),
+            ));
+
+            // The two-block-future anchor completes a larger subtree
+            // (2^3 leafs) and requires a longer path than the own chain can
+            // provide.
+            assert!(truncate_auth_path(
+                &own_auth_path,
+                requested_height.into(),
+                far_future_anchor.num_leafs(),
+            )
+            .is_none());
+            assert_eq!(8, far_future_anchor.num_leafs());
+            assert_eq!(6, own_num_leafs);
+
+            let cases = [
+                (
+                    future_anchor,
+                    PeerMessage::ValidatedBlock(Box::new((transfer_block.clone(), expected_path))),
+                ),
+                (
+                    far_future_anchor,
+                    PeerMessage::Block(Box::new(transfer_block)),
+                ),
+            ];
+            for (anchor, expected_message) in cases {
+                let mock = Mock::new(vec![
+                    Action::Read(PeerMessage::ValidatedBlockRequestByHeight(
+                        ValidatedBlockRequestByHeight {
+                            height: requested_height,
+                            anchor,
+                        },
+                    )),
+                    Action::Write(expected_message),
+                    Action::Read(PeerMessage::Bye),
+                ]);
+                let mut peer_loop_handler = PeerLoopHandler::new(
+                    to_main_tx.clone(),
+                    state_lock.clone(),
+                    pseudorandom_peer_id(&peer_address),
+                    socketaddr_to_multiaddr(peer_address),
+                    handshake,
+                    false,
+                    1,
+                );
+
+                peer_loop_handler
+                    .run_wrapper(mock, from_main_rx_clone.resubscribe())
+                    .await?;
+            }
+
+            Ok(())
         }
 
         #[traced_test]

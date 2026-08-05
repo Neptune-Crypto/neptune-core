@@ -6,9 +6,49 @@ use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::network::Network;
 use rand::rng;
 use rand::RngCore;
+use tasm_lib::twenty_first::prelude::Mmr;
+use tasm_lib::twenty_first::prelude::MmrMembershipProof;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tokio::fs;
 
 use crate::application::loops::sync_loop::SynchronizationBitMask;
+
+/// Truncate an MMR authentication path to one relative to an MMR with fewer
+/// leafs.
+///
+/// The entries of an MMR authentication path are append-invariant: appending
+/// leafs to the MMR only ever extends the path. So the path for a leaf
+/// relative to a smaller MMR is a prefix of the path relative to a larger one
+/// — provided the smaller MMR is a prefix of the larger, which this function
+/// cannot check. The caller must verify the returned path against the peaks
+/// of the target MMR before relying on, or sharing, it.
+///
+/// Returns `None` if the target MMR does not contain the leaf, or if it
+/// requires a longer path than the given one — which happens when the path's
+/// own MMR is the smaller one.
+///
+/// The same truncation, in other guises, appears in
+/// `MsMembershipProof::revert_update_from_batch_addition` and
+/// `RemovalRecord::batch_revert_update_from_addition`. Its storage-backed
+/// inverse is `ArchivalMmr::prove_membership_relative_to_smaller_mmr`.
+pub(crate) fn truncate_auth_path(
+    auth_path: &MmrMembershipProof,
+    leaf_index: u64,
+    target_num_leafs: u64,
+) -> Option<MmrMembershipProof> {
+    if leaf_index >= target_num_leafs {
+        return None;
+    }
+
+    let target_len = (leaf_index ^ target_num_leafs).ilog2() as usize;
+    if target_len > auth_path.authentication_path.len() {
+        return None;
+    }
+
+    Some(MmrMembershipProof::new(
+        auth_path.authentication_path[..target_len].to_vec(),
+    ))
+}
 
 /// The state of a rapid block download process.
 ///
