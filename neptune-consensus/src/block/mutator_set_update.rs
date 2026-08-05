@@ -186,43 +186,35 @@ impl MutatorSetUpdate {
         authenticated_items: &mut [&mut AuthenticatedItem],
     ) -> bool {
         let mut cloned_removals = self.removals.clone();
-        let mut remaining_removal_records = cloned_removals.iter_mut().rev().collect::<Vec<_>>();
-        for addition_record in &self.additions {
-            RemovalRecord::batch_update_from_addition(
-                &mut remaining_removal_records,
-                ms_accumulator,
-            );
+        {
+            let mut own_removal_records = cloned_removals.iter_mut().collect::<Vec<_>>();
+            for addition_record in &self.additions {
+                RemovalRecord::batch_update_from_addition(&mut own_removal_records, ms_accumulator);
 
-            RemovalRecord::batch_update_from_addition(removal_records, ms_accumulator);
+                RemovalRecord::batch_update_from_addition(removal_records, ms_accumulator);
 
-            AuthenticatedItem::batch_update_from_addition(
-                authenticated_items,
-                ms_accumulator,
-                *addition_record,
-            );
+                AuthenticatedItem::batch_update_from_addition(
+                    authenticated_items,
+                    ms_accumulator,
+                    *addition_record,
+                );
 
-            ms_accumulator.add(addition_record);
-        }
-
-        let mut removal_records_are_valid = true;
-        while let Some(applied_removal_record) = remaining_removal_records.pop() {
-            RemovalRecord::batch_update_from_remove(
-                &mut remaining_removal_records,
-                applied_removal_record,
-            );
-
-            RemovalRecord::batch_update_from_remove(removal_records, applied_removal_record);
-
-            AuthenticatedItem::batch_update_from_remove(
-                authenticated_items,
-                applied_removal_record,
-            );
-
-            if !ms_accumulator.can_remove(applied_removal_record) {
-                removal_records_are_valid = false;
+                ms_accumulator.add(addition_record);
             }
-            ms_accumulator.remove(applied_removal_record);
         }
+
+        let removal_records_are_valid = ms_accumulator.can_remove_all(&cloned_removals);
+
+        // Apply all removal records in one batch. The batch application
+        // produces the same accumulator, removal records and authenticated
+        // items as applying the records one at a time: the Bloom filter
+        // insertions commute.
+        RemovalRecord::batch_update_from_removals(removal_records, &cloned_removals);
+        let mut preserved_membership_proofs = authenticated_items
+            .iter_mut()
+            .map(|authenticated_item| &mut authenticated_item.ms_membership_proof)
+            .collect::<Vec<_>>();
+        ms_accumulator.batch_remove(cloned_removals, &mut preserved_membership_proofs);
 
         removal_records_are_valid
     }
@@ -283,6 +275,309 @@ mod tests {
         msa_and_records: MsaAndRecords,
     ) {
         prop_assert!(prop(msa_and_records).is_ok())
+    }
+
+    mod batch_apply {
+        use itertools::Itertools;
+        use neptune_mutator_set::authenticated_item::AuthenticatedItem;
+        use neptune_mutator_set::commit;
+        use neptune_mutator_set::msa_and_records::MsaAndRecords;
+        use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+        use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+        use neptune_mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
+        use neptune_mutator_set::removal_record::RemovalRecord;
+        use neptune_mutator_set::shared::NUM_TRIALS;
+        use proptest::collection::vec;
+        use proptest::prelude::TestCaseError;
+        use proptest::prop_assert;
+        use proptest::prop_assert_eq;
+        use proptest_arbitrary_interop::arb;
+        use tasm_lib::prelude::Digest;
+        use test_strategy::proptest;
+
+        use super::MutatorSetUpdate;
+
+        /// The sequential implementation that
+        /// `apply_to_accumulator_and_records_inner` used before batch
+        /// application, kept as a reference for differential testing.
+        ///
+        /// Practially like the production code but without using the fastest
+        /// possible batch method for removal record maintanence. Weaker than
+        /// the production code since the `can_remove` check is applied in-order
+        /// here, and in an order-independent way in the production code. This
+        /// weakness can, in the consensus path, only be hit with negligible
+        /// (read: ~2^(-160)) probability. So switching to the batching-version
+        /// in the production code is technically a softfork, just one that can
+        /// only be hit with negligible probability.
+        fn sequential_apply_reference(
+            update: &MutatorSetUpdate,
+            ms_accumulator: &mut MutatorSetAccumulator,
+            removal_records: &mut [&mut RemovalRecord],
+            authenticated_items: &mut [&mut AuthenticatedItem],
+        ) -> bool {
+            let mut cloned_removals = update.removals.clone();
+            let mut remaining_removal_records =
+                cloned_removals.iter_mut().rev().collect::<Vec<_>>();
+            for addition_record in &update.additions {
+                RemovalRecord::batch_update_from_addition(
+                    &mut remaining_removal_records,
+                    ms_accumulator,
+                );
+                RemovalRecord::batch_update_from_addition(removal_records, ms_accumulator);
+                AuthenticatedItem::batch_update_from_addition(
+                    authenticated_items,
+                    ms_accumulator,
+                    *addition_record,
+                );
+                ms_accumulator.add(addition_record);
+            }
+
+            let mut removal_records_are_valid = true;
+            while let Some(applied_removal_record) = remaining_removal_records.pop() {
+                RemovalRecord::batch_update_from_remove(
+                    &mut remaining_removal_records,
+                    applied_removal_record,
+                );
+                RemovalRecord::batch_update_from_remove(removal_records, applied_removal_record);
+                AuthenticatedItem::batch_update_from_remove(
+                    authenticated_items,
+                    applied_removal_record,
+                );
+                if !ms_accumulator.can_remove(applied_removal_record) {
+                    removal_records_are_valid = false;
+                }
+                ms_accumulator.remove(applied_removal_record);
+            }
+
+            removal_records_are_valid
+        }
+
+        fn batch_and_sequential_apply_agree(
+            msa_and_records: MsaAndRecords,
+            removables: Vec<(Digest, Digest, Digest)>,
+            num_removals: usize,
+            addition_preimages: Vec<(Digest, Digest, Digest)>,
+        ) -> std::result::Result<(), TestCaseError> {
+            let all_records = msa_and_records.unpacked_removal_records();
+            let all_mps = &msa_and_records.membership_proofs;
+            let msa = &msa_and_records.mutator_set_accumulator;
+
+            let additions = addition_preimages
+                .iter()
+                .map(|(item, sender_randomness, receiver_preimage)| {
+                    commit(*item, *sender_randomness, receiver_preimage.hash())
+                })
+                .collect_vec();
+            let update = MutatorSetUpdate::new(all_records[..num_removals].to_vec(), additions);
+
+            // The records and authenticated items to be maintained through
+            // the application.
+            let preserved_records = all_records[num_removals..].to_vec();
+            let preserved_items = removables[num_removals..]
+                .iter()
+                .zip(&all_mps[num_removals..])
+                .map(|((item, _, _), ms_membership_proof)| AuthenticatedItem {
+                    item: *item,
+                    ms_membership_proof: ms_membership_proof.clone(),
+                })
+                .collect_vec();
+
+            let mut msa_batch = msa.clone();
+            let mut records_batch = preserved_records.clone();
+            let mut items_batch = preserved_items.clone();
+            let batch_result = update.apply_to_accumulator_and_records(
+                &mut msa_batch,
+                &mut records_batch.iter_mut().collect_vec(),
+                &mut items_batch.iter_mut().collect_vec(),
+            );
+
+            let mut msa_sequential = msa.clone();
+            let mut records_sequential = preserved_records.clone();
+            let mut items_sequential = preserved_items.clone();
+            let sequential_is_valid = sequential_apply_reference(
+                &update,
+                &mut msa_sequential,
+                &mut records_sequential.iter_mut().collect_vec(),
+                &mut items_sequential.iter_mut().collect_vec(),
+            );
+
+            prop_assert!(batch_result.is_ok());
+            prop_assert!(sequential_is_valid);
+            prop_assert_eq!(msa_sequential, msa_batch);
+            prop_assert_eq!(records_sequential, records_batch);
+            for (sequential, batch) in items_sequential.iter().zip(&items_batch) {
+                prop_assert_eq!(sequential.item, batch.item);
+                prop_assert_eq!(&sequential.ms_membership_proof, &batch.ms_membership_proof);
+            }
+
+            Ok(())
+        }
+
+        #[proptest(cases = 12)]
+        fn batch_apply_agrees_with_sequential_apply_u8(
+            #[strategy(1usize..10)] num_removals: usize,
+            #[strategy(1usize..6)] _num_preserved: usize,
+            #[strategy((((#num_removals + #_num_preserved) as u64))..=(u64::from(u8::MAX)))]
+            _num_leafs_aocl: u64,
+            #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #num_removals + #_num_preserved))]
+            removables: Vec<(Digest, Digest, Digest)>,
+            #[strategy(MsaAndRecords::arbitrary_with((#removables, #_num_leafs_aocl)))]
+            msa_and_records: MsaAndRecords,
+            #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), 0usize..8))]
+            addition_preimages: Vec<(Digest, Digest, Digest)>,
+        ) {
+            prop_assert!(batch_and_sequential_apply_agree(
+                msa_and_records,
+                removables,
+                num_removals,
+                addition_preimages
+            )
+            .is_ok())
+        }
+
+        #[proptest(cases = 6)]
+        fn batch_apply_agrees_with_sequential_apply_u16(
+            #[strategy(1usize..10)] num_removals: usize,
+            #[strategy(1usize..6)] _num_preserved: usize,
+            #[strategy((((#num_removals + #_num_preserved) as u64))..=(u64::from(u16::MAX)))]
+            _num_leafs_aocl: u64,
+            #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #num_removals + #_num_preserved))]
+            removables: Vec<(Digest, Digest, Digest)>,
+            #[strategy(MsaAndRecords::arbitrary_with((#removables, #_num_leafs_aocl)))]
+            msa_and_records: MsaAndRecords,
+            #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), 0usize..8))]
+            addition_preimages: Vec<(Digest, Digest, Digest)>,
+        ) {
+            prop_assert!(batch_and_sequential_apply_agree(
+                msa_and_records,
+                removables,
+                num_removals,
+                addition_preimages
+            )
+            .is_ok())
+        }
+
+        #[proptest(cases = 3)]
+        fn batch_apply_agrees_with_sequential_apply_u32(
+            #[strategy(1usize..10)] num_removals: usize,
+            #[strategy(1usize..6)] _num_preserved: usize,
+            #[strategy((((#num_removals + #_num_preserved) as u64))..=(u64::from(u32::MAX)))]
+            _num_leafs_aocl: u64,
+            #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #num_removals + #_num_preserved))]
+            removables: Vec<(Digest, Digest, Digest)>,
+            #[strategy(MsaAndRecords::arbitrary_with((#removables, #_num_leafs_aocl)))]
+            msa_and_records: MsaAndRecords,
+            #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), 0usize..8))]
+            addition_preimages: Vec<(Digest, Digest, Digest)>,
+        ) {
+            prop_assert!(batch_and_sequential_apply_agree(
+                msa_and_records,
+                removables,
+                num_removals,
+                addition_preimages
+            )
+            .is_ok())
+        }
+
+        #[proptest(cases = 3)]
+        fn batch_apply_agrees_with_sequential_apply_u63(
+            #[strategy(1usize..10)] num_removals: usize,
+            #[strategy(1usize..6)] _num_preserved: usize,
+            #[strategy((((#num_removals + #_num_preserved) as u64))..=(u64::MAX / 2))]
+            _num_leafs_aocl: u64,
+            #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #num_removals + #_num_preserved))]
+            removables: Vec<(Digest, Digest, Digest)>,
+            #[strategy(MsaAndRecords::arbitrary_with((#removables, #_num_leafs_aocl)))]
+            msa_and_records: MsaAndRecords,
+            #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), 0usize..8))]
+            addition_preimages: Vec<(Digest, Digest, Digest)>,
+        ) {
+            prop_assert!(batch_and_sequential_apply_agree(
+                msa_and_records,
+                removables,
+                num_removals,
+                addition_preimages
+            )
+            .is_ok())
+        }
+
+        #[proptest(cases = 10)]
+        fn duplicated_removal_record_invalidates_update(
+            #[strategy(1u64..=(u64::from(u8::MAX)))] _num_leafs_aocl: u64,
+            #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), 1))]
+            _removables: Vec<(Digest, Digest, Digest)>,
+            #[strategy(MsaAndRecords::arbitrary_with((#_removables, #_num_leafs_aocl)))]
+            msa_and_records: MsaAndRecords,
+        ) {
+            let removal_record = msa_and_records.unpacked_removal_records()[0].clone();
+            let update =
+                MutatorSetUpdate::new(vec![removal_record.clone(), removal_record], vec![]);
+
+            let mut msa_batch = msa_and_records.mutator_set_accumulator.clone();
+            prop_assert!(update.apply_to_accumulator(&mut msa_batch).is_err());
+
+            let mut msa_sequential = msa_and_records.mutator_set_accumulator.clone();
+            let sequential_is_valid =
+                sequential_apply_reference(&update, &mut msa_sequential, &mut [], &mut []);
+            prop_assert!(!sequential_is_valid);
+
+            prop_assert_eq!(msa_sequential, msa_batch);
+        }
+
+        /// The batch check is stricter than sequential application in one
+        /// corner: a removal record whose indices are covered by the Bloom
+        /// filter and the *other* records of the update combined, without
+        /// being covered by the Bloom filter and earlier records alone.
+        /// passes sequentially but fails the batch check. For honestly
+        /// generated removal records this corner has negligible probability.
+        #[test]
+        fn batch_check_rejects_fully_covered_record_where_sequential_accepts() {
+            // All indices lie in the initial active window, so removal
+            // records with empty chunk dictionaries are valid.
+            fn removal_record(indices: [u128; NUM_TRIALS as usize]) -> RemovalRecord {
+                RemovalRecord {
+                    absolute_indices: AbsoluteIndexSet::new(indices),
+                    target_chunks: ChunkDictionary::default(),
+                }
+            }
+
+            // The pre-state has indices 0..45 set.
+            let pre_set = core::array::from_fn(|i| i as u128);
+            let mut msa = MutatorSetAccumulator::default();
+            MutatorSetUpdate::new(vec![removal_record(pre_set)], vec![])
+                .apply_to_accumulator(&mut msa)
+                .unwrap();
+
+            // The first record's indices are covered by the pre-state
+            // (0..20) and the second record (100..125) combined; the second
+            // record has twenty uncovered indices (200..220).
+            let first = core::array::from_fn(|i| {
+                if i < 20 {
+                    i as u128
+                } else {
+                    100 + (i as u128 - 20)
+                }
+            });
+            let second = core::array::from_fn(|i| {
+                if i < 25 {
+                    100 + i as u128
+                } else {
+                    200 + (i as u128 - 25)
+                }
+            });
+            let update =
+                MutatorSetUpdate::new(vec![removal_record(first), removal_record(second)], vec![]);
+
+            let mut msa_sequential = msa.clone();
+            let sequential_is_valid =
+                sequential_apply_reference(&update, &mut msa_sequential, &mut [], &mut []);
+            assert!(sequential_is_valid);
+
+            let mut msa_batch = msa.clone();
+            assert!(update.apply_to_accumulator(&mut msa_batch).is_err());
+
+            assert_eq!(msa_sequential, msa_batch);
+        }
     }
 
     mod compose {
