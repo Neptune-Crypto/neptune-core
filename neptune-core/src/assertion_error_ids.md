@@ -36,3 +36,4 @@ often.
 |  530..540 | [`LinkProof`](../../neptune-consensus/src/chaintx/link_proof.rs)                                                                |
 |  540..560 | [`Chain`](../../neptune-consensus/src/chaintx/chain.rs)                                                                        |
 |  560..570 | [`Update`](../../neptune-consensus/src/chaintx/update.rs)                                                                       |
+|  570..580 | [`Cast`](../../neptune-consensus/src/chaintx/cast.rs)                                                                          |
