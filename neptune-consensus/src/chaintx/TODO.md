@@ -191,7 +191,7 @@ verified", i.e. universal forgery. Covered by §Negative tests for `D`.
 - [x] `LinkPrimitiveWitness` — primitive-witness analog consumed by `Forge`
   - [x] an arbitrary strategy obtained by lifting its `PrimitiveWitness` analog
   - [x] `validate` -- analogous to `PrimitiveWitness::validate`
-- [ ] `LinkProofWitness` enum: `Forge | Chain | Update | Cast`
+- [x] `LinkProofWitness` enum: `Forge | Chain | Update | Cast`
       (mirror `SingleProofWitness`; note `Fix` is NOT here)
   - [x] `Forge(Box<ForgeWitness>)` — the variant holds what the branch consumes,
         mirroring `SingleProofWitness::Collection(ProofCollection)`.
@@ -204,7 +204,11 @@ verified", i.e. universal forgery. Covered by §Negative tests for `D`.
         accumulators (pre-reduced, as `AuthenticateMsaAgainstTxk` eats them),
         the AOCL successor proof, and the old link proof. Its own memory
         projection, like `Chain`'s.
-  - [ ] `Cast` (3) — lands with its witness
+  - [x] `Cast(Box<CastWitness>)` (3) — holds the legacy transaction's kernel and
+        its `SingleProof`. Its own memory projection, like `Chain`'s, though the
+        branch reads only the proof out of it: the kernel is bound through its
+        MAST hash, which is divined rather than recomputed, so the copy in memory
+        is for the prover's sake (the hash, and the two authentication paths).
   - [x] `SecretWitness` impl — dispatches to the branch witness.
   - [x] `standard_input()` gains `|| D.reversed()`, `D` = the `SingleProof`
         program digest (§Breaking the `Fix`/`Cast` cycle). Landed ahead of
@@ -340,11 +344,28 @@ would bind that check to the wrong tree without crashing.
         induction, as in `Chain`.
   - Deliberately *no* non-empty-input-set requirement, unlike `update_branch`;
         see §Governing invariants.
-- [ ] **Cast** `Transaction -> LinkTx`: recursively verify the input
+- [x] **Cast** `Transaction -> LinkTx`: recursively verify the input
       `SingleProof`, produce `LinkProof(thruputs = [])` so a regular
       `Transaction` can join a chain. The inner claim is
       `{ program: D, input: [txkmh] }` — `D` read from public input, *not*
-      hardcoded: this is what breaks the cycle.
+      hardcoded: this is what breaks the cycle. The only branch that lets `D`
+      name a *program*; everywhere else it is passed along untouched.
+  - [x] the cast kernel is the transaction's kernel with no thruputs, in one
+        hash: a `LinkKernel`'s nine leafs pad to sixteen and its first eight are
+        exactly the legacy kernel's (already a power of two), so `txkmh` is the
+        left child of `lkmh` and, thruputs being empty, the right child is the
+        constant `no_thruputs_subtree_root()`. `txkmh` is divined and
+        `hash_pair(txkmh, that constant)` must be `lkmh`. Empty thruputs are not
+        a second check; they are baked into the constant.
+        (`link_kernel.rs::mast_hash_pairs_the_kernel_root_with_the_thruputs_subtree`
+        is what pins the structure the branch stands on.)
+  - [x] no coinbase and no merge bit on the cast kernel, as constant leafs --
+        which is to say a coinbase or an already-merged transaction cannot be
+        cast. Deliberate: `Chain` relies on both by induction.
+  - [x] nothing inspects the transaction's *contents*, the `SingleProof` being
+        what says it is valid, and `Cast` adding nothing to it. In particular the
+        mutator set is untouched: the cast link transaction names whichever one
+        the transaction named, and requiring agreement is `Chain`'s job.
 - [ ] **Fix** = new `SingleProof` branch: recursively verify the `LinkProof`
       against `{ program: <hardcoded LinkProof digest>, input:
       [lkmh, own_program_digest()] }`, assert `thruputs == []`, produce a
@@ -645,14 +666,24 @@ Claim / plumbing:
       (rejected), or a witness-supplied second digest (ignored).
 
 `Cast`:
-- [ ] inner `SingleProof` claim built with a program digest ≠ `D` from public
-      input → rejected.
+- [x] inner `SingleProof` claim built with a program digest ≠ `D` from public
+      input → rejected
+      (`transaction_proven_under_another_program_digest_is_rejected`), plus its
+      mirror image `witness_supplied_single_proof_digest_is_ignored`: `D` poked
+      in the witness's memory image, public input untouched → must still verify.
 - [ ] `Cast` with `D` = the `LinkProof` program's own digest (self-substitution:
       a `LinkProof` passed off as a `SingleProof`) → the `Cast` itself succeeds
       but the result is un-`Fix`able. Assert the `Fix` rejection, and assert that
       this is the *only* thing standing between it and a block.
-- [ ] `Cast` of a `Transaction` whose `SingleProof` is invalid → rejected (the
-      recursion actually runs; guards against `D` being read and then unused).
+- [x] `Cast` of a `Transaction` whose `SingleProof` does not answer the claim →
+      rejected: the recursion actually runs, which guards against `D` being read
+      and then unused. Folded into
+      `transaction_proven_under_another_program_digest_is_rejected`, which
+      asserts the failure happens *inside* `stark_verify`; a *mock* proof is
+      deliberately not used, since the verifier reads its garbage as lengths and
+      exhausts the machine instead of rejecting. The positive counterpart,
+      `cast_accepts_a_single_proof_backed_transaction`, runs the recursion
+      against a real `SingleProof` and is the only test that does.
 
 `Fix`:
 - [ ] `D ≠ own_program_digest()` in the `LinkProof` claim → rejected. Including

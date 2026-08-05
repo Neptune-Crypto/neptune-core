@@ -4,8 +4,10 @@ use tasm_lib::library::Library;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::triton_vm::prelude::*;
 
+use super::cast::Cast;
 use super::chain::Chain;
 use super::forge::Forge;
+use super::link_proof_witness::DISCRIMINANT_FOR_CAST;
 use super::link_proof_witness::DISCRIMINANT_FOR_CHAIN;
 use super::link_proof_witness::DISCRIMINANT_FOR_FORGE;
 use super::link_proof_witness::DISCRIMINANT_FOR_UPDATE;
@@ -78,7 +80,8 @@ pub(super) fn merge_bit_false_leaf() -> Digest {
 /// [`LinkProofWitness`](super::link_proof_witness::LinkProofWitness), each of
 /// which is a [`BasicSnippet`] that establishes the same claim by a different
 /// route. `Forge` is the entry point, `Chain` combines two link transactions,
-/// and `Update` re-targets one at a newer mutator set; `Cast` follows.
+/// `Update` re-targets one at a newer mutator set, and `Cast` pulls a legacy
+/// transaction in.
 ///
 /// The dispatcher hands each branch `[own_program_digest] [lkmh] *witness disc`
 /// and expects `[own_program_digest] [scratch] *witness -1` back. A branch that
@@ -112,6 +115,9 @@ impl TritonProgram for LinkProof {
         let update_branch = library.import(Box::new(Update {
             single_proof_digest_address: single_proof_digest_alloc.read_address(),
         }));
+        let cast_branch = library.import(Box::new(Cast {
+            single_proof_digest_address: single_proof_digest_alloc.read_address(),
+        }));
 
         // Sum the per-branch equality flags: exactly one may be set. Extend with
         // `dup n push {DISCRIMINANT_FOR_X} eq` + one more `add` per branch.
@@ -133,9 +139,15 @@ impl TritonProgram for LinkProof {
             eq
             // _ disc (disc == forge) (disc == chain) (disc == update)
 
+            dup 3
+            push {DISCRIMINANT_FOR_CAST}
+            eq
+            // _ disc (disc == forge) (disc == chain) (disc == update) (disc == cast)
+
             add
             add
-            // _ disc (disc == forge || disc == chain || disc == update)
+            add
+            // _ disc (disc == forge || disc == chain || disc == update || disc == cast)
 
             assert error_id {INVALID_WITNESS_DISCRIMINANT_ERROR}
             // _ disc
@@ -182,6 +194,9 @@ impl TritonProgram for LinkProof {
 
             dup 0 push {DISCRIMINANT_FOR_UPDATE} eq
             skiz call {update_branch}
+
+            dup 0 push {DISCRIMINANT_FOR_CAST} eq
+            skiz call {cast_branch}
             // _ [own_program_digest] [lkmh] *link_proof_witness discriminant
 
             // a discriminant of -1 indicates that some branch was executed
@@ -232,6 +247,7 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
+    use crate::chaintx::cast::tests::cast_branch_source;
     use crate::chaintx::chain::tests::chain_branch_source;
     use crate::chaintx::forge::tests::forge_branch_source;
     use crate::chaintx::forge::ForgeWitness;
@@ -259,6 +275,9 @@ mod tests {
                 }
                 LinkProofWitnessMemory::Update(witness) => {
                     update_branch_source(own_program_digest, lkmh, single_proof_digest, *witness)
+                }
+                LinkProofWitnessMemory::Cast(witness) => {
+                    cast_branch_source(lkmh, single_proof_digest, *witness)
                 }
             }
         }
@@ -290,7 +309,7 @@ mod tests {
     #[test]
     fn invalid_discriminant_crashes_execution() {
         let public_input = PublicInput::new(bfe_vec![0; 2 * Digest::LEN]);
-        for illegal_discriminant in bfe_array![-1, 3, 4, 1u64 << 40] {
+        for illegal_discriminant in bfe_array![-1, 4, 5, 1u64 << 40] {
             let memory: HashMap<_, _> = [(
                 FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
                 illegal_discriminant,
@@ -311,6 +330,6 @@ mod tests {
 
     test_program_snapshot!(
         LinkProof,
-        "f392f783aa403b097a25c51286786c9272541aa3e3548d8f510bc34acc12a8cde2d603c492f6d9e9"
+        "a79ad6a039d807b113f1e72a249612895ec79977dc8b6f0f88a56eb2bc5cdc2c744b23f25b94dff4"
     );
 }

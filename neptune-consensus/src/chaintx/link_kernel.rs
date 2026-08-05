@@ -6,9 +6,12 @@ use serde::Deserialize;
 use serde::Serialize;
 use strum::EnumCount;
 use strum::VariantArray;
+use tasm_lib::prelude::Digest;
+use tasm_lib::prelude::Tip5;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
+use tasm_lib::twenty_first::prelude::MerkleTree;
 
 use crate::transaction::transaction_kernel::TransactionKernel;
 
@@ -65,6 +68,32 @@ impl MastHash for LinkKernel {
     }
 }
 
+/// The right child of the MAST root of a [`LinkKernel`] whose thruputs are
+/// empty.
+///
+/// A `LinkKernel`'s nine leafs pad to sixteen, and its first eight are exactly
+/// the wrapped [`TransactionKernel`]'s -- eight being already a power of two, so
+/// nothing pads in between. The left child of the `LinkKernel` root is therefore
+/// the transaction kernel's MAST root itself, and the right child holds nothing
+/// but the `Thruputs` leaf and padding:
+///
+/// ```text
+/// lkmh = hash_pair(txkmh, no_thruputs_subtree_root())      (thruputs == [])
+/// ```
+///
+/// which is what lets [`Cast`](super::cast::Cast) bind a divined `txkmh` to the
+/// `lkmh` it is claimed against with a single hash instead of a subtree. Pinned
+/// by `mast_hash_pairs_the_kernel_root_with_the_thruputs_subtree`.
+pub(super) fn no_thruputs_subtree_root() -> Digest {
+    let mut leafs = vec![Tip5::hash_varlen(&Vec::<AdditionRecord>::new().encode())];
+    leafs.resize(
+        1 << <TransactionKernel as MastHash>::MAST_HEIGHT,
+        Digest::default(),
+    );
+
+    MerkleTree::sequential_new(&leafs).unwrap().root()
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -111,6 +140,29 @@ mod tests {
         prop_assert_eq!(kernel_seqs.len() + 1, link_seqs.len());
         prop_assert_eq!(kernel_seqs.as_slice(), &link_seqs[..kernel_seqs.len()]);
         prop_assert_eq!(&link.thruputs.encode(), link_seqs.last().unwrap());
+    }
+
+    /// The MAST root of a thruput-less [`LinkKernel`] is its transaction
+    /// kernel's root paired with a constant.
+    ///
+    /// `Cast` stands on this: it divines `txkmh`, hashes it with
+    /// [`no_thruputs_subtree_root`], and compares against the `lkmh` it is
+    /// claimed under -- one hash in place of a subtree, and the empty thruputs
+    /// come for free, being baked into the constant. Should the leaf order or
+    /// the padding ever change, this is what fails.
+    #[proptest]
+    fn mast_hash_pairs_the_kernel_root_with_the_thruputs_subtree(
+        #[strategy(arb())] kernel: TransactionKernel,
+    ) {
+        let link = LinkKernel {
+            kernel,
+            thruputs: std::vec![],
+        };
+
+        prop_assert_eq!(
+            link.mast_hash(),
+            Tip5::hash_pair(link.kernel.mast_hash(), no_thruputs_subtree_root())
+        );
     }
 
     /// Thruputs are bound into the MAST hash: appending a thruput changes the hash.
