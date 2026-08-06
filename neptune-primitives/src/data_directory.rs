@@ -62,7 +62,17 @@ impl DataDirectory {
 
     /// Create directory if it does not exist
     pub async fn create_dir_if_not_exists(dir: &Path) -> Result<()> {
-        tokio::fs::create_dir_all(dir)
+        let mut dir_builder = tokio::fs::DirBuilder::new();
+        dir_builder.recursive(true);
+
+        // The data directory holds wallet secrets and credentials, so deny
+        // other users any access. Directories that already exist keep their
+        // permissions.
+        #[cfg(unix)]
+        dir_builder.mode(0o700);
+
+        dir_builder
+            .create(dir)
             .await
             .with_context(|| format!("Failed to create data directory {}", dir.display()))
     }
