@@ -1429,18 +1429,19 @@ impl RpcApi for RpcServer {
     ) -> RpcResult<SubmitBlockResponse> {
         let mut template: Block = request.template.into();
 
-        // Since block comes from external source, we need to check validity.
         let network = self.state.cli().network;
         let tip = self.state.lock_guard().await.chain.tip().clone();
-        let now = self.now();
-        if !template.is_valid(&tip, now, network).await {
-            return Err(RpcError::SubmitBlock(SubmitBlockError::InvalidBlock));
-        }
 
+        // The block comes from an external source, so it needs to be checked
+        // for validity. Both checks run *after* the pow solution is inserted.
         template.set_header_pow(request.pow.into());
 
-        if !template.has_proof_of_work(self.state.cli().network, template.header()) {
+        if !template.has_proof_of_work(network, tip.header()) {
             return Err(RpcError::SubmitBlock(SubmitBlockError::InsufficientWork));
+        }
+
+        if !template.is_valid(&tip, self.now(), network).await {
+            return Err(RpcError::SubmitBlock(SubmitBlockError::InvalidBlock));
         }
 
         // No time to waste! Inform main_loop!
@@ -2452,6 +2453,9 @@ pub mod tests {
             "Node must accept valid new tip."
         );
 
+        // Stripping the proof also invalidates the solution, since the block's
+        // proof is committed to by its hash. So the proof-of-work check, which
+        // runs first, is the one that rejects this.
         let mut bad_proposal = block;
         bad_proposal.proof = None;
         assert_eq!(
@@ -2459,7 +2463,7 @@ pub mod tests {
                 .submit_block(bad_proposal.clone(), solution)
                 .await
                 .unwrap_err(),
-            RpcError::SubmitBlock(SubmitBlockError::InvalidBlock)
+            RpcError::SubmitBlock(SubmitBlockError::InsufficientWork)
         );
     }
 
