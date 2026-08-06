@@ -1412,7 +1412,7 @@ pub(crate) mod tests {
     /// a fresh claim, hence a fresh proof, every time. The mock-proof negatives
     /// draw at random instead -- they pay no proving cost, so there is nothing
     /// to amortize and everything to gain.
-    pub(super) fn deterministic_chainable_link_primitive_witnesses(
+    pub(crate) fn deterministic_chainable_link_primitive_witnesses(
         num_inputs: usize,
         num_thruputs: usize,
     ) -> (LinkPrimitiveWitness, LinkPrimitiveWitness) {
@@ -1426,10 +1426,7 @@ pub(crate) mod tests {
     }
 
     /// Forge a link primitive witness into a proof-backed [`LinkTx`].
-    pub(in crate::chaintx) async fn forge(
-        lpw: &LinkPrimitiveWitness,
-        single_proof_digest: Digest,
-    ) -> LinkTx {
+    pub(crate) async fn forge(lpw: &LinkPrimitiveWitness, single_proof_digest: Digest) -> LinkTx {
         let witness = ForgeWitness::produce(
             lpw,
             single_proof_digest,

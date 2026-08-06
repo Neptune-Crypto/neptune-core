@@ -90,7 +90,7 @@ impl Transaction {
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
         new_timestamp: Option<Timestamp>,
-        _consensus_rule_set: ConsensusRuleSet,
+        consensus_rule_set: ConsensusRuleSet,
     ) -> anyhow::Result<Transaction> {
         ensure!(
             old_transaction_kernel.mutator_set_hash == previous_mutator_set_accumulator.hash(),
@@ -139,7 +139,7 @@ impl Transaction {
 
         info!("starting single proof via update ...");
         let single_proof = SingleProofWitness::from_update(update_witness)
-            .produce(triton_vm_job_queue, proof_job_options)
+            .produce(consensus_rule_set, triton_vm_job_queue, proof_job_options)
             .await?;
         let proof = TransactionProof::SingleProof(single_proof);
         info!("done.");
@@ -178,7 +178,7 @@ impl Transaction {
         shuffle_seed: [u8; 32],
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
-        _consensus_rule_set: ConsensusRuleSet,
+        consensus_rule_set: ConsensusRuleSet,
     ) -> Result<Transaction> {
         assert_eq!(
             self.kernel.mutator_set_hash, other.kernel.mutator_set_hash,
@@ -191,7 +191,13 @@ impl Transaction {
         );
 
         let merge_witness = MergeWitness::from_transactions(self, other, shuffle_seed);
-        MergeWitness::merge(merge_witness, triton_vm_job_queue, proof_job_options).await
+        MergeWitness::merge(
+            merge_witness,
+            consensus_rule_set,
+            triton_vm_job_queue,
+            proof_job_options,
+        )
+        .await
     }
 
     /// Calculates a fraction representing the fee-density, defined as:

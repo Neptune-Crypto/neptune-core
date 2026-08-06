@@ -39,11 +39,11 @@ use tracing::info;
 use crate::block::block_transaction::BlockOrRegularTransaction;
 use crate::block::block_transaction::BlockOrRegularTransactionKernel;
 use crate::block::block_transaction::BlockTransactionKernel;
+use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::prelude::triton_vm::prelude::triton_asm;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
-use crate::proof_abstractions::SecretWitness;
 use crate::transaction::transaction_kernel::TransactionKernelField;
 use crate::transaction::transaction_kernel::TransactionKernelModifier;
 use crate::transaction::validity::single_proof::SingleProof;
@@ -148,6 +148,7 @@ impl MergeWitness {
     /// merger. Generates the proof for the merged transaction.
     pub(crate) async fn merge(
         self,
+        consensus_rule_set: ConsensusRuleSet,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> Result<Transaction> {
@@ -169,12 +170,12 @@ impl MergeWitness {
             Proof::valid_mock()
         } else {
             let new_single_proof_witness = SingleProofWitness::from_merge(self);
-            let new_single_proof_claim = new_single_proof_witness.claim();
+            let new_single_proof_claim = new_single_proof_witness.claim(consensus_rule_set);
             info!("Start: creating new single proof through merge");
-            SingleProof
+            SingleProof::new(consensus_rule_set)
                 .prove(
                     new_single_proof_claim,
-                    new_single_proof_witness.nondeterminism(),
+                    new_single_proof_witness.nondeterminism(consensus_rule_set),
                     triton_vm_job_queue,
                     proof_job_options,
                 )

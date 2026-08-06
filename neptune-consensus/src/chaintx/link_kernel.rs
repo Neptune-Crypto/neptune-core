@@ -84,7 +84,7 @@ impl MastHash for LinkKernel {
 /// which is what lets [`Cast`](super::cast::Cast) bind a divined `txkmh` to the
 /// `lkmh` it is claimed against with a single hash instead of a subtree. Pinned
 /// by `mast_hash_pairs_the_kernel_root_with_the_thruputs_subtree`.
-pub(super) fn no_thruputs_subtree_root() -> Digest {
+pub(crate) fn no_thruputs_subtree_root() -> Digest {
     let mut leafs = vec![Tip5::hash_varlen(&Vec::<AdditionRecord>::new().encode())];
     leafs.resize(
         1 << <TransactionKernel as MastHash>::MAST_HEIGHT,

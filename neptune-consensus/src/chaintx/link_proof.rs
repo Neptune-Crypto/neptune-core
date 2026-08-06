@@ -33,7 +33,7 @@ pub(crate) const INVALID_WITNESS_DISCRIMINANT_ERROR: i128 = 1_000_531;
 /// The public input of a `LinkProof` claim: the MAST hash of the
 /// [`LinkKernel`](super::link_kernel::LinkKernel) it attests to, then the
 /// `SingleProof` program digest `D` it is indexed by.
-pub(super) fn link_proof_public_input(
+pub(crate) fn link_proof_public_input(
     kernel_mast_hash: Digest,
     single_proof_digest: Digest,
 ) -> PublicInput {

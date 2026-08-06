@@ -29,7 +29,7 @@ use crate::transaction::validity::tasm::claims::new_claim::NewClaim;
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct GenerateLinkProofClaim {
     /// Where the dispatcher stashed `D`. See [`LinkProof`](super::link_proof::LinkProof).
-    pub(super) single_proof_digest_address: BFieldElement,
+    pub(crate) single_proof_digest_address: BFieldElement,
 }
 
 impl BasicSnippet for GenerateLinkProofClaim {

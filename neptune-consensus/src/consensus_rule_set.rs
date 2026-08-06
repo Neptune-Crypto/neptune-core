@@ -46,6 +46,16 @@ pub const BLOCK_HEIGHT_HARDFORK_GAMMA_MAIN_NET: BlockHeight =
 pub const BLOCK_HEIGHT_HARDFORK_GAMMA_TESTNET: BlockHeight =
     BlockHeight::new(BFieldElement::new(4_650));
 
+/// Height of the first block after hard fork delta, which activates
+/// transaction chaining, on main net.
+pub const BLOCK_HEIGHT_HARDFORK_DELTA_MAIN_NET: BlockHeight =
+    BlockHeight::new(BFieldElement::new(60_000u64));
+
+/// Height of the first block after hard fork delta, which activates
+/// transaction chaining, on test net.
+pub const BLOCK_HEIGHT_HARDFORK_DELTA_TESTNET: BlockHeight =
+    BlockHeight::new(BFieldElement::new(6_000));
+
 /// Transactions that are more than three days older than the block are
 /// disallowed. Only enforced from hardfork gamma and onwards.
 pub const TX_BACKDATING_LIMIT: Timestamp = Timestamp::days(3);
@@ -81,6 +91,19 @@ pub enum ConsensusRuleSet {
     /// found to be unsound.
     #[default]
     HardforkGamma,
+
+    /// Activate transaction chaining: `SingleProof` gains the `Fix` branch,
+    /// which recursively verifies a `LinkProof` and so lets a chained
+    /// transaction (`LinkTx`) become a block-borne `Transaction`.
+    ///
+    /// A new branch is a new program, hence a new program digest, hence a
+    /// different claim about every transaction. See [`Self::has_fix_branch`].
+    ///
+    /// Intended to deploy together with an upstream Triton VM bump, which will
+    /// move the claim's *version* as well. That version cannot be named ahead of
+    /// the dependency, though -- see [`Self::triton_proof_version`] -- so for
+    /// now delta differs from gamma by the program digest alone.
+    HardforkDelta,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
@@ -129,8 +152,10 @@ impl ConsensusRuleSet {
                     ConsensusRuleSet::TvmProofVersion1
                 } else if block_height < BLOCK_HEIGHT_HARDFORK_GAMMA_MAIN_NET {
                     ConsensusRuleSet::HardforkBeta
-                } else {
+                } else if block_height < BLOCK_HEIGHT_HARDFORK_DELTA_MAIN_NET {
                     ConsensusRuleSet::HardforkGamma
+                } else {
+                    ConsensusRuleSet::HardforkDelta
                 }
             }
             Network::Testnet(0) => {
@@ -142,10 +167,16 @@ impl ConsensusRuleSet {
                     ConsensusRuleSet::TvmProofVersion1
                 } else if block_height < BLOCK_HEIGHT_HARDFORK_GAMMA_TESTNET {
                     ConsensusRuleSet::HardforkBeta
-                } else {
+                } else if block_height < BLOCK_HEIGHT_HARDFORK_DELTA_TESTNET {
                     ConsensusRuleSet::HardforkGamma
+                } else {
+                    ConsensusRuleSet::HardforkDelta
                 }
             }
+            // The ephemeral networks stay on gamma until the chain pipeline has
+            // an integration path (builder, mempool, peer) to exercise. Flip
+            // this to delta together with those, not before: it is what makes
+            // `Fix` reachable end-to-end.
             _ => ConsensusRuleSet::HardforkGamma,
         }
     }
@@ -157,6 +188,7 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::TvmProofVersion1 => true,
             ConsensusRuleSet::HardforkBeta => false,
             ConsensusRuleSet::HardforkGamma => false,
+            ConsensusRuleSet::HardforkDelta => false,
         }
     }
 
@@ -169,6 +201,7 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::TvmProofVersion1 => true,
             ConsensusRuleSet::HardforkBeta => false,
             ConsensusRuleSet::HardforkGamma => false,
+            ConsensusRuleSet::HardforkDelta => false,
         }
     }
 
@@ -179,6 +212,7 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::TvmProofVersion1 => false,
             ConsensusRuleSet::HardforkBeta => true,
             ConsensusRuleSet::HardforkGamma => true,
+            ConsensusRuleSet::HardforkDelta => true,
         }
     }
 
@@ -189,6 +223,7 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::TvmProofVersion1 => false,
             ConsensusRuleSet::HardforkBeta => true,
             ConsensusRuleSet::HardforkGamma => true,
+            ConsensusRuleSet::HardforkDelta => true,
         }
     }
 
@@ -198,7 +233,29 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::HardforkAlpha
             | ConsensusRuleSet::TvmProofVersion1
             | ConsensusRuleSet::HardforkBeta => None,
-            ConsensusRuleSet::HardforkGamma => Some(TX_BACKDATING_LIMIT),
+            ConsensusRuleSet::HardforkGamma | ConsensusRuleSet::HardforkDelta => {
+                Some(TX_BACKDATING_LIMIT)
+            }
+        }
+    }
+
+    /// Whether the `SingleProof` program carries the
+    /// [`Fix`](crate::transaction::validity::tasm::single_proof::fix_branch::FixBranch)
+    /// branch, which recursively verifies a `LinkProof` -- i.e. whether a
+    /// chained transaction can become block-borne.
+    ///
+    /// This is the one difference between the gamma and delta `SingleProof`
+    /// programs, and hence the reason there are two of them: a branch more is a
+    /// program hash more, and a claim about a transaction is about whichever
+    /// program the block height selects.
+    pub fn has_fix_branch(&self) -> bool {
+        match self {
+            ConsensusRuleSet::Reboot
+            | ConsensusRuleSet::HardforkAlpha
+            | ConsensusRuleSet::TvmProofVersion1
+            | ConsensusRuleSet::HardforkBeta
+            | ConsensusRuleSet::HardforkGamma => false,
+            ConsensusRuleSet::HardforkDelta => true,
         }
     }
 
@@ -220,6 +277,7 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::TvmProofVersion1 => unreachable!("Lustration not active"),
             ConsensusRuleSet::HardforkBeta => false,
             ConsensusRuleSet::HardforkGamma => true,
+            ConsensusRuleSet::HardforkDelta => true,
         }
     }
 
@@ -231,6 +289,22 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::TvmProofVersion1 => TritonProofVersion::V1,
             ConsensusRuleSet::HardforkBeta => TritonProofVersion::V1,
             ConsensusRuleSet::HardforkGamma => TritonProofVersion::V5,
+
+            // Delta ships together with an upstream Triton VM bump, so its
+            // claims will carry a higher version -- but that version cannot be
+            // named here ahead of the dependency. `triton_vm::proof::
+            // CURRENT_VERSION` is compiled *into the consensus programs*: the
+            // tasm claim generator pushes it as a literal
+            // (`tasm/claims/new_claim.rs`), and `Claim::new` stamps it on every
+            // recursive claim built in Rust. Naming a version the linked VM
+            // does not use therefore breaks recursion outright -- operand
+            // proofs answer one version, every verifier expects another.
+            //
+            // So delta tracks the linked VM, and moves when the dependency
+            // does. `newest_rule_set_tracks_the_linked_triton_vm` fails at that
+            // moment, which is the cue to give delta a variant of its own and
+            // leave gamma pinned at V5.
+            ConsensusRuleSet::HardforkDelta => TritonProofVersion::V5,
         }
     }
 
@@ -241,7 +315,8 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::HardforkAlpha
             | ConsensusRuleSet::TvmProofVersion1
             | ConsensusRuleSet::HardforkBeta
-            | ConsensusRuleSet::HardforkGamma => {
+            | ConsensusRuleSet::HardforkGamma
+            | ConsensusRuleSet::HardforkDelta => {
                 // This size is 8MB which should keep it feasible to run archival nodes for
                 // many years without requiring excessive disk space.
                 1_000_000
@@ -272,7 +347,8 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::HardforkAlpha
             | ConsensusRuleSet::TvmProofVersion1
             | ConsensusRuleSet::HardforkBeta
-            | ConsensusRuleSet::HardforkGamma => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
+            | ConsensusRuleSet::HardforkGamma
+            | ConsensusRuleSet::HardforkDelta => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
         }
     }
     pub fn max_num_outputs(&self) -> usize {
@@ -281,7 +357,8 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::HardforkAlpha
             | ConsensusRuleSet::TvmProofVersion1
             | ConsensusRuleSet::HardforkBeta
-            | ConsensusRuleSet::HardforkGamma => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
+            | ConsensusRuleSet::HardforkGamma
+            | ConsensusRuleSet::HardforkDelta => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
         }
     }
     pub fn max_num_announcements(&self) -> usize {
@@ -290,7 +367,8 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::HardforkAlpha
             | ConsensusRuleSet::TvmProofVersion1
             | ConsensusRuleSet::HardforkBeta
-            | ConsensusRuleSet::HardforkGamma => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
+            | ConsensusRuleSet::HardforkGamma
+            | ConsensusRuleSet::HardforkDelta => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
         }
     }
 
@@ -490,6 +568,47 @@ pub(crate) mod tests {
             ConsensusRuleSet::HardforkGamma
                 .triton_proof_version()
                 .version(),
+        );
+        assert_eq!(
+            5,
+            ConsensusRuleSet::HardforkDelta
+                .triton_proof_version()
+                .version(),
+        );
+    }
+
+    /// The newest rule set must name the version the *linked* Triton VM uses.
+    ///
+    /// `triton_vm::proof::CURRENT_VERSION` is baked into the consensus programs
+    /// themselves -- the tasm claim generator pushes it as a literal, and
+    /// `Claim::new` stamps it on every recursive claim built in Rust. A rule set
+    /// naming any other version therefore cannot recurse: its operand proofs
+    /// answer one version while every verifier, in-VM and out, expects another.
+    ///
+    /// This is also the tripwire for hardfork delta's planned Triton VM bump.
+    /// When the dependency moves to 6 this fails, and the fix is to give delta a
+    /// `TritonProofVersion` variant of its own while gamma stays pinned at V5 --
+    /// which is the point at which the fork becomes deployable.
+    #[test]
+    fn newest_rule_set_tracks_the_linked_triton_vm() {
+        use tasm_lib::triton_vm::proof::CURRENT_VERSION;
+
+        assert_eq!(
+            CURRENT_VERSION,
+            ConsensusRuleSet::HardforkDelta
+                .triton_proof_version()
+                .version(),
+            "the newest rule set must use the linked Triton VM's claim version, \
+             or recursion breaks: `new_claim.rs` compiles CURRENT_VERSION into \
+             the program. If the dependency just bumped, give delta its own \
+             TritonProofVersion variant and leave gamma at V5."
+        );
+        assert_eq!(
+            5,
+            ConsensusRuleSet::HardforkGamma
+                .triton_proof_version()
+                .version(),
+            "gamma's version is history and must never move"
         );
     }
 
