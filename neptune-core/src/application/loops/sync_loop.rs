@@ -943,6 +943,34 @@ impl SyncLoop {
     }
 }
 
+/// Helpers for integration tests.
+#[cfg(any(test, feature = "test-helpers"))]
+pub mod test_helpers {
+    use std::path::PathBuf;
+
+    use anyhow::Result;
+    use neptune_consensus::block::Block;
+    use neptune_primitives::network::Network;
+    use tasm_lib::twenty_first::prelude::MmrMembershipProof;
+
+    use super::rapid_block_download::RapidBlockDownload;
+
+    /// Write sync-store entries for the given blocks and authentication
+    /// paths, such that a sync process started with the same `sync_dir`
+    /// resumes from them: the covered heights count as already downloaded.
+    /// The authentication paths must be valid relative to the sync anchor
+    /// that the syncing node will obtain.
+    pub async fn seed_sync_directory(
+        sync_dir: PathBuf,
+        network: Network,
+        entries: &[(Block, MmrMembershipProof)],
+    ) -> Result<()> {
+        RapidBlockDownload::seed_directory(&Some(sync_dir), network, entries)
+            .await
+            .map_err(|e| anyhow::anyhow!("could not seed sync directory: {e}"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;

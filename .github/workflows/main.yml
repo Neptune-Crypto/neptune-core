@@ -79,6 +79,7 @@ jobs:
             test(verify_all_proof_servers_work) |
             test(basic_sync) |
             test(sync_with_validated_blocks) |
+            test(syncing_peers_complete_sync_from_each_other) |
             test(alice_sends_to_bob_with_proof_collection_capability)
           )'
 
@@ -96,6 +97,7 @@ jobs:
               test(validate_donation_address) |
               test(basic_sync) |
               test(sync_with_validated_blocks) |
+              test(syncing_peers_complete_sync_from_each_other) |
               test(alice_sends_to_bob_with_proof_collection_capability)
               '
 

@@ -486,6 +486,39 @@ pub(crate) enum RapidBlockDownloadError {
     Serialization(String),
 }
 
+/// Test-only extensions of [`RapidBlockDownload`], keeping the knowledge of
+/// its storage format in this file.
+#[cfg(any(test, feature = "test-helpers"))]
+mod test_helpers {
+    use super::*;
+
+    impl RapidBlockDownload {
+        /// Write sync-store entries for the given blocks and authentication
+        /// paths, such that a sync process started with the same `sync_dir`
+        /// resumes from them. Gives tests a way to hand a node a
+        /// predetermined partial download.
+        pub(crate) async fn seed_directory(
+            sync_dir: &Option<PathBuf>,
+            network: Network,
+            entries: &[(Block, MmrMembershipProof)],
+        ) -> Result<(), RapidBlockDownloadError> {
+            let storage_dir = Self::base_storage_dir(sync_dir, network).join("seed/");
+            tokio::fs::create_dir_all(&storage_dir)
+                .await
+                .map_err(|e| RapidBlockDownloadError::IO(e.to_string()))?;
+            for (block, auth_path) in entries {
+                let data = bincode::serialize(&(block, Some(auth_path)))
+                    .map_err(|e| RapidBlockDownloadError::Serialization(e.to_string()))?;
+                tokio::fs::write(storage_dir.join(block.hash().to_hex()), data)
+                    .await
+                    .map_err(|e| RapidBlockDownloadError::IO(e.to_string()))?;
+            }
+
+            Ok(())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;

@@ -52,6 +52,21 @@ impl Display for SyncProgress {
     }
 }
 
+/// Views into the sync progress, for integration tests.
+#[cfg(any(test, feature = "test-helpers"))]
+mod test_helpers {
+    use super::*;
+
+    impl SyncProgress {
+        /// Whether every block in the sync span has been downloaded, whether
+        /// processed or not. The genesis block is part of the span but is
+        /// never downloaded, hence the off-by-one.
+        pub(crate) fn download_is_complete(&self) -> bool {
+            self.num_blocks_downloaded + 1 == self.total_span
+        }
+    }
+}
+
 #[cfg(feature = "mock-rpc")]
 impl rand::distr::Distribution<SyncProgress> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> SyncProgress {

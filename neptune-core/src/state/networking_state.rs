@@ -270,14 +270,20 @@ impl NetworkingState {
 mod test_helpers {
     use super::*;
 
-    /// Whether a running sync process has retained an authentication path
-    /// for the current tip. Exists to give integration tests a view into
-    /// sync-internal state.
+    /// Views into sync-internal state, for integration tests.
     impl NetworkingState {
+        /// Whether a running sync process has retained an authentication path
+        /// for the current tip.
         pub fn sync_tip_auth_path_is_retained(&self) -> bool {
             self.sync_anchor
                 .as_ref()
                 .is_some_and(|sync_anchor| sync_anchor.tip_auth_path.is_some())
+        }
+
+        /// Whether a running sync process has downloaded every block in its
+        /// span, processed or not.
+        pub fn sync_download_is_complete(&self) -> bool {
+            matches!(&self.sync_status, SyncStatus::Syncing(progress) if progress.download_is_complete())
         }
     }
 }

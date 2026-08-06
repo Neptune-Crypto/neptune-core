@@ -2273,11 +2273,9 @@ impl PeerLoopHandler {
                     std::process::exit(255);
                 }
 
-                // Prefer the validated block request, whose response can be
-                // authenticated against the sync anchor without access to the
-                // block's parent. Older peers do not understand it, and
-                // outside of sync mode there is no anchor to validate
-                // against; fall back to the plain block request there.
+                // Prefer the validated block request if possible: requires
+                // that this node is syncing, and that peer understands this
+                // message type.
                 let anchor = if self
                     .peer_handshake_data
                     .version
