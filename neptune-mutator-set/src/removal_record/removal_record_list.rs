@@ -513,6 +513,7 @@ impl RemovalRecordList {
         let expected_authentication_structure_lengths = all_peak_heights
             .into_iter()
             .zip(merkle_leaf_indices_by_tree)
+            .sorted_by_key(|&(peak_height, _)| peak_height)
             .map(|(ph, mlis)| {
                 MerkleTree::authentication_structure_node_indices(1_u64 << ph, &mlis)
                     .unwrap_or_else(|_| {
@@ -524,13 +525,11 @@ impl RemovalRecordList {
                     })
                     .len()
             })
-            .sorted()
             .collect_vec();
         let observed_authentication_structure_lengths = self
             .authentication_structures
             .iter()
             .map(|auth_str| auth_str.len())
-            .sorted()
             .collect_vec();
         if expected_authentication_structure_lengths != observed_authentication_structure_lengths {
             return Err(
@@ -2271,6 +2270,63 @@ mod tests {
                     "Must return expected error on incorrectly sorted tree heights"
                 );
             }
+        }
+
+        #[test]
+        fn no_panic_on_mispaired_authentication_structures() {
+            let num_aocl_leafs = 120;
+            let mut test_runner = TestRunner::deterministic();
+            let mut rng = rng();
+
+            // Find a set of removal records that spans two trees whose
+            // authentication structures have different lengths; only then can
+            // the structures be mispaired without changing the multiset.
+            let mut swapped = None;
+            for _ in 0..100 {
+                let item: Digest = rng.random();
+                let msa_and_records = MsaAndRecords::arbitrary_with((
+                    vec![(item, Digest::default(), Digest::default()); 2],
+                    num_aocl_leafs,
+                ))
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
+
+                let packed = RemovalRecordList::pack(msa_and_records.unpacked_removal_records());
+                let dictionary = &packed[0].target_chunks.dictionary;
+                let Some((i, j)) = (0..dictionary.len())
+                    .cartesian_product(0..dictionary.len())
+                    .find(|&(i, j)| {
+                        dictionary[i].1 .0.authentication_path.len()
+                            != dictionary[j].1 .0.authentication_path.len()
+                    })
+                else {
+                    continue;
+                };
+
+                let mut mispaired = packed.clone();
+                let dictionary = &mut mispaired[0].target_chunks.dictionary;
+                let structure_i = dictionary[i].1 .0.authentication_path.clone();
+                let structure_j = dictionary[j].1 .0.authentication_path.clone();
+                dictionary[i].1 .0.authentication_path = structure_j;
+                dictionary[j].1 .0.authentication_path = structure_i;
+                swapped = Some(mispaired);
+                break;
+            }
+
+            let mispaired = swapped.expect("must find two structures of differing lengths");
+
+            // Per the no-crash contract this must return Err, not panic.
+            let result = RemovalRecordList::try_unpack(mispaired);
+            assert!(
+                matches!(
+                    result,
+                    Err(RemovalRecordListUnpackError::Inconsistency(
+                        RemovalRecordListInconsistency::AuthenticationStructureLength { .. }
+                    ))
+                ),
+                "Must return expected error on mispaired authentication structures. Got: {result:?}"
+            );
         }
 
         #[test]
