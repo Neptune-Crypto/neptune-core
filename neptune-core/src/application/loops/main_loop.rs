@@ -404,7 +404,7 @@ impl MainLoopHandler {
     ///
     /// Sends the result back through the provided channel.
     async fn update_mempool_jobs(
-        mut global_state_lock: GlobalStateLock,
+        global_state_lock: GlobalStateLock,
         update_jobs: Vec<MempoolUpdateJob>,
         job_queue: Arc<TritonVmJobQueue>,
         transaction_update_sender: mpsc::Sender<Vec<MempoolUpdateJobResult>>,
@@ -424,10 +424,10 @@ impl MainLoopHandler {
 
                     // Acquire lock, and drop it immediately.
                     let msa_update = global_state_lock
-                        .lock_guard_mut()
+                        .lock_guard()
                         .await
                         .chain
-                        .archival_state_mut()
+                        .archival_state()
                         .get_mutator_set_update_to_tip(
                             old_msa,
                             SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE,
@@ -476,7 +476,7 @@ impl MainLoopHandler {
                 } => {
                     let upgrade_incentive = UpgradeIncentive::Critical;
                     let Ok(update_job) = global_state_lock
-                        .lock_guard_mut()
+                        .lock_guard()
                         .await
                         .update_single_proof_job(
                             old_kernel.to_owned(),
@@ -1455,7 +1455,7 @@ impl MainLoopHandler {
         // Check if it's time to run the proof-upgrader, and if we're capable
         // of upgrading a transaction proof.
         let upgrade_candidate = {
-            let mut global_state = self.global_state_lock.lock_guard_mut().await;
+            let global_state = self.global_state_lock.lock_guard().await;
             if !attempt_upgrade(&global_state, main_loop_state) {
                 trace!("Not attempting upgrade.");
                 return Ok(());
@@ -1464,8 +1464,7 @@ impl MainLoopHandler {
             debug!("Attempting to run transaction-proof-upgrade");
 
             // Find a candidate for proof upgrade
-            let Some(upgrade_candidate) = get_upgrade_task_from_mempool(&mut global_state).await
-            else {
+            let Some(upgrade_candidate) = get_upgrade_task_from_mempool(&global_state).await else {
                 debug!("Found no transaction-proof to upgrade");
                 return Ok(());
             };

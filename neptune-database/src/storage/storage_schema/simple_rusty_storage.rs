@@ -24,23 +24,26 @@ pub struct SimpleRustyStorage {
 impl StorageWriter for SimpleRustyStorage {
     #[inline]
     async fn persist(&mut self) {
-        let mut write_ops = WriteBatchAsync::new();
+        // Hold the lock across the entire operation, so that no interleaved
+        // write can land between building the batch and clearing the queue.
+        let mut pending_writes = self.schema.pending_writes.lock_guard_mut().await;
 
-        // note: we read all pending ops and perform mutations
-        // in a single atomic operation.
-        {
-            let mut pending_writes = self.schema.pending_writes.lock_guard_mut().await;
-            for op in &pending_writes.write_ops {
-                match op.clone() {
-                    WriteOperation::Write(key, value) => write_ops.op_write(key, value),
-                    WriteOperation::Delete(key) => write_ops.op_delete(key),
-                }
+        let mut write_ops = WriteBatchAsync::new();
+        for op in &pending_writes.write_ops {
+            match op.clone() {
+                WriteOperation::Write(key, value) => write_ops.op_write(key, value),
+                WriteOperation::Delete(key) => write_ops.op_delete(key),
             }
-            pending_writes.write_ops.clear();
-            pending_writes.persist_count += 1;
         }
 
-        self.db.batch_write(write_ops).await
+        self.db.batch_write(write_ops).await;
+
+        // Only clear the queue once the batch write has completed. If this
+        // future is dropped mid-write, the operations stay queued and the next
+        // persist retries them. Redoing an operation is harmless: writes and
+        // deletes are both idempotent.
+        pending_writes.write_ops.clear();
+        pending_writes.persist_count += 1;
     }
 
     async fn drop_unpersisted(&mut self) {

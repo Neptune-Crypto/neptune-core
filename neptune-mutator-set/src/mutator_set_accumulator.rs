@@ -186,40 +186,75 @@ impl MutatorSetAccumulator {
     /// if either the MMR membership proofs are unsynced, or if all its indices
     /// are already set, or if the chunk dictionary is missing entries.
     pub fn can_remove(&self, removal_record: &RemovalRecord) -> bool {
-        let mut have_absent_index = false;
+        self.can_remove_all(std::slice::from_ref(removal_record))
+    }
 
-        // Validate verifies that the all required chunk/MMR membership proof
-        // pairs are present, and that all MMR membership proofs are valid
-        // against the mutator set accumulator.
-        if !removal_record.validate(self) {
-            return false;
-        }
-
-        let swbfi_num_leafs = self.get_batch_index();
-        let active_window_start = u128::from(swbfi_num_leafs) * u128::from(CHUNK_SIZE);
-        for inserted_index in removal_record.absolute_indices.to_vec() {
-            // determine if inserted index lives in active window
-            if inserted_index < active_window_start {
-                let inserted_index_chunkidx = (inserted_index / u128::from(CHUNK_SIZE)) as u64;
-                let (_mmr_mp, chunk) = removal_record
-                    .target_chunks
-                    .get(&inserted_index_chunkidx)
-                    .expect("Presence of required MMR MPs should have already been established.");
-                let relative_index = (inserted_index % u128::from(CHUNK_SIZE)) as u32;
-                if !chunk.contains(relative_index) {
-                    have_absent_index = true;
-                    break;
-                }
-            } else {
-                let relative_index = (inserted_index - active_window_start) as u32;
-                if !self.swbf_active.contains(relative_index) {
-                    have_absent_index = true;
-                    break;
-                }
+    /// Check if a batch of removal records can be applied to a mutator set.
+    ///
+    /// Returns false if some removal record's MMR membership proofs are
+    /// unsynced or its chunk dictionary is missing entries, or if some
+    /// removal record contributes nothing: every removal record must have at
+    /// least one index that is neither set in the Bloom filter already nor
+    /// contributed by any other removal record in the batch.
+    ///
+    /// For a single removal record this coincides with [`Self::can_remove`].
+    /// For larger batches it is slightly stricter than checking
+    /// [`Self::can_remove`] for each record under sequential application:
+    /// sequential application accepts a record whose indices are covered by
+    /// the Bloom filter and *later* records combined. Unlike the sequential
+    /// check, this predicate is independent of the records' order.
+    pub fn can_remove_all(&self, removal_records: &[RemovalRecord]) -> bool {
+        // index -> multiplicity, over the entire batch
+        let mut combined_counts: HashMap<u128, u32> = HashMap::new();
+        for removal_record in removal_records {
+            for index in removal_record.absolute_indices.iter() {
+                *combined_counts.entry(index).or_default() += 1;
             }
         }
 
-        have_absent_index
+        let active_window_start = u128::from(self.get_batch_index()) * u128::from(CHUNK_SIZE);
+        removal_records.iter().all(|removal_record| {
+            // Validate verifies that the all required chunk/MMR membership
+            // proof pairs are present, and that all MMR membership proofs are
+            // valid against the mutator set accumulator.
+            if !removal_record.validate(self) {
+                return false;
+            }
+
+            let mut own_counts: HashMap<u128, u32> = HashMap::new();
+            for index in removal_record.absolute_indices.iter() {
+                *own_counts.entry(index).or_default() += 1;
+            }
+
+            own_counts.into_iter().any(|(inserted_index, own_count)| {
+                // An index contributed by another removal record in the batch
+                // counts as set.
+                // This checks compatibility with all other removal records in
+                // the list.
+                if combined_counts[&inserted_index] > own_count {
+                    return false;
+                }
+
+                // Determine if index was set prior to the application of these
+                // removal records.
+                if inserted_index < active_window_start {
+                    // Index lives in a chunk
+                    let inserted_index_chunkidx = (inserted_index / u128::from(CHUNK_SIZE)) as u64;
+                    let (_mmr_mp, chunk) = removal_record
+                        .target_chunks
+                        .get(&inserted_index_chunkidx)
+                        .expect(
+                            "Presence of required MMR MPs should have already been established.",
+                        );
+                    let relative_index = (inserted_index % u128::from(CHUNK_SIZE)) as u32;
+                    !chunk.contains(relative_index)
+                } else {
+                    // Index lives in the active window
+                    let relative_index = (inserted_index - active_window_start) as u32;
+                    !self.swbf_active.contains(relative_index)
+                }
+            })
+        })
     }
 }
 
@@ -582,6 +617,66 @@ mod tests {
 
         use super::*;
         use crate::msa_and_records::MsaAndRecords;
+
+        #[test]
+        fn can_remove_all_requires_a_unique_unset_index_per_record() {
+            // All indices lie in the initial active window, so removal records
+            // with empty chunk dictionaries are valid.
+            fn removal_record(indices: [u128; NUM_TRIALS as usize]) -> RemovalRecord {
+                RemovalRecord {
+                    absolute_indices: AbsoluteIndexSet::new(indices),
+                    target_chunks: ChunkDictionary::default(),
+                }
+            }
+            fn indices_from(start: u128) -> [u128; NUM_TRIALS as usize] {
+                core::array::from_fn(|i| start + i as u128)
+            }
+
+            let mut msa = MutatorSetAccumulator::default();
+            let first = removal_record(indices_from(0));
+            let second = removal_record(indices_from(1000));
+
+            // Every record in a batch of disjoint records has unique indices.
+            assert!(msa.can_remove_all(&[]));
+            assert!(msa.can_remove_all(std::slice::from_ref(&first)));
+            assert!(msa.can_remove_all(&[first.clone(), second.clone()]));
+
+            // In a batch of two identical records, neither record has an
+            // index that the other does not also contribute.
+            assert!(!msa.can_remove_all(&[first.clone(), first.clone()]));
+
+            // A record's index multiplicity does not count against itself.
+            let self_repeating = removal_record([9000; NUM_TRIALS as usize]);
+            assert!(msa.can_remove_all(std::slice::from_ref(&self_repeating)));
+
+            // Indices set in the Bloom filter count as covered.
+            msa.remove(&first);
+            assert!(!msa.can_remove_all(std::slice::from_ref(&first)));
+            assert!(!msa.can_remove_all(&[first, second.clone()]));
+            assert!(msa.can_remove_all(std::slice::from_ref(&second)));
+
+            // A record whose indices are covered by the Bloom filter and
+            // another record *combined* invalidates the batch, even though
+            // each record passes the single-record check.
+            let covered = removal_record(core::array::from_fn(|i| {
+                if i < 20 {
+                    i as u128
+                } else {
+                    100 + (i as u128 - 20)
+                }
+            }));
+            let covering = removal_record(core::array::from_fn(|i| {
+                if i < 25 {
+                    100 + i as u128
+                } else {
+                    200 + (i as u128 - 25)
+                }
+            }));
+            assert!(msa.can_remove(&covered));
+            assert!(msa.can_remove(&covering));
+            assert!(!msa.can_remove_all(&[covered.clone(), covering.clone()]));
+            assert!(!msa.can_remove_all(&[covering, covered]));
+        }
 
         #[proptest]
         fn missing_chunk_dictionary_entry_small(

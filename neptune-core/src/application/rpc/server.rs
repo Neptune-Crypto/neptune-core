@@ -3553,7 +3553,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     async fn upgrade(
-        mut self,
+        self,
         _ctx: context::Context,
         token: auth::Token,
         tx_kernel_id: TransactionKernelId,
@@ -3582,7 +3582,7 @@ impl RPC for NeptuneRPCServer {
                 let gobbling_potential = NativeCurrencyAmount::zero();
                 let update_job = self
                     .state
-                    .lock_guard_mut()
+                    .lock_guard()
                     .await
                     .update_single_proof_job(
                         tx.kernel,
@@ -3599,7 +3599,7 @@ impl RPC for NeptuneRPCServer {
                 let gobbling_potential = NativeCurrencyAmount::zero();
                 let raise_job = self
                     .state
-                    .lock_guard_mut()
+                    .lock_guard()
                     .await
                     .upgrade_proof_collection_job(
                         tx.kernel,
