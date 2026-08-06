@@ -59,7 +59,7 @@ impl BlockProgram {
                 | ConsensusRuleSet::HardforkBeta => {
                     Digest::try_from_hex(PRE_HF_GAMMA_PROGRAM_HASH).unwrap()
                 }
-                ConsensusRuleSet::HardforkGamma => Self.hash(),
+                ConsensusRuleSet::HardforkGamma | ConsensusRuleSet::HardforkDelta => Self.hash(),
             };
 
             (hash, consensus_rule_set.triton_proof_version().version())

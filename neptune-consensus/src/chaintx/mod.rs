@@ -7,7 +7,7 @@ mod authenticate_link_kernel_field;
 pub mod cast;
 pub mod chain;
 pub mod forge;
-mod generate_link_proof_claim;
+pub(crate) mod generate_link_proof_claim;
 pub mod link_kernel;
 pub mod link_primitive_witness;
 pub mod link_proof;

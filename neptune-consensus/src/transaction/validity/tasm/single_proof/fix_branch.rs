@@ -1,0 +1,458 @@
+use itertools::Itertools;
+use neptune_primitives::mast_hash::MastHash;
+use tasm_lib::data_type::DataType;
+use tasm_lib::field;
+use tasm_lib::prelude::BasicSnippet;
+use tasm_lib::prelude::Digest;
+use tasm_lib::prelude::Library;
+use tasm_lib::prelude::Tip5;
+use tasm_lib::structure::tasm_object::TasmObject;
+use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
+use tasm_lib::triton_vm;
+use tasm_lib::triton_vm::prelude::*;
+use tasm_lib::verifier::stark_verify::StarkVerify;
+
+use crate::chaintx::generate_link_proof_claim::GenerateLinkProofClaim;
+use crate::chaintx::link_kernel::no_thruputs_subtree_root;
+use crate::chaintx::link_proof::link_proof_public_input;
+use crate::chaintx::link_proof::LinkProof;
+use crate::chaintx::link_tx::LinkTx;
+use crate::chaintx::link_tx::LinkTxProof;
+use crate::proof_abstractions::tasm::program::TritonProgram;
+use crate::transaction::validity::neptune_proof::Proof;
+use crate::transaction::validity::single_proof::DISCRIMINANT_FOR_FIX;
+use crate::transaction::TransactionKernel;
+
+/// The witness consumed by [`FixBranch`].
+///
+/// Holds the chained transaction leaving the chain pipeline: the kernel it
+/// becomes, and the `LinkProof` backing it.
+///
+/// The thruputs are not among the fields, and neither is the `LinkKernel`. They
+/// do not have to be: a `LinkKernel` with no thruputs is its transaction kernel
+/// paired with a constant (see [`no_thruputs_subtree_root`]), so the branch
+/// derives the link kernel's MAST hash from the transaction kernel's, and a
+/// `LinkTx` that still carries thruputs simply has no proof answering the claim
+/// the branch builds. The empty thruputs are not a separate check; they are
+/// baked into the constant. This is [`Cast`](crate::chaintx::cast::Cast)'s
+/// binding read in the other direction.
+///
+/// The tasm reads only the proof out of the memory image; the kernel is there
+/// for the prover's sake, being bound to the claim through its MAST hash, which
+/// the branch takes off the public input.
+#[derive(Debug, Clone, BFieldCodec, TasmObject)]
+pub struct FixWitness {
+    pub(crate) kernel: TransactionKernel,
+
+    pub(crate) link_proof: Proof,
+}
+
+impl FixWitness {
+    /// Send a fully resolved chained transaction back to the legacy pipeline.
+    ///
+    /// # Panics
+    ///
+    /// - if `link_tx` still carries thruputs, which is to say it is not yet
+    ///   block-eligible: a thruput is an input no mutator set knows about, and
+    ///   only `Chain` can resolve one.
+    /// - if `link_tx` is witness-backed rather than proof-backed.
+    pub fn fix(link_tx: LinkTx) -> Self {
+        assert!(
+            link_tx.kernel.thruputs.is_empty(),
+            "cannot fix a link transaction with unresolved thruputs"
+        );
+        let LinkTxProof::Proof(link_proof) = link_tx.proof else {
+            panic!("cannot fix a link transaction that is not backed by a link proof");
+        };
+
+        Self {
+            kernel: link_tx.kernel.kernel,
+            link_proof,
+        }
+    }
+
+    /// MAST hash of the transaction kernel this fix produces -- the public
+    /// input of the `SingleProof` claim.
+    pub(crate) fn kernel_mast_hash(&self) -> Digest {
+        self.kernel.mast_hash()
+    }
+
+    /// MAST hash of the [`LinkKernel`](crate::chaintx::link_kernel::LinkKernel)
+    /// the link proof attests to: this transaction's kernel, no thruputs.
+    fn link_kernel_mast_hash(&self) -> Digest {
+        Tip5::hash_pair(self.kernel_mast_hash(), no_thruputs_subtree_root())
+    }
+
+    /// The claim the link proof is verified against.
+    ///
+    /// `single_proof_digest` is `own_program_digest()` at run time. That is the
+    /// whole of the tie between the two programs: `LinkProof` is a family
+    /// `Link[D]` indexed by a `SingleProof` digest it never names itself, and
+    /// `Fix` is what instantiates `D` -- with the digest of the very program
+    /// doing the instantiating, which the outer verifier has already pinned.
+    fn link_proof_claim(&self, single_proof_digest: Digest) -> Claim {
+        let input = link_proof_public_input(self.link_kernel_mast_hash(), single_proof_digest);
+        Claim::new(LinkProof.hash()).with_input(input.individual_tokens)
+    }
+
+    pub(crate) fn populate_nd_streams(
+        &self,
+        nondeterminism: &mut NonDeterminism,
+        single_proof_program_hash: Digest,
+    ) {
+        let claim = self.link_proof_claim(single_proof_program_hash);
+
+        // this check is needed for regtest mode, to prevent a panic
+        // because regtest mode uses mock (empty) proofs.
+        if !triton_vm::verify(Stark::default(), &claim, &self.link_proof) {
+            tracing::warn!("attempting to fix invalid link transaction ...");
+            return;
+        }
+
+        StarkVerify::new_with_dynamic_layout(Stark::default()).update_nondeterminism(
+            nondeterminism,
+            &self.link_proof,
+            &claim,
+        );
+    }
+}
+
+/// `Fix: LinkTx -> Transaction`: send a chained transaction whose thruputs are
+/// all resolved back to the legacy pipeline, where a block can carry it.
+///
+/// The counterpart of [`Cast`](crate::chaintx::cast::Cast), and the other half
+/// of the `Fix`/`Cast` cycle break. `Cast` cannot hardcode the `SingleProof`
+/// digest -- it reads it off the public input -- precisely so that `Fix` *can*
+/// hardcode the `LinkProof` digest, which it does here. The dependency between
+/// the two programs runs one way only, and this is that way.
+///
+/// The branch recursively verifies the link proof against
+/// `{ program: LinkProof, input: [lkmh, own_program_digest()] }`, and that is
+/// nearly all it does. Two things are worth spelling out:
+///
+/// - **`lkmh` is derived, not divined.** It is the transaction kernel's MAST
+///   hash -- which the claim being proven *is about* -- paired with the constant
+///   subtree of an empty thruput list. So the claim binds the link transaction
+///   to this transaction and asserts its thruputs are empty in the same hash.
+/// - **`D := own_program_digest()`.** Every `LinkProof` in the derivation tree
+///   was verified against the `D` its claim carries (`Chain` and `Update` copy
+///   it verbatim, `Forge` ignores it, `Cast` is the only one that lets it name a
+///   program), so instantiating it here means: anything reaching a block was
+///   `Cast` from a genuine `SingleProof` under these very rules.
+///
+/// Nothing else is checked. It does not need to be: no coinbase and no merge bit
+/// hold on the link kernel by induction over the `LinkProof` branches, and those
+/// two leafs sit at the same MAST positions in a `LinkKernel` as in the
+/// `TransactionKernel` it wraps.
+///
+/// This branch exists only from hardfork delta onwards; see
+/// [`ConsensusRuleSet::has_fix_branch`](crate::consensus_rule_set::ConsensusRuleSet::has_fix_branch).
+#[derive(Debug, Copy, Clone)]
+pub struct FixBranch;
+
+impl BasicSnippet for FixBranch {
+    fn parameters(&self) -> Vec<(DataType, String)> {
+        vec![
+            (DataType::Digest, "txk_digest".to_string()),
+            (DataType::VoidPointer, "single_proof_witness".to_string()),
+            (DataType::Bfe, "discriminant".to_string()),
+        ]
+    }
+
+    fn return_values(&self) -> Vec<(DataType, String)> {
+        vec![
+            (DataType::Digest, "txk_digest".to_string()),
+            (DataType::VoidPointer, "single_proof_witness".to_string()),
+            (DataType::Bfe, "minus_1".to_string()),
+        ]
+    }
+
+    fn entrypoint(&self) -> String {
+        "neptune_transaction_single_proof_fix_branch".to_string()
+    }
+
+    fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
+        let audit_preloaded_data =
+            library.import(Box::new(VerifyNdSiIntegrity::<FixWitness>::default()));
+
+        // `D`, from the `LinkProof` claim's point of view, is this program's own
+        // digest -- so the slot the claim generator reads it from is one this
+        // branch writes, not one a dispatcher fills from the public input.
+        let single_proof_digest_alloc = library.kmalloc(u32::try_from(Digest::LEN).unwrap());
+        let generate_link_proof_claim = library.import(Box::new(GenerateLinkProofClaim {
+            single_proof_digest_address: single_proof_digest_alloc.read_address(),
+        }));
+        let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
+            Stark::default(),
+        )));
+
+        let field_link_proof = field!(FixWitness::link_proof);
+
+        // Push a compile-time-known digest such that its 0th element ends up on
+        // top -- the layout `hash` and the claim generator expect.
+        let push_digest = |digest: Digest| {
+            digest
+                .reversed()
+                .values()
+                .into_iter()
+                .flat_map(|v| triton_asm!(push { v }))
+                .collect_vec()
+        };
+
+        triton_asm!(
+            {self.entrypoint()}:
+            // _ [own_program_digest] [txk_digest] *single_proof_witness disc
+
+            place 6
+            // _ [own_program_digest] disc [txk_digest] *single_proof_witness
+
+            addi 2
+            hint witness = stack[0]
+            // _ [own_program_digest] disc [txk_digest] *witness
+            // (`disc` stays buried below the frame until the epilogue.)
+
+            dup 0 call {audit_preloaded_data} pop 1
+            // _ [own_program_digest] disc [txk_digest] *witness
+
+            /* Stash the own program digest where the claim generator reads `D`.
+               This is the one tie between `SingleProof` and `LinkProof` that
+               runs in this direction, and it must be the *own* digest: naming
+               anything else would verify a link proof from another family. */
+            dup 11 dup 11 dup 11 dup 11 dup 11
+            // _ [own_program_digest] disc [txk_digest] *witness [own_program_digest]
+
+            push {single_proof_digest_alloc.write_address()}
+            write_mem {Digest::LEN}
+            pop 1
+            // _ [own_program_digest] disc [txk_digest] *witness
+
+            /* The link kernel this transaction came from: its kernel, with no
+               thruputs. One hash, because the legacy kernel's eight leafs are
+               the left half of the `LinkKernel`'s sixteen and, thruputs being
+               empty, the right child is a constant. A link transaction that
+               still carries thruputs has a different `lkmh`, hence a claim its
+               proof does not answer. */
+            {&push_digest(no_thruputs_subtree_root())}
+            // _ .. [txk_digest] *witness [no_thruputs]
+
+            dup 10 dup 10 dup 10 dup 10 dup 10
+            // _ .. [txk_digest] *witness [no_thruputs] [txk_digest]
+
+            hash
+            // _ [own_program_digest] disc [txk_digest] *witness [lkmh]
+            // (lkmh = hash_pair(txkmh, no_thruputs): tasm `hash` takes the top
+            // operand as the first argument, so txkmh sits on top.)
+
+            {&push_digest(LinkProof.hash())}
+            // _ .. *witness [lkmh] [link_proof_digest]
+
+            call {generate_link_proof_claim}
+            // _ [own_program_digest] disc [txk_digest] *witness *claim
+
+            dup 1
+            {&field_link_proof}
+            // _ [own_program_digest] disc [txk_digest] *witness *claim *link_proof
+
+            call {stark_verify}
+            // _ [own_program_digest] disc [txk_digest] *witness
+
+            pick 6
+            // _ [own_program_digest] [txk_digest] *witness disc
+
+            addi {-(DISCRIMINANT_FOR_FIX as isize) - 1}
+            // _ [own_program_digest] [txk_digest] *witness -1
+
+            return
+        )
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub(crate) mod tests {
+    use super::*;
+    use crate::chaintx::chain::tests::deterministic_chainable_link_primitive_witnesses;
+    use crate::chaintx::chain::tests::forge;
+    use crate::chaintx::mock_single_proof_digest;
+    use crate::consensus_rule_set::ConsensusRuleSet;
+    use crate::proof_abstractions::tasm::builtins as tasm;
+    use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
+    use crate::proof_abstractions::tasm::program::TritonError;
+    use crate::transaction::transaction_kernel::TransactionKernelModifier;
+    use crate::transaction::validity::single_proof::SingleProof;
+    use crate::transaction::validity::single_proof::SingleProofWitness;
+    use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
+
+    impl FixWitness {
+        /// The `Fix` branch of the `SingleProof` rust shadow, called by
+        /// [`SingleProof::source`](crate::transaction::validity::single_proof::SingleProof)
+        /// once it has read the own program digest and `txk_digest` -- mirroring
+        /// the tasm, where the dispatcher does exactly that before `call`ing
+        /// this branch.
+        pub fn branch_source(&self, single_proof_program_digest: Digest, txk_digest: Digest) {
+            /* the link kernel this transaction came from: its kernel, with no
+            thruputs */
+            let lkmh: Digest = Tip5::hash_pair(txk_digest, no_thruputs_subtree_root());
+
+            /* recursively verify the link proof, naming this very program as the
+            `D` the whole `LinkProof` derivation was indexed by */
+            let input = link_proof_public_input(lkmh, single_proof_program_digest);
+            let claim = Claim::new(LinkProof.hash()).with_input(input.individual_tokens);
+            tasm::verify_stark(Stark::default(), &claim, &self.link_proof);
+        }
+    }
+
+    /// The rule set whose `SingleProof` program has this branch. Every test
+    /// below runs that program and no other.
+    const CONSENSUS_RULE_SET: ConsensusRuleSet = ConsensusRuleSet::HardforkDelta;
+
+    /// The `D` a link transaction must be forged under to be fixable: the digest
+    /// of the very program that fixes it.
+    fn single_proof_digest() -> Digest {
+        SingleProof::new(CONSENSUS_RULE_SET).hash()
+    }
+
+    /// Forge a `LinkTx` from the `n`th of the chainable pair, under `d`.
+    ///
+    /// The fixture is `Chain`'s, deliberately: with `d` set to
+    /// `mock_single_proof_digest(0)` the link proof is one `chain.rs` has
+    /// already produced, so the negative below costs a cache hit rather than a
+    /// forge. The predecessor has no thruputs; the successor has one.
+    async fn forged_link_tx(index: usize, num_thruputs: usize, d: Digest) -> LinkTx {
+        let (predecessor, successor) =
+            deterministic_chainable_link_primitive_witnesses(2, num_thruputs);
+        let lpw = [predecessor, successor].into_iter().nth(index).unwrap();
+
+        forge(&lpw, d).await
+    }
+
+    /// `Fix` writes nothing to stdout, so the assertion is that both the Rust
+    /// shadow and the tasm run to completion: every `assert` in either one held,
+    /// and the recursion accepted.
+    fn prop_positive(witness: FixWitness) {
+        let single_proof = SingleProof::new(CONSENSUS_RULE_SET);
+        let witness = SingleProofWitness::from_fix(witness);
+        let input = witness.standard_input();
+
+        single_proof
+            .run_rust(&input, witness.nondeterminism(CONSENSUS_RULE_SET))
+            .unwrap();
+        single_proof
+            .run_tasm(&input, witness.nondeterminism(CONSENSUS_RULE_SET))
+            .unwrap();
+    }
+
+    /// Run `Fix` against `input` and require that it fails, inside the recursive
+    /// verification rather than before it.
+    ///
+    /// The branch asserts nothing of its own -- the link kernel it derives goes
+    /// straight into the claim -- so *every* way of getting it wrong is a claim
+    /// no link proof answers, and "did the recursion actually run" is the only
+    /// thing there is to check.
+    fn expect_rejection_in_stark_verify(witness: FixWitness, input: PublicInput) {
+        let single_proof = SingleProof::new(CONSENSUS_RULE_SET);
+        let witness = SingleProofWitness::from_fix(witness);
+        let nondeterminism = || witness.nondeterminism(CONSENSUS_RULE_SET);
+
+        single_proof.run_rust(&input, nondeterminism()).unwrap_err();
+
+        let Err(TritonError::TritonVMPanic(vm_state, _)) =
+            single_proof.run_tasm(&input, nondeterminism())
+        else {
+            panic!("`Fix` must reject a link proof that does not answer its claim");
+        };
+        assert!(
+            vm_state.contains("stark_verify"),
+            "must fail in the recursive verification, not before it:\n{vm_state}"
+        );
+    }
+
+    /// A chained transaction with nothing left outstanding leaves the chain
+    /// pipeline: its link proof is recursively verified, under a claim naming
+    /// this very program as the `D` the whole derivation was indexed by.
+    ///
+    /// The one test that runs the recursion against a real `LinkProof`, and
+    /// hence the one that says the claim `Fix` builds is the one `LinkProof`
+    /// establishes -- both digests in it, and the kernel binding.
+    ///
+    /// This test involves producing proofs and might take a while to complete
+    /// if there is no proof cache.
+    #[tokio::test]
+    async fn fix_accepts_a_resolved_link_transaction() {
+        let link_tx = forged_link_tx(0, 0, single_proof_digest()).await;
+        prop_positive(FixWitness::fix(link_tx));
+    }
+
+    /// A link transaction that still carries thruputs cannot become block-borne.
+    ///
+    /// This is the property the whole design rests on: a thruput is an input no
+    /// mutator set knows about, so an unresolved -- or fabricated -- one must
+    /// never reach a block. It is enforced by *arithmetic*, not by an assertion:
+    /// the branch derives the link kernel's MAST hash from the transaction
+    /// kernel's on the assumption that there are no thruputs, so a link proof
+    /// about a thruput-carrying kernel simply answers a different claim.
+    ///
+    /// This test involves producing proofs and might take a while to complete
+    /// if there is no proof cache.
+    #[tokio::test]
+    async fn link_transaction_with_thruputs_is_rejected() {
+        let link_tx = forged_link_tx(1, 1, single_proof_digest()).await;
+        assert!(!link_tx.kernel.thruputs.is_empty());
+
+        // `FixWitness::fix` refuses to build this one, which is the Rust-side
+        // half of the same rule; the branch has to refuse it too.
+        let LinkTxProof::Proof(link_proof) = link_tx.proof else {
+            unreachable!("`forge` produces a proof-backed link transaction")
+        };
+        let witness = FixWitness {
+            kernel: link_tx.kernel.kernel,
+            link_proof,
+        };
+
+        let input = witness.kernel_mast_hash().reversed().values().into();
+        expect_rejection_in_stark_verify(witness, input);
+    }
+
+    /// `D` is `own_program_digest()`, and nothing else will do.
+    ///
+    /// The link transaction here is forged under a junk `D`, which is what makes
+    /// such a transaction *inert* rather than invalid: `Forge` and `Cast` let a
+    /// prover name any `D` at all, `Chain` and `Update` refuse to mix them, and
+    /// this is where that freedom is finally cashed out -- the one verifier that
+    /// names a `D` names its own, so a chain indexed by anything else has
+    /// nowhere to go.
+    ///
+    /// Reuses a link proof `chain.rs` produces, so it costs a cache hit rather
+    /// than a forge.
+    #[tokio::test]
+    async fn link_proof_forged_under_another_single_proof_digest_is_rejected() {
+        let link_tx = forged_link_tx(0, 0, mock_single_proof_digest(0)).await;
+        let witness = FixWitness::fix(link_tx);
+
+        let input = witness.kernel_mast_hash().reversed().values().into();
+        expect_rejection_in_stark_verify(witness, input);
+    }
+
+    /// The link proof must attest to the transaction the claim is about.
+    ///
+    /// Only the claim moves here: the witness, and hence the proof and the
+    /// digests extracted against it, are the ones the positive test uses. The
+    /// branch reads `txkmh` off the public input and derives the link kernel
+    /// from it, so a different `txkmh` is a different `lkmh` -- the very same
+    /// single hash that [`link_transaction_with_thruputs_is_rejected`] breaks,
+    /// approached from the other side.
+    ///
+    /// Reuses the proof the positive test makes, so it costs a cache hit rather
+    /// than a forge.
+    #[tokio::test]
+    async fn link_proof_must_attest_to_the_claimed_transaction() {
+        let witness = FixWitness::fix(forged_link_tx(0, 0, single_proof_digest()).await);
+
+        let other_kernel = TransactionKernelModifier::default()
+            .fee(witness.kernel.fee + NativeCurrencyAmount::coins(1))
+            .clone_modify(&witness.kernel);
+        let input = other_kernel.mast_hash().reversed().values().into();
+
+        expect_rejection_in_stark_verify(witness, input);
+    }
+}

@@ -216,8 +216,15 @@ verified", i.e. universal forgery. Covered by §Negative tests for `D`.
         to agree on it, so it is cheaper to establish -- and to test -- on two
         branches than on four. `Forge` carries `D` without reading it; `Chain`
         passes it through.
-- [ ] `SingleProofWitness::Fix(FixWitness)` — new variant on the *existing*
-      enum; recursively verifies a LinkProof, asserts `thruputs == []`
+- [x] `SingleProofWitness::Fix(FixWitness)` — new variant on the *existing*
+      enum (discriminant 3); recursively verifies a `LinkProof`. It holds the
+      transaction kernel and the link proof, and nothing else: `thruputs == []`
+      is not a field and not an assertion but the shape of the derived `lkmh`.
+  - [x] `SingleProofWitness` loses its `SecretWitness` impl in the process.
+        `program`/`claim`/`nondeterminism`/`produce` take a `ConsensusRuleSet`,
+        because from delta onwards a witness cannot say by itself which of the
+        two `SingleProof` programs it is being proven under, and the branches
+        that recurse have to name the right digest.
 
 ## Tasm
 Four produce a `LinkProof`; `Fix` produces a `SingleProof`.
@@ -366,14 +373,29 @@ would bind that check to the wrong tree without crashing.
         what says it is valid, and `Cast` adding nothing to it. In particular the
         mutator set is untouched: the cast link transaction names whichever one
         the transaction named, and requiring agreement is `Chain`'s job.
-- [ ] **Fix** = new `SingleProof` branch: recursively verify the `LinkProof`
-      against `{ program: <hardcoded LinkProof digest>, input:
-      [lkmh, own_program_digest()] }`, assert `thruputs == []`, produce a
-      standard `SingleProof`. `D` is already the claim's second input, so `Fix`
-      only has to *name* `own_program_digest()` there -- no claim-shape change
-      left to make. The `own_program_digest()` in that claim is the
-      sole tie between the two programs. Changes the `SingleProof` program hash
-      (see §Consensus change).
+- [x] **Fix** = new `SingleProof` branch
+      (`transaction/validity/tasm/single_proof/fix_branch.rs`): recursively
+      verify the `LinkProof` against
+      `{ program: <hardcoded LinkProof digest>, input:
+      [lkmh, own_program_digest()] }` and produce a standard `SingleProof`. `D`
+      is already the claim's second input, so `Fix` only has to *name*
+      `own_program_digest()` there -- no claim-shape change left to make. The
+      `own_program_digest()` in that claim is the sole tie between the two
+      programs. Changes the `SingleProof` program hash (see §Consensus change).
+  - [x] `thruputs == []` is not a separate assertion. `lkmh` is *derived*, not
+        divined: `hash_pair(txkmh, no_thruputs_subtree_root())`, where `txkmh` is
+        the public input -- i.e. the very transaction the outer claim is about.
+        One hash binds the kernel and empties the thruputs at once, `Cast`'s
+        binding read in the other direction. A link transaction that still
+        carries thruputs has a different `lkmh` and so answers a different
+        claim. (`link_transaction_with_thruputs_is_rejected`)
+  - [x] no coinbase and no merge bit are *not* re-checked: they hold on the link
+        kernel by induction over the `LinkProof` branches, and those two leafs
+        sit at the same MAST positions in a `LinkKernel` as in the
+        `TransactionKernel` it wraps.
+  - [x] the branch asserts nothing of its own, so it declares no error IDs:
+        every way of getting it wrong is a claim no link proof answers, and the
+        negatives all land inside `stark_verify`.
 - [x] claim generators for each; the `LinkProof` claim generator takes
       `(lkmh, D)` — `chaintx/generate_link_proof_claim.rs`, mirroring
       `GenerateSingleProofClaim`, whose second parameter is already a
@@ -384,9 +406,40 @@ would bind that check to the wrong tree without crashing.
       goes on, or it lands past `dup 15`.
 
 ## Consensus change (because SingleProof gains `Fix`)
-- [ ] New `ConsensusRuleSet` variant + per-network activation `BlockHeight`s
-      (`consensus_rule_set.rs::infer_from`)
-- [ ] Pin the new `SingleProof` program hash + the `LinkProof` program hash
+- [x] New `ConsensusRuleSet` variant + per-network activation `BlockHeight`s
+      (`consensus_rule_set.rs::infer_from`): `HardforkDelta`, at
+      `BLOCK_HEIGHT_HARDFORK_DELTA_{MAIN_NET,TESTNET}`. **The heights are
+      placeholders** (60_000 / 6_000) and want a real schedule before release.
+  - [x] Delta also bumps the claim's Triton VM version (`V5` -> `V6`), the fork
+        being deployed together with the upstream bump. So a gamma proof fails a
+        delta claim twice over: wrong program digest *and* wrong version.
+  - [ ] `TritonProofVersion::V6` is ahead of the linked `triton-vm`, whose
+        `CURRENT_VERSION` is what `Claim::new` stamps -- so a delta proof
+        produced *today* would carry version 5 and answer nothing.
+        `produce_single_proof` accepts delta anyway, which is unreachable (no
+        caller names delta, and the activation height is far off) but wrong
+        until the dependency lands.
+        `newest_producible_version_is_the_linked_one` is the tripwire: it fails
+        the moment `CURRENT_VERSION` reaches 6, which is when delta becomes
+        producible and its proof artifacts want regenerating.
+  - [x] `SingleProof` becomes a family indexed by the rule set, with
+        `ConsensusRuleSet::has_fix_branch` as the one axis: two programs, two
+        `OnceLock`s. Everything that produces or names a single proof takes a
+        rule set, so the pre-delta program keeps running until the activation
+        height, as it must.
+  - [ ] `infer_from`'s catch-all (RegTest, TestnetMock, Testnet(n>0)) still
+        answers gamma, so `Fix` is unreachable end-to-end there. Flip it to
+        delta together with §Integration -- not before, since nothing yet
+        builds a `LinkTx` on those networks and flipping invalidates every
+        cached proof they use.
+  - [ ] `ConsensusRuleSet::default()` is still gamma, deliberately: it is the
+        rule set in force, and a caller that forgets to thread the real one
+        should fall back to what today's peers accept. Move it with the
+        activation.
+- [x] Pin the new `SingleProof` program hash + the `LinkProof` program hash.
+      Both `SingleProof` programs are pinned -- `tests::gamma_program` is the
+      guard that adding `Fix` left the pre-delta program untouched, down to the
+      static-memory addresses (which is why `FixBranch` is imported last).
 - [ ] soundness audit: `SingleProof` `Fix` branch, and `Forge`'s inlined RRI
       + the recursion in `Chain`/`Update`/`Cast`, including the verbatim `D`
       pass-through
@@ -604,8 +657,12 @@ unmatched thruput is un-`Fix`able (see §Motivation).
       `LinkTx` can reach a block via `Fix`, and test it wherever it lands.
 
 ### onto `Fix`
-- [ ] invalid `LinkProofWitness` discriminant crashes (← `invalid_discriminant_crashes_execution`)
-- [ ] invalid `SingleProofWitness` discriminant crashes (now that `Fix` is a variant)
+- [x] invalid `LinkProofWitness` discriminant crashes (← `invalid_discriminant_crashes_execution`)
+- [x] invalid `SingleProofWitness` discriminant crashes (now that `Fix` is a
+      variant) -- `single_proof.rs::invalid_discriminant_crashes_execution` now
+      runs over both programs, and the pre-delta one gets `Fix`'s discriminant
+      among its illegal values: a `Fix` witness handed to it names a branch that
+      is not there, and must be rejected rather than ignored.
 
 ## Negative tests for `D` (the `SingleProof` digest in the `LinkProof` claim)
 
@@ -686,18 +743,28 @@ Claim / plumbing:
       against a real `SingleProof` and is the only test that does.
 
 `Fix`:
-- [ ] `D ≠ own_program_digest()` in the `LinkProof` claim → rejected. Including
-      the two realistic wrong values: the *previous* rule set's `SingleProof`
-      digest, and the `LinkProof` digest itself.
-- [ ] `LinkProof` claim built with a program digest ≠ the hardcoded `LinkProof`
-      digest → rejected.
-- [ ] a `Forge`'d `LinkTx` carrying an arbitrary junk `D` → rejected (the inert-
-      by-construction argument, as a test).
-- [ ] `Fix` with non-empty thruputs → rejected (also listed under §New Tests).
+- [x] a `Forge`'d `LinkTx` carrying an arbitrary junk `D` → rejected: the
+      inert-by-construction argument, as a test
+      (`link_proof_forged_under_another_single_proof_digest_is_rejected`). This
+      is also the `D ≠ own_program_digest()` case: the branch reads one digest,
+      its own, so a wrong `D` can only appear on the *proof*, never in the claim
+      it builds. Naming the previous rule set's `SingleProof` digest, or the
+      `LinkProof` digest, is the same test with a different junk value.
+- [x] `Fix` with non-empty thruputs → rejected (also listed under §New Tests):
+      `link_transaction_with_thruputs_is_rejected`.
+- [x] the link proof must attest to the transaction the claim is about
+      (`link_proof_must_attest_to_the_claimed_transaction`) -- the same single
+      hash as the thruputs case, approached from the other side.
 
 Positive counterparts (so the negatives cannot pass vacuously):
+- [x] `Forge → Fix` with `D` = the real `SingleProof` digest accepts
+      (`fix_accepts_a_resolved_link_transaction`) -- the one test that runs
+      `Fix`'s recursion against a real `LinkProof`, and hence the one saying
+      both digits of the claim it builds are the ones `LinkProof` establishes.
 - [ ] end-to-end `Forge → Chain → Fix` with `D` = the real `SingleProof` digest
-      throughout accepts, and the resulting `SingleProof` verifies.
+      throughout accepts, and the resulting `SingleProof` verifies. (The
+      `Forge → Fix` leg above is done; what is missing is a `Chain` in the
+      middle and a *proven* `SingleProof` at the end rather than a program run.)
 - [ ] `Cast → Chain → Fix` round-trip with the real `D` accepts.
 
 
@@ -713,7 +780,8 @@ Positive counterparts (so the negatives cannot pass vacuously):
 - [ ] Negative: `LinkKernel` carrying a coinbase rejected
 - [ ] `Update` then `Fix` == `Fix` on the updated mutator set
 - [ ] `Cast` round-trip: `Cast(tx)` then `Fix` == `tx`
-- [ ] Negative: `Fix` with non-empty thruputs rejected
+- [x] Negative: `Fix` with non-empty thruputs rejected
+      (`link_transaction_with_thruputs_is_rejected`)
 - [x] Negative: `Chain` with mismatched thruputs rejected (a cut-through whose
       commitment matches no output)
 - [ ] Negative: `Chain` with double-spends rejected. Not enforced by the branch

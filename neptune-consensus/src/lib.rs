@@ -152,7 +152,9 @@ mod tests {
             transaction::validity::kernel_to_outputs::KernelToOutputs,
             type_scripts::native_currency::NativeCurrency,
             transaction::validity::removal_records_integrity::RemovalRecordsIntegrity,
-            transaction::validity::single_proof::SingleProof,
+            transaction::validity::single_proof::SingleProof::new(
+                crate::consensus_rule_set::ConsensusRuleSet::HardforkDelta
+            ),
             type_scripts::time_lock::TimeLock,
             // todo: what about those?
             // block_validity::coinbase_is_valid::CoinbaseIsValid,

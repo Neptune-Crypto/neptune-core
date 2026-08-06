@@ -436,6 +436,11 @@ pub(crate) mod tests {
     /// proof-backed test below; the negatives that need no valid proof draw
     /// their fixtures at random instead.
     pub(super) async fn deterministic_cast_witness() -> CastWitness {
+        // `Cast` never inspects `D`, only names it, so the rule set here is
+        // whichever one keeps the transaction's single proof in the cache -- not
+        // necessarily the one the chain pipeline activates under.
+        let consensus_rule_set = ConsensusRuleSet::HardforkGamma;
+
         let mut test_runner = TestRunner::deterministic();
         let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 1)
             .new_tree(&mut test_runner)
@@ -445,7 +450,7 @@ pub(crate) mod tests {
             &primitive_witness,
             vm_job_queue(),
             TritonVmProofJobOptions::default(),
-            ConsensusRuleSet::HardforkGamma,
+            consensus_rule_set,
         )
         .await
         .unwrap();
@@ -455,7 +460,7 @@ pub(crate) mod tests {
                 kernel: primitive_witness.kernel,
                 proof: TransactionProof::SingleProof(proof),
             },
-            SingleProof.hash(),
+            SingleProof::new(consensus_rule_set).hash(),
         )
     }
 
