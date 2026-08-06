@@ -954,6 +954,12 @@ impl Block {
             return true;
         }
 
+        // Reject values that the difficulty control mechanism can never
+        // produce, rather than dividing by zero.
+        if previous_block_header.difficulty < Difficulty::MINIMUM {
+            return false;
+        }
+
         let parent_threshold = previous_block_header.difficulty.target();
         if network.allows_mock_pow() && self.is_valid_mock_pow(parent_threshold) {
             return true;
@@ -1849,6 +1855,32 @@ pub(crate) mod tests {
                  under {consensus_rule_set}"
             );
         }
+    }
+
+    #[test]
+    fn has_proof_of_work_rejects_parent_difficulty_below_minimum() {
+        let network = Network::Testnet(42);
+        let genesis = Block::genesis(network);
+        assert!(
+            network.difficulty_reset_interval().is_none(),
+            "test assumption: no difficulty reset, so the parent's target is computed"
+        );
+
+        // `Difficulty`'s derived decoders build the value field-by-field,
+        // without going through the constructor that enforces the minimum.
+        let encoding_len = Difficulty::MINIMUM.encode().len();
+        let zero_difficulty =
+            *Difficulty::decode(&vec![BFieldElement::new(0); encoding_len]).unwrap();
+        assert!(
+            zero_difficulty < Difficulty::MINIMUM,
+            "test assumption: decoding bypasses the minimum difficulty"
+        );
+
+        let mut parent_header = genesis.header().to_owned();
+        parent_header.difficulty = zero_difficulty;
+
+        let block = invalid_empty_block(&genesis, network);
+        assert!(!block.has_proof_of_work(network, &parent_header),);
     }
 
     #[test]
