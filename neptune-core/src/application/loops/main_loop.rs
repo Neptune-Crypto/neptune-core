@@ -2473,7 +2473,7 @@ impl MainLoopHandler {
                 // files. Just drop the handle.
                 return None;
             }
-            SyncToMain::TipSuccessor(block) => {
+            SyncToMain::TipSuccessor { block, auth_path } => {
                 log_slow_scope!(fn_name!() + "::PeerTaskToMain::TipSuccessor");
                 let height = block.header().height;
 
@@ -2485,8 +2485,18 @@ impl MainLoopHandler {
                     if let Err(e) = global_state_mut.store_block_not_tip(*block).await {
                         panic!("Could not store sync block {}: {e}.", height);
                     }
-                } else if let Err(e) = global_state_mut.set_new_tip(*block).await {
-                    panic!("Could not store sync block {} as new tip: {e}.", height);
+                } else {
+                    if let Err(e) = global_state_mut.set_new_tip(*block).await {
+                        panic!("Could not store sync block {} as new tip: {e}.", height);
+                    }
+
+                    // The block is now the tip, and the sync loop deletes its
+                    // copy of the block's authentication path. Retain the path
+                    // for the tip as it's needed to serve other syncing peers
+                    // with authentication paths.
+                    if let Some(sync_anchor) = &mut global_state_mut.net.sync_anchor {
+                        sync_anchor.tip_auth_path = auth_path.map(|auth_path| (height, auth_path));
+                    }
                 }
 
                 // Flush.

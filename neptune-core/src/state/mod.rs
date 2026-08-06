@@ -1981,7 +1981,9 @@ impl GlobalState {
             listen_port,
             network: self.cli().network,
             instance_id: self.net.instance_id,
-            version: VersionString::new_from_str(VERSION),
+            version: VersionString::new_from_str(
+                self.cli().advertised_version.as_deref().unwrap_or(VERSION),
+            ),
             // For now, all nodes are archival nodes
             is_archival_node: self.chain.is_archival_node(),
             is_bootstrapper_node: self.cli().bootstrap,

@@ -10,6 +10,7 @@ use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::network::Network;
 use rand::rng;
 use rand::Rng;
+use tasm_lib::twenty_first::prelude::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::Receiver;
@@ -355,7 +356,7 @@ impl SyncLoop {
                                 }
 
                                 tracing::debug!("chain extension is one ahead of current tip; sending directly to main loop.");
-                                if !Self::ensure_send_tip_successor(&self.main_channel_sender, *block.to_owned()).await {
+                                if !Self::ensure_send_tip_successor(&self.main_channel_sender, *block.to_owned(), None).await {
                                     tracing::error!("Could not send tip-successor to main loop. Terminating sync loop.");
                                     break;
                                 }
@@ -817,12 +818,16 @@ impl SyncLoop {
     async fn ensure_send_tip_successor(
         channel_to_main: &Sender<SyncToMain>,
         successor: Block,
+        auth_path: Option<MmrMembershipProof>,
     ) -> bool {
         // send to main
         // important payload, so report on delays
         let max = 1000;
         for i in 1..=max {
-            match channel_to_main.try_send(SyncToMain::TipSuccessor(Box::new(successor.clone()))) {
+            match channel_to_main.try_send(SyncToMain::TipSuccessor {
+                block: Box::new(successor.clone()),
+                auth_path: auth_path.clone(),
+            }) {
                 Ok(_) => {
                     if i > 1 {
                         tracing::debug!("succeeded sending tip-successor block to main");
@@ -860,8 +865,8 @@ impl SyncLoop {
         let mut tip = current_tip;
         while download_state.have_received(tip.header().height.next()) {
             // get successor block
-            let Ok(successor) = download_state
-                .get_received_block(tip.header().height.next())
+            let Ok((successor, auth_path)) = download_state
+                .get_received_entry(tip.header().height.next())
                 .await
             else {
                 tracing::error!(
@@ -898,7 +903,9 @@ impl SyncLoop {
             }
 
             // send to main
-            if !Self::ensure_send_tip_successor(&channel_to_main, successor.clone()).await {
+            if !Self::ensure_send_tip_successor(&channel_to_main, successor.clone(), auth_path)
+                .await
+            {
                 tracing::error!(
                     "Sync loop: failed to send tip-successor block to main \
                     loop. Aborting sync loop."
@@ -1066,7 +1073,7 @@ mod tests {
                                 }
                                 break;
                             }
-                            SyncToMain::TipSuccessor(block) => {
+                            SyncToMain::TipSuccessor { block, auth_path: _ } => {
                                 tracing::debug!("mock main loop: processing block {}", block.header().height);
                                 if block.header().height == self.current_tip_height.next() {
                                     self.current_tip_height = block.header().height;

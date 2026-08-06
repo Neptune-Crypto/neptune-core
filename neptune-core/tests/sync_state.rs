@@ -7,7 +7,98 @@ use neptune_primitives::network::Network;
 use tracing::info;
 
 #[tokio::test(flavor = "multi_thread")]
-pub async fn bob_catches_up_to_alices_new_blocks_with_sync_state() {
+pub async fn sync_with_validated_blocks() {
+    logging::tracing_logger();
+    let network = Network::RegTest;
+
+    let timeout_secs = 20;
+
+    // Set advertised version so that the validated-block machinery is
+    // guaranteed to be active on both sides: Bob/ requests blocks authenticated
+    // against his sync anchor, and ignores plain middle blocks from Alice, who
+    // is capable of serving authenticated blocks.
+    // The sync below can therefore only complete through `ValidatedBlock`
+    // responses.
+    let mut base_args = GenesisNode::default_args().await;
+    base_args.tx_proving_capability = Some(TxProvingCapability::SingleProof);
+    base_args.sync_mode_threshold = 11;
+    base_args.sync_dir = Some(
+        GenesisNode::integration_test_data_directory(network)
+            .unwrap()
+            .root_dir_path()
+            .join("rapid-block-download"),
+    );
+    base_args.advertised_version = Some("0.99.0".to_string());
+    let [mut alice, bob] = GenesisNode::start_connected_cluster(
+        &GenesisNode::cluster_id(None),
+        2,
+        Some(base_args),
+        timeout_secs,
+    )
+    .await
+    .unwrap();
+
+    // Stop transaction and block sharing to ensure Bob sees all mined blocks
+    // at once.
+    alice.gsl.api_mut().regtest_mut().freeze().await;
+
+    // Alice mines 15 blocks that forces Bob into sync mode
+    alice
+        .gsl
+        .api_mut()
+        .regtest_mut()
+        .mine_blocks_to_wallet(15, false)
+        .await
+        .unwrap();
+
+    alice
+        .wait_until_block_height(15, timeout_secs)
+        .await
+        .unwrap();
+    info!("Alice reached block height 15");
+
+    // Start sharing blocks again
+    alice.gsl.api_mut().regtest_mut().unfreeze().await;
+
+    // Mine one more block to force a state share/update
+    alice
+        .gsl
+        .api_mut()
+        .regtest_mut()
+        .mine_blocks_to_wallet(1, false)
+        .await
+        .unwrap();
+
+    // While Bob processes the downloaded blocks, his main loop must retain
+    // each processed block's authentication path — the enabler for serving
+    // his processed blocks to other syncing peers. The retained path is only
+    // observable while the sync process is running.
+    let start = std::time::Instant::now();
+    let timeout = std::time::Duration::from_secs(timeout_secs.into());
+    loop {
+        if bob
+            .gsl
+            .lock_guard()
+            .await
+            .net
+            .sync_tip_auth_path_is_retained()
+        {
+            break;
+        }
+        assert!(
+            start.elapsed() < timeout,
+            "Bob must retain a tip authentication path while syncing"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+    }
+    info!("Bob retained the tip's authentication path during sync");
+
+    bob.wait_until_synced(timeout_secs).await.unwrap();
+    bob.wait_until_block_height(16, timeout_secs).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+pub async fn basic_sync() {
     logging::tracing_logger();
     let network = Network::RegTest;
 

@@ -17,7 +17,16 @@ pub(crate) struct BlockRequest {
 #[derive(Debug, Clone)]
 pub(crate) enum SyncToMain {
     Finished(BlockHeight),
-    TipSuccessor(Box<Block>),
+    TipSuccessor {
+        block: Box<Block>,
+        /// The authentication path the block arrived with, proving its
+        /// membership in the chain being synced towards, if any. Retained by
+        /// the main loop when the block becomes the new tip, since the sync
+        /// loop deletes its copy after the handover.
+        ///
+        /// If provided, it is assumed to be valid.
+        auth_path: Option<MmrMembershipProof>,
+    },
     RequestBlocks(Vec<BlockRequest>),
     Status(SyncProgress),
     Punish(Vec<PeerHandle>),

@@ -393,7 +393,7 @@ impl RapidBlockDownload {
 
     /// Read a block and its stored authentication path, if any, from the
     /// storage directory.
-    async fn get_received_entry(
+    pub(crate) async fn get_received_entry(
         &self,
         height: BlockHeight,
     ) -> Result<(Block, Option<MmrMembershipProof>), RapidBlockDownloadError> {

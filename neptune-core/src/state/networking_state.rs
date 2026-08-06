@@ -17,6 +17,7 @@ use rand::rng;
 use rand::Rng;
 use tasm_lib::prelude::Digest;
 use tasm_lib::twenty_first::prelude::Mmr;
+use tasm_lib::twenty_first::prelude::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
 use crate::application::loops::sync_loop::sync_progress::SyncProgress;
@@ -38,6 +39,12 @@ pub(crate) struct SyncAnchor {
 
     /// Indicates the block that we have currently synced to under this anchor.
     pub(crate) champion: (BlockHeight, Digest),
+
+    /// Authentication path of the node's tip, relative to `block_mmr`, if that
+    /// block arrived with one. Processed blocks are deleted from the sync
+    /// store, so this retained path is what allows membership proofs to be
+    /// extended to anchor-relative ones when serving other syncing peers.
+    pub(crate) tip_auth_path: Option<(BlockHeight, MmrMembershipProof)>,
 
     /// The last time this anchor was either created or updated.
     pub(crate) updated: SystemTime,
@@ -70,6 +77,7 @@ impl SyncAnchor {
             cumulative_proof_of_work: claimed_cumulative_pow,
             block_mmr: claimed_block_mmra,
             champion: (claimed_height, claimed_block_digest),
+            tip_auth_path: None,
             updated: SystemTime::now(),
             status,
         }
@@ -255,5 +263,21 @@ impl NetworkingState {
 
     pub(crate) fn last_disconnection_time_of_peer(&self, id: InstanceId) -> Option<SystemTime> {
         self.disconnection_times.get(&id).copied()
+    }
+}
+
+#[cfg(any(test, feature = "test-helpers"))]
+mod test_helpers {
+    use super::*;
+
+    /// Whether a running sync process has retained an authentication path
+    /// for the current tip. Exists to give integration tests a view into
+    /// sync-internal state.
+    impl NetworkingState {
+        pub fn sync_tip_auth_path_is_retained(&self) -> bool {
+            self.sync_anchor
+                .as_ref()
+                .is_some_and(|sync_anchor| sync_anchor.tip_auth_path.is_some())
+        }
     }
 }
