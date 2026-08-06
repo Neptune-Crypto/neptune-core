@@ -17,6 +17,8 @@ use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 use tracing::info;
 
+use super::tasm::single_proof::fix_branch::FixBranch;
+use super::tasm::single_proof::fix_branch::FixWitness;
 use super::tasm::single_proof::merge_branch::MergeWitness;
 use super::tasm::single_proof::update_branch::UpdateWitness;
 use crate::consensus_rule_set::ConsensusRuleSet;
@@ -25,7 +27,6 @@ use crate::proof_abstractions::proof_builder::ProofBuilder;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
-use crate::proof_abstractions::SecretWitness;
 use crate::transaction::primitive_witness::PrimitiveWitness;
 use crate::transaction::transaction_kernel::TransactionKernel;
 use crate::transaction::transaction_kernel::TransactionKernelField;
@@ -45,6 +46,10 @@ pub(crate) const DISCRIMINANT_FOR_PROOF_COLLECTION: u64 = 0;
 pub(crate) const DISCRIMINANT_FOR_UPDATE: u64 = 1;
 pub(crate) const DISCRIMINANT_FOR_MERGE: u64 = 2;
 
+/// Only a legal discriminant from hardfork delta onwards; see
+/// [`ConsensusRuleSet::has_fix_branch`].
+pub(crate) const DISCRIMINANT_FOR_FIX: u64 = 3;
+
 const INVALID_WITNESS_DISCRIMINANT_ERROR: i128 = 1_000_050;
 const NO_BRANCH_TAKEN_ERROR: i128 = 1_000_051;
 const MANIPULATED_PROOF_COLLECTION_WITNESS_ERROR: i128 = 1_000_052;
@@ -54,6 +59,12 @@ pub enum SingleProofWitness {
     Collection(Box<ProofCollection>),
     Update(UpdateWitness),
     Merger(MergeWitness),
+    /// `LinkTx -> Transaction`: send a chained transaction whose thruputs are
+    /// all resolved to a block-borne, `SingleProof`-backed one.
+    ///
+    /// Only the delta `SingleProof` program has this branch; the gamma program
+    /// rejects the discriminant outright.
+    Fix(FixWitness),
     // Wait for Hard Fork One:
     // IntegralMempool(IntegralMempoolMembershipWitness)
 }
@@ -71,16 +82,59 @@ impl SingleProofWitness {
         Self::Merger(merge_witness)
     }
 
+    pub fn from_fix(witness: FixWitness) -> Self {
+        Self::Fix(witness)
+    }
+
+    /// MAST hash of the transaction kernel this witness attests to -- the public
+    /// input of the `SingleProof` claim.
+    pub fn kernel_mast_hash(&self) -> Digest {
+        match self {
+            Self::Collection(pc) => pc.kernel_mast_hash,
+            Self::Update(witness) => witness.new_kernel_mast_hash,
+            Self::Merger(witness) => witness.new_kernel.mast_hash(),
+            Self::Fix(witness) => witness.kernel_mast_hash(),
+        }
+    }
+
+    /// The program's (public/standard) input.
+    pub fn standard_input(&self) -> PublicInput {
+        self.kernel_mast_hash().reversed().values().into()
+    }
+
+    /// The `SingleProof` program of the given rule set.
+    //
+    // Deliberately *not* a `SecretWitness` impl, unlike every other witness in
+    // this crate: `SingleProof` is two programs from hardfork delta onwards, and
+    // a witness does not know which one it is being proven under. Taking the
+    // rule set here forces every caller to say.
+    pub fn program(&self, consensus_rule_set: ConsensusRuleSet) -> Program {
+        SingleProof::new(consensus_rule_set).program()
+    }
+
+    /// The claim this witness is proven against.
+    ///
+    /// Delegates to [`single_proof_claim`], which is the *one* place the shape
+    /// of a `SingleProof` claim is spelled out. Building it here instead would
+    /// mean two constructions that have to agree on both the program digest and
+    /// the claim's Triton VM version -- and the version is part of the
+    /// Fiat-Shamir transcript, so a disagreement is not a mismatched constant
+    /// but a proof that answers nothing.
+    pub fn claim(&self, consensus_rule_set: ConsensusRuleSet) -> Claim {
+        single_proof_claim(self.kernel_mast_hash(), consensus_rule_set)
+    }
+
     /// Prove this witness, yielding a [`SingleProof`]-backed [`Proof`].
     pub async fn produce(
         self,
+        consensus_rule_set: ConsensusRuleSet,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> Result<Proof, CreateProofError> {
-        let claim = self.claim();
-        let nondeterminism = self.nondeterminism();
+        let claim = self.claim(consensus_rule_set);
+        let nondeterminism = self.nondeterminism(consensus_rule_set);
         ProofBuilder::new()
-            .program(self.program())
+            .program(self.program(consensus_rule_set))
             .claim(claim)
             .nondeterminism(|| nondeterminism)
             .job_queue(triton_vm_job_queue)
@@ -127,30 +181,19 @@ impl TasmObject for SingleProofWitness {
             DISCRIMINANT_FOR_MERGE => {
                 Ok(Box::new(Self::Merger(*BFieldCodec::decode(&field_data)?)))
             }
+            DISCRIMINANT_FOR_FIX => Ok(Box::new(Self::Fix(*BFieldCodec::decode(&field_data)?))),
             _ => Err(Box::new(BFieldCodecError::ElementOutOfRange)),
         }
     }
 }
 
-impl SecretWitness for SingleProofWitness {
-    fn standard_input(&self) -> PublicInput {
-        let kernel_mast_hash = match self {
-            Self::Collection(pc) => pc.kernel_mast_hash,
-            Self::Update(witness) => witness.new_kernel_mast_hash,
-            Self::Merger(witness) => witness.new_kernel.mast_hash(),
-        };
-        kernel_mast_hash.reversed().values().into()
-    }
-
-    fn output(&self) -> Vec<BFieldElement> {
-        std::vec![]
-    }
-
-    fn program(&self) -> Program {
-        SingleProof.program()
-    }
-
-    fn nondeterminism(&self) -> NonDeterminism {
+impl SingleProofWitness {
+    /// The non-determinism for the VM that this witness corresponds to.
+    ///
+    /// The rule set is needed because the `Update`, `Merger` and `Fix` branches
+    /// recurse into a claim naming the `SingleProof` program itself, and the
+    /// digest they name has to be the one of the program actually running.
+    pub fn nondeterminism(&self, consensus_rule_set: ConsensusRuleSet) -> NonDeterminism {
         // populate nondeterministic memory with witness
         let mut memory = HashMap::default();
         encode_to_memory(
@@ -161,7 +204,7 @@ impl SecretWitness for SingleProofWitness {
 
         let mut nondeterminism = NonDeterminism::default().with_ram(memory);
         let stark_verify_snippet = StarkVerify::new_with_dynamic_layout(Stark::default());
-        let single_proof_program_hash = SingleProof.hash();
+        let single_proof_program_hash = SingleProof::new(consensus_rule_set).hash();
 
         match self {
             SingleProofWitness::Collection(proof_collection) => {
@@ -230,20 +273,35 @@ impl SecretWitness for SingleProofWitness {
                 witness_of_merge
                     .populate_nd_streams(&mut nondeterminism, single_proof_program_hash);
             }
+            SingleProofWitness::Fix(witness) => {
+                witness.populate_nd_streams(&mut nondeterminism, single_proof_program_hash);
+            }
         }
 
         nondeterminism
     }
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct SingleProof;
+/// The consensus program backing a `SingleProof`-backed
+/// [`Transaction`](crate::transaction::Transaction).
+///
+/// A *family* of programs, one per [`ConsensusRuleSet`], rather than a single
+/// one: hardfork delta adds the [`FixBranch`] and a branch more is a program
+/// hash more. Two rule sets that agree on [`ConsensusRuleSet::has_fix_branch`]
+/// share a program.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct SingleProof {
+    consensus_rule_set: ConsensusRuleSet,
+}
 
 impl SingleProof {
+    pub const fn new(consensus_rule_set: ConsensusRuleSet) -> Self {
+        Self { consensus_rule_set }
+    }
+
     /// Not to be confused with SingleProofWitness::claim
-    fn claim(tx_kernel_mast_hash: Digest) -> Claim {
-        Claim::about_program(&SingleProof.program())
-            .with_input(tx_kernel_mast_hash.reversed().values())
+    fn claim(&self, tx_kernel_mast_hash: Digest) -> Claim {
+        Claim::about_program(&self.program()).with_input(tx_kernel_mast_hash.reversed().values())
     }
 
     /// Generate a [SingleProof] for the transaction, given its primitive
@@ -254,6 +312,7 @@ impl SingleProof {
     /// Use [produce_single_proof] to automatically select the right single
     /// proof version.
     async fn produce(
+        &self,
         primitive_witness: &PrimitiveWitness,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
@@ -265,13 +324,13 @@ impl SingleProof {
         )
         .await?;
         let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
-        let claim = single_proof_witness.claim();
+        let claim = single_proof_witness.claim(self.consensus_rule_set);
 
-        let nondeterminism = single_proof_witness.nondeterminism();
+        let nondeterminism = single_proof_witness.nondeterminism(self.consensus_rule_set);
         info!("Start: generate single proof from proof collection");
 
         let proof = ProofBuilder::new()
-            .program(SingleProof.program())
+            .program(self.program())
             .claim(claim)
             .nondeterminism(|| nondeterminism)
             .job_queue(triton_vm_job_queue)
@@ -298,8 +357,10 @@ pub async fn produce_single_proof(
     consensus_rule_set: ConsensusRuleSet,
 ) -> Result<Proof, CreateProofError> {
     match consensus_rule_set {
-        ConsensusRuleSet::HardforkGamma => {
-            SingleProof::produce(primitive_witness, triton_vm_job_queue, proof_job_options).await
+        ConsensusRuleSet::HardforkGamma | ConsensusRuleSet::HardforkDelta => {
+            SingleProof::new(consensus_rule_set)
+                .produce(primitive_witness, triton_vm_job_queue, proof_job_options)
+                .await
         }
         _ => Err(CreateProofError::DeprecatedConsensusRules),
     }
@@ -325,7 +386,9 @@ pub fn single_proof_claim(
             Claim::new(Digest::try_from_hex(SINGLE_PROOF_PROGRAM_DIGEST_PRE_HF_GAMMA).unwrap())
                 .with_input(tx_kernel_mast_hash.reversed().values().to_vec())
         }
-        ConsensusRuleSet::HardforkGamma => SingleProof::claim(tx_kernel_mast_hash),
+        ConsensusRuleSet::HardforkGamma | ConsensusRuleSet::HardforkDelta => {
+            SingleProof::new(consensus_rule_set).claim(tx_kernel_mast_hash)
+        }
     };
 
     claim.about_version(consensus_rule_set.triton_proof_version().version())
@@ -376,6 +439,15 @@ impl TritonProgram for SingleProof {
         let claim_field_with_size_output = triton_asm!(read_mem 1 addi 1 place 1 addi -1);
         let merkle_verify =
             library.import(Box::new(tasm_lib::hashing::merkle_verify::MerkleVerify));
+
+        // Imported last, and only from hardfork delta onwards, so that the
+        // pre-delta program is unchanged down to the byte: an import both emits
+        // code and hands out static-memory addresses, and every earlier
+        // allocation has to keep the address it had.
+        let fix_branch = self
+            .consensus_rule_set
+            .has_fix_branch()
+            .then(|| library.import(Box::new(FixBranch)));
 
         let verify_scripts_loop_label = "neptune_transaction_verify_lock_scripts_loop";
         let verify_scripts_loop_body = triton_asm! {
@@ -681,6 +753,17 @@ impl TritonProgram for SingleProof {
                 return
         };
 
+        // The `Fix` discriminant is legal only where the branch exists: a
+        // pre-delta program must reject a `Fix` witness rather than fall through
+        // it, which is the same reason this check exists at all.
+        let (accept_fix_discriminant, dispatch_fix) = match fix_branch {
+            None => (triton_asm!(), triton_asm!()),
+            Some(fix_branch) => (
+                triton_asm!(dup 1 push {DISCRIMINANT_FOR_FIX} eq add),
+                triton_asm!(dup 0 push {DISCRIMINANT_FOR_FIX} eq skiz call {fix_branch}),
+            ),
+        };
+
         let verify_discriminant_has_legal_value = triton_asm!(
             // _ discr
 
@@ -700,6 +783,9 @@ impl TritonProgram for SingleProof {
             add
             add
             // _ discr (discr == proof_coll || discr == update || discr == merge)
+
+            {&accept_fix_discriminant}
+            // _ discr (.. || discr == fix)
 
             assert error_id {INVALID_WITNESS_DISCRIMINANT_ERROR}
             // _ discr
@@ -733,6 +819,8 @@ impl TritonProgram for SingleProof {
             dup 0 push {DISCRIMINANT_FOR_MERGE} eq
             skiz call {merge_branch}
 
+            {&dispatch_fix}
+
             // _ [own_digest] [txk_digest] *single_proof_witness discriminant
 
             // a discriminant of -1 indicates that some branch was executed
@@ -757,25 +845,39 @@ impl TritonProgram for SingleProof {
     }
 
     fn hash(&self) -> Digest {
-        static PROGRAM_DIGEST: OnceLock<Digest> = OnceLock::new();
+        static WITH_FIX: OnceLock<Digest> = OnceLock::new();
+        static WITHOUT_FIX: OnceLock<Digest> = OnceLock::new();
 
-        let digest = PROGRAM_DIGEST.get_or_init(|| self.program().hash());
+        let cache = if self.consensus_rule_set.has_fix_branch() {
+            &WITH_FIX
+        } else {
+            &WITHOUT_FIX
+        };
 
-        *digest
+        *cache.get_or_init(|| self.program().hash())
     }
 
     fn program(&self) -> Program {
         // Overwrite trait-implementation since this leads to much faster code.
         // Throughout the lifetime of a client, the `SingleProof` program for a
-        // given version never changes, so this is OK.
-        static PROGRAM: OnceLock<Program> = OnceLock::new();
+        // given version never changes, so this is OK. There are two versions --
+        // the `Fix` branch is the whole of the difference -- so there are two
+        // caches, not one per rule set.
+        static WITH_FIX: OnceLock<Program> = OnceLock::new();
+        static WITHOUT_FIX: OnceLock<Program> = OnceLock::new();
 
-        let program = PROGRAM.get_or_init(|| {
-            let (_, code) = self.library_and_code();
-            Program::new(&code)
-        });
+        let cache = if self.consensus_rule_set.has_fix_branch() {
+            &WITH_FIX
+        } else {
+            &WITHOUT_FIX
+        };
 
-        program.clone()
+        cache
+            .get_or_init(|| {
+                let (_, code) = self.library_and_code();
+                Program::new(&code)
+            })
+            .clone()
     }
 }
 
@@ -879,37 +981,69 @@ pub(crate) mod tests {
                 SingleProofWitness::Merger(witness) => {
                     witness.branch_source(own_program_digest, txk_digest)
                 }
+                SingleProofWitness::Fix(witness) => {
+                    witness.branch_source(own_program_digest, txk_digest)
+                }
             }
         }
     }
 
+    /// The rule sets that have a `SingleProof` program of their own.
+    ///
+    /// Two, and only two: the `Fix` branch is the whole of the difference, so
+    /// [`ConsensusRuleSet::has_fix_branch`] partitions every rule set past and
+    /// future into these classes. Tests that do not depend on which program they
+    /// run go through both -- the three pre-delta branches are the same code
+    /// either side of the fork, but the dispatcher reaching them is not.
+    const PROGRAM_VERSIONS: [ConsensusRuleSet; 2] = [
+        ConsensusRuleSet::HardforkGamma,
+        ConsensusRuleSet::HardforkDelta,
+    ];
+
+    /// A discriminant not claimed by any branch of the running program must
+    /// halt it, not fall through it.
+    ///
+    /// Includes [`DISCRIMINANT_FOR_FIX`] on the pre-delta program: a `Fix`
+    /// witness handed to it is exactly a witness naming a branch that is not
+    /// there, and it has to be rejected rather than ignored.
     #[apply(shared_tokio_runtime)]
     async fn invalid_discriminant_crashes_execution() {
         let pub_input = PublicInput::new(bfe_vec![0, 0, 0, 0, 0]);
-        for illegal_discriminant_value in bfe_array![-1, 3, 4, 1u64 << 40] {
-            let init_ram: HashMap<_, _> = [(
-                FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
-                illegal_discriminant_value,
-            )]
-            .into_iter()
-            .collect();
+        for consensus_rule_set in PROGRAM_VERSIONS {
+            let illegal_discriminant_values = if consensus_rule_set.has_fix_branch() {
+                bfe_array![-1, 4, 5, 1u64 << 40]
+            } else {
+                bfe_array![-1, 3, 4, 1u64 << 40]
+            };
 
-            let nondeterminism = NonDeterminism::default().with_ram(init_ram);
+            for illegal_discriminant_value in illegal_discriminant_values {
+                let init_ram: HashMap<_, _> = [(
+                    FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+                    illegal_discriminant_value,
+                )]
+                .into_iter()
+                .collect();
 
-            let consensus_err = SingleProof.run_tasm(&pub_input, nondeterminism.clone());
+                let nondeterminism = NonDeterminism::default().with_ram(init_ram);
 
-            let_assert!(Err(TritonError::TritonVMPanic(_, instruction_err)) = consensus_err);
-            let_assert!(InstructionError::AssertionFailed(assertion_err) = instruction_err);
-            let_assert!(Some(err_id) = assertion_err.id);
-            assert_eq!(INVALID_WITNESS_DISCRIMINANT_ERROR, err_id);
+                let consensus_err = SingleProof::new(consensus_rule_set)
+                    .run_tasm(&pub_input, nondeterminism.clone());
+
+                let_assert!(Err(TritonError::TritonVMPanic(_, instruction_err)) = consensus_err);
+                let_assert!(InstructionError::AssertionFailed(assertion_err) = instruction_err);
+                let_assert!(Some(err_id) = assertion_err.id);
+                assert_eq!(INVALID_WITNESS_DISCRIMINANT_ERROR, err_id);
+            }
         }
     }
 
-    fn positive_prop(witness: SingleProofWitness) {
-        let claim = witness.claim();
+    fn positive_prop(witness: SingleProofWitness, consensus_rule_set: ConsensusRuleSet) {
+        let single_proof = SingleProof::new(consensus_rule_set);
+        let claim = witness.claim(consensus_rule_set);
         let public_input = PublicInput::new(claim.input);
-        let rust_result = SingleProof.run_rust(&public_input, witness.nondeterminism());
-        let tasm_result = SingleProof.run_tasm(&public_input, witness.nondeterminism());
+        let nondeterminism = || witness.nondeterminism(consensus_rule_set);
+        let rust_result = single_proof.run_rust(&public_input, nondeterminism());
+        let tasm_result = single_proof.run_tasm(&public_input, nondeterminism());
         assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
     }
 
@@ -936,7 +1070,9 @@ pub(crate) mod tests {
             .await
             .unwrap();
             let good_witness = SingleProofWitness::from_collection(good_proof_collection.clone());
-            positive_prop(good_witness);
+            for consensus_rule_set in PROGRAM_VERSIONS {
+                positive_prop(good_witness.clone(), consensus_rule_set);
+            }
 
             // Setting the `merge_bit` must make program crash, as this bit may
             // only be set to true through the execution of the merge branch.
@@ -959,13 +1095,15 @@ pub(crate) mod tests {
             // This witness fails with a Merkle auth path error since it never
             // reads the actual bit but rather just verifies that it is set to
             // false in this execution path.
-            SingleProof
-                .test_assertion_failure(
-                    bad_witness.standard_input(),
-                    bad_witness.nondeterminism(),
-                    &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
-                )
-                .unwrap();
+            for consensus_rule_set in PROGRAM_VERSIONS {
+                SingleProof::new(consensus_rule_set)
+                    .test_assertion_failure(
+                        bad_witness.standard_input(),
+                        bad_witness.nondeterminism(consensus_rule_set),
+                        &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
+                    )
+                    .unwrap();
+            }
         }
 
         #[apply(shared_tokio_runtime)]
@@ -989,18 +1127,19 @@ pub(crate) mod tests {
             assert!(proof_collection.verify(txk_mast_hash, network).await);
 
             let witness = SingleProofWitness::from_collection(proof_collection.clone());
-            let claim = witness.claim();
-            let public_input = PublicInput::new(claim.input);
-            let rust_result = SingleProof.run_rust(&public_input, witness.nondeterminism());
-            let tasm_result = SingleProof.run_tasm(&public_input, witness.nondeterminism());
-            assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
+            for consensus_rule_set in PROGRAM_VERSIONS {
+                positive_prop(witness.clone(), consensus_rule_set);
 
-            // Verify equivalence of claim functions
-            assert_eq!(
-                witness.claim(),
-                SingleProof::claim(txk_mast_hash),
-                "Claim functions must agree"
-            );
+                // Verify equivalence of claim functions. `single_proof_claim`
+                // is the shape of record; a witness that built its own claim
+                // would have to agree with it on the version too, and the
+                // version is Fiat-Shamir input.
+                assert_eq!(
+                    witness.claim(consensus_rule_set),
+                    single_proof_claim(txk_mast_hash, consensus_rule_set),
+                    "Claim functions must agree"
+                );
+            }
         }
 
         #[traced_test]
@@ -1029,11 +1168,9 @@ pub(crate) mod tests {
             assert!(proof_collection.verify(txk_mast_hash, network).await);
 
             let witness = SingleProofWitness::from_collection(proof_collection.clone());
-            let claim = witness.claim();
-            let public_input = PublicInput::new(claim.input);
-            let rust_result = SingleProof.run_rust(&public_input, witness.nondeterminism());
-            let tasm_result = SingleProof.run_tasm(&public_input, witness.nondeterminism());
-            assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
+            for consensus_rule_set in PROGRAM_VERSIONS {
+                positive_prop(witness.clone(), consensus_rule_set);
+            }
         }
     }
 
@@ -1042,17 +1179,15 @@ pub(crate) mod tests {
         use crate::consensus_rule_set::ConsensusRuleSet;
         use crate::transaction::validity::tasm::single_proof::merge_branch::tests::deterministic_merge_witness_with_coinbase;
 
+        /// The witnesses below hold single proofs produced under
+        /// [`ConsensusRuleSet::default`], and the merge branch recurses into a
+        /// claim naming the program itself, so this runs under that rule set and
+        /// no other.
         fn positive_prop(witness: MergeWitness) {
-            let witness = SingleProofWitness::from_merge(witness);
-            let claim = witness.claim();
-            let input = PublicInput::new(claim.input.clone());
-            let nondeterminism = witness.nondeterminism();
-
-            let rust_result = SingleProof.run_rust(&input, nondeterminism.clone());
-
-            let tasm_result = SingleProof.run_tasm(&input, nondeterminism);
-
-            assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
+            super::positive_prop(
+                SingleProofWitness::from_merge(witness),
+                ConsensusRuleSet::default(),
+            );
         }
 
         #[apply(shared_tokio_runtime)]
@@ -1097,26 +1232,25 @@ pub(crate) mod tests {
         use crate::transaction::transaction_kernel::TransactionKernelModifier;
         use crate::transaction::validity::tasm::single_proof::update_branch::test_helpers::deterministic_update_witness_additions_and_removals;
 
+        /// Same as in `merge_tests`: the old proof pins the rule set.
         fn positive_prop(witness: UpdateWitness) {
-            let witness = SingleProofWitness::from_update(witness);
-            let claim = witness.claim();
-            let input = PublicInput::new(claim.input.clone());
-            let nondeterminism = witness.nondeterminism();
-
-            let rust_result = SingleProof.run_rust(&input, nondeterminism.clone());
-
-            let tasm_result = SingleProof.run_tasm(&input, nondeterminism);
-
-            assert_eq!(rust_result.unwrap(), tasm_result.unwrap());
+            super::positive_prop(
+                SingleProofWitness::from_update(witness),
+                ConsensusRuleSet::default(),
+            );
         }
 
         fn negative_prop(witness: UpdateWitness, allowed_error_codes: &[i128]) {
+            let consensus_rule_set = ConsensusRuleSet::default();
             let witness = SingleProofWitness::from_update(witness.clone());
-            let claim = witness.claim();
+            let claim = witness.claim(consensus_rule_set);
             let input = PublicInput::new(claim.input.clone());
-            let nondeterminism = witness.nondeterminism();
-            let test_result =
-                SingleProof.test_assertion_failure(input, nondeterminism, allowed_error_codes);
+            let nondeterminism = witness.nondeterminism(consensus_rule_set);
+            let test_result = SingleProof::new(consensus_rule_set).test_assertion_failure(
+                input,
+                nondeterminism,
+                allowed_error_codes,
+            );
             test_result.unwrap();
         }
 
@@ -1314,10 +1448,10 @@ pub(crate) mod tests {
                 new_additions_and_removals_2_outputs.clone(),
             ] {
                 let bad_witness = SingleProofWitness::from_update(bad_witness);
-                let claim = bad_witness.claim();
+                let claim = bad_witness.claim(consensus_rule_set);
                 let input = PublicInput::new(claim.input.clone());
-                let nondeterminism = bad_witness.nondeterminism();
-                let test_result = SingleProof.test_assertion_failure(
+                let nondeterminism = bad_witness.nondeterminism(consensus_rule_set);
+                let test_result = SingleProof::new(consensus_rule_set).test_assertion_failure(
                     input,
                     nondeterminism,
                     &[UpdateBranch::INPUT_SET_IS_EMPTY_ERROR],
@@ -1327,8 +1461,26 @@ pub(crate) mod tests {
         }
     }
 
-    test_program_snapshot!(
-        SingleProof,
-        "54389bce28ce2eee0e8b554be47542b1da1f8f56179f0367e01d11bb5f136ac82a507451ca93b5bc"
-    );
+    /// The pre-delta program, pinned. Adding the `Fix` branch must leave it
+    /// untouched: it is the program every block up to the activation height is
+    /// validated against.
+    mod gamma_program {
+        use super::*;
+
+        test_program_snapshot!(
+            SingleProof::new(ConsensusRuleSet::HardforkGamma),
+            "54389bce28ce2eee0e8b554be47542b1da1f8f56179f0367e01d11bb5f136ac82a507451ca93b5bc"
+        );
+    }
+
+    /// The program from hardfork delta onwards: the same three branches plus
+    /// `Fix`.
+    mod delta_program {
+        use super::*;
+
+        test_program_snapshot!(
+            SingleProof::new(ConsensusRuleSet::HardforkDelta),
+            "05c2c83266cbb651cf202e88e09a2035bda95721630b51feaf9810a9f31d51246008031aae2682ad"
+        );
+    }
 }
