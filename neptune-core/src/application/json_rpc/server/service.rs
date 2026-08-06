@@ -716,6 +716,9 @@ impl RpcApi for RpcServer {
                 TxAdmissionError::NotConfirmable(_) | TxAdmissionError::CannotApplyToMutatorSet => {
                     SubmitTransactionError::NotConfirmable
                 }
+                TxAdmissionError::TooManyInputs
+                | TxAdmissionError::TooManyOutputs
+                | TxAdmissionError::TooManyAnnouncements => SubmitTransactionError::TooBig,
                 TxAdmissionError::Lustration(
                     TransactionLustrationError::MissingLustrationAnnouncement,
                 ) => SubmitTransactionError::MissingLustration,

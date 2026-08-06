@@ -24,6 +24,7 @@ use crate::model::message::*;
 use crate::model::wallet::transaction::RpcTransaction;
 
 #[derive(Debug, Clone, Copy, Error, Eq, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum RestoreMembershipProofError {
     #[error("Failed for index {0}")]
     Failed(usize),
@@ -33,6 +34,7 @@ pub enum RestoreMembershipProofError {
 }
 
 #[derive(Debug, Clone, Copy, Error, Eq, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum SubmitTransactionError {
     #[error("Invalid transaction")]
     InvalidTransaction,
@@ -52,6 +54,9 @@ pub enum SubmitTransactionError {
     #[error("Transaction not confirmable relative to the mutator set")]
     NotConfirmable,
 
+    #[error("Transaction has more inputs, outputs, or announcements than allowed")]
+    TooBig,
+
     #[error("Transaction fails to lustrate the required inputs")]
     MissingLustration,
 
@@ -60,6 +65,7 @@ pub enum SubmitTransactionError {
 }
 
 #[derive(Debug, Clone, Copy, Error, Eq, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum SubmitBlockError {
     #[error("Invalid block")]
     InvalidBlock,
@@ -69,6 +75,7 @@ pub enum SubmitBlockError {
 }
 
 #[derive(Debug, Clone, Error, Eq, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum RpcError {
     #[error("JSON-RPC server error: {0}")]
     Server(JsonError),

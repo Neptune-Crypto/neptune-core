@@ -1901,6 +1901,15 @@ impl PeerLoopHandler {
                             warn!("Received transaction that was already known");
                             None
                         }
+                        TxAdmissionError::TooManyInputs
+                        | TxAdmissionError::TooManyOutputs
+                        | TxAdmissionError::TooManyAnnouncements => {
+                            warn!(
+                                "Received transaction with TXID {txid} that exceeds the \
+                                 allowed limits, and can therefore never be mined."
+                            );
+                            Some(NegativePeerSanction::UnrelayableTransaction)
+                        }
                         TxAdmissionError::TooOld => {
                             // TODO: Consider punishing here
                             warn!("Received too old tx");

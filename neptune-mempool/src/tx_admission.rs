@@ -55,6 +55,12 @@ pub enum TxAdmissionError {
     /// when the transaction is confirmable; checked to be sure.
     CannotApplyToMutatorSet,
 
+    TooManyInputs,
+
+    TooManyOutputs,
+
+    TooManyAnnouncements,
+
     /// Older than the mempool is willing to hold.
     TooOld,
 
@@ -70,6 +76,18 @@ pub enum TxAdmissionError {
 
     /// The transaction's proof does not attest to its kernel.
     Invalid,
+}
+
+/// How many items are reserved for the transactions that a mempool
+/// transaction is merged with before it is mined. It is merged with the miner's
+/// coinbase transaction, which typically has two outputs, and it may also be
+/// merged with a negative-fee transaction whose author claims part of its fee.
+const MERGE_HEADROOM: usize = 5;
+
+/// The largest number of inputs, outputs, or announcements a mempool
+/// transaction may have, given a block's limit on that item.
+fn admissible_count(max_num_per_block: usize) -> usize {
+    max_num_per_block.saturating_sub(MERGE_HEADROOM)
 }
 
 /// Determine whether a transaction may be admitted to the mempool.
@@ -100,6 +118,18 @@ pub async fn admissible(
 
     if transaction.kernel.fee.is_negative() {
         return Err(TxAdmissionError::NegativeFee);
+    }
+
+    if transaction.kernel.inputs.len() > admissible_count(consensus_rule_set.max_num_inputs()) {
+        return Err(TxAdmissionError::TooManyInputs);
+    }
+    if transaction.kernel.outputs.len() > admissible_count(consensus_rule_set.max_num_outputs()) {
+        return Err(TxAdmissionError::TooManyOutputs);
+    }
+    if transaction.kernel.announcements.len()
+        > admissible_count(consensus_rule_set.max_num_announcements())
+    {
+        return Err(TxAdmissionError::TooManyAnnouncements);
     }
 
     let timestamp = transaction.kernel.timestamp;
@@ -162,6 +192,7 @@ pub async fn admissible(
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use neptune_consensus::transaction::TransactionProof;
+    use neptune_consensus::transaction::announcement::Announcement;
     use neptune_consensus::transaction::test_helpers::txkernel;
     use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
     use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier;
@@ -173,11 +204,100 @@ mod tests {
     use neptune_mutator_set::shared::CHUNK_SIZE;
     use neptune_mutator_set::shared::NUM_TRIALS;
     use neptune_mutator_set::shared::WINDOW_SIZE;
+    use proptest::prop_assert;
+    use proptest::prop_assert_eq;
     use proptest_arbitrary_interop::arb;
     use tasm_lib::prelude::Digest;
     use test_strategy::proptest;
 
     use super::*;
+
+    /// A transaction whose counts exceed what a block may hold can never be
+    /// mined, so the mempool must not store and relay it. Counts at the limit
+    /// are admissible as far as these checks are concerned.
+    #[proptest(cases = 1, async = "tokio")]
+    async fn transactions_exceeding_per_block_limits_are_not_admitted(
+        #[strategy(txkernel::with_lengths(0..1, 0..1, 0..1, true))] kernel: TransactionKernel,
+        #[strategy(arb())] now: Timestamp,
+    ) {
+        let consensus_rule_set = ConsensusRuleSet::default();
+        let input = RemovalRecord {
+            absolute_indices: AbsoluteIndexSet::new([0; NUM_TRIALS as usize]),
+            target_chunks: ChunkDictionary::empty(),
+        };
+        let output = AdditionRecord::new(Digest::default());
+        let announcement = Announcement { message: vec![] };
+
+        let max_num_inputs = admissible_count(consensus_rule_set.max_num_inputs());
+        let max_num_outputs = admissible_count(consensus_rule_set.max_num_outputs());
+        let max_num_announcements = admissible_count(consensus_rule_set.max_num_announcements());
+        assert!(max_num_inputs < consensus_rule_set.max_num_inputs());
+
+        let cases = [
+            (
+                max_num_inputs + 1,
+                0,
+                0,
+                Some(TxAdmissionError::TooManyInputs),
+            ),
+            (
+                0,
+                max_num_outputs + 1,
+                0,
+                Some(TxAdmissionError::TooManyOutputs),
+            ),
+            (
+                0,
+                0,
+                max_num_announcements + 1,
+                Some(TxAdmissionError::TooManyAnnouncements),
+            ),
+            (max_num_inputs, max_num_outputs, max_num_announcements, None),
+        ];
+
+        for (num_inputs, num_outputs, num_announcements, expected) in cases {
+            let kernel = TransactionKernelModifier::default()
+                .inputs(vec![input.clone(); num_inputs])
+                .outputs(vec![output; num_outputs])
+                .announcements(vec![announcement.clone(); num_announcements])
+                .coinbase(None)
+                .fee(NativeCurrencyAmount::coins(1))
+                .timestamp(now)
+                .modify(kernel.clone());
+
+            // Everything this test is about happens before proof verification.
+            let transaction = Transaction {
+                kernel,
+                proof: TransactionProof::invalid(),
+            };
+
+            let rejection = admissible(
+                &transaction,
+                &MutatorSetAccumulator::default(),
+                None,
+                false,
+                now,
+                Network::Main,
+                consensus_rule_set,
+            )
+            .await
+            .expect_err("transaction with an invalid proof is never admitted");
+
+            match expected {
+                Some(expected) => prop_assert_eq!(expected, rejection),
+                None => prop_assert!(
+                    !matches!(
+                        rejection,
+                        TxAdmissionError::TooManyInputs
+                            | TxAdmissionError::TooManyOutputs
+                            | TxAdmissionError::TooManyAnnouncements
+                    ),
+                    "counts at the limit must not be rejected for being too many. Got: {:?}",
+                    rejection
+                ),
+            }
+        }
+    }
 
     /// Admission runs on untrusted data. So it is not allowed to panic.
     #[proptest(cases = 15, async = "tokio")]
