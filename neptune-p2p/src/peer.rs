@@ -78,7 +78,10 @@ pub enum NegativePeerSanction {
     InvalidMessage,
     NonMinedTransactionHasCoinbase,
     TooShortBlockBatch,
+
+    /// A anchor-authenticated block was received outside of syncing
     ReceivedBatchBlocksOutsideOfSync,
+
     BatchBlocksInvalidStartHeight,
     BatchBlocksUnknownRequest,
     BatchBlocksRequestEmpty,
@@ -371,6 +374,22 @@ pub struct BlockRequestBatch {
     pub anchor: MmrAccumulator,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ValidatedBlockRequestByHeight {
+    /// The height of the requested block.
+    pub height: BlockHeight,
+
+    /// The block MMR accumulator of the tip of the chain which the node is
+    /// syncing towards. Its number of leafs is the block height the node is
+    /// syncing towards.
+    ///
+    /// The receiver needs this value to know which MMR authentication path to
+    /// attach to the block in the response. This path allows the receiver of
+    /// the block to verify that the received block is indeed an ancestor of a
+    /// given tip.
+    pub anchor: MmrAccumulator,
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BlockProposalRequest {
     pub body_mast_hash: Digest,
@@ -424,6 +443,18 @@ pub enum PeerMessage {
     Bye,
     ConnectionStatus(TransferConnectionStatus),
     SyncCoverage(TransferSyncBitMask),
+
+    /// Request a single block by height, along with an MMR authentication
+    /// path relative to the request's anchor. Only peers with a version
+    /// exceeding 0.15.1 understand this message.
+    ///
+    /// An unauthenticated block may not be returned as a response to this
+    /// message.
+    ValidatedBlockRequestByHeight(ValidatedBlockRequestByHeight),
+    /// Response to [`PeerMessage::ValidatedBlockRequestByHeight`]: the block
+    /// together with an MMR authentication path relative to the request's
+    /// anchor, like the elements of a [`PeerMessage::BlockResponseBatch`].
+    ValidatedBlock(Box<(TransferBlock, MmrMembershipProof)>),
     // New variants must be added here at the bottom to be backwards compatible.
 }
 
@@ -452,6 +483,8 @@ impl PeerMessage {
             PeerMessage::SyncChallenge(_) => "sync challenge",
             PeerMessage::SyncChallengeResponse(_) => "sync challenge response",
             PeerMessage::SyncCoverage(_) => "sync coverage",
+            PeerMessage::ValidatedBlockRequestByHeight(_) => "validated block req by height",
+            PeerMessage::ValidatedBlock(_) => "validated block",
         }
         .to_string()
     }
@@ -480,6 +513,8 @@ impl PeerMessage {
             PeerMessage::SyncChallenge(_) => false,
             PeerMessage::SyncChallengeResponse(_) => false,
             PeerMessage::SyncCoverage(_) => true,
+            PeerMessage::ValidatedBlockRequestByHeight(_) => false,
+            PeerMessage::ValidatedBlock(_) => true,
         }
     }
 
@@ -508,6 +543,8 @@ impl PeerMessage {
             PeerMessage::SyncChallenge(_) => false,
             PeerMessage::SyncChallengeResponse(_) => false,
             PeerMessage::SyncCoverage(_) => false,
+            PeerMessage::ValidatedBlockRequestByHeight(_) => false,
+            PeerMessage::ValidatedBlock(_) => false,
         }
     }
 
@@ -537,6 +574,8 @@ impl PeerMessage {
             PeerMessage::Bye => false,
             PeerMessage::ConnectionStatus(_) => false,
             PeerMessage::SyncCoverage(_) => true,
+            PeerMessage::ValidatedBlockRequestByHeight(_) => true,
+            PeerMessage::ValidatedBlock(_) => true,
         }
     }
 }

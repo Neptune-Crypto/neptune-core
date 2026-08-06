@@ -472,6 +472,12 @@ pub struct Args {
     #[clap(long, value_name = "DIR")]
     pub sync_dir: Option<PathBuf>,
 
+    /// Override the version advertised in the peer handshake. Not settable
+    /// from the command line. Tests use it to exercise behavior that is gated
+    /// on peer versions.
+    #[clap(skip)]
+    pub advertised_version: Option<String>,
+
     /// Multiaddrs (or IPs) of nodes to connect to, e.g.:
     /// ```text
     /// --peer /ip4/8.8.8.8 \

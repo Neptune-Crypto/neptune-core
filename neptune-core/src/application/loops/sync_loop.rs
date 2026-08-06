@@ -10,6 +10,8 @@ use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::network::Network;
 use rand::rng;
 use rand::Rng;
+use tasm_lib::twenty_first::prelude::MmrMembershipProof;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
@@ -270,7 +272,7 @@ impl SyncLoop {
                             self.peers.lock().await.remove(&peer_handle);
                             last_peer_disconnect_time = Some(SystemTime::now());
                         }
-                        MainToSync::ReceiveBlock { peer_handle, block } => {
+                        MainToSync::ReceiveBlock { peer_handle, block, auth_path } => {
                             tracing::info!(
                                 "Sync loop: receiving block {} out of [{}:{}) ...",
                                 block.header().height,
@@ -280,7 +282,7 @@ impl SyncLoop {
 
                             // Store block and update download state.
                             tracing::trace!("storing block ...");
-                            if let Err(e) = self.download_state.receive_block(&block).await
+                            if let Err(e) = self.download_state.receive_block(&block, auth_path.as_ref()).await
                             {
                                 tracing::warn!(
                                     "Could not process received block {:x} of height {}: {}",
@@ -354,7 +356,7 @@ impl SyncLoop {
                                 }
 
                                 tracing::debug!("chain extension is one ahead of current tip; sending directly to main loop.");
-                                if !Self::ensure_send_tip_successor(&self.main_channel_sender, *block.to_owned()).await {
+                                if !Self::ensure_send_tip_successor(&self.main_channel_sender, *block.to_owned(), None).await {
                                     tracing::error!("Could not send tip-successor to main loop. Terminating sync loop.");
                                     break;
                                 }
@@ -387,7 +389,7 @@ impl SyncLoop {
                                 pending_block_requests.push(peer_handle);
                             }
                         }
-                        MainToSync::TryFetchBlock{ peer_handle, height } => {
+                        MainToSync::TryFetchBlock{ peer_handle, height, requester_anchor } => {
                             tracing::debug!("sync loop received try-fetch-block message from peer {peer_handle} for block {height}");
 
                             // Test if the requested block height lives in the
@@ -413,7 +415,7 @@ impl SyncLoop {
                                 let moved_download_state = self.download_state.clone();
                                 let moved_main_channel_sender = self.main_channel_sender.clone();
                                 let _ = tokio::task::spawn(
-                                    Self::fetch_and_send_block(moved_main_channel_sender, moved_download_state, peer_handle, height)
+                                    Self::fetch_and_send_block(moved_main_channel_sender, moved_download_state, peer_handle, height, requester_anchor)
                                 ).await;
                             }
                         }
@@ -641,22 +643,37 @@ impl SyncLoop {
         download_state: RapidBlockDownload,
         peer_handle: PeerHandle,
         height: BlockHeight,
+        requester_anchor: Option<MmrAccumulator>,
     ) {
-        let block = match download_state.get_received_block(height).await {
-            Ok(b) => b,
-            Err(e) => {
-                tracing::error!("Failed to read block from temp directory: {e}.");
-                return;
-            }
+        let response = match &requester_anchor {
+            // A request that came with an anchor asks for an *authenticated*
+            // block.
+            Some(anchor) => match download_state.get_authenticated_block(height, anchor).await {
+                Ok(Some((block, auth_path))) => SyncToMain::SyncBlock {
+                    block: Box::new(block),
+                    peer_handle,
+                    auth_path: Some(auth_path),
+                },
+                Ok(None) => SyncToMain::UnableToServeValidatedBlock { peer_handle },
+                Err(e) => {
+                    tracing::error!("Failed to read block from temp directory: {e}.");
+                    return;
+                }
+            },
+            None => match download_state.get_received_block(height).await {
+                Ok(block) => SyncToMain::SyncBlock {
+                    block: Box::new(block),
+                    peer_handle,
+                    auth_path: None,
+                },
+                Err(e) => {
+                    tracing::error!("Failed to read block from temp directory: {e}.");
+                    return;
+                }
+            },
         };
 
-        if let Err(e) = main_channel_sender
-            .send(SyncToMain::SyncBlock {
-                block: Box::new(block),
-                peer_handle,
-            })
-            .await
-        {
+        if let Err(e) = main_channel_sender.send(response).await {
             tracing::error!("Could not send sync block to main loop: {e}.");
         }
     }
@@ -801,12 +818,16 @@ impl SyncLoop {
     async fn ensure_send_tip_successor(
         channel_to_main: &Sender<SyncToMain>,
         successor: Block,
+        auth_path: Option<MmrMembershipProof>,
     ) -> bool {
         // send to main
         // important payload, so report on delays
         let max = 1000;
         for i in 1..=max {
-            match channel_to_main.try_send(SyncToMain::TipSuccessor(Box::new(successor.clone()))) {
+            match channel_to_main.try_send(SyncToMain::TipSuccessor {
+                block: Box::new(successor.clone()),
+                auth_path: auth_path.clone(),
+            }) {
                 Ok(_) => {
                     if i > 1 {
                         tracing::debug!("succeeded sending tip-successor block to main");
@@ -844,8 +865,8 @@ impl SyncLoop {
         let mut tip = current_tip;
         while download_state.have_received(tip.header().height.next()) {
             // get successor block
-            let Ok(successor) = download_state
-                .get_received_block(tip.header().height.next())
+            let Ok((successor, auth_path)) = download_state
+                .get_received_entry(tip.header().height.next())
                 .await
             else {
                 tracing::error!(
@@ -882,7 +903,9 @@ impl SyncLoop {
             }
 
             // send to main
-            if !Self::ensure_send_tip_successor(&channel_to_main, successor.clone()).await {
+            if !Self::ensure_send_tip_successor(&channel_to_main, successor.clone(), auth_path)
+                .await
+            {
                 tracing::error!(
                     "Sync loop: failed to send tip-successor block to main \
                     loop. Aborting sync loop."
@@ -917,6 +940,34 @@ impl SyncLoop {
                 .send(SuccessorsToSync::Continue { new_tip: tip })
                 .await;
         }
+    }
+}
+
+/// Helpers for integration tests.
+#[cfg(any(test, feature = "test-helpers"))]
+pub mod test_helpers {
+    use std::path::PathBuf;
+
+    use anyhow::Result;
+    use neptune_consensus::block::Block;
+    use neptune_primitives::network::Network;
+    use tasm_lib::twenty_first::prelude::MmrMembershipProof;
+
+    use super::rapid_block_download::RapidBlockDownload;
+
+    /// Write sync-store entries for the given blocks and authentication
+    /// paths, such that a sync process started with the same `sync_dir`
+    /// resumes from them: the covered heights count as already downloaded.
+    /// The authentication paths must be valid relative to the sync anchor
+    /// that the syncing node will obtain.
+    pub async fn seed_sync_directory(
+        sync_dir: PathBuf,
+        network: Network,
+        entries: &[(Block, MmrMembershipProof)],
+    ) -> Result<()> {
+        RapidBlockDownload::seed_directory(&Some(sync_dir), network, entries)
+            .await
+            .map_err(|e| anyhow::anyhow!("could not seed sync directory: {e}"))
     }
 }
 
@@ -1050,7 +1101,7 @@ mod tests {
                                 }
                                 break;
                             }
-                            SyncToMain::TipSuccessor(block) => {
+                            SyncToMain::TipSuccessor { block, auth_path: _ } => {
                                 tracing::debug!("mock main loop: processing block {}", block.header().height);
                                 if block.header().height == self.current_tip_height.next() {
                                     self.current_tip_height = block.header().height;
@@ -1069,7 +1120,7 @@ mod tests {
                                     if let Some(peer) = self.peers.get_mut(&block_request.peer_handle.clone()) {
                                         if let Some(block) = peer.request(block_request.height).await {
                                             tracing::debug!("mock main loop: got block from peer; relaying to sync loop");
-                                            self.sync_loop_handle.send_block(Box::new(block), block_request.peer_handle);
+                                            self.sync_loop_handle.send_block(Box::new(block), block_request.peer_handle, None);
                                             tracing::debug!("mock main loop: done relaying");
                                         } else {
                                             if let MockPeer::Syncing(syncing_peer) = peer {
@@ -1101,9 +1152,13 @@ mod tests {
                             } => {
                                 tracing::info!("mock main loop: Sending coverage to peer {peer_handle}");
                             }
+                            SyncToMain::UnableToServeValidatedBlock { peer_handle } => {
+                                tracing::info!("mock main loop: cannot serve validated block to {peer_handle}");
+                            }
                             SyncToMain::SyncBlock{
                                 block,
                                 peer_handle,
+                                auth_path: _,
                             } => {
                                 tracing::info!("mock main loop: Sending block {} over to {peer_handle}", block.header().height);
                             }

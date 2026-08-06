@@ -1981,7 +1981,9 @@ impl GlobalState {
             listen_port,
             network: self.cli().network,
             instance_id: self.net.instance_id,
-            version: VersionString::new_from_str(VERSION),
+            version: VersionString::new_from_str(
+                self.cli().advertised_version.as_deref().unwrap_or(VERSION),
+            ),
             // For now, all nodes are archival nodes
             is_archival_node: self.chain.is_archival_node(),
             is_bootstrapper_node: self.cli().bootstrap,
@@ -3498,6 +3500,44 @@ impl GlobalState {
         self.flush_databases().await?;
 
         Ok(num_stored_blocks)
+    }
+}
+
+#[cfg(any(test, feature = "test-helpers"))]
+mod state_test_helpers {
+    use super::*;
+
+    impl GlobalState {
+        /// The canonical blocks at the given heights, each with its
+        /// authentication path relative to the archival block MMR.
+        ///
+        /// # Panics
+        ///
+        /// Panics if any of the heights lies beyond the tip.
+        pub async fn blocks_with_authentication_paths(
+            &self,
+            heights: std::ops::RangeInclusive<u64>,
+        ) -> Vec<(Block, tasm_lib::twenty_first::prelude::MmrMembershipProof)> {
+            let mut entries = vec![];
+            for height in heights {
+                let block = self
+                    .chain
+                    .archival_state()
+                    .canonical_block_by_height(height.into())
+                    .await
+                    .expect("block height must be known");
+                let auth_path = self
+                    .chain
+                    .archival_state()
+                    .archival_block_mmr
+                    .ammr()
+                    .prove_membership_async(height)
+                    .await;
+                entries.push((block, auth_path));
+            }
+
+            entries
+        }
     }
 }
 

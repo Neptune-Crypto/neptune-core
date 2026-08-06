@@ -6,9 +6,44 @@ use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::network::Network;
 use rand::rng;
 use rand::RngCore;
+use tasm_lib::twenty_first::prelude::Mmr;
+use tasm_lib::twenty_first::prelude::MmrMembershipProof;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tokio::fs;
 
 use crate::application::loops::sync_loop::SynchronizationBitMask;
+
+/// Truncate an MMR authentication path to one relative to an MMR with fewer
+/// leafs.
+///
+/// The entries of an MMR authentication path are append-invariant: appending
+/// leafs to the MMR only ever extends the path. So the path for a leaf
+/// relative to a smaller MMR is a prefix of the path relative to a larger one
+/// — provided the smaller MMR is a prefix of the larger, which this function
+/// cannot check. The caller must verify the returned path against the peaks
+/// of the target MMR before relying on, or sharing, it.
+///
+/// Returns `None` if the target MMR does not contain the leaf, or if it
+/// requires a longer path than the given one — which happens when the path's
+/// own MMR is the smaller one.
+pub(crate) fn truncate_auth_path(
+    auth_path: &MmrMembershipProof,
+    leaf_index: u64,
+    target_num_leafs: u64,
+) -> Option<MmrMembershipProof> {
+    if leaf_index >= target_num_leafs {
+        return None;
+    }
+
+    let target_len = (leaf_index ^ target_num_leafs).ilog2() as usize;
+    if target_len > auth_path.authentication_path.len() {
+        return None;
+    }
+
+    Some(MmrMembershipProof::new(
+        auth_path.authentication_path[..target_len].to_vec(),
+    ))
+}
 
 /// The state of a rapid block download process.
 ///
@@ -89,12 +124,14 @@ impl RapidBlockDownload {
             .await
             .map_err(|e| RapidBlockDownloadError::IO(e.to_string()))?
         {
-            if let Ok(block) = Self::load_block(&entry.path()).await.inspect_err(|e| {
-                tracing::warn!(
-                    "Could not read Block from file '{}': {e}",
-                    entry.path().to_string_lossy()
-                );
-            }) {
+            if let Ok((block, _auth_path)) =
+                Self::load_entry(&entry.path()).await.inspect_err(|e| {
+                    tracing::warn!(
+                        "Could not read Block from file '{}': {e}",
+                        entry.path().to_string_lossy()
+                    );
+                })
+            {
                 let height = block.header().height.value();
                 if height >= coverage.upper_bound {
                     coverage = coverage.expand(height + 1);
@@ -249,7 +286,9 @@ impl RapidBlockDownload {
 
         self.coverage = self.coverage.clone().expand(new_block_height.value() + 1);
 
-        self.receive_block(new_block).await?;
+        // Blocks extending the chain lie beyond any sync anchor, so no
+        // authentication path can exist for them.
+        self.receive_block(new_block, None).await?;
 
         self.target_height = self.target_height.next();
 
@@ -263,13 +302,19 @@ impl RapidBlockDownload {
 
     /// Store the block in the storage directory and mark it as received, if it
     /// wasn't received already.
+    ///
+    /// The authentication path, if one is given, must have been verified to
+    /// prove the block's membership in the chain being synced towards.
+    // TODO: A block arriving *with* an authentication path for a height that
+    // was first received without one does not upgrade the stored entry.
     pub(crate) async fn receive_block(
         &mut self,
         block: &Block,
+        auth_path: Option<&MmrMembershipProof>,
     ) -> Result<(), RapidBlockDownloadError> {
         if !self.coverage.contains(block.header().height.value()) {
             let file_name = self.file_name(block);
-            self.store_block(block, &file_name).await?;
+            self.store_entry(block, auth_path, &file_name).await?;
 
             self.index_to_filename
                 .insert(block.header().height.value(), file_name);
@@ -279,27 +324,32 @@ impl RapidBlockDownload {
         Ok(())
     }
 
-    /// Store the block in the storage directory.
-    async fn store_block(
+    /// Store the block and its optional authentication path in the storage
+    /// directory.
+    async fn store_entry(
         &self,
         block: &Block,
+        auth_path: Option<&MmrMembershipProof>,
         file_name: &PathBuf,
     ) -> Result<(), RapidBlockDownloadError> {
-        let data = bincode::serialize(block)
+        let data = bincode::serialize(&(block, auth_path))
             .map_err(|e| RapidBlockDownloadError::Serialization(e.to_string()))?;
         tokio::fs::write(file_name, data)
             .await
             .map_err(|e| RapidBlockDownloadError::IO(e.to_string()))
     }
 
-    /// Load the block from the storage directory.
-    async fn load_block(file_name: &PathBuf) -> Result<Block, RapidBlockDownloadError> {
+    /// Load a block and its optional authentication path from the storage
+    /// directory.
+    async fn load_entry(
+        file_name: &PathBuf,
+    ) -> Result<(Block, Option<MmrMembershipProof>), RapidBlockDownloadError> {
         let data = tokio::fs::read(file_name)
             .await
             .map_err(|e| RapidBlockDownloadError::IO(e.to_string()))?;
-        let block = bincode::deserialize(&data)
+        let entry = bincode::deserialize(&data)
             .map_err(|e| RapidBlockDownloadError::Serialization(e.to_string()))?;
-        Ok(block)
+        Ok(entry)
     }
 
     /// Read a block from the storage directory.
@@ -307,16 +357,54 @@ impl RapidBlockDownload {
         &self,
         height: BlockHeight,
     ) -> Result<Block, RapidBlockDownloadError> {
+        self.get_received_entry(height)
+            .await
+            .map(|(block, _)| block)
+    }
+
+    /// Read a block from the storage directory, along with an authentication
+    /// path relative to the given anchor.
+    ///
+    /// The stored authentication path is relative to the anchor of the sync
+    /// process that received the block, which is generally not the requester's
+    /// anchor. The stored path is therefore truncated to the requester's anchor
+    /// and verified against it. `Ok(None)` is returned if no authentication
+    /// path against this anchor could be made.
+    pub(crate) async fn get_authenticated_block(
+        &self,
+        height: BlockHeight,
+        anchor: &MmrAccumulator,
+    ) -> Result<Option<(Block, MmrMembershipProof)>, RapidBlockDownloadError> {
+        let (block, stored_auth_path) = self.get_received_entry(height).await?;
+
+        let auth_path = stored_auth_path
+            .and_then(|stored| truncate_auth_path(&stored, height.value(), anchor.num_leafs()))
+            .filter(|truncated| {
+                truncated.verify(
+                    height.value(),
+                    block.hash(),
+                    &anchor.peaks(),
+                    anchor.num_leafs(),
+                )
+            });
+
+        Ok(auth_path.map(|auth_path| (block, auth_path)))
+    }
+
+    /// Read a block and its stored authentication path, if any, from the
+    /// storage directory.
+    pub(crate) async fn get_received_entry(
+        &self,
+        height: BlockHeight,
+    ) -> Result<(Block, Option<MmrMembershipProof>), RapidBlockDownloadError> {
         let file_name = self
             .index_to_filename
             .get(&height.value())
             .ok_or(RapidBlockDownloadError::NotReceived(height))?;
 
-        let block = Self::load_block(file_name)
+        Self::load_entry(file_name)
             .await
-            .map_err(|e| RapidBlockDownloadError::IO(e.to_string()))?;
-
-        Ok(block)
+            .map_err(|e| RapidBlockDownloadError::IO(e.to_string()))
     }
 
     /// Un-bind a height: throw away the block stored there and mark the height
@@ -398,6 +486,39 @@ pub(crate) enum RapidBlockDownloadError {
     Serialization(String),
 }
 
+/// Test-only extensions of [`RapidBlockDownload`], keeping the knowledge of
+/// its storage format in this file.
+#[cfg(any(test, feature = "test-helpers"))]
+mod test_helpers {
+    use super::*;
+
+    impl RapidBlockDownload {
+        /// Write sync-store entries for the given blocks and authentication
+        /// paths, such that a sync process started with the same `sync_dir`
+        /// resumes from them. Gives tests a way to hand a node a
+        /// predetermined partial download.
+        pub(crate) async fn seed_directory(
+            sync_dir: &Option<PathBuf>,
+            network: Network,
+            entries: &[(Block, MmrMembershipProof)],
+        ) -> Result<(), RapidBlockDownloadError> {
+            let storage_dir = Self::base_storage_dir(sync_dir, network).join("seed/");
+            tokio::fs::create_dir_all(&storage_dir)
+                .await
+                .map_err(|e| RapidBlockDownloadError::IO(e.to_string()))?;
+            for (block, auth_path) in entries {
+                let data = bincode::serialize(&(block, Some(auth_path)))
+                    .map_err(|e| RapidBlockDownloadError::Serialization(e.to_string()))?;
+                tokio::fs::write(storage_dir.join(block.hash().to_hex()), data)
+                    .await
+                    .map_err(|e| RapidBlockDownloadError::IO(e.to_string()))?;
+            }
+
+            Ok(())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
@@ -407,10 +528,209 @@ mod tests {
     use rand::Rng;
     use rand::RngCore;
     use rand::SeedableRng;
+    use tasm_lib::prelude::Digest;
 
     use super::*;
     use crate::tests::shared::files::unit_test_path;
     use crate::tests::shared_tokio_runtime;
+
+    /// Build an MMR over the given leafs while tracking the authentication
+    /// path of one of the leafs. Returns the tracked path, relative to the full
+    /// MMR, along with the accumulator as it looked after each append:
+    /// `snapshots[m]` holds `m` leafs.
+    fn mmr_with_tracked_leaf(
+        leafs: &[Digest],
+        tracked_index: u64,
+    ) -> (MmrMembershipProof, Vec<MmrAccumulator>) {
+        let mut mmra = MmrAccumulator::new_from_leafs(vec![]);
+        let mut tracked: Option<MmrMembershipProof> = None;
+        let mut snapshots = vec![mmra.clone()];
+        for (i, leaf) in leafs.iter().enumerate() {
+            if let Some(mp) = &mut tracked {
+                MmrMembershipProof::batch_update_from_append(
+                    &mut [mp],
+                    &[tracked_index],
+                    mmra.num_leafs(),
+                    *leaf,
+                    &mmra.peaks(),
+                );
+            }
+            let mp = mmra.append(*leaf);
+            if i as u64 == tracked_index {
+                tracked = Some(mp);
+            }
+            snapshots.push(mmra.clone());
+        }
+
+        (tracked.unwrap(), snapshots)
+    }
+
+    #[test]
+    fn truncate_auth_path_yields_valid_paths_for_all_prefix_anchors() {
+        let mut rng = StdRng::seed_from_u64(0x1717);
+        let num_leafs = 130u64;
+        let leafs = (0..num_leafs).map(|_| rng.random::<Digest>()).collect_vec();
+
+        for tracked_index in [0u64, 1, 63, 64, 100, num_leafs - 1] {
+            let (full_path, snapshots) = mmr_with_tracked_leaf(&leafs, tracked_index);
+
+            // The full path truncates to a valid path for every prefix MMR
+            // that contains the leaf.
+            for m in (tracked_index + 1)..=num_leafs {
+                let truncated = truncate_auth_path(&full_path, tracked_index, m).unwrap();
+                assert!(truncated.verify(
+                    tracked_index,
+                    leafs[tracked_index as usize],
+                    &snapshots[m as usize].peaks(),
+                    m,
+                ));
+            }
+
+            // Prefixes not containing the leaf yield nothing.
+            assert!(truncate_auth_path(&full_path, tracked_index, tracked_index).is_none());
+        }
+
+        // A path relative to a small MMR cannot be stretched to a larger MMR
+        // that requires a longer path.
+        let (short_path, _) = mmr_with_tracked_leaf(&leafs[..2], 0);
+        assert!(truncate_auth_path(&short_path, 0, num_leafs).is_none());
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn authenticated_blocks_are_served_relative_to_the_requester_anchor() {
+        let network = Network::Main;
+        let mut rng = rng();
+        let target_height = 129u64;
+        let block_height = 100u64;
+        let mut block = rng.random::<Block>();
+        block.set_header_height(block_height.into());
+
+        // The chain being synced towards: random block digests, except at the
+        // stored block's own height.
+        let num_leafs = target_height + 1;
+        let mut leafs = (0..num_leafs).map(|_| rng.random::<Digest>()).collect_vec();
+        leafs[block_height as usize] = block.hash();
+        let (auth_path, snapshots) = mmr_with_tracked_leaf(&leafs, block_height);
+        let own_anchor = snapshots[num_leafs as usize].clone();
+
+        let mut download = RapidBlockDownload::new(
+            BlockHeight::from(target_height),
+            false,
+            Some(unit_test_path()),
+            network,
+        )
+        .await
+        .unwrap();
+        download
+            .receive_block(&block, Some(&auth_path))
+            .await
+            .unwrap();
+
+        // A requester with the same anchor gets the stored path.
+        let (served_block, served_path) = download
+            .get_authenticated_block(block_height.into(), &own_anchor)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(block.hash(), served_block.hash());
+        assert!(served_path.verify(
+            block_height,
+            block.hash(),
+            &own_anchor.peaks(),
+            own_anchor.num_leafs(),
+        ));
+
+        // A requester whose anchor is a smaller prefix of the same chain gets
+        // a truncated path, valid relative to their anchor.
+        for smaller_num_leafs in [block_height + 1, 110] {
+            let smaller_anchor = &snapshots[smaller_num_leafs as usize];
+            let (_, truncated_path) = download
+                .get_authenticated_block(block_height.into(), smaller_anchor)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(truncated_path.verify(
+                block_height,
+                block.hash(),
+                &smaller_anchor.peaks(),
+                smaller_anchor.num_leafs(),
+            ));
+        }
+
+        // A requester syncing towards a different chain gets nothing.
+        let forked_anchor = MmrAccumulator::new_from_leafs(
+            (0..num_leafs).map(|_| rng.random::<Digest>()).collect_vec(),
+        );
+        let forked_anchor_entry = download
+            .get_authenticated_block(block_height.into(), &forked_anchor)
+            .await
+            .unwrap();
+        assert!(forked_anchor_entry.is_none());
+
+        // A block stored without a path cannot be served authenticated, but
+        // is still available plain.
+        let mut pathless_block = rng.random::<Block>();
+        pathless_block.set_header_height(BlockHeight::from(50u64));
+        download.receive_block(&pathless_block, None).await.unwrap();
+        let pathless_block_entry = download
+            .get_authenticated_block(BlockHeight::from(50u64), &own_anchor)
+            .await
+            .unwrap();
+        assert!(pathless_block_entry.is_none());
+        assert_eq!(
+            pathless_block.hash(),
+            download
+                .get_received_block(BlockHeight::from(50u64))
+                .await
+                .unwrap()
+                .hash()
+        );
+
+        let _ = download.clean_up().await;
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn legacy_block_files_are_skipped_on_resume() {
+        let network = Network::Main;
+        let mut rng = rng();
+        let sync_dir = unit_test_path();
+        let target = BlockHeight::from(100u64);
+
+        // A first download stores one block in the current format. A file in
+        // the legacy format — a bare block, without the option of an
+        // authentication path — is planted next to it.
+        let mut first_download =
+            RapidBlockDownload::new(target, false, Some(sync_dir.clone()), network)
+                .await
+                .unwrap();
+        let mut stored_block = rng.random::<Block>();
+        stored_block.set_header_height(BlockHeight::from(7u64));
+        first_download
+            .receive_block(&stored_block, None)
+            .await
+            .unwrap();
+
+        let mut legacy_block = rng.random::<Block>();
+        legacy_block.set_header_height(BlockHeight::from(9u64));
+        tokio::fs::write(
+            first_download
+                .block_storage_dir
+                .join(legacy_block.hash().to_hex()),
+            bincode::serialize(&legacy_block).unwrap(),
+        )
+        .await
+        .unwrap();
+
+        // On resume, the current-format block is recovered and the legacy
+        // file is skipped, so that height gets downloaded again.
+        let resumed_download = RapidBlockDownload::new(target, true, Some(sync_dir), network)
+            .await
+            .unwrap();
+        assert!(resumed_download.have_received(BlockHeight::from(7u64)));
+        assert!(!resumed_download.have_received(BlockHeight::from(9u64)));
+
+        let _ = resumed_download.clean_up().await;
+    }
 
     /// A rejected block must free its height slot, so that the height is asked
     /// for again and the download counts as unfinished.
@@ -429,7 +749,10 @@ mod tests {
         // The one outstanding height gets filled, completing the download.
         let mut block = rng.random::<Block>();
         block.set_header_height(target);
-        rapid_block_download.receive_block(&block).await.unwrap();
+        rapid_block_download
+            .receive_block(&block, None)
+            .await
+            .unwrap();
         assert!(rapid_block_download.have_received(target));
         assert!(rapid_block_download.is_complete());
 
@@ -446,7 +769,7 @@ mod tests {
         let mut replacement = rng.random::<Block>();
         replacement.set_header_height(target);
         rapid_block_download
-            .receive_block(&replacement)
+            .receive_block(&replacement, None)
             .await
             .unwrap();
         assert_eq!(
@@ -483,7 +806,7 @@ mod tests {
             received_heights.push(height);
             let mut block = rng.random::<Block>();
             block.set_header_height(BlockHeight::from(height));
-            if let Err(e) = rapid_block_download.receive_block(&block).await {
+            if let Err(e) = rapid_block_download.receive_block(&block, None).await {
                 panic!("Could not receive block {height}: {e}");
             }
 
@@ -546,7 +869,7 @@ mod tests {
 
             let mut block = rng.random::<Block>();
             block.set_header_height(height);
-            let _ = rapid_block_download.receive_block(&block).await;
+            let _ = rapid_block_download.receive_block(&block, None).await;
         }
 
         // verify that we are finished
@@ -590,7 +913,7 @@ mod tests {
 
             let mut block = rng.random::<Block>();
             block.set_header_height(height);
-            let _ = rapid_block_download_a.receive_block(&block).await;
+            let _ = rapid_block_download_a.receive_block(&block, None).await;
         }
 
         assert!(!rapid_block_download_a.is_complete());
@@ -615,7 +938,7 @@ mod tests {
 
             let mut block = rng.random::<Block>();
             block.set_header_height(height);
-            let _ = rapid_block_download_b.receive_block(&block).await;
+            let _ = rapid_block_download_b.receive_block(&block, None).await;
         }
 
         // verify that we are finished
@@ -666,7 +989,7 @@ mod tests {
             let mut block = rng.random::<Block>();
             let height = BlockHeight::from(i);
             block.set_header_height(height);
-            let _ = rapid_block_download_a.receive_block(&block).await;
+            let _ = rapid_block_download_a.receive_block(&block, None).await;
         }
 
         // setup new rapid block download state
@@ -708,7 +1031,7 @@ mod tests {
                 let i = rng.random_range(0usize..blocks_remaining.len());
                 let mut block = rng.random::<Block>();
                 block.set_header_height(blocks_remaining[i]);
-                let _ = rapid_block_download.receive_block(&block).await;
+                let _ = rapid_block_download.receive_block(&block, None).await;
             } else {
                 let i = rng.random_range(0usize..blocks_remaining.len());
                 let height = blocks_remaining.swap_remove(i);
@@ -716,7 +1039,7 @@ mod tests {
 
                 let mut block = rng.random::<Block>();
                 block.set_header_height(height);
-                let _ = rapid_block_download.receive_block(&block).await;
+                let _ = rapid_block_download.receive_block(&block, None).await;
             };
         }
 
@@ -770,7 +1093,7 @@ mod tests {
 
                 let mut block = rng.random::<Block>();
                 block.set_header_height(height);
-                let _ = rapid_block_download.receive_block(&block).await;
+                let _ = rapid_block_download.receive_block(&block, None).await;
             }
 
             // verify that we are finished

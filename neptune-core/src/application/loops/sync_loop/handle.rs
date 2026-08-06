@@ -1,6 +1,8 @@
 use neptune_consensus::block::Block;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::network::Network;
+use tasm_lib::twenty_first::prelude::MmrMembershipProof;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
@@ -63,10 +65,16 @@ impl SyncLoopHandle {
         }
     }
 
-    pub(crate) fn send_block(&self, block: Box<Block>, peer: PeerHandle) {
+    pub(crate) fn send_block(
+        &self,
+        block: Box<Block>,
+        peer: PeerHandle,
+        auth_path: Option<MmrMembershipProof>,
+    ) {
         if let Err(e) = self.sender.try_send(MainToSync::ReceiveBlock {
             peer_handle: peer,
             block,
+            auth_path,
         }) {
             tracing::warn!("Error relaying block to sync loop: {e}.");
             tracing::debug!(
@@ -91,10 +99,16 @@ impl SyncLoopHandle {
         }
     }
 
-    pub(crate) fn send_try_fetch_block(&self, peer: PeerHandle, height: BlockHeight) {
+    pub(crate) fn send_try_fetch_block(
+        &self,
+        peer: PeerHandle,
+        height: BlockHeight,
+        requester_anchor: Option<MmrAccumulator>,
+    ) {
         if let Err(e) = self.sender.try_send(MainToSync::TryFetchBlock {
             peer_handle: peer,
             height,
+            requester_anchor,
         }) {
             tracing::warn!("Error sending try-fetch-block message to sync loop: {e}.");
             tracing::debug!(

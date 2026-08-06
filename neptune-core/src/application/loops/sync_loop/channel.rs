@@ -1,5 +1,7 @@
 use neptune_consensus::block::Block;
 use neptune_primitives::block_height::BlockHeight;
+use tasm_lib::twenty_first::prelude::MmrMembershipProof;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
 use super::PeerHandle;
 use crate::application::loops::sync_loop::sync_progress::SyncProgress;
@@ -15,7 +17,16 @@ pub(crate) struct BlockRequest {
 #[derive(Debug, Clone)]
 pub(crate) enum SyncToMain {
     Finished(BlockHeight),
-    TipSuccessor(Box<Block>),
+    TipSuccessor {
+        block: Box<Block>,
+        /// The authentication path the block arrived with, proving its
+        /// membership in the chain being synced towards, if any. Retained by
+        /// the main loop when the block becomes the new tip, since the sync
+        /// loop deletes its copy after the handover.
+        ///
+        /// If provided, it is assumed to be valid.
+        auth_path: Option<MmrMembershipProof>,
+    },
     RequestBlocks(Vec<BlockRequest>),
     Status(SyncProgress),
     Punish(Vec<PeerHandle>),
@@ -24,9 +35,18 @@ pub(crate) enum SyncToMain {
         peer_handle: PeerHandle,
     },
     Error,
+    /// A peer requested a block with an anchor to authenticate against, but
+    /// no authentication path relative to that anchor could be produced. The
+    /// requester is informed so it can ask elsewhere.
+    UnableToServeValidatedBlock {
+        peer_handle: PeerHandle,
+    },
     SyncBlock {
         block: Box<Block>,
         peer_handle: PeerHandle,
+        /// An authentication path proving the block's membership in the chain
+        /// anchored by the requester's anchor, if one could be produced.
+        auth_path: Option<MmrMembershipProof>,
     },
 }
 
@@ -39,6 +59,10 @@ pub(crate) enum MainToSync {
     ReceiveBlock {
         peer_handle: PeerHandle,
         block: Box<Block>,
+        /// An authentication path proving the block's membership in the chain
+        /// being synced towards, if the block arrived with one. Must have
+        /// been verified against the provided sync anchor.
+        auth_path: Option<MmrMembershipProof>,
     },
     ExtendChain(Box<Block>),
     SyncCoverage {
@@ -48,6 +72,9 @@ pub(crate) enum MainToSync {
     TryFetchBlock {
         peer_handle: PeerHandle,
         height: BlockHeight,
+        /// The sync anchor of the requesting peer, against which a served
+        /// block should be authenticated, if the request carried one.
+        requester_anchor: Option<MmrAccumulator>,
     },
     FastForward {
         new_tip: Box<Block>,

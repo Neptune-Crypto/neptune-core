@@ -37,6 +37,7 @@ mod test_utils {
     pub(crate) use shared_tokio_runtime;
 }
 
+use std::collections::HashMap;
 use std::ops::RangeInclusive;
 
 use itertools::Itertools;
@@ -278,56 +279,117 @@ impl<Storage: StorageVec<Digest>> ArchivalMmr<Storage> {
     /// Return membership proof, as it looks relative to a smaller version of
     /// the MMR which only has `num_leafs` leafs. `num_leafs` may not exceed
     /// the actual number of leafs.
+    ///
+    /// # Panics
+    /// - If the `num_leafs` that the membership proof is served relative to is
+    ///   greater than this MMR's num leafs.
     pub async fn prove_membership_relative_to_smaller_mmr(
         &self,
         leaf_index: u64,
         num_leafs: u64,
     ) -> MmrMembershipProof {
-        // TODO: Replace this local function with the one in `twenty_first` once
-        // available through never version.
-        fn auth_path_node_indices(num_leafs: u64, leaf_index: u64) -> Vec<u64> {
-            assert!(
-                leaf_index < num_leafs,
-                "Leaf index out-of-bounds: {leaf_index}/{num_leafs}"
-            );
-
-            let (mut merkle_tree_index, _) =
-                leaf_index_to_mt_index_and_peak_index(leaf_index, num_leafs);
-            let mut node_index = leaf_index_to_node_index(leaf_index);
-            let mut height = 0;
-            let tree_height = u64::BITS - merkle_tree_index.leading_zeros() - 1;
-            let mut ret = Vec::with_capacity(tree_height as usize);
-            while merkle_tree_index > 1 {
-                let is_left_sibling = merkle_tree_index & 1 == 0;
-                let height_pow = 1u64 << (height + 1);
-                let as_1_or_minus_1: u64 = (2 * i64::from(is_left_sibling) - 1) as u64;
-                let signed_height_pow = height_pow.wrapping_mul(as_1_or_minus_1);
-                let sibling = node_index
-                    .wrapping_add(signed_height_pow)
-                    .wrapping_sub(as_1_or_minus_1);
-
-                node_index += 1 << ((height + 1) * u32::from(is_left_sibling));
-
-                ret.push(sibling);
-                merkle_tree_index >>= 1;
-                height += 1;
-            }
-
-            debug_assert_eq!(tree_height, ret.len() as u32, "Allocation must be optimal");
-
-            ret
-        }
-
         assert!(
             num_leafs <= self.num_leafs().await,
             "Cannot find membership proofs relative to bigger MMR"
         );
 
-        let node_indices = auth_path_node_indices(num_leafs, leaf_index);
+        let node_indices = shared_advanced::auth_path_node_indices(num_leafs, leaf_index);
         let ap_elements = self.digests.get_many(&node_indices).await;
 
         MmrMembershipProof {
             authentication_path: ap_elements,
+        }
+    }
+
+    /// Return membership proof, as it looks relative to a larger version of
+    /// the MMR, one that extends this MMR with additional leafs, and whose
+    /// nodes are known only through the authentication path of a later leaf of
+    /// this MMR.
+    ///
+    /// Every entry of the returned path is one of three kinds: a node known to
+    /// this MMR; the node at which the leaf's path joins the later leaf's path,
+    /// or an entry of `later_leaf_path` above that join.
+    ///
+    /// If the `later_leaf_path` is correct, and the path of a leaf after this
+    /// node's tip, then the result will be correct.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the MMR is empty, if `leaf_index` is out-of-bounds, if
+    /// `larger_num_leafs` is smaller than this MMR's number of leafs, or if
+    /// `later_leaf_path` does not have the length that `larger_num_leafs`
+    /// prescribes for this MMR's last leaf.
+    pub async fn prove_membership_relative_to_larger_mmr(
+        &self,
+        leaf_index: u64,
+        later_leaf_path: &MmrMembershipProof,
+        larger_num_leafs: u64,
+    ) -> MmrMembershipProof {
+        let num_leafs = self.num_leafs().await;
+        assert!(num_leafs > 0, "Cannot prove membership in an empty MMR");
+        assert!(
+            leaf_index < num_leafs,
+            "Leaf index out-of-bounds: {leaf_index}/{num_leafs}"
+        );
+        assert!(
+            num_leafs <= larger_num_leafs,
+            "Cannot find membership proofs relative to smaller MMR"
+        );
+
+        let last_leaf_index = num_leafs - 1;
+        let later_leaf_path_node_indices =
+            shared_advanced::auth_path_node_indices(larger_num_leafs, last_leaf_index);
+        assert_eq!(
+            later_leaf_path_node_indices.len(),
+            later_leaf_path.authentication_path.len(),
+            "Last leaf's authentication path must be relative to the larger MMR"
+        );
+
+        // Calculate all MMR nodes that can be known.
+        let mut node_index = leaf_index_to_node_index(last_leaf_index);
+        let mut acc_hash = self.get_leaf_async(last_leaf_index).await;
+        let mut beyond_own_nodes: HashMap<u64, Digest> = HashMap::new();
+        for (&sibling_index, &sibling) in later_leaf_path_node_indices
+            .iter()
+            .zip(&later_leaf_path.authentication_path)
+        {
+            beyond_own_nodes.insert(sibling_index, sibling);
+            let is_right_child =
+                shared_advanced::right_lineage_length_and_own_height(node_index).0 != 0;
+            acc_hash = if is_right_child {
+                Tip5::hash_pair(sibling, acc_hash)
+            } else {
+                Tip5::hash_pair(acc_hash, sibling)
+            };
+            node_index = shared_advanced::parent(node_index);
+            beyond_own_nodes.insert(node_index, acc_hash);
+        }
+
+        // Find the required MMR nodes for this membership proof, among the ones
+        // we could calculate.
+        let num_own_nodes = self.digests.len().await - 1;
+        let path_node_indices =
+            shared_advanced::auth_path_node_indices(larger_num_leafs, leaf_index);
+        let own_node_indices = path_node_indices
+            .iter()
+            .copied()
+            .filter(|node_index| *node_index <= num_own_nodes)
+            .collect_vec();
+        let mut own_digests = self.digests.get_many(&own_node_indices).await.into_iter();
+
+        let authentication_path = path_node_indices
+            .into_iter()
+            .map(|node_index| {
+                if node_index <= num_own_nodes {
+                    own_digests.next().unwrap()
+                } else {
+                    beyond_own_nodes[&node_index]
+                }
+            })
+            .collect();
+
+        MmrMembershipProof {
+            authentication_path,
         }
     }
 
@@ -809,6 +871,33 @@ pub(crate) mod tests {
             &smaller_mmr.peaks(),
             smaller_mmr.num_leafs()
         ));
+    }
+
+    #[proptest(cases = 20, async = "tokio")]
+    async fn prove_membership_relative_to_larger_mmr(
+        #[strategy(1u64..500)] num_leafs: u64,
+        #[strategy(vec(arb(), #num_leafs as usize))] digests: Vec<Digest>,
+        #[strategy(1u64..=#num_leafs)] reduced_num_leafs: u64,
+        #[strategy(0u64..#reduced_num_leafs)] leaf_index: u64,
+    ) {
+        let last_leaf_index = reduced_num_leafs - 1;
+        let full_ammr = mock::get_ammr_from_digests(digests.clone()).await;
+        let later_leaf_path = full_ammr.prove_membership_async(last_leaf_index).await;
+
+        let reduced_ammr =
+            mock::get_ammr_from_digests(digests[0..reduced_num_leafs as usize].to_vec()).await;
+        let mp = reduced_ammr
+            .prove_membership_relative_to_larger_mmr(leaf_index, &later_leaf_path, num_leafs)
+            .await;
+
+        let larger_mmr = MmrAccumulator::new_from_leafs(digests.clone());
+        prop_assert!(mp.verify(
+            leaf_index,
+            digests[leaf_index as usize],
+            &larger_mmr.peaks(),
+            larger_mmr.num_leafs()
+        ));
+        prop_assert_eq!(full_ammr.prove_membership_async(leaf_index).await, mp);
     }
 
     #[apply(shared_tokio_runtime)]

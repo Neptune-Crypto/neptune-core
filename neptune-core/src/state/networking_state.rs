@@ -17,6 +17,7 @@ use rand::rng;
 use rand::Rng;
 use tasm_lib::prelude::Digest;
 use tasm_lib::twenty_first::prelude::Mmr;
+use tasm_lib::twenty_first::prelude::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
 use crate::application::loops::sync_loop::sync_progress::SyncProgress;
@@ -39,6 +40,12 @@ pub(crate) struct SyncAnchor {
     /// Indicates the block that we have currently synced to under this anchor.
     pub(crate) champion: (BlockHeight, Digest),
 
+    /// Authentication path of the node's tip, relative to `block_mmr`, if that
+    /// block arrived with one. Processed blocks are deleted from the sync
+    /// store, so this retained path is what allows membership proofs to be
+    /// extended to anchor-relative ones when serving other syncing peers.
+    pub(crate) tip_auth_path: Option<(BlockHeight, MmrMembershipProof)>,
+
     /// The last time this anchor was either created or updated.
     pub(crate) updated: SystemTime,
 
@@ -47,17 +54,30 @@ pub(crate) struct SyncAnchor {
 }
 
 impl SyncAnchor {
+    /// # Panics
+    ///
+    /// If the claimed block MMR accumulator does not match the claimed height.
+    ///
+    /// The block defining this anchor must have its digest added to the MMR.
     pub(crate) fn new(
         claimed_cumulative_pow: ProofOfWork,
         claimed_block_mmra: MmrAccumulator,
         claimed_height: BlockHeight,
         claimed_block_digest: Digest,
     ) -> Self {
+        assert_eq!(
+            claimed_height.next().value(),
+            claimed_block_mmra.num_leafs(),
+            "Claimed block MMR accumulator must have one leaf per block up to \
+             and including the claimed tip of height {claimed_height}."
+        );
+
         let status = SyncProgress::new(claimed_block_mmra.num_leafs());
         Self {
             cumulative_proof_of_work: claimed_cumulative_pow,
             block_mmr: claimed_block_mmra,
             champion: (claimed_height, claimed_block_digest),
+            tip_auth_path: None,
             updated: SystemTime::now(),
             status,
         }
@@ -243,5 +263,27 @@ impl NetworkingState {
 
     pub(crate) fn last_disconnection_time_of_peer(&self, id: InstanceId) -> Option<SystemTime> {
         self.disconnection_times.get(&id).copied()
+    }
+}
+
+#[cfg(any(test, feature = "test-helpers"))]
+mod test_helpers {
+    use super::*;
+
+    /// Views into sync-internal state, for integration tests.
+    impl NetworkingState {
+        /// Whether a running sync process has retained an authentication path
+        /// for the current tip.
+        pub fn sync_tip_auth_path_is_retained(&self) -> bool {
+            self.sync_anchor
+                .as_ref()
+                .is_some_and(|sync_anchor| sync_anchor.tip_auth_path.is_some())
+        }
+
+        /// Whether a running sync process has downloaded every block in its
+        /// span, processed or not.
+        pub fn sync_download_is_complete(&self) -> bool {
+            matches!(&self.sync_status, SyncStatus::Syncing(progress) if progress.download_is_complete())
+        }
     }
 }
