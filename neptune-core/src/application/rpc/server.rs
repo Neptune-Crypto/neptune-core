@@ -3846,6 +3846,10 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
+        if !self.state.cli().network.use_mock_proof() {
+            return Err(api::regtest::error::RegTestError::WrongNetwork.into());
+        }
+
         let include_mempool_txs = true;
         Ok(self
             .state
