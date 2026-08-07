@@ -437,7 +437,11 @@ where
     #[inline]
     async fn bloom_filter_contains_inner(&self, index: u128, active_window_start: u128) -> bool {
         if index >= active_window_start {
-            let relative_index = (index - active_window_start) as u32;
+            // Ensure index is actually inside the active window. If not, it
+            // is a future index. Index must be valid u32.
+            let Ok(relative_index) = u32::try_from(index - active_window_start) else {
+                return false;
+            };
             if relative_index >= WINDOW_SIZE {
                 return false;
             }
@@ -669,6 +673,18 @@ mod tests {
                 .await
         );
         assert!(!archival_mutator_set.bloom_filter_contains(0u128).await);
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn far_future_index_is_not_in_active_window() {
+        let mut rms = empty_rusty_mutator_set().await;
+        let ams = rms.ams_mut();
+        ams.swbf_active.insert(5);
+
+        assert!(ams.bloom_filter_contains(5).await);
+        assert!(!ams.bloom_filter_contains((1u128 << 32) + 5).await);
+        assert!(!ams.bloom_filter_contains((1u128 << 64) + 5).await);
+        assert!(!ams.bloom_filter_contains((1u128 << 96) + 5).await);
     }
 
     #[apply(shared_tokio_runtime)]
