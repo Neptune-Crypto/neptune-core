@@ -214,9 +214,6 @@ impl MutatorSetAccumulator {
 
         let active_window_start = u128::from(self.get_batch_index()) * u128::from(CHUNK_SIZE);
         removal_records.iter().all(|removal_record| {
-            // Validate verifies that the all required chunk/MMR membership
-            // proof pairs are present, and that all MMR membership proofs are
-            // valid against the mutator set accumulator.
             if !removal_record.validate(self) {
                 return false;
             }
