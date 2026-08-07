@@ -232,9 +232,9 @@ where
         Ok((chunk_auth_path, chunk))
     }
 
-    /// Restore membership_proof. If called on someone else's UTXO, this leaks privacy. In this case,
-    /// caller is better off using `get_aocl_authentication_path` and `get_chunk_and_auth_path` for the
-    /// relevant indices.
+    /// Restore membership_proof. If called on someone else's UTXO, this leaks
+    /// privacy. In this case, caller is better off using
+    /// `restore_membership_proof_privacy_preserving`.
     pub async fn restore_membership_proof(
         &self,
         item: Digest,
