@@ -282,10 +282,12 @@ impl RemovalRecordList {
     ///  - If the observed authentication path lengths is not sorted in
     ///    descending order (*i.e.*, largest first).
     ///  - If the observed authentication path lengths contains duplicates.
+    ///
+    /// Returns `None` if the estimate is not representable.
     fn estimate_num_leafs_aocl(
         observed_chunk_indices: &[u64],
         observed_authentication_path_lengths: &[usize],
-    ) -> u64 {
+    ) -> Option<u64> {
         let largest_observed_chunk_index =
             observed_chunk_indices.iter().copied().max().unwrap_or(0);
         let mut swbfi_leaf_count_estimate = largest_observed_chunk_index;
@@ -314,7 +316,9 @@ impl RemovalRecordList {
             }
         }
 
-        swbfi_leaf_count_estimate * u64::from(BATCH_SIZE) + 1
+        swbfi_leaf_count_estimate
+            .checked_mul(u64::from(BATCH_SIZE))?
+            .checked_add(1)
     }
 
     /// Compute a [`ChunkDictionary`], densely encoding all the data about
@@ -619,7 +623,8 @@ impl RemovalRecordList {
         let num_leafs_aocl = Self::estimate_num_leafs_aocl(
             &observed_chunk_indices,
             &tree_heights.iter().map(|u| *u as usize).rev().collect_vec(),
-        );
+        )
+        .ok_or(RemovalRecordListUnpackError::AbsoluteIndexTooBig)?;
 
         let removal_record_list = Self {
             index_sets,
@@ -710,7 +715,8 @@ impl RemovalRecordList {
         let num_leafs_aocl = RemovalRecordList::estimate_num_leafs_aocl(
             &observed_chunk_indices,
             &authentication_path_lengths,
-        );
+        )
+        .expect("locally derived removal records must have a representable AOCL leaf count");
 
         RemovalRecordList::from_removal_records(removal_records, num_leafs_aocl)
     }
@@ -1478,7 +1484,8 @@ mod tests {
         let estimate_num_leafs_aocl = RemovalRecordList::estimate_num_leafs_aocl(
             &chunk_indices,
             &authentication_path_lengths,
-        );
+        )
+        .unwrap();
 
         prop_assert!(estimate_num_leafs_aocl <= num_leafs_aocl);
     }
@@ -1506,7 +1513,8 @@ mod tests {
         let estimate_num_leafs_aocl = RemovalRecordList::estimate_num_leafs_aocl(
             &chunk_indices,
             &authentication_path_lengths,
-        );
+        )
+        .unwrap();
 
         // the estimate explains all authentication path lengths
         let num_leafs_swbfi = aocl_to_swbfi_leaf_counts(estimate_num_leafs_aocl);
@@ -1572,7 +1580,8 @@ mod tests {
         let estimate_num_leafs_aocl = RemovalRecordList::estimate_num_leafs_aocl(
             &chunk_indices,
             &authentication_path_lengths,
-        );
+        )
+        .unwrap();
 
         // the estimate explains all authentication path lengths
         let num_leafs_swbfi = aocl_to_swbfi_leaf_counts(estimate_num_leafs_aocl);
@@ -2242,6 +2251,22 @@ mod tests {
 
             // Ensure no crash, and that an error is returned.
             assert!(RemovalRecordList::try_unpack(removal_records).is_err());
+        }
+
+        #[test]
+        fn try_unpack_rejects_indices_that_overflow_the_aocl_leaf_count_estimate() {
+            let removal_record = RemovalRecord {
+                absolute_indices: AbsoluteIndexSet::new_raw(1u128 << 74, [0; NUM_TRIALS as usize]),
+                target_chunks: ChunkDictionary::new(vec![(
+                    0,
+                    (MmrMembershipProof::new(vec![]), Chunk::empty_chunk()),
+                )]),
+            };
+
+            assert!(matches!(
+                RemovalRecordList::try_unpack(vec![removal_record]),
+                Err(RemovalRecordListUnpackError::AbsoluteIndexTooBig)
+            ));
         }
 
         #[test]
