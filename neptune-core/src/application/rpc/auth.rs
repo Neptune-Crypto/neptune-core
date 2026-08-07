@@ -138,7 +138,12 @@ impl Cookie {
         path_tmp.set_extension(extension);
 
         if let Some(parent_dir) = path.parent() {
-            tokio::fs::create_dir_all(&parent_dir)
+            let mut dir_builder = tokio::fs::DirBuilder::new();
+            dir_builder.recursive(true);
+            #[cfg(unix)]
+            dir_builder.mode(0o700);
+            dir_builder
+                .create(&parent_dir)
                 .await
                 .map_err(|e| error::CookieFileError {
                     path: path.clone(),
@@ -150,10 +155,15 @@ impl Cookie {
         }
 
         // open new temp file
-        let mut file = tokio::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
+        //
+        // The cookie is a credential as powerful as the wallet file, so it
+        // gets the same protection the wallet file has.
+        let mut open_options = tokio::fs::OpenOptions::new();
+        open_options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        open_options.mode(0o600);
+
+        let mut file = open_options
             .open(&path_tmp)
             .await
             .map_err(|e| error::CookieFileError {
@@ -319,6 +329,30 @@ mod tests {
         use std::collections::HashSet;
 
         use super::*;
+
+        #[cfg(unix)]
+        #[apply(shared_tokio_runtime)]
+        pub async fn cookie_is_inaccessible_to_other_users() -> anyhow::Result<()> {
+            use std::os::unix::fs::PermissionsExt;
+
+            let data_dir = unit_test_data_directory(Network::Main)?;
+            Cookie::try_new(&data_dir).await?;
+
+            let cookie_file_path = Cookie::cookie_file_path(&data_dir);
+            let cookie_mode = tokio::fs::metadata(&cookie_file_path)
+                .await?
+                .permissions()
+                .mode();
+            assert_eq!(0o600, cookie_mode & 0o777);
+
+            let cookie_dir_mode = tokio::fs::metadata(cookie_file_path.parent().unwrap())
+                .await?
+                .permissions()
+                .mode();
+            assert_eq!(0o700, cookie_dir_mode & 0o777);
+
+            Ok(())
+        }
 
         /// tests cookies are unique
         ///

@@ -24,15 +24,20 @@ use crate::model::message::*;
 use crate::model::wallet::transaction::RpcTransaction;
 
 #[derive(Debug, Clone, Copy, Error, Eq, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum RestoreMembershipProofError {
     #[error("Failed for index {0}")]
     Failed(usize),
 
     #[error("Exceeds the allowed limit")]
     ExceedsAllowed,
+
+    #[error("A new tip arrived while the membership proofs were being derived")]
+    TipMoved,
 }
 
 #[derive(Debug, Clone, Copy, Error, Eq, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum SubmitTransactionError {
     #[error("Invalid transaction")]
     InvalidTransaction,
@@ -52,6 +57,9 @@ pub enum SubmitTransactionError {
     #[error("Transaction not confirmable relative to the mutator set")]
     NotConfirmable,
 
+    #[error("Transaction has more inputs, outputs, or announcements than allowed")]
+    TooBig,
+
     #[error("Transaction fails to lustrate the required inputs")]
     MissingLustration,
 
@@ -60,6 +68,7 @@ pub enum SubmitTransactionError {
 }
 
 #[derive(Debug, Clone, Copy, Error, Eq, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum SubmitBlockError {
     #[error("Invalid block")]
     InvalidBlock,
@@ -69,6 +78,7 @@ pub enum SubmitBlockError {
 }
 
 #[derive(Debug, Clone, Error, Eq, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum RpcError {
     #[error("JSON-RPC server error: {0}")]
     Server(JsonError),
@@ -134,6 +144,15 @@ pub type RpcResult<T> = Result<T, RpcError>;
 
 pub const MAX_BATCH_ARE_BLOOM_INDICES_SET_INDEX_SETS: usize = 1000;
 pub const MAX_UTXO_ORIGIN_ABSOLUTE_INDEX_SETS: usize = 1000;
+
+/// The hard limit on how many membership proofs one request may ask for.
+/// Applies to every caller, including those allowed to exceed
+/// [`MAX_RESTRICTED_RESTORE_MEMBERSHIP_PROOF_INDEX_SETS`].
+pub const MAX_RESTORE_MEMBERSHIP_PROOF_INDEX_SETS: usize = 1000;
+
+/// The limit on how many membership proofs one request may ask for, for
+/// callers that are not granted unrestricted access.
+pub const MAX_RESTRICTED_RESTORE_MEMBERSHIP_PROOF_INDEX_SETS: usize = 256;
 
 #[async_trait]
 pub trait RpcApi: Sync + Send {

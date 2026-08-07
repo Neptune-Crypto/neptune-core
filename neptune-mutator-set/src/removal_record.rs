@@ -385,6 +385,11 @@ impl RemovalRecord {
         }
     }
 
+    /// Whether the chunk dictionary holds exactly the required chunk indices.
+    ///
+    /// Does not check the validity of the authentication paths, only that the
+    /// correct indicees are present, as dictated by the absolute index set and
+    /// the batch index.
     fn has_required_authenticated_chunks(
         &self,
         mutator_set_accumulator: &MutatorSetAccumulator,
@@ -403,8 +408,8 @@ impl RemovalRecord {
     }
 
     /// Validates that a removal record is synchronized against the inactive
-    /// part of the SWBF, and that all required chunk/MMR membership proofs are
-    /// present.
+    /// part of the SWBF, and that the chunk/MMR membership proofs it carries
+    /// are exactly those its indices require, no fewer, and no more.
     pub fn validate(&self, mutator_set: &MutatorSetAccumulator) -> bool {
         self.validate_inner(mutator_set).is_ok()
     }
@@ -414,8 +419,15 @@ impl RemovalRecord {
         &self,
         mutator_set: &MutatorSetAccumulator,
     ) -> Result<(), RemovalRecordValidityError> {
+        // Disallow repeated chunk indices, since an (unpacked) removal record
+        // is supposed to be a map.
+        let chunk_indices = self.target_chunks.all_chunk_indices();
+        if let Some(&chunk_index) = chunk_indices.iter().duplicates().next() {
+            return Err(RemovalRecordValidityError::DuplicateChunkIndex { chunk_index });
+        }
+
         if !self.has_required_authenticated_chunks(mutator_set) {
-            return Err(RemovalRecordValidityError::AbsentAuthenticatedChunk);
+            return Err(RemovalRecordValidityError::MismatchedChunkIndices);
         }
 
         let swbfi_peaks = mutator_set.swbf_inactive.peaks();
@@ -444,8 +456,14 @@ impl RemovalRecord {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RemovalRecordValidityError {
-    AbsentAuthenticatedChunk,
-    InvalidSwbfiMmrMp { chunk_index: u64 },
+    /// Missing or superfluous chunk indices compared to what's required.
+    MismatchedChunkIndices,
+    InvalidSwbfiMmrMp {
+        chunk_index: u64,
+    },
+    DuplicateChunkIndex {
+        chunk_index: u64,
+    },
 }
 
 #[cfg(any(test, feature = "test-helpers"))]
@@ -658,6 +676,94 @@ mod tests {
 
         assert!(rr_for_aocl0.validate(&accumulator));
         assert!(!rr_for_aocl0.validate(&MutatorSetAccumulator::default()));
+    }
+
+    #[test]
+    fn duplicate_chunk_index_is_invalid() {
+        let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
+        let (min_index_in_active_window, max_index_in_active_window) =
+            accumulator.active_window_chunk_interval();
+        let num_chunks_in_active_window = max_index_in_active_window - min_index_in_active_window;
+
+        let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
+        let addition_record: AdditionRecord =
+            commit(item, sender_randomness, receiver_preimage.hash());
+
+        let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
+        accumulator.add(&addition_record);
+        let mut removal_record = accumulator.drop(item, &mp);
+
+        // Move every index into the inactive part of the sliding-window Bloom
+        // filter, so that the removal record has SWBF auth paths.
+        for _ in 0..u64::from(BATCH_SIZE) * num_chunks_in_active_window + 1 {
+            RemovalRecord::batch_update_from_addition(&mut [&mut removal_record], &accumulator);
+            accumulator.add(&addition_record);
+        }
+        assert!(removal_record.validate(&accumulator));
+        assert!(accumulator.can_remove(&removal_record));
+
+        let repeated_entry = removal_record.target_chunks.dictionary[0].clone();
+        let chunk_index = repeated_entry.0;
+        removal_record.target_chunks.dictionary.push(repeated_entry);
+
+        assert_eq!(
+            Err(RemovalRecordValidityError::DuplicateChunkIndex { chunk_index }),
+            removal_record.validate_inner(&accumulator)
+        );
+        assert!(
+            !accumulator.can_remove(&removal_record),
+            "a removal record with a repeated chunk index must not be applicable"
+        );
+    }
+
+    #[test]
+    fn superfluous_chunk_is_invalid() {
+        let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
+        let (min_index_in_active_window, max_index_in_active_window) =
+            accumulator.active_window_chunk_interval();
+        let num_chunks_in_active_window = max_index_in_active_window - min_index_in_active_window;
+
+        let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
+        let addition_record: AdditionRecord =
+            commit(item, sender_randomness, receiver_preimage.hash());
+
+        let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
+        accumulator.add(&addition_record);
+        let mut removal_record = accumulator.drop(item, &mp);
+
+        // Move every index into the inactive part of the sliding-window Bloom
+        // filter, so that the removal record has SWBF auth paths.
+        for _ in 0..u64::from(BATCH_SIZE) * num_chunks_in_active_window + 1 {
+            RemovalRecord::batch_update_from_addition(&mut [&mut removal_record], &accumulator);
+            accumulator.add(&addition_record);
+        }
+        assert!(removal_record.validate(&accumulator));
+
+        // Add an authenticated chunk for an index that none of the removal
+        // record's absolute indices points into.
+        let (unrequired_chunk_index, authenticated_chunk) = {
+            let (_, authenticated_chunk) = removal_record.target_chunks.dictionary[0].clone();
+            let not_required_chk_idx = removal_record
+                .target_chunks
+                .all_chunk_indices()
+                .into_iter()
+                .max()
+                .unwrap()
+                + 1;
+            (not_required_chk_idx, authenticated_chunk)
+        };
+        removal_record
+            .target_chunks
+            .insert(unrequired_chunk_index, authenticated_chunk);
+
+        assert_eq!(
+            Err(RemovalRecordValidityError::MismatchedChunkIndices),
+            removal_record.validate_inner(&accumulator)
+        );
+        assert!(
+            !accumulator.can_remove(&removal_record),
+            "a removal record with a superfluous chunk must not be applicable"
+        );
     }
 
     /// non-deterministic; a correction was shelved at <https://github.com/Neptune-Crypto/neptune-core/pull/554>

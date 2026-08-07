@@ -2244,16 +2244,24 @@ impl NeptuneRPCServer {
     }
 
     /// Verify a pow solution and send it to main loop if it is valid.
+    ///
+    /// Also verifies block validity in general.
     async fn pow_solution_inner(
         &self,
         mut proposal: Block,
         pow: BlockPow,
-        tip_header: BlockHeader,
+        tip: Block,
     ) -> RpcResult<bool> {
         proposal.set_header_pow(pow);
 
-        if !proposal.has_proof_of_work(self.state.cli().network, &tip_header) {
+        let network = self.state.cli().network;
+        if !proposal.has_proof_of_work(network, tip.header()) {
             warn!("Got claimed PoW solution but PoW solution is not valid.");
+            return Ok(false);
+        }
+
+        if let Err(e) = proposal.validate(&tip, Timestamp::now(), network).await {
+            warn!("Got claimed PoW solution for a block that is not valid: {e}");
             return Ok(false);
         }
 
@@ -3838,6 +3846,10 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
+        if !self.state.cli().network.use_mock_proof() {
+            return Err(api::regtest::error::RegTestError::WrongNetwork.into());
+        }
+
         let include_mempool_txs = true;
         Ok(self
             .state
@@ -3859,7 +3871,7 @@ impl RPC for NeptuneRPCServer {
         token.auth(&self.valid_tokens)?;
 
         // Find proposal from list of exported proposals.
-        let (proposal, tip_header) = {
+        let (proposal, tip) = {
             let state = self.state.lock_guard().await;
             let Some(proposal) = state
                 .mining_state
@@ -3874,10 +3886,10 @@ impl RPC for NeptuneRPCServer {
                 return Ok(false);
             };
 
-            (proposal, *state.chain.tip().header())
+            (proposal, state.chain.tip().clone())
         };
 
-        self.pow_solution_inner(proposal, pow, tip_header).await
+        self.pow_solution_inner(proposal, pow, tip).await
     }
 
     // documented in trait. do not add doc-comment.
@@ -3891,21 +3903,13 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        // Since block comes from external source, we need to check validity.
-        let tip_header = {
-            let network = self.state.cli().network;
-            let state = self.state.lock_guard().await;
-            let tip = state.chain.tip();
-            if !proposal.is_valid(tip, Timestamp::now(), network).await {
-                warn!("Got claimed new block that was not valid");
-                return Ok(false);
-            }
-
-            *state.chain.tip().header()
-        };
+        // The block comes from an external source, so it needs to be checked
+        // for validity. That happens in `pow_solution_inner`, once the
+        // solution has been inserted.
+        let tip = self.state.lock_guard().await.chain.tip().clone();
 
         // No locks may be held here
-        self.pow_solution_inner(proposal, pow, tip_header).await
+        self.pow_solution_inner(proposal, pow, tip).await
     }
 
     // documented in trait. do not add doc-comment.
@@ -6433,7 +6437,10 @@ mod tests {
             let bob_token = cookie_token(&bob).await;
 
             let genesis = Block::genesis(network);
-            let mut block1 = invalid_empty_block(&genesis, network);
+
+            let mut block1 = fake_valid_deterministic_successor(&genesis, network).await;
+
+            let lustration_status = block1.header().pow.lustration_status().ok();
             bob.state
                 .lock_mut(|x| {
                     x.mining_state.block_proposal =
@@ -6502,9 +6509,13 @@ mod tests {
                 let version = block1.header().version;
                 let target = genesis.header().difficulty.target();
                 let valid_pow = loop {
-                    if let Some(valid_pow) =
-                        Pow::guess(&mast_auth_paths, random(), target, None, Some(version))
-                    {
+                    if let Some(valid_pow) = Pow::guess(
+                        &mast_auth_paths,
+                        random(),
+                        target,
+                        lustration_status,
+                        Some(version),
+                    ) {
                         break valid_pow;
                     }
                 };

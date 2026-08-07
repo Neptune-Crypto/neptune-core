@@ -443,14 +443,20 @@ impl PeerLoopHandler {
                 );
                 match invalid_removal_record.validate_inner(mutator_set_accumulator) {
                     Ok(_) => (),
-                    Err(RemovalRecordValidityError::AbsentAuthenticatedChunk) => {
-                        debug!("invalid because membership proof is missing");
+                    Err(RemovalRecordValidityError::MismatchedChunkIndices) => {
+                        debug!(
+                            "invalid because the authenticated chunks are not the ones the \
+                             indices require: some are missing or superfluous"
+                        );
                     }
                     Err(RemovalRecordValidityError::InvalidSwbfiMmrMp { chunk_index }) => {
                         debug!(
                             "invalid because membership proof for chunk index {chunk_index} is \
                              invalid"
                         );
+                    }
+                    Err(RemovalRecordValidityError::DuplicateChunkIndex { chunk_index }) => {
+                        debug!("invalid because chunk index {chunk_index} occurs more than once");
                     }
                 }
 
@@ -1900,6 +1906,15 @@ impl PeerLoopHandler {
                             // arrive whenever more than one of them answers.
                             warn!("Received transaction that was already known");
                             None
+                        }
+                        TxAdmissionError::TooManyInputs
+                        | TxAdmissionError::TooManyOutputs
+                        | TxAdmissionError::TooManyAnnouncements => {
+                            warn!(
+                                "Received transaction with TXID {txid} that exceeds the \
+                                 allowed limits, and can therefore never be mined."
+                            );
+                            Some(NegativePeerSanction::UnrelayableTransaction)
                         }
                         TxAdmissionError::TooOld => {
                             // TODO: Consider punishing here

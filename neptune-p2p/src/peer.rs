@@ -23,6 +23,7 @@ use neptune_primitives::difficulty_control::max_cumulative_pow_after;
 use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 use num_bigint::BigUint;
+use num_traits::CheckedSub;
 use num_traits::ToPrimitive;
 use num_traits::Zero;
 use peer_block_notifications::PeerBlockNotification;
@@ -844,8 +845,14 @@ impl SyncChallengeResponse {
 
         let first = self.blocks[0].0.header;
         let last = self.tip.header;
-        let total_pow_increase = BigUint::from(last.cumulative_proof_of_work)
-            - BigUint::from(first.cumulative_proof_of_work);
+
+        // Cum-pow values are the responder's to choose, so the difference is
+        // not known to be positive.
+        let Some(total_pow_increase) = BigUint::from(last.cumulative_proof_of_work)
+            .checked_sub(&BigUint::from(first.cumulative_proof_of_work))
+        else {
+            return false;
+        };
         let span = last.height - first.height;
         let average_difficulty = total_pow_increase.to_f64().unwrap() / (span as f64);
         debug_assert!(
@@ -1062,6 +1069,36 @@ mod tests {
     use rand::rng;
 
     use super::*;
+
+    #[test]
+    fn check_pow_rejects_first_block_with_more_work_than_last() {
+        use neptune_consensus::block::block_header::HeaderToBlockHashWitness;
+        use neptune_consensus::transaction::validity::neptune_proof::Proof;
+
+        let network = Network::Testnet(42);
+        let genesis = Block::genesis(network);
+        let block = TransferBlock {
+            header: *genesis.header(),
+            body: genesis.body().clone(),
+            appendix: genesis.appendix().clone(),
+            proof: Proof::invalid(),
+        };
+        let witness = BlockHeaderWithBlockHashWitness::new(
+            *genesis.header(),
+            HeaderToBlockHashWitness::from(&genesis),
+        );
+        let mut response = SyncChallengeResponse {
+            blocks: std::array::from_fn(|_| (block.clone(), block.clone())),
+            membership_proofs: std::array::from_fn(|_| MmrMembershipProof::new(vec![])),
+            tip_parent: block.clone(),
+            tip: block.clone(),
+            pow_witnesses: std::array::from_fn(|_| witness.clone()),
+        };
+        response.blocks[0].0.header.cumulative_proof_of_work =
+            block.header.cumulative_proof_of_work + [1u32];
+
+        assert!(!response.check_pow(network, 1u64.into()));
+    }
 
     #[test]
     fn random_negative_peer_sanction_does_not_crash() {

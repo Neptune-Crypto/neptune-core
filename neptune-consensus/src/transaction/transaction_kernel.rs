@@ -136,7 +136,6 @@ impl TransactionKernel {
         // check validity of removal records
         //       ^^^^^^^^
 
-        // meaning: a) all required membership proofs exist; and b) are valid.
         let inputs = &self.inputs;
         let maybe_invalid_removal_record = inputs
             .iter()

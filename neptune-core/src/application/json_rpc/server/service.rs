@@ -57,6 +57,16 @@ use crate::state::wallet::sent_transaction::SentTransaction;
 use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
 use crate::state::wallet::MAX_DERIVATION_INDEX_BUMP;
 
+/// How many membership proofs are derived per acquisition of the state lock.
+/// Deriving one reads from disk, and the lock blocks the application of new
+/// tips, so the derivations of a request are spread over several acquisitions.
+const RESTORE_MEMBERSHIP_PROOF_CHUNK_SIZE: usize = 16;
+
+/// How many times membership-proof derivation is restarted when a new tip
+/// arrives while it is running. Every proof in a response must be relative to
+/// the same mutator set, so a new tip invalidates the proofs derived so far.
+const RESTORE_MEMBERSHIP_PROOF_MAX_ATTEMPTS: usize = 3;
+
 #[async_trait]
 impl RpcApi for RpcServer {
     async fn network_call(&self, _: NetworkRequest) -> RpcResult<NetworkResponse> {
@@ -639,39 +649,81 @@ impl RpcApi for RpcServer {
         &self,
         request: RestoreMembershipProofRequest,
     ) -> RpcResult<RestoreMembershipProofResponse> {
-        if request.absolute_index_sets.len() > 256 && !self.unrestricted {
+        let got = request.absolute_index_sets.len();
+        if got > MAX_RESTORE_MEMBERSHIP_PROOF_INDEX_SETS {
+            return Err(RpcError::TooManyAbsoluteIndexSets {
+                max: MAX_RESTORE_MEMBERSHIP_PROOF_INDEX_SETS,
+                got,
+            });
+        }
+        if got > MAX_RESTRICTED_RESTORE_MEMBERSHIP_PROOF_INDEX_SETS && !self.unrestricted {
             return Err(RpcError::RestoreMembershipProof(
                 RestoreMembershipProofError::ExceedsAllowed,
             ));
         }
 
-        let state = self.state.lock_guard().await;
-        let ams = state.chain.archival_state().archival_mutator_set.ams();
-        let mut membership_proofs = Vec::with_capacity(request.absolute_index_sets.len());
+        // Ensure the read lock is not held too long: do derivation in chunks.
+        // All authentication paths in the response must be relative to the same
+        // mutator set. So verify that tip does not move in between chunks.
+        for _ in 0..RESTORE_MEMBERSHIP_PROOF_MAX_ATTEMPTS {
+            let (tip_hash, tip_height, tip_mutator_set) = {
+                let state = self.state.lock_guard().await;
+                (
+                    state.chain.tip_hash(),
+                    state.chain.tip_height(),
+                    state.chain.tip_mutator_set_after(),
+                )
+            };
 
-        for (index, set) in request.absolute_index_sets.into_iter().enumerate() {
-            match ams.restore_membership_proof_privacy_preserving(set).await {
-                Ok(msmp) => membership_proofs.push(msmp.into()),
-                Err(err) => {
-                    debug!("Failed to restore MSMP for {index}: {err}");
-                    return Err(RpcError::RestoreMembershipProof(
-                        RestoreMembershipProofError::Failed(index),
-                    ));
+            let mut membership_proofs = Vec::with_capacity(got);
+            let mut tip_moved = false;
+
+            for (j, index_sets) in request
+                .absolute_index_sets
+                .chunks(RESTORE_MEMBERSHIP_PROOF_CHUNK_SIZE)
+                .enumerate()
+            {
+                let state = self.state.lock_guard().await;
+                if state.chain.tip_hash() != tip_hash {
+                    tip_moved = true;
+                    break;
+                }
+
+                let ams = state.chain.archival_state().archival_mutator_set.ams();
+                for (offset, index_set) in index_sets.iter().enumerate() {
+                    match ams
+                        .restore_membership_proof_privacy_preserving(*index_set)
+                        .await
+                    {
+                        Ok(msmp) => membership_proofs.push(msmp.into()),
+                        Err(err) => {
+                            let index = j * RESTORE_MEMBERSHIP_PROOF_CHUNK_SIZE + offset;
+                            debug!("Failed to restore MSMP for {index}: {err}");
+                            return Err(RpcError::RestoreMembershipProof(
+                                RestoreMembershipProofError::Failed(index),
+                            ));
+                        }
+                    }
                 }
             }
+
+            if tip_moved {
+                continue;
+            }
+
+            let snapshot = RpcMsMembershipSnapshot {
+                synced_height: tip_height.into(),
+                synced_hash: tip_hash,
+                membership_proofs,
+                synced_mutator_set: (&tip_mutator_set).into(),
+            };
+
+            return Ok(RestoreMembershipProofResponse { snapshot });
         }
 
-        let tip_height = state.chain.tip_height();
-        let tip_hash = state.chain.tip_hash();
-        let tip_mutator_set = state.chain.tip_mutator_set_after();
-        let snapshot = RpcMsMembershipSnapshot {
-            synced_height: tip_height.into(),
-            synced_hash: tip_hash,
-            membership_proofs,
-            synced_mutator_set: (&tip_mutator_set).into(),
-        };
-
-        Ok(RestoreMembershipProofResponse { snapshot })
+        Err(RpcError::RestoreMembershipProof(
+            RestoreMembershipProofError::TipMoved,
+        ))
     }
 
     async fn submit_transaction_call(
@@ -716,6 +768,9 @@ impl RpcApi for RpcServer {
                 TxAdmissionError::NotConfirmable(_) | TxAdmissionError::CannotApplyToMutatorSet => {
                     SubmitTransactionError::NotConfirmable
                 }
+                TxAdmissionError::TooManyInputs
+                | TxAdmissionError::TooManyOutputs
+                | TxAdmissionError::TooManyAnnouncements => SubmitTransactionError::TooBig,
                 TxAdmissionError::Lustration(
                     TransactionLustrationError::MissingLustrationAnnouncement,
                 ) => SubmitTransactionError::MissingLustration,
@@ -1426,18 +1481,19 @@ impl RpcApi for RpcServer {
     ) -> RpcResult<SubmitBlockResponse> {
         let mut template: Block = request.template.into();
 
-        // Since block comes from external source, we need to check validity.
         let network = self.state.cli().network;
         let tip = self.state.lock_guard().await.chain.tip().clone();
-        let now = self.now();
-        if !template.is_valid(&tip, now, network).await {
-            return Err(RpcError::SubmitBlock(SubmitBlockError::InvalidBlock));
-        }
 
+        // The block comes from an external source, so it needs to be checked
+        // for validity. Both checks run *after* the pow solution is inserted.
         template.set_header_pow(request.pow.into());
 
-        if !template.has_proof_of_work(self.state.cli().network, template.header()) {
+        if !template.has_proof_of_work(network, tip.header()) {
             return Err(RpcError::SubmitBlock(SubmitBlockError::InsufficientWork));
+        }
+
+        if !template.is_valid(&tip, self.now(), network).await {
+            return Err(RpcError::SubmitBlock(SubmitBlockError::InvalidBlock));
         }
 
         // No time to waste! Inform main_loop!
@@ -1835,6 +1891,7 @@ pub mod tests {
     use neptune_rpc_api::api::rpc::RpcApi;
     use neptune_rpc_api::api::rpc::RpcError;
     use neptune_rpc_api::api::rpc::MAX_BATCH_ARE_BLOOM_INDICES_SET_INDEX_SETS;
+    use neptune_rpc_api::api::rpc::MAX_RESTORE_MEMBERSHIP_PROOF_INDEX_SETS;
     use neptune_rpc_api::model::common::RpcBlockSelector;
     use neptune_rpc_api::model::message::BlockHeightsByFlagsRequest;
     use neptune_rpc_api::model::mining::template::RpcBlockTemplate;
@@ -2030,6 +2087,30 @@ pub mod tests {
             },
             err
         );
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn restore_membership_proof_rejects_too_many_index_sets() {
+        let absolute_index_set = AbsoluteIndexSet::new([0_u128; NUM_TRIALS as usize]);
+        let got = MAX_RESTORE_MEMBERSHIP_PROOF_INDEX_SETS + 1;
+
+        for unrestricted in [false, true] {
+            let mut rpc_server = test_rpc_server().await;
+            rpc_server.unrestricted = unrestricted;
+
+            let err = rpc_server
+                .restore_membership_proof(vec![absolute_index_set; got])
+                .await
+                .unwrap_err();
+
+            assert_eq!(
+                RpcError::TooManyAbsoluteIndexSets {
+                    max: MAX_RESTORE_MEMBERSHIP_PROOF_INDEX_SETS,
+                    got
+                },
+                err
+            );
+        }
     }
 
     #[test_strategy::proptest(async = "tokio", cases = 5)]
@@ -2449,6 +2530,9 @@ pub mod tests {
             "Node must accept valid new tip."
         );
 
+        // Stripping the proof also invalidates the solution, since the block's
+        // proof is committed to by its hash. So the proof-of-work check, which
+        // runs first, is the one that rejects this.
         let mut bad_proposal = block;
         bad_proposal.proof = None;
         assert_eq!(
@@ -2456,7 +2540,7 @@ pub mod tests {
                 .submit_block(bad_proposal.clone(), solution)
                 .await
                 .unwrap_err(),
-            RpcError::SubmitBlock(SubmitBlockError::InvalidBlock)
+            RpcError::SubmitBlock(SubmitBlockError::InsufficientWork)
         );
     }
 
