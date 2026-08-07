@@ -1,5 +1,62 @@
 Note: (!) indicates a breaking change.
 
+## [0.16.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.15.1..v0.16.0) - 2026-08-07
+
+### ✨ Features
+
+- *(proof_upgrader)* Try next transaction if one fails ([23cef791](https://github.com/Neptune-Crypto/neptune-core/commit/23cef791))
+- *(mutator_set)* Batch-version of removal record maintanence ([1d2181e7](https://github.com/Neptune-Crypto/neptune-core/commit/1d2181e7))
+- Compose mutator set updates ([c8b9f398](https://github.com/Neptune-Crypto/neptune-core/commit/c8b9f398))
+- *(mutator_set)* Add batch-version of `can_remove` ([94be04fc](https://github.com/Neptune-Crypto/neptune-core/commit/94be04fc))
+- *(peer_loop)* Prefer authenticated blocks in sync mode ([2460e299](https://github.com/Neptune-Crypto/neptune-core/commit/2460e299))
+- *(peer_loop)* MMR-authenticate future blocks if block MMR allows it ([c4c58f9d](https://github.com/Neptune-Crypto/neptune-core/commit/c4c58f9d))
+- *(sync_loop)* Serve stored sync blocks with MMR authentication paths ([873584a8](https://github.com/Neptune-Crypto/neptune-core/commit/873584a8))
+- *(archival_mmr)* Construct auth paths for future MMRs ([bed90eb4](https://github.com/Neptune-Crypto/neptune-core/commit/bed90eb4))
+- *(sync_loop)* Extend auth paths when serving other syncing peers ([790cbe00](https://github.com/Neptune-Crypto/neptune-core/commit/790cbe00))
+
+### 🐛 Bug Fixes
+
+- *(database)* Make `persist` cancel safe ([cf7d6ab2](https://github.com/Neptune-Crypto/neptune-core/commit/cf7d6ab2))
+- Don't panic on mispaired authentication structures ([e677c44a](https://github.com/Neptune-Crypto/neptune-core/commit/e677c44a))
+- *(pow)* Reject blocks whose parent's difficulty is below minimum value ([b7cf05ba](https://github.com/Neptune-Crypto/neptune-core/commit/b7cf05ba))
+- (!) *(mempool)* Reject transactions with too many inputs/outputs/announcements ([7eff93e2](https://github.com/Neptune-Crypto/neptune-core/commit/7eff93e2))
+- *(rpc)* Verify block validity, not just PoW ([6f8f8d62](https://github.com/Neptune-Crypto/neptune-core/commit/6f8f8d62))
+- (!) *(mutator_set)* Reject duplicated chunk index values ([5571f15b](https://github.com/Neptune-Crypto/neptune-core/commit/5571f15b))
+- *(mutator_set)* Use checked arithmetic in removal records unpacking ([f968ae41](https://github.com/Neptune-Crypto/neptune-core/commit/f968ae41))
+- *(tarpc)* Early check network is RegTest on mock-block construction ([224b8e42](https://github.com/Neptune-Crypto/neptune-core/commit/224b8e42))
+- *(archival_mutator_set)* Return false on future index ([d0f5a687](https://github.com/Neptune-Crypto/neptune-core/commit/d0f5a687))
+- *(peer_loop)* Don't panic on negative cum-pow difference ([17796ae7](https://github.com/Neptune-Crypto/neptune-core/commit/17796ae7))
+
+### 🚀 Performance
+
+- *(mutator_set)* Faster mutator set updates through batching ([05772110](https://github.com/Neptune-Crypto/neptune-core/commit/05772110))
+- *(json_rpc)* Don't hold read-lock over too many MSMP restorations ([da0b31ae](https://github.com/Neptune-Crypto/neptune-core/commit/da0b31ae))
+
+### 🔒️ Security
+
+- *(mempool)* Reject ProofCollection-backed tx with set merge bit ([78aa9790](https://github.com/Neptune-Crypto/neptune-core/commit/78aa9790))
+- Reject bad ProofCollection backed txs faster ([8754f219](https://github.com/Neptune-Crypto/neptune-core/commit/8754f219))
+- On unix: restrict access to cookie file from other users ([c7fb43cd](https://github.com/Neptune-Crypto/neptune-core/commit/c7fb43cd))
+
+### ♻️ Refactor
+
+- Upgrade tx before constructing fee gobbler ([c050f952](https://github.com/Neptune-Crypto/neptune-core/commit/c050f952))
+- *(archival_state)* Prefer MS-update composition over AMS scratch pad ([051795a8](https://github.com/Neptune-Crypto/neptune-core/commit/051795a8))
+
+### ✅ Testing
+
+- Fix flakiness of rapid-block-download tests ([#960](https://github.com/Neptune-Crypto/neptune-core/issues/960)) ([bad0de8a](https://github.com/Neptune-Crypto/neptune-core/commit/bad0de8a))
+- Integration test of proof upgrading ([dd61c16e](https://github.com/Neptune-Crypto/neptune-core/commit/dd61c16e))
+- Integration test of syncing from syncing peer ([7df305b0](https://github.com/Neptune-Crypto/neptune-core/commit/7df305b0))
+
+### 🪢 Merge
+
+- Merge([#958](https://github.com/Neptune-Crypto/neptune-core/issues/958)): Neptune-Crypto/mempool-improvements ([c90d05d3](https://github.com/Neptune-Crypto/neptune-core/commit/c90d05d3))
+- Merge([#961](https://github.com/Neptune-Crypto/neptune-core/issues/961)): Neptune-Crypto/ams-scratch-pad-robustness ([aa7168ac](https://github.com/Neptune-Crypto/neptune-core/commit/aa7168ac))
+- Merge([#962](https://github.com/Neptune-Crypto/neptune-core/issues/962)): Neptune-Crypto/mmr-authenticate-sync-received-blocks ([07a3450f](https://github.com/Neptune-Crypto/neptune-core/commit/07a3450f))
+- Merge([#963](https://github.com/Neptune-Crypto/neptune-core/issues/963)): Neptune-Crypto/many-small-fixes ([7ac03bc4](https://github.com/Neptune-Crypto/neptune-core/commit/7ac03bc4))
+
+
 ## [0.15.1](https://github.com/Neptune-Crypto/neptune-core/compare/v0.15.0..v0.15.1) - 2026-07-31
 
 ### ✨ Features

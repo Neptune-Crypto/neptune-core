@@ -4072,6 +4072,8 @@ mod tests {
             ]);
             let capable_version = VersionString::new_from_str("0.99.0");
             assert!(capable_version.supports_validated_block_request());
+            let incapable_version = VersionString::new_from_str("0.15.1");
+            assert!(!incapable_version.supports_validated_block_request());
 
             enum Expected {
                 Ignored,
@@ -4079,15 +4081,11 @@ mod tests {
                 NewSyncBlock,
             }
             let cases = [
-                (Some(capable_version), block_1.clone(), Expected::Ignored),
-                (
-                    Some(capable_version),
-                    block_3.clone(),
-                    Expected::NewSyncTarget,
-                ),
-                (None, block_1.clone(), Expected::NewSyncBlock),
+                (capable_version, block_1.clone(), Expected::Ignored),
+                (capable_version, block_3.clone(), Expected::NewSyncTarget),
+                (incapable_version, block_1.clone(), Expected::NewSyncBlock),
             ];
-            for (version_override, sent_block, expected) in cases {
+            for (version, sent_block, expected) in cases {
                 let (
                     _peer_broadcast_tx,
                     from_main_rx_clone,
@@ -4099,11 +4097,7 @@ mod tests {
                     mut handshake,
                 ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network))
                     .await?;
-                if let Some(version) = version_override {
-                    handshake.version = version;
-                } else {
-                    assert!(!handshake.version.supports_validated_block_request());
-                }
+                handshake.version = version;
                 let peer_address = get_dummy_socket_address(0);
 
                 {
