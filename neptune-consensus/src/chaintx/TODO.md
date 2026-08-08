@@ -254,14 +254,6 @@ would bind that check to the wrong tree without crashing.
         payload at `*witness + 2`, past the discriminant and field-size words.
   - [x] `test_program_snapshot!` — pins the `LinkProof` program hash (replaces
         the `Forge`-as-a-program pin; `Forge` no longer has a hash of its own)
-  - [x] ~~Import order is consensus-critical~~ — retired. It used to be, because
-        four of `Forge`'s `kmalloc`s had to land at `RemovalRecordsIntegrity`'s
-        *absolute* addresses. `forge_confirmed_loop_matches_rri` now rebases
-        static-memory addresses on the block each loop touches, so it compares
-        relative layout and the block may start anywhere. What survives is local
-        to `forge.rs`: those four allocations must stay contiguous and in order,
-        which is why `StarkVerify` and the other verifier-side imports still come
-        after them.
   - [x] `main` reads the own program digest off the initial stack and hands it
         to every branch below `lkmh`. `Chain` needs it to name `LinkProof` in
         its operand claims; `Forge` ignores it. Mirrors `SingleProof`'s `main`.
@@ -736,10 +728,27 @@ Claim / plumbing:
       (`transaction_proven_under_another_program_digest_is_rejected`), plus its
       mirror image `witness_supplied_single_proof_digest_is_ignored`: `D` poked
       in the witness's memory image, public input untouched → must still verify.
-- [ ] `Cast` with `D` = the `LinkProof` program's own digest (self-substitution:
-      a `LinkProof` passed off as a `SingleProof`) → the `Cast` itself succeeds
-      but the result is un-`Fix`able. Assert the `Fix` rejection, and assert that
-      this is the *only* thing standing between it and a block.
+- [x] `Cast` under a bogus `SingleProof` program: the `Cast` succeeds, and the
+      result is un-`Fix`able —
+      `cast_under_a_bogus_single_proof_program_is_un_fixable`, in
+      `fix_branch.rs` since that is where the payoff is asserted.
+      `Cast` cannot check `D`, so a prover may name any program at all,
+      including `read_io 5 halt` -- one that approves every transaction put to
+      it and is claim-compatible by construction. Its proof verifies, the `Cast`
+      is accepted (a plain `unwrap`, so that half cannot pass vacuously), and a
+      `LinkTx` now exists attesting to nothing whatsoever. `Fix` then refuses
+      it, *inside* `stark_verify`, which is what says the link proof is itself
+      real and the digest is the sole disqualification. Together with
+      `fix_accepts_a_resolved_link_transaction` -- the same construction under
+      the true `D` -- that discharges "the only thing standing between it and a
+      block".
+      Note for anyone re-reading this item's original wording: the test does not
+      literally name the `LinkProof` digest as `D`. That special case is
+      *weaker*, not sharper -- `single_proof_claim` carries `txkmh` alone while
+      `LinkProof` reads `lkmh || D`, so no proof of `LinkProof` answers a `Cast`
+      inner claim and the substitution fails on input length, an accident of two
+      unrelated claim shapes rather than a defence. A bogus program built to fit
+      the claim is the real attack, and the only one worth pinning.
 - [x] `Cast` of a `Transaction` whose `SingleProof` does not answer the claim →
       rejected: the recursion actually runs, which guards against `D` being read
       and then unused. Folded into
@@ -845,10 +854,6 @@ Positive counterparts (so the negatives cannot pass vacuously):
       that vector to the input-UTXO tail partition. Count disagreement is the
       cardinality entry above. There is no third representation to disagree --
       `ForgeWitness` holds one `thruputs` field.
-- [n/a] Partition misclassification. Not an error, and deliberately so: the
-      partition *is* the kernel, every input carries a lock-script proof either
-      way, and a thruput no predecessor resolves is simply un-`Fix`able. See the
-      note closing §Mirror Tests > onto `Forge`.
 - [x] Faithful union. `forge_accepts_valid_witnesses` runs every split of
       `0..=3` inputs into confirmed and thruputs -- so the genuinely mixed
       shapes (1+1, 2+1, 1+2) and both extremes -- through `produce`, which

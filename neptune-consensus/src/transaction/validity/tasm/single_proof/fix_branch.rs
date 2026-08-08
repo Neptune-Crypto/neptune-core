@@ -271,13 +271,19 @@ impl BasicSnippet for FixBranch {
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
     use super::*;
+    use crate::chaintx::cast::CastWitness;
     use crate::chaintx::chain::tests::deterministic_chainable_link_primitive_witnesses;
     use crate::chaintx::chain::tests::forge;
     use crate::chaintx::mock_single_proof_digest;
     use crate::consensus_rule_set::ConsensusRuleSet;
     use crate::proof_abstractions::tasm::builtins as tasm;
+    use crate::proof_abstractions::tasm::program::prove_triton_program;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::proof_abstractions::tasm::program::TritonError;
+    use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+    use crate::proof_abstractions::triton_vm_job_queue::vm_job_queue;
+    use crate::proof_abstractions::SecretWitness;
+    use crate::transaction::Transaction;
     use crate::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::transaction::validity::single_proof::SingleProof;
     use crate::transaction::validity::single_proof::SingleProofWitness;
@@ -428,6 +434,73 @@ pub(crate) mod tests {
     async fn link_proof_forged_under_another_single_proof_digest_is_rejected() {
         let link_tx = forged_link_tx(0, 0, mock_single_proof_digest(0)).await;
         let witness = FixWitness::fix(link_tx);
+
+        let input = witness.kernel_mast_hash().reversed().values().into();
+        expect_rejection_in_stark_verify(witness, input);
+    }
+
+    /// A `Cast` under a bogus "`SingleProof`" program succeeds -- and is worth
+    /// nothing.
+    ///
+    /// `Cast` does not check the program digest `D` it is handed. It cannot:
+    /// that circularity is the whole reason `D` is a claim parameter rather
+    /// than a constant. So a prover may name any program at all, including one
+    /// that approves everything. Here that program is `read_io 5 halt`, which
+    /// consumes a transaction kernel's MAST hash and halts -- exactly the shape
+    /// `Cast`'s inner claim asks for. Its proof verifies, the `Cast` is
+    /// accepted, and a link transaction now exists that attests to nothing
+    /// whatsoever about the transaction it wraps.
+    ///
+    /// What stops it is the far end, and only the far end. The claim its link
+    /// proof answers carries the bogus `D`; `Chain` and `Update` copy `D` along
+    /// unchanged and refuse to mix two of them; and `Fix` names its own
+    /// program's digest. So the whole derivation is sealed off from the block
+    /// chain rather than admitted to it. The rejection landing *inside* the
+    /// recursive verification is what says the link proof is itself real, and
+    /// that the digest is the sole disqualification.
+    ///
+    /// This is the sharp version of
+    /// [`link_proof_forged_under_another_single_proof_digest_is_rejected`],
+    /// which makes the same point on the `Forge` side -- where the junk `D` is
+    /// never used for anything, so nothing was ever at stake. Here the junk `D`
+    /// *is* used, as a program, and it really does verify a real proof.
+    ///
+    /// This test involves producing proofs and might take a while to complete
+    /// if there is no proof cache.
+    #[tokio::test]
+    async fn cast_under_a_bogus_single_proof_program_is_un_fixable() {
+        let (predecessor, _) = deterministic_chainable_link_primitive_witnesses(2, 0);
+        let kernel = predecessor.kernel.kernel.clone();
+
+        // A "validator" that approves every transaction put to it.
+        let bogus = Program::new(&triton_asm!(read_io 5 halt));
+        let bogus_proof = prove_triton_program(
+            bogus.clone(),
+            Claim::new(bogus.hash()).with_input(kernel.mast_hash().reversed().values()),
+            NonDeterminism::default(),
+            vm_job_queue(),
+            TritonVmProofJobOptions::default(),
+        )
+        .await
+        .unwrap();
+
+        // The `Cast` itself is accepted: the proof answers the claim it builds.
+        let transaction = Transaction::new_single_proof(kernel.clone(), bogus_proof);
+        let cast = CastWitness::cast(transaction, bogus.hash());
+        LinkProof
+            .run_tasm(&cast.standard_input(), cast.nondeterminism())
+            .unwrap();
+
+        let link_proof = LinkProof
+            .prove(
+                cast.claim(),
+                cast.nondeterminism(),
+                vm_job_queue(),
+                TritonVmProofJobOptions::default(),
+            )
+            .await
+            .unwrap();
+        let witness = FixWitness { kernel, link_proof };
 
         let input = witness.kernel_mast_hash().reversed().values().into();
         expect_rejection_in_stark_verify(witness, input);
