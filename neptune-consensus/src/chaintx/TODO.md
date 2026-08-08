@@ -584,6 +584,11 @@ tested on the new dual pipeline as well.
       break the `Inputs`-leaf binding)
 - [x] bad absolute index set rejected (← `removal_record_fail_on_bad_absolute_indices`)
       — `bad_absolute_index_set_is_rejected`
+- [x] the AOCL-membership half of the same loop: a confirmed input UTXO that is
+      not the one its removal record spends —
+      `confirmed_input_utxo_unbound_to_its_removal_record_is_rejected`. RRI has
+      no counterpart to mirror; `forge_confirmed_loop_matches_rri` means this
+      test covers both copies of the loop.
 - [x] all lock scripts have valid witnesses (net behavior of `CollectLockScripts`)
       — every input UTXO needs a proof (count guard,
       `missing_lock_script_proof_is_rejected`) and each is `StarkVerify`d;
@@ -812,24 +817,48 @@ Positive counterparts (so the negatives cannot pass vacuously):
       commitment matches no output)
 - [ ] End-to-end: `Fix`'d tx passes existing `SingleProof` verification & enters
       into a block
-- [ ] Phantom thruputs are rejected. Salted inputs list contains a UTXO not
-      backed by any thruput AdditionRecord → Forge fails. This is the direct
-      inflation path.
-- [ ] Phantom confirmed UTXOs are rejected. Salted inputs list contains a UTXO
-      not backed by any removal record → Forge fails.
-- [ ] Bad commitments are rejected. The salted input UTXOs list contains an
-      element whose canonical commitment disagrees with its backing
-      `AdditionRecord` or `RemovalRecord` → Forge fails.
-- [ ] Cardinality. `|salted_input_utxos| ≠ |confirmed_inputs| + |thruputs|` →
-      Forge fails
-- [ ] Two representations of thruputs must agree. A: the `thruputs` leaf in
-      `LinkKernel`. B: the thruputs partition in the input UTXOs list.
-      Disagreement → Forge fails
-- [ ] Partition misclassification. A confirmed input placed in the thruput
-      partition (or vice-versa) → Forge fails.
-- [ ] Faithful union. A valid `Forge` with both confirmed inputs and thruputs
-      produces a digest that the unchanged NativeCurrency accepts, and the
-      balance sums over both sets.
+- [x] Phantom thruputs / phantom confirmed UTXOs are rejected. One assert covers
+      both partitions rather than two: an unbacked UTXO in *either* half changes
+      `|input_utxos|` and nothing else, so it dies on the cardinality equality
+      (`phantom_input_utxo_is_rejected`, `CARDINALITY_MISMATCH_ERROR`) before
+      either per-partition loop runs. The count-preserving flavors -- a UTXO
+      swapped for another rather than appended -- are the "bad commitments"
+      entry below; between them the inflation path is closed from both sides.
+- [x] Bad commitments are rejected, on all three lists. Thruput side:
+      `tampered_thruput_is_rejected` (`UTXO_COMMITMENT_MISMATCH_ERROR`). Output
+      side: `output_utxos_unbound_to_addition_records_is_rejected` (same id).
+      Confirmed-input side: `confirmed_input_utxo_unbound_to_its_removal_record_is_rejected`
+      (new) -- the recomputed commitment stops being the AOCL leaf, so the
+      inlined RRI membership check rejects; and
+      `bad_absolute_index_set_is_rejected` for the index-set half of the same
+      binding.
+- [x] Cardinality. `phantom_input_utxo_is_rejected` /
+      `phantom_output_utxo_is_rejected` trip the input- and output-side guards.
+      Only the "one too many" direction is poked; both guards are equality
+      asserts, so "too few" reaches the identical instruction. The
+      parallel-vector lengths (`membership_proofs`, `thruput_sender_randomnesses`,
+      ...) are checked at the proof-free tier instead --
+      `short_thruput_randomness_fails_cardinality`.
+- [x] Two representations of thruputs must agree.
+      `unauthenticated_thruput_is_rejected` pins the kernel's `thruputs` leaf to
+      the witness vector (`ROOT_MISMATCH`); `tampered_thruput_is_rejected` pins
+      that vector to the input-UTXO tail partition. Count disagreement is the
+      cardinality entry above. There is no third representation to disagree --
+      `ForgeWitness` holds one `thruputs` field.
+- [n/a] Partition misclassification. Not an error, and deliberately so: the
+      partition *is* the kernel, every input carries a lock-script proof either
+      way, and a thruput no predecessor resolves is simply un-`Fix`able. See the
+      note closing §Mirror Tests > onto `Forge`.
+- [x] Faithful union. `forge_accepts_valid_witnesses` runs every split of
+      `0..=3` inputs into confirmed and thruputs -- so the genuinely mixed
+      shapes (1+1, 2+1, 1+2) and both extremes -- through `produce`, which
+      proves the *unchanged* type scripts over the union `confirmed || thruputs`,
+      and `Forge` then recursively verifies them.
+      `forge_accepts_timelocked_witness` repeats it for a two-type-script
+      witness. Caveat worth keeping: the balance claim rests on NativeCurrency
+      proving at all, not on an assertion of the sum. `all_thruputs_is_valid` is
+      the sharpest statement of it -- a witness with zero confirmed inputs
+      balances only if thruput value counts toward the input side.
 - [x] Chain rejects a bad MAST auth path for an operand's `inputs` / `outputs` /
       `thruputs` / `fee`. (One path tampered; every field goes through the same
       snippet.)
