@@ -2379,6 +2379,44 @@ pub(crate) mod tests {
             .unwrap();
     }
 
+    /// A coinbase transaction, or one that has already been through `Merge`,
+    /// cannot be forged. Both leafs are constants the branch authenticates
+    /// directly, so a kernel holding anything else has the wrong *leaf*, not
+    /// merely the wrong value -- hence `ROOT_MISMATCH` rather than an assert of
+    /// `Forge`'s own.
+    ///
+    /// The kernel is poked before the witness is built, so the MAST tree, the
+    /// claim and every authentication path are rebuilt around it together and
+    /// the constant-leaf authentication is the only thing left to fail.
+    ///
+    /// `Chain`, `Update` and `Cast` each carry this negative already. `Forge`'s
+    /// is the one that closes the pipeline: it is where a `LinkKernel` is minted
+    /// rather than derived from one a `LinkProof` already vouches for, so every
+    /// branch downstream is entitled to assume the two leafs by induction --
+    /// `Fix` included, which is why it needs no coinbase negative of its own.
+    #[proptest(cases = 4)]
+    fn coinbase_or_merge_bit_on_the_forged_kernel_is_rejected(
+        #[strategy(pokeable_lpw())] original: LinkPrimitiveWitness,
+    ) {
+        for modifier in [
+            TransactionKernelModifier::default().coinbase(Some(NativeCurrencyAmount::coins(1))),
+            TransactionKernelModifier::default().merge_bit(true),
+        ] {
+            let mut lpw = original.clone();
+            lpw.kernel.kernel = modifier.modify(lpw.kernel.kernel);
+
+            let witness = ForgeWitness::without_proofs(&lpw);
+            prop_assert!(!witness.validate_integrity());
+            LinkProof
+                .test_assertion_failure(
+                    witness.standard_input(),
+                    witness.nondeterminism(),
+                    &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
+                )
+                .unwrap();
+        }
+    }
+
     /// A confirmed removal record whose claimed absolute index set does not match
     /// the one recomputed from its UTXO and randomness is rejected -- the inlined
     /// `RemovalRecordsIntegrity` check that a bad index set (a double-spend path

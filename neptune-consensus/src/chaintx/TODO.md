@@ -779,8 +779,31 @@ Positive counterparts (so the negatives cannot pass vacuously):
       when `thruputs == []`
 - [x] `Chain`: new timestamp unequal to max rejected
 - [ ] Thruput-input integrity: a thruput must equal an output of a predecessor
-      in the chain (validated against that output, not mutator-set membership)
-- [ ] Negative: `LinkKernel` carrying a coinbase rejected
+      in the chain (validated against that output, not mutator-set membership).
+      The negatives are all there -- `cut_through_on_unequal_commitments_is_rejected`
+      bounds the cut-through set below the outputs, `non_maximal_cut_through_is_rejected`
+      above, `a_thruput_cannot_be_cut_through_twice` fixes the multiplicity, and
+      `link_transaction_with_thruputs_is_rejected` closes the far end. What is
+      missing is the *positive*: `prop_positive` has never been run over a
+      chained witness whose `new_kernel.thruputs` is non-empty, so nothing shows
+      `Chain` accepts an honest carry-forward -- the shape that makes the
+      property mean anything. Both existing positives chain to zero thruputs
+      (`chain_accepts_a_predecessor_successor_pair` asserts as much;
+      `chain_accepts_a_chain_produced_operand` uses `from_primitive_witness(pw, 0)`).
+      Needs a fixture where the predecessor resolves only some of the
+      successor's thruputs, which `chainable_link_primitive_witnesses` cannot
+      currently express -- hence left open rather than bodged.
+- [x] Negative: `LinkKernel` carrying a coinbase rejected. All four branches
+      that mint or rewrite a kernel now have it:
+      `coinbase_or_merge_bit_on_the_forged_kernel_is_rejected` (new),
+      `..._on_the_chained_kernel_...`, `..._on_the_new_kernel_...` (`Update`),
+      `..._on_the_cast_kernel_...`; each pokes both leafs and expects
+      `ROOT_MISMATCH`, the two being constants the branches authenticate rather
+      than values they read. `Fix` needs none: it derives the link kernel from
+      the transaction kernel and verifies a `LinkProof`, and no branch that can
+      produce one admits a coinbase, so it holds by induction.
+      `coinbase_kernel_is_rejected` / `merge_bit_is_rejected` are the proof-free
+      tier's counterparts.
 - [ ] `Update` then `Fix` == `Fix` on the updated mutator set
 - [ ] `Cast` round-trip: `Cast(tx)` then `Fix` == `tx`
 - [x] Negative: `Fix` with non-empty thruputs rejected
