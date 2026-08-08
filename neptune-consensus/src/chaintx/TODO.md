@@ -649,12 +649,15 @@ unmatched thruput is un-`Fix`able (see §Motivation).
 - [x] cut-through on unequal commitments rejected — the phantom-thruput
       argument, as a test: a thruput no predecessor output resolves can never
       be cancelled
+- [x] a thruput cannot be cut through twice
+      (`a_thruput_cannot_be_cut_through_twice`) — a thruput is not a removal
+      record, so the host-machine check in `Block::is_valid` cannot check
+      thruputs for double-spends. Setup: both `Chain` operands claim the same
+      unconfirmed output. *Only one* claimed output between them is canceled; 
+      the other survives as an obligation. `Fix` will not succeed because
+      `thruputs` is not empty. Cancelling both fails the *outputs* equation.
 - [x] chained *outputs* are the union of the operands' outputs when nothing cuts
       through (`chained_outputs_must_be_the_operands_outputs`).
-- [ ] double spend across operands: both operands spending the same input.
-      `Chain` does not reject this today — nor does `merge_branch`; index-set
-      uniqueness is enforced downstream. Confirm that is still true once a
-      `LinkTx` can reach a block via `Fix`, and test it wherever it lands.
 
 ### onto `Fix`
 - [x] invalid `LinkProofWitness` discriminant crashes (← `invalid_discriminant_crashes_execution`)
@@ -784,9 +787,6 @@ Positive counterparts (so the negatives cannot pass vacuously):
       (`link_transaction_with_thruputs_is_rejected`)
 - [x] Negative: `Chain` with mismatched thruputs rejected (a cut-through whose
       commitment matches no output)
-- [ ] Negative: `Chain` with double-spends rejected. Not enforced by the branch
-      today (`merge_branch` does not either -- index-set uniqueness is a
-      downstream check); revisit once `Fix` can carry a `LinkTx` into a block
 - [ ] End-to-end: `Fix`'d tx passes existing `SingleProof` verification & enters
       into a block
 - [ ] Phantom thruputs are rejected. Salted inputs list contains a UTXO not
