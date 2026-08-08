@@ -2253,6 +2253,41 @@ pub(crate) mod tests {
             .unwrap();
     }
 
+    /// The input-side twin, and the sharper of the two: show the type scripts a
+    /// confirmed input UTXO that is not the one its removal record spends.
+    ///
+    /// Every entry of `input_utxos` counts toward the input balance, so a UTXO
+    /// no record backs is money from nowhere -- and cardinality cannot see it,
+    /// the count being untouched. What catches it is the inlined
+    /// `RemovalRecordsIntegrity` membership check: the canonical commitment
+    /// recomputed from the poked UTXO is no longer the AOCL leaf the membership
+    /// proof authenticates, so `MmrVerifyFromSecretInLeafIndexOnStack` rejects
+    /// before the index-set comparison downstream gets a look.
+    ///
+    /// `pokeable_lpw` puts the one confirmed input at index 0, the thruput after
+    /// it; the thruput's own version of this is `tampered_thruput_is_rejected`.
+    #[proptest(cases = 4)]
+    fn confirmed_input_utxo_unbound_to_its_removal_record_is_rejected(
+        #[strategy(pokeable_lpw())] lpw: LinkPrimitiveWitness,
+    ) {
+        let mut witness = ForgeWitness::without_proofs(&lpw);
+        let inflated = witness.input_utxos.utxos[0].get_native_currency_amount()
+            + NativeCurrencyAmount::coins(42);
+        witness.input_utxos.utxos[0] =
+            witness.input_utxos.utxos[0].new_with_native_currency_amount(inflated);
+        prop_assert!(!witness.validate_integrity());
+        LinkProof
+            .test_assertion_failure(
+                witness.standard_input(),
+                witness.nondeterminism(),
+                // The root comparison inside
+                // `MmrVerifyFromSecretInLeafIndexOnStack`. tasm-lib names no
+                // constant for it, so the id is written out.
+                &[10],
+            )
+            .unwrap();
+    }
+
     /// Likewise for the count: an output UTXO backed by no addition record.
     #[proptest(cases = 4)]
     fn phantom_output_utxo_is_rejected(#[strategy(pokeable_lpw())] lpw: LinkPrimitiveWitness) {
