@@ -676,19 +676,49 @@ Claim / plumbing:
       `lkmh.reversed() || D.reversed()`, length `2 * Digest::LEN`. Order and
       length must never drift (analog of the `Forge` program-hash pin).
       (`link_proof_claim_shape_is_pinned`)
-- [~] Proof/claim binding: a valid `LinkProof` for `[lkmh, D₁]` does **not**
-      verify against `[lkmh, D₂]`, `D₁ ≠ D₂`. Not written: the claim is part of
-      the Fiat-Shamir transcript, so this holds whatever our program does with
-      `D` — it tests Triton VM, not us. The gap it was meant to cover, `D` read
-      but never put in the claim, is covered by the shape pin above (which fixes
-      what `claim()` contains) and by
-      `operand_forged_under_another_single_proof_digest_is_rejected` (which fixes
-      that the *branch* uses it).
-- [~] `LinkProof` program hash does not change when the `SingleProof` program
-      changes — i.e. `LinkProof::hash()` is stable across `ConsensusRuleSet`
-      variants. Not written as its own test: `test_program_snapshot!(LinkProof)`
-      already fails the moment that stops holding, and there is no second
-      `SingleProof` version to parameterise over yet.
+- [x] Proof/claim binding: a valid `LinkProof` for `[lkmh, D₁]` does **not**
+      verify against `[lkmh, D₂]`, `D₁ ≠ D₂`.
+      **Status: resolved.** Deliberately not written as a test, and not
+      outstanding — the reasoning below settles it, and two existing tests cover
+      the part that is actually ours. Do not re-open it.
+
+      The check cannot fail, and not because of anything in this codebase. A
+      STARK proof is made interactive-then-flattened: the prover derives the
+      verifier's challenges by hashing a running transcript, and that transcript
+      is seeded with the statement itself — program, input, output. So the
+      challenges a proof answers are a function of the exact statement it was
+      made for. Feed the same proof a different statement, the verifier derives
+      different challenges, and the prover's pre-computed answers no longer fit.
+      Nothing compares `D`; the mismatch falls out of the hashing. Writing the
+      test would assert that Triton VM binds proofs to statements — the
+      dependency's property, and its own suite's job. If it ever stopped
+      holding, every proof in the system would be forgeable and this test would
+      be the least of it.
+
+      The entry was not pointless, though: the risk it aimed at is real, and it
+      is ours. That risk exists because `D` is a *parameter* rather than a
+      constant. Were it baked into the program there would be nothing to worry
+      about, but the program reads it at runtime, so there is a live failure
+      mode — **`D` gets read and then never actually used.** Read off the input,
+      and then the claim built without it, or with something else. `D` would be
+      decorative: anyone could name any digest, nothing would depend on it, and
+      the whole indexing scheme would be theatre. That is universal forgery.
+
+      Note the asymmetry. Fiat-Shamir guarantees a proof is bound to whatever
+      statement you check it against, but says nothing about whether you built
+      the *right* statement. That second part is entirely ours, and it is
+      covered by two tests, because there are two places the bug could live:
+      - `link_proof_claim_shape_is_pinned` — the Rust side, which is what the
+        *prover* uses. Pins the claim's input to exactly `lkmh || D`, in that
+        order, that length. Dropping `D` from the claim builder fails it.
+      - `operand_forged_under_another_single_proof_digest_is_rejected` — the
+        tasm side, which is what the *verifier* runs. Operands proven under one
+        digest while the claim names another must be rejected. A branch that
+        read `D` and then did not use it when constructing operand claims would
+        pass this when it should fail.
+
+      Both are needed: the prover's helper and the verifier's program are
+      separate pieces of code, and either could be the one that forgets `D`.
 
 `Chain`:
 - [x] substituted operand `D`: the operands are proven under `D'` while the claim
