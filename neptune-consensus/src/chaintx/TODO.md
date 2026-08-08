@@ -702,8 +702,25 @@ Claim / plumbing:
       leave the public input alone → must still verify
       (`witness_supplied_single_proof_digest_is_ignored`). The negative stated as
       a positive: a branch that divined would fail it.
-- [ ] mixed provenance: `Chain(Forge'd with D₁, Cast'd with D₂)` → rejected —
-      the case that would otherwise launder a junk-`D` `Cast` into a real chain.
+- [x] mixed provenance: `Chain(Forge'd with D₁, Cast'd with D₂)` → rejected.
+      Two halves, and the first one dissolves the item's premise. `Chain` never
+      *compares* two digests, because there is only one: `D` is read from the
+      public input into a single static slot, and `generate_link_proof_claim`
+      appends that one value to both operand claims (`chain.rs:945`). Operands
+      supply no digest of their own, so mixed provenance is unrepresentable
+      rather than rejected, and there is no laundering hazard to defend against
+      — both operands are forced into the same `Link[D]` family by
+      construction. How the junk operand was produced (`Forge` or `Cast`) is
+      likewise irrelevant: `Chain` only ever checks the claim.
+      What *is* worth pinning is that both claims are actually checked, and that
+      needed a test: every other operand negative corrupts both operands at once
+      (`operand_forged_under_another_single_proof_digest_is_rejected` forges each
+      under `D'`; `operand_proof_must_attest_to_its_own_operand` swaps them), so
+      the left verification alone trips all of them and deleting the right
+      `verify_operand` call would have gone unnoticed by the whole suite.
+      `each_operand_is_verified_against_the_claims_d` corrupts exactly one
+      operand, in each direction, so the surviving verification is the only thing
+      that can fire. Costs cache hits, not forges.
 
 `Update`:
 - [x] operand claim with `D' ≠ D` → rejected
