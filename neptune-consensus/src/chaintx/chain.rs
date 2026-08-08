@@ -1659,6 +1659,7 @@ mod negative_tests {
     use num_traits::CheckedSub;
     use tasm_lib::hashing::merkle_verify::MerkleVerify;
 
+    use proptest::prop_assert_eq;
     use proptest::prop_assume;
     use proptest::strategy::Strategy;
     use test_strategy::proptest;
@@ -1863,6 +1864,49 @@ mod negative_tests {
         witness.new_kernel.thruputs.push(uncut);
 
         expect_failure(witness, &[CUT_THROUGH_IS_NOT_MAXIMAL_ERROR]).unwrap();
+    }
+
+    /// A thruput cannot be cut-through twice.
+    ///
+    /// This is a double spend that cannot be enforced on the host machine in
+    /// `Block::is_valid` rule 2.c because a thruput is not a removal record and
+    /// never reaches a block, so verifying uniqeness of all index-sets cannot
+    /// be what stops it.
+    ///
+    /// A conservation law is the solution. One operand claims the same
+    /// unconfirmed output as a thruput twice, the other supplies the single
+    /// output that resolves it, and the two cut-through equations subtract the
+    /// *same* multiset from both sides -- so at most one copy can cancel and
+    /// the surplus survives as a thruput the chain still owes, which `Fix`
+    /// refuses to carry into a block (`thruputs == []`).
+    ///
+    /// The attack is the prover cancelling both copies against the one output.
+    /// It fails the *outputs* equation: cut-through would have to take that
+    /// record off the output side twice, and it is only there once.
+    #[proptest(cases = 4)]
+    fn a_thruput_cannot_be_cut_through_twice(
+        #[strategy(pokeable_pair())] pair: (LinkPrimitiveWitness, LinkPrimitiveWitness),
+    ) {
+        let (predecessor, mut successor) = pair;
+
+        // the successor now claims its thruput twice; the predecessor's one
+        // output can resolve only one of them. Both operands stay internally
+        // valid -- outputs and thruputs disjoint on either side -- so this is a
+        // shape `Forge` can actually emit, by listing one commitment twice.
+        let thruput = successor.kernel.thruputs[0];
+        successor.kernel.thruputs.push(thruput);
+        let mut witness =
+            ChainWitness::without_proofs(&predecessor.kernel, &successor.kernel, [0u8; 32]);
+
+        // conservation, honestly chained: one copy cancels, one is still owed
+        prop_assert_eq!(vec![thruput], witness.cut_through.clone());
+        prop_assert_eq!(vec![thruput], witness.new_kernel.thruputs.clone());
+
+        // the double spend: cancel the surplus copy too
+        witness.cut_through.push(thruput);
+        witness.new_kernel.thruputs.clear();
+
+        expect_failure(witness, &[OUTPUTS_ARE_NOT_CUT_THROUGH_ERROR]).unwrap();
     }
 
     /// Chain the two operand fees and the chained fee, all in nau, and expect
