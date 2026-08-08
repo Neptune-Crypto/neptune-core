@@ -2184,6 +2184,88 @@ mod negative_tests {
         );
     }
 
+    /// One operand good, one junk -- in each direction. Both slots are verified.
+    ///
+    /// `Chain` does not *compare* two digests; there is only one `D`. It is read
+    /// from the public input into a single static slot, and
+    /// `generate_link_proof_claim` appends that one value to both operand
+    /// claims, so mixed provenance is unrepresentable rather than rejected: two
+    /// operands cannot disagree about a digest neither of them supplies. That is
+    /// the structural half of the argument, and it needs no test.
+    ///
+    /// What does need one is that both claims are actually *checked*. Every
+    /// other operand negative corrupts both operands at once --
+    /// [`operand_forged_under_another_single_proof_digest_is_rejected`] forges
+    /// each under `D'`, [`operand_proof_must_attest_to_its_own_operand`] swaps
+    /// them -- so verifying the left operand alone would trip all of them, and
+    /// deleting the right `verify_operand` call would go unnoticed by the entire
+    /// suite. Here exactly one operand is junk, so the surviving verification is
+    /// the only thing that can fire, and running it both ways round pins the two
+    /// slots independently.
+    ///
+    /// Costs cache hits rather than forges: both digests over both operands are
+    /// proofs the tests around it already make.
+    ///
+    /// The non-determinism is a *consistent* witness's, and the junk operand is
+    /// substituted afterwards -- the same construction
+    /// [`operand_proof_must_attest_to_its_own_operand`] uses, and for the same
+    /// reason: the digest stream is extracted per (proof, claim) pair, so it can
+    /// only be built for operands that answer their claims. A prover holding
+    /// only an `other_d` proof is in exactly this position. It also sharpens the
+    /// test -- if the substituted operand's verification were skipped, its proof
+    /// would never be read and the leftover stream would go unused, so the run
+    /// would succeed.
+    ///
+    /// Only the tasm is run, unlike its neighbours: the rust shadow's
+    /// `verify_stark` unwraps FRI errors, so it aborts rather than returning.
+    /// That is the shadow's error handling, not the branch's behaviour.
+    #[tokio::test]
+    async fn each_operand_is_verified_against_the_claims_d() {
+        let (predecessor, successor) = deterministic_chainable_link_primitive_witnesses(2, 1);
+        let d = mock_single_proof_digest(0);
+        let other_d = mock_single_proof_digest(1);
+
+        for junk_on_the_right in [false, true] {
+            let mut witness = ChainWitness::chain(
+                forge(&predecessor, d).await,
+                forge(&successor, d).await,
+                d,
+                [0u8; 32],
+            );
+            let mut nondeterminism = witness.nondeterminism();
+
+            let junk = if junk_on_the_right {
+                forge(&successor, other_d).await
+            } else {
+                forge(&predecessor, other_d).await
+            };
+            let LinkTxProof::Proof(junk_proof) = junk.proof else {
+                unreachable!("`forge` produces a proof-backed link transaction")
+            };
+            if junk_on_the_right {
+                witness.right_proof = junk_proof;
+            } else {
+                witness.left_proof = junk_proof;
+            }
+            encode_to_memory(
+                &mut nondeterminism.ram,
+                FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+                &LinkProofWitnessMemory::Chain(Box::new(witness.clone())),
+            );
+
+            let input = witness.standard_input();
+            let Err(TritonError::TritonVMPanic(vm_state, _)) =
+                LinkProof.run_tasm(&input, nondeterminism)
+            else {
+                panic!("`Chain` must verify both operands against the claim's `D`");
+            };
+            assert!(
+                vm_state.contains("stark_verify"),
+                "must fail in the recursive verification, not before it:\n{vm_state}"
+            );
+        }
+    }
+
     /// The converse: `D` sits in the witness's memory image, and the branch must
     /// never look at it.
     ///
