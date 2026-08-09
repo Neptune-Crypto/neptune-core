@@ -270,6 +270,10 @@ impl BasicSnippet for FixBranch {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
+    use proptest::strategy::Strategy;
+    use proptest::strategy::ValueTree;
+    use proptest::test_runner::TestRunner;
+
     use super::*;
     use crate::chaintx::cast::CastWitness;
     use crate::chaintx::chain::tests::deterministic_chainable_link_primitive_witnesses;
@@ -283,10 +287,13 @@ pub(crate) mod tests {
     use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
     use crate::proof_abstractions::triton_vm_job_queue::vm_job_queue;
     use crate::proof_abstractions::SecretWitness;
-    use crate::transaction::Transaction;
+    use crate::transaction::primitive_witness::PrimitiveWitness;
     use crate::transaction::transaction_kernel::TransactionKernelModifier;
+    use crate::transaction::validity::single_proof::produce_single_proof;
+    use crate::transaction::validity::single_proof::single_proof_claim;
     use crate::transaction::validity::single_proof::SingleProof;
     use crate::transaction::validity::single_proof::SingleProofWitness;
+    use crate::transaction::Transaction;
     use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
     impl FixWitness {
@@ -373,13 +380,9 @@ pub(crate) mod tests {
         );
     }
 
-    /// A chained transaction with nothing left outstanding leaves the chain
-    /// pipeline: its link proof is recursively verified, under a claim naming
-    /// this very program as the `D` the whole derivation was indexed by.
-    ///
-    /// The one test that runs the recursion against a real `LinkProof`, and
-    /// hence the one that says the claim `Fix` builds is the one `LinkProof`
-    /// establishes -- both digests in it, and the kernel binding.
+    /// A chained transaction with no thruputs left outstanding can leave the
+    /// chaining pipeline: its LinkProof is recursively verified, under a claim
+    /// naming this very program as the `D` the whole derivation was indexed by.
     ///
     /// This test involves producing proofs and might take a while to complete
     /// if there is no proof cache.
@@ -527,5 +530,109 @@ pub(crate) mod tests {
         let input = other_kernel.mast_hash().reversed().values().into();
 
         expect_rejection_in_stark_verify(witness, input);
+    }
+
+    /// Compute a `Fix`.
+    ///
+    /// Prove the fixed transaction, and verify the resulting `SingleProof`
+    /// against the claim it will be checked against out in the world.
+    ///
+    /// Returns the claim, so the caller can say what the transaction leaving
+    /// the pipeline turned out to be.
+    async fn produce_and_verify_single_proof(witness: FixWitness) -> Claim {
+        let claim = single_proof_claim(witness.kernel_mast_hash(), CONSENSUS_RULE_SET);
+        let single_proof = SingleProofWitness::from_fix(witness)
+            .produce(
+                CONSENSUS_RULE_SET,
+                vm_job_queue(),
+                TritonVmProofJobOptions::default(),
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            triton_vm::verify(Stark::default(), &claim, &single_proof),
+            "a fixed transaction must carry a valid single proof"
+        );
+
+        claim
+    }
+
+    /// The whole `Forge -> Fix` pipeline, end to end: a link primitive witness
+    /// becomes a link transaction, which becomes an ordinary
+    /// `SingleProof`-backed transaction, and that single proof verifies.
+    ///
+    /// [`fix_accepts_a_resolved_link_transaction`] takes the same route but
+    /// stops at running the program. What this adds is the last step, the one
+    /// that says the chain pipeline's output is *interchangeable* with the
+    /// legacy pipeline's: a proof answering the very claim
+    /// [`single_proof_claim`] hands to a block.
+    ///
+    /// This test involves producing proofs and might take a while to complete
+    /// if there is no proof cache.
+    #[tokio::test]
+    async fn forge_then_fix_yields_a_verifying_single_proof() {
+        let link_tx = forged_link_tx(0, 0, single_proof_digest()).await;
+        produce_and_verify_single_proof(FixWitness::fix(link_tx)).await;
+    }
+
+    /// The whole `Cast -> Fix` pipeline, end to end -- and a round trip: a
+    /// legacy transaction is pulled into the chain pipeline and sent straight
+    /// back out, and what comes out answers the claim that went in.
+    ///
+    /// That equality is the point. `Cast` adds nothing to a transaction and
+    /// `Fix` takes nothing away, so the composition is the identity on the
+    /// claim -- which is what makes casting safe to do opportunistically: a
+    /// transaction that joins a chain and finds no partner is no worse off than
+    /// one that never joined.
+    ///
+    /// Unlike `cast.rs`'s own fixture, the transaction here is proven under the
+    /// rule set that *has* `Fix`. It has to be: `Fix` names its own program
+    /// digest as the `D` indexing the whole derivation, and `Cast` verifies the
+    /// transaction against that same `D` as a program. So this is the one test
+    /// where the cycle closes -- a real `SingleProof` recursively verified by
+    /// `Cast`, under a digest a real `SingleProof` then instantiates.
+    ///
+    /// This test involves producing proofs and might take a while to complete
+    /// if there is no proof cache.
+    #[tokio::test]
+    async fn cast_then_fix_yields_a_verifying_single_proof() {
+        let mut test_runner = TestRunner::deterministic();
+        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 1)
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let single_proof = produce_single_proof(
+            &primitive_witness,
+            vm_job_queue(),
+            TritonVmProofJobOptions::default(),
+            CONSENSUS_RULE_SET,
+        )
+        .await
+        .unwrap();
+        let transaction = Transaction::new_single_proof(primitive_witness.kernel, single_proof);
+        let original_claim = single_proof_claim(transaction.kernel.mast_hash(), CONSENSUS_RULE_SET);
+
+        let cast = CastWitness::cast(transaction, single_proof_digest());
+        let link_proof = LinkProof
+            .prove(
+                cast.claim(),
+                cast.nondeterminism(),
+                vm_job_queue(),
+                TritonVmProofJobOptions::default(),
+            )
+            .await
+            .unwrap();
+        let link_tx = LinkTx {
+            kernel: cast.link_kernel(),
+            proof: LinkTxProof::Proof(link_proof),
+        };
+        assert!(link_tx.kernel.thruputs.is_empty(), "a cast has no thruputs");
+
+        let fixed_claim = produce_and_verify_single_proof(FixWitness::fix(link_tx)).await;
+        assert_eq!(
+            original_claim, fixed_claim,
+            "`Fix` after `Cast` must land on the transaction it started from"
+        );
     }
 }
