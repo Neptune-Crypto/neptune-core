@@ -496,7 +496,9 @@ Positive:
 
 Negative:
 - [x] `extra_input_utxo_fails_cardinality`: an input UTXO backed by no record
-      fails the cardinality check.
+      gives `CardinalityMismatch`.
+- [x] `extra_output_utxo_fails_cardinality`: an output UTXO backed by no addition
+      record gives `OutputCardinalityMismatch`.
 - [x] `short_thruput_randomness_fails_cardinality`: a thruput-randomness vector
       shorter than the thruput list fails the cardinality check.
 - [x] `bad_lock_script_witness_fails`: a lock-script witness that does not
@@ -515,6 +517,9 @@ Negative:
 - [x] `tampered_thruput_addition_record_fails` /
       `tampered_thruput_randomness_fails`: a thruput whose addition record or
       randomness no longer commits its UTXO gives `ThruputCommitmentMismatch`.
+- [x] `tampered_output_randomness_fails`: an output UTXO whose sender randomness
+      no longer commits it to the kernel's addition record gives
+      `OutputCommitmentMismatch`.
 - [x] `mutator_set_hash_mismatch_is_rejected`: a kernel naming a mutator set
       other than the witness's gives `MutatorSetMismatch`.
 - [x] `merge_bit_is_rejected`: a kernel with the merge bit set gives
