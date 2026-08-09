@@ -1309,32 +1309,32 @@ pub(crate) mod tests {
         );
     }
 
-    /// A predecessor/successor pair over one mutator set: the successor's
-    /// thruputs are exactly the predecessor's outputs, so chaining them cuts
-    /// through every one.
+    /// The predecessor that resolves the successor's inputs `range`, over the
+    /// same mutator set.
     ///
-    /// The predecessor spends `num_thruputs` confirmed UTXOs and pays them
-    /// straight back out with the very randomness their membership proofs carry
-    /// -- so its addition records are, element for element, the commitments the
-    /// successor's reclassified inputs became when
+    /// It spends exactly those UTXOs and pays them straight back out with the
+    /// very randomness their membership proofs carry -- so its addition records
+    /// are, element for element, the commitments those inputs became when
     /// [`LinkPrimitiveWitness::from_primitive_witness`] turned them into
     /// thruputs. Balanced by construction (same UTXOs in and out, zero fee), so
     /// no re-balancing is needed.
-    pub(super) fn chainable_link_primitive_witnesses(
-        successor_pw: PrimitiveWitness,
-        num_thruputs: usize,
-    ) -> (LinkPrimitiveWitness, LinkPrimitiveWitness) {
+    ///
+    /// A range rather than a count because the successor's thruputs need not
+    /// all come from the same predecessor: see
+    /// [`thruputs_resolve_in_two_stages`]. `range` must sit inside the tail
+    /// `from_primitive_witness` reclassifies, or the "predecessor" resolves an
+    /// input the successor still holds as confirmed and nothing cuts through.
+    fn predecessor_resolving(
+        successor_pw: &PrimitiveWitness,
+        range: std::ops::Range<usize>,
+    ) -> LinkPrimitiveWitness {
         use crate::transaction::transaction_kernel::TransactionKernelProxy;
         use crate::type_scripts::known_type_scripts::match_type_script_and_generate_witness;
 
-        let num_inputs = successor_pw.input_utxos.utxos.len();
-        assert!(num_thruputs <= num_inputs);
-        let num_confirmed = num_inputs - num_thruputs;
-
         // The UTXOs the successor will hold as thruputs, together with the
         // randomness that commits them.
-        let utxos = successor_pw.input_utxos.utxos[num_confirmed..].to_vec();
-        let membership_proofs = successor_pw.input_membership_proofs[num_confirmed..].to_vec();
+        let utxos = successor_pw.input_utxos.utxos[range.clone()].to_vec();
+        let membership_proofs = successor_pw.input_membership_proofs[range.clone()].to_vec();
         let sender_randomnesses = membership_proofs
             .iter()
             .map(|mp| mp.sender_randomness)
@@ -1389,8 +1389,7 @@ pub(crate) mod tests {
         let predecessor_pw = PrimitiveWitness {
             input_utxos: salted_utxos.clone(),
             input_membership_proofs: membership_proofs,
-            lock_scripts_and_witnesses: successor_pw.lock_scripts_and_witnesses[num_confirmed..]
-                .to_vec(),
+            lock_scripts_and_witnesses: successor_pw.lock_scripts_and_witnesses[range].to_vec(),
             type_scripts_and_witnesses,
             output_utxos: salted_utxos,
             output_sender_randomnesses: sender_randomnesses,
@@ -1399,8 +1398,24 @@ pub(crate) mod tests {
             kernel: predecessor_kernel,
         };
 
+        LinkPrimitiveWitness::from_primitive_witness(predecessor_pw, 0)
+    }
+
+    /// A predecessor/successor pair over one mutator set: the successor's
+    /// thruputs are exactly the predecessor's outputs, so chaining them cuts
+    /// through every one.
+    pub(super) fn chainable_link_primitive_witnesses(
+        successor_pw: PrimitiveWitness,
+        num_thruputs: usize,
+    ) -> (LinkPrimitiveWitness, LinkPrimitiveWitness) {
+        let num_inputs = successor_pw.input_utxos.utxos.len();
+        assert!(num_thruputs <= num_inputs);
+
+        let predecessor =
+            predecessor_resolving(&successor_pw, num_inputs - num_thruputs..num_inputs);
+
         (
-            LinkPrimitiveWitness::from_primitive_witness(predecessor_pw, 0),
+            predecessor,
             LinkPrimitiveWitness::from_primitive_witness(successor_pw, num_thruputs),
         )
     }
@@ -1451,8 +1466,8 @@ pub(crate) mod tests {
         }
     }
 
-    /// `Chain` writes nothing to stdout, so the assertion is that both the Rust
-    /// shadow and the tasm run to completion: every `assert` in either one held.
+    /// Assertion is that both the Rust shadow and the tasm run to completion
+    /// and halt gracefully. Do this without proving anything.
     fn prop_positive(witness: ChainWitness) {
         LinkProof
             .run_rust(&witness.standard_input(), witness.nondeterminism())
@@ -1649,6 +1664,68 @@ pub(crate) mod tests {
             d,
             [1u8; 32],
         ));
+    }
+
+    /// Thruputs resolved in two stages, one `Chain` each.
+    ///
+    /// The successor is funded entirely by unconfirmed money, and by *two*
+    /// different predecessors -- one thruput apiece. Chaining in the first
+    /// cancels one thruput and leaves the other standing; only chaining in the
+    /// second empties the list, and with it makes the transaction something
+    /// `Fix` could take to a block.
+    ///
+    /// This test involves producing proofs and might take a while to complete
+    /// if there is no proof cache.
+    #[tokio::test]
+    async fn thruputs_resolve_in_two_stages() {
+        let mut test_runner = TestRunner::deterministic();
+        let successor_pw = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 1)
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+
+        // Both of the successor's inputs become thruputs, one per predecessor.
+        let first = predecessor_resolving(&successor_pw, 0..1);
+        let second = predecessor_resolving(&successor_pw, 1..2);
+        let successor = LinkPrimitiveWitness::from_primitive_witness(successor_pw, 2);
+        assert_eq!(2, successor.kernel.thruputs.len());
+
+        let d = mock_single_proof_digest(0);
+        let stage_one = ChainWitness::chain(
+            forge(&first, d).await,
+            forge(&successor, d).await,
+            d,
+            [0u8; 32],
+        );
+        assert_eq!(1, stage_one.cut_through.len());
+        assert_eq!(
+            1,
+            stage_one.new_kernel.thruputs.len(),
+            "the second predecessor's thruput is still outstanding"
+        );
+        prop_positive(stage_one.clone());
+
+        let stage_one_proof = LinkProof
+            .prove(
+                stage_one.claim(),
+                stage_one.nondeterminism(),
+                vm_job_queue(),
+                TritonVmProofJobOptions::default(),
+            )
+            .await
+            .unwrap();
+        let stage_one_tx = LinkTx {
+            kernel: stage_one.new_kernel,
+            proof: LinkTxProof::Proof(stage_one_proof),
+        };
+
+        let stage_two = ChainWitness::chain(stage_one_tx, forge(&second, d).await, d, [1u8; 32]);
+        assert_eq!(1, stage_two.cut_through.len());
+        assert!(
+            stage_two.new_kernel.thruputs.is_empty(),
+            "the second stage resolves the last thruput"
+        );
+        prop_positive(stage_two);
     }
 }
 
