@@ -489,51 +489,52 @@ scripts so the kernel MAST stays consistent and the intended late-stage check
 fires instead of an early `InvalidTypeScript`.
 
 Positive:
-- [x] round-trip `bfield_codec` (`bfield_codec_round_trip`)
-- [x] lift preserves validity for any `PrimitiveWitness` at any thruput count
-      (`lift_preserves_validity`)
-- [x] all-thruputs (0 confirmed) validates — proves thruput value counts toward
-      the input balance (`all_thruputs_is_valid`)
+- [x] `bfield_codec_round_trip`: a `LinkPrimitiveWitness` survives encode/decode.
+- [x] `lift_preserves_validity`: lifting any `PrimitiveWitness` at any thruput
+      count yields a witness that validates.
+- [x] `all_thruputs_is_valid`: a witness with zero confirmed inputs validates.
 
-Negative — one per reachable branch (bracketed items pre-cover a §onto `Forge`
-or §New Tests entry at this tier):
-- [x] cardinality: extra input UTXO / short thruput-randomness vector
-      (`extra_input_utxo_fails_cardinality`,
-      `short_thruput_randomness_fails_cardinality`) [→ Cardinality]
-- [x] bad lock-script witness → `InvalidLockScript`
-      (`bad_lock_script_witness_fails`)
-- [x] bad mutator-set accumulator → `InvalidMembershipProof`
-      (`bad_mutator_set_accumulator_fails`) [→ bad ms acc]
-- [x] unbalanced output / fee-too-big → `InvalidTypeScript`
-      (`unbalanced_output_fails_type_script`, `fee_too_big_fails_type_script`)
-      [→ unbalanced; fee-too-big inflation]
-- [x] missing / too-many type-script witnesses
-      (`missing_type_script_witness_fails`,
-      `too_many_type_script_witnesses_fails`) [→ type scripts present]
-- [x] swapped confirmed removal records → `RemovalRecordsMismatch`
-      (`swapped_removal_records_fail`)
-- [x] tampered thruput addition record / randomness → `ThruputCommitmentMismatch`
-      (`tampered_thruput_addition_record_fails`,
-      `tampered_thruput_randomness_fails`) [→ two representations of thruputs agree]
-- [x] mutator-set-hash mismatch → `MutatorSetMismatch`
-      (`mutator_set_hash_mismatch_is_rejected`)
-- [x] merge bit set → `MergeBitSet` (`merge_bit_is_rejected`)
-- [x] coinbase in kernel → `CoinbaseSet` (`coinbase_kernel_is_rejected`)
-      [→ New Tests: `LinkKernel` carrying a coinbase rejected]
+Negative:
+- [x] `extra_input_utxo_fails_cardinality`: an input UTXO backed by no record
+      fails the cardinality check.
+- [x] `short_thruput_randomness_fails_cardinality`: a thruput-randomness vector
+      shorter than the thruput list fails the cardinality check.
+- [x] `bad_lock_script_witness_fails`: a lock-script witness that does not
+      satisfy its script gives `InvalidLockScript`.
+- [x] `bad_mutator_set_accumulator_fails`: a mutator-set accumulator the inputs
+      are not members of gives `InvalidMembershipProof`.
+- [x] `unbalanced_output_fails_type_script`: outputs exceeding inputs gives
+      `InvalidTypeScript`.
+- [x] `fee_too_big_fails_type_script`: a fee exceeding the input sum gives
+      `InvalidTypeScript`.
+- [x] `missing_type_script_witness_fails` / `too_many_type_script_witnesses_fails`:
+      a type-script witness list that does not match the unique type scripts is
+      rejected.
+- [x] `swapped_removal_records_fail`: confirmed removal records in the wrong
+      order give `RemovalRecordsMismatch`.
+- [x] `tampered_thruput_addition_record_fails` /
+      `tampered_thruput_randomness_fails`: a thruput whose addition record or
+      randomness no longer commits its UTXO gives `ThruputCommitmentMismatch`.
+- [x] `mutator_set_hash_mismatch_is_rejected`: a kernel naming a mutator set
+      other than the witness's gives `MutatorSetMismatch`.
+- [x] `merge_bit_is_rejected`: a kernel with the merge bit set gives
+      `MergeBitSet`.
+- [x] `coinbase_kernel_is_rejected`: a kernel carrying a coinbase gives
+      `CoinbaseSet`.
 
 Gap pinned (same gap as `PrimitiveWitness::validate`; enforced later by `Forge`):
-- [x] missing/extra lock script is *not* caught by `validate` — lock-script
-      coverage is `Forge`/`CollectLockScripts`'s job
-      (`missing_or_extra_lock_script_is_not_caught`)
+- [x] `missing_or_extra_lock_script_is_not_caught`: `validate` accepts a witness
+      whose lock scripts do not match its input UTXOs.
 
 Deferred to `Forge` (sharper there than at the proof-free tier):
-- [x] bad input MAST auth path / bad absolute index set (confirmed inputs) — bad
-      index set: `bad_absolute_index_set_is_rejected`
-      (`COMPUTED_AND_CLAIMED_INDICES_DISAGREE_ERROR`); bad kernel-MAST binding:
-      `unauthenticated_removal_record_is_rejected` / `unauthenticated_thruput_is_rejected`
-      (`ROOT_MISMATCH`).
-- [x] phantom thruput / phantom confirmed UTXO backed by no record —
-      `phantom_input_utxo_is_rejected` (`CARDINALITY_MISMATCH_ERROR`)
+- [x] `bad_absolute_index_set_is_rejected`: a confirmed input whose claimed
+      absolute index set differs from the computed one trips
+      `COMPUTED_AND_CLAIMED_INDICES_DISAGREE_ERROR`.
+- [x] `unauthenticated_removal_record_is_rejected` /
+      `unauthenticated_thruput_is_rejected`: a removal record or thruput absent
+      from the kernel MAST trips `ROOT_MISMATCH`.
+- [x] `phantom_input_utxo_is_rejected`: an input UTXO backed by neither a removal
+      record nor a thruput trips `CARDINALITY_MISMATCH_ERROR`.
 
 ## Mirror Tests
 Two tiers: the proof-free `LinkPrimitiveWitness::validate` (above) and the tasm programs
@@ -556,32 +557,27 @@ tested on the new dual pipeline as well.
   field (legacy negative-test idiom) — no per-test strategy duplication.
 
 ### onto `Forge`
-- [x] bad mutator-set accumulator rejected
-      (← `removal_records_fail_on_bad_ms_acc`) — `bad_mutator_set_accumulator_is_rejected`
-- [x] bad input MAST auth path rejected
-      (← `removal_records_fail_on_bad_mast_path_inputs`) — covered by
-      `unauthenticated_removal_record_is_rejected` (the kernel MAST path is
-      derived from `mast_leafs`, so poking the confirmed record is the way to
-      break the `Inputs`-leaf binding)
-- [x] bad absolute index set rejected (← `removal_record_fail_on_bad_absolute_indices`)
-      — `bad_absolute_index_set_is_rejected`
-- [x] the AOCL-membership half of the same loop: a confirmed input UTXO that is
-      not the one its removal record spends —
-      `confirmed_input_utxo_unbound_to_its_removal_record_is_rejected`. RRI has
-      no counterpart to mirror; `forge_confirmed_loop_matches_rri` means this
-      test covers both copies of the loop.
-- [x] all lock scripts have valid witnesses (net behavior of `CollectLockScripts`)
-      — every input UTXO needs a proof (count guard,
-      `missing_lock_script_proof_is_rejected`) and each is `StarkVerify`d;
-      the positive path is `forge_accepts_valid_witnesses`
-- [x] all unique type scripts have valid witnesses (net behavior of `CollectTypeScripts`)
-      (`forge_accepts_timelocked_witness` forges a tx whose unique list is
-      `[NativeCurrency, TimeLock]`, recursively verifying both.)
-- [x] negative: a single missing lock-script or type-script witness fails `Forge`
-      (both tasm guards done: `missing_type_script_proof_is_rejected` /
-      `missing_lock_script_proof_is_rejected` trip
-      `WRONG_NUMBER_OF_{TYPE,LOCK}_SCRIPT_PROOFS_ERROR`; `validate` rejects a
-      dropped lock- or type-script proof too -- see `validate_matches_forge`.)
+- [x] `bad_mutator_set_accumulator_is_rejected`: a mutator-set accumulator other
+      than the one the kernel names is rejected.
+- [x] `unauthenticated_removal_record_is_rejected`: a confirmed removal record
+      absent from the kernel's `Inputs` leaf is rejected.
+- [x] `bad_absolute_index_set_is_rejected`: a confirmed input whose claimed
+      absolute index set differs from the computed one is rejected.
+- [x] `confirmed_input_utxo_unbound_to_its_removal_record_is_rejected`: a
+      confirmed input UTXO that is not the one its removal record spends is
+      rejected.
+- [x] `forge_confirmed_loop_matches_rri`: `Forge`'s confirmed-input loop is
+      instruction-for-instruction the one in `RemovalRecordsIntegrity`.
+- [x] `missing_lock_script_proof_is_rejected`: fewer lock-script proofs than
+      input UTXOs trips `WRONG_NUMBER_OF_LOCK_SCRIPT_PROOFS_ERROR`.
+- [x] `missing_type_script_proof_is_rejected`: fewer type-script proofs than
+      unique type scripts trips `WRONG_NUMBER_OF_TYPE_SCRIPT_PROOFS_ERROR`.
+- [x] `validate_matches_forge`: `validate` rejects a dropped lock- or
+      type-script proof too.
+- [x] `forge_accepts_valid_witnesses`: `Forge` accepts every split of `0..=3`
+      inputs into confirmed inputs and thruputs.
+- [x] `forge_accepts_timelocked_witness`: `Forge` accepts a witness whose unique
+      type scripts are `[NativeCurrency, TimeLock]`, verifying both.
 
 Not on `Forge` -- these are `NativeCurrency` properties, recursively *verified*
 (not re-implemented) by `Forge`, so `NativeCurrency`'s own tests still apply and
@@ -592,17 +588,21 @@ partition *is* the kernel, every input carries a lock-script proof, and an
 unmatched thruput is un-`Fix`able (see §Motivation).
 
 ### onto `Update`
-- [x] new timestamp older than old rejected (← `new_timestamp_older_than_old_prop`)
-- [x] bad new AOCL rejected (← `bad_new_aocl_prop`)
-- [x] bad old AOCL rejected (← `bad_old_aocl_prop`)
-      (both in `mutator_set_accumulator_must_be_the_one_the_kernel_names`)
-- [x] tampered absolute-index-set value rejected (← `bad_absolute_index_set_value_prop`)
-- [x] tampered absolute-index-set length rejected (← `bad_absolute_index_set_length_too_short_prop`)
-      (both in `tampered_absolute_index_set_is_rejected`)
-- [x] changing a carried-over field -- outputs, thruputs, announcements, fee --
-      rejected (`changing_a_carried_over_field_is_rejected`)
-- [x] coinbase or merge bit on the new kernel rejected
-- [x] the new kernel must be the one named in the claim
+- [x] `new_timestamp_older_than_old_is_rejected`: a new kernel timestamp earlier
+      than the old kernel's is rejected.
+- [x] `mutator_set_accumulator_must_be_the_one_the_kernel_names`: a new or old
+      mutator-set accumulator other than the one its kernel names is rejected.
+- [x] `tampered_absolute_index_set_is_rejected`: an absolute index set whose
+      value or length changed across the update is rejected.
+- [x] `changing_a_carried_over_field_is_rejected`: changing outputs, thruputs,
+      announcements or fee across the update is rejected.
+- [x] `coinbase_or_merge_bit_on_the_new_kernel_is_rejected`: a coinbase or merge
+      bit on the new kernel is rejected.
+- [x] `new_kernel_must_be_the_one_in_the_claim`: a new kernel other than the one
+      the claim names is rejected.
+- [x] `update_accepts_a_forged_link_transaction` /
+      `update_accepts_an_all_thruputs_link_transaction`: `Update` re-targets a
+      forged link transaction, with or without confirmed inputs.
 - Not applicable: merge-bit-unchanged (`update_branch` divines the bit and
   carries it across; a `LinkTx` never has it set, so the constant leaf is
   stronger)
@@ -610,48 +610,57 @@ unmatched thruput is un-`Fix`able (see §Motivation).
 ### onto `Chain`
 - Not applicable: coinbase-specific merge tests (`too_big_time_diff`,
   `authenticate_coinbase_fields_*`) — a `LinkTx` is never a coinbase transaction
-- [x] chained inputs are the operands' inputs
-- [x] chained announcements are the operands' announcements
-- [x] chained fee is the sum of the operand fees (too big *and* too small)
-- [x] a fee sum outside `[0, MAX_NAU]` is rejected
-      (`fee_sum_outside_the_valid_range_is_rejected`).
-- [x] a negative operand fee is rejected *even when the sum is a valid amount*
-      (`negative_operand_fee_is_rejected_even_when_the_sum_is_valid`) — the case
-      the range check cannot reach, caught by the assert that the `u128`
-      addition did not carry. This is the test behind the no-negative-fees
-      invariant; see §Governing invariants.
-- [x] chained timestamp is the later of the operand timestamps
-- [x] all three kernels agree on the mutator-set hash
-- [x] coinbase / merge bit on the chained kernel rejected
-- [x] bad MAST auth path rejected
-- [x] chained kernel must be the one named in the claim
-- [x] depth 2: a `Chain`-produced link proof is a valid operand
-      (`chain_accepts_a_chain_produced_operand`) -- the only test that proves a
-      `Chain`
-- [x] an operand's link proof must attest to *that* operand: swapping the two
-      proofs is rejected (`operand_proof_must_attest_to_its_own_operand`).
-- [x] one-sided cut-through rejected, in both directions (← §cut-through value
-      conservation, negative)
-- [x] cut-through on unequal commitments rejected — the phantom-thruput
-      argument, as a test: a thruput no predecessor output resolves can never
-      be cancelled
-- [x] a thruput cannot be cut through twice
-      (`a_thruput_cannot_be_cut_through_twice`) — a thruput is not a removal
-      record, so the host-machine check in `Block::is_valid` cannot check
-      thruputs for double-spends. Setup: both `Chain` operands claim the same
-      unconfirmed output. *Only one* claimed output between them is canceled; 
-      the other survives as an obligation. `Fix` will not succeed because
-      `thruputs` is not empty. Cancelling both fails the *outputs* equation.
-- [x] chained *outputs* are the union of the operands' outputs when nothing cuts
-      through (`chained_outputs_must_be_the_operands_outputs`).
+- [x] `chained_inputs_must_be_the_operands_inputs`: a chained input list that is
+      not the concatenation of the operands' is rejected.
+- [x] `chained_announcements_must_be_the_operands_announcements`: a chained
+      announcement list that is not the concatenation of the operands' is
+      rejected.
+- [x] `chained_fee_must_be_the_sum_of_the_operand_fees`: a chained fee above or
+      below the sum of the operand fees is rejected.
+- [x] `fee_sum_outside_the_valid_range_is_rejected`: a fee sum outside
+      `[0, MAX_NAU]` is rejected.
+- [x] `negative_operand_fee_is_rejected_even_when_the_sum_is_valid`: a negative
+      operand fee is rejected even where the sum lands in range.
+- [x] `chained_timestamp_must_be_the_later_of_the_operand_timestamps`: a chained
+      timestamp other than the later of the two is rejected.
+- [x] `mismatched_mutator_set_hash_is_rejected`: operands or chained kernel
+      disagreeing on the mutator-set hash is rejected.
+- [x] `coinbase_or_merge_bit_on_the_chained_kernel_is_rejected`: a coinbase or
+      merge bit on the chained kernel is rejected.
+- [x] `bad_authentication_path_is_rejected`: an operand field absent from its
+      kernel MAST is rejected.
+- [x] `chained_kernel_must_be_the_one_in_the_claim`: a chained kernel other than
+      the one the claim names is rejected.
+- [x] `chain_accepts_a_chain_produced_operand`: a `Chain`-produced link proof is
+      itself a valid operand.
+- [x] `operand_proof_must_attest_to_its_own_operand`: swapping the two operands'
+      link proofs is rejected.
+- [x] `one_sided_cut_through_is_rejected`: a record removed from the outputs but
+      not the thruputs, or the reverse, is rejected.
+- [x] `cut_through_on_unequal_commitments_is_rejected`: cancelling a (thruput,
+      output) pair whose commitments differ is rejected.
+- [x] `a_thruput_cannot_be_cut_through_twice`: with both operands claiming the
+      same unconfirmed output, cancelling both copies is rejected.
+- [x] `chained_outputs_must_be_union_of_outputs_of_operands`: a chained output
+      list that is not the concatenation of the operands' is rejected.
+- [x] `chain_accepts_a_predecessor_successor_pair`: a successor chained onto the
+      predecessor resolving all its thruputs leaves none outstanding.
+- [x] `thruputs_resolve_in_two_stages`: a successor with one thruput from each of
+      two predecessors is chained onto them in turn, and only the second empties
+      the thruput list.
+- [x] `chain_is_associative`: `Chain(Chain(A, B), C)` and `Chain(A, Chain(B, C))`
+      agree as multisets, on the chained kernel and the cut-through set.
+- [x] `cut_through_removes_matching_pairs_from_both_sides`: each cut-through pair
+      drops one output and one thruput.
+- [x] `non_maximal_cut_through_is_rejected`: a cut-through leaving a cancellable
+      (output, thruput) pair standing is rejected.
 
 ### onto `Fix`
-- [x] invalid `LinkProofWitness` discriminant crashes (← `invalid_discriminant_crashes_execution`)
-- [x] invalid `SingleProofWitness` discriminant crashes (now that `Fix` is a
-      variant) -- `single_proof.rs::invalid_discriminant_crashes_execution` now
-      runs over both programs, and the pre-delta one gets `Fix`'s discriminant
-      among its illegal values: a `Fix` witness handed to it names a branch that
-      is not there, and must be rejected rather than ignored.
+- [x] `link_proof.rs::invalid_discriminant_crashes_execution`: an out-of-range
+      `LinkProofWitness` discriminant crashes the run.
+- [x] `single_proof.rs::invalid_discriminant_crashes_execution`: an out-of-range
+      `SingleProofWitness` discriminant crashes both programs, `Fix`'s counting
+      as out of range for the pre-delta one.
 
 ## Negative tests for `D` (the `SingleProof` digest in the `LinkProof` claim)
 
@@ -661,276 +670,129 @@ difference between recursion and universal forgery, so *every* branch that
 touches `D` gets a negative.
 
 Claim / plumbing:
-- [x] Claim shape pinned: `LinkProofWitness::standard_input()` ==
-      `lkmh.reversed() || D.reversed()`, length `2 * Digest::LEN`. Order and
-      length must never drift (analog of the `Forge` program-hash pin).
-      (`link_proof_claim_shape_is_pinned`)
-- [x] Proof/claim binding: a valid `LinkProof` for `[lkmh, D₁]` does **not**
-      verify against `[lkmh, D₂]`, `D₁ ≠ D₂`.
-      **Status: resolved.** Deliberately not written as a test, and not
-      outstanding — the reasoning below settles it, and two existing tests cover
-      the part that is actually ours. Do not re-open it.
-
-      The check cannot fail, and not because of anything in this codebase. A
-      STARK proof is made interactive-then-flattened: the prover derives the
-      verifier's challenges by hashing a running transcript, and that transcript
-      is seeded with the statement itself — program, input, output. So the
-      challenges a proof answers are a function of the exact statement it was
-      made for. Feed the same proof a different statement, the verifier derives
-      different challenges, and the prover's pre-computed answers no longer fit.
-      Nothing compares `D`; the mismatch falls out of the hashing. Writing the
-      test would assert that Triton VM binds proofs to statements — the
-      dependency's property, and its own suite's job. If it ever stopped
-      holding, every proof in the system would be forgeable and this test would
-      be the least of it.
-
-      The entry was not pointless, though: the risk it aimed at is real, and it
-      is ours. That risk exists because `D` is a *parameter* rather than a
-      constant. Were it baked into the program there would be nothing to worry
-      about, but the program reads it at runtime, so there is a live failure
-      mode — **`D` gets read and then never actually used.** Read off the input,
-      and then the claim built without it, or with something else. `D` would be
-      decorative: anyone could name any digest, nothing would depend on it, and
-      the whole indexing scheme would be theatre. That is universal forgery.
-
-      Note the asymmetry. Fiat-Shamir guarantees a proof is bound to whatever
-      statement you check it against, but says nothing about whether you built
-      the *right* statement. That second part is entirely ours, and it is
-      covered by two tests, because there are two places the bug could live:
-      - `link_proof_claim_shape_is_pinned` — the Rust side, which is what the
-        *prover* uses. Pins the claim's input to exactly `lkmh || D`, in that
-        order, that length. Dropping `D` from the claim builder fails it.
-      - `operand_forged_under_another_single_proof_digest_is_rejected` — the
-        tasm side, which is what the *verifier* runs. Operands proven under one
-        digest while the claim names another must be rejected. A branch that
-        read `D` and then did not use it when constructing operand claims would
-        pass this when it should fail.
-
-      Both are needed: the prover's helper and the verifier's program are
-      separate pieces of code, and either could be the one that forgets `D`.
+- [x] `link_proof_claim_shape_is_pinned`: `LinkProofWitness::standard_input()` is
+      exactly `lkmh.reversed() || D.reversed()`, length `2 * Digest::LEN`.
+- [x] Proof/claim binding — a valid `LinkProof` for `[lkmh, D₁]` not verifying
+      against `[lkmh, D₂]` — is Triton VM's Fiat-Shamir, not ours; deliberately
+      not a test, and not to be re-opened. What is ours is building the right
+      claim, covered by `link_proof_claim_shape_is_pinned` (prover side) and
+      `operand_forged_under_another_single_proof_digest_is_rejected` (verifier
+      side).
 
 `Chain`:
-- [x] substituted operand `D`: the operands are proven under `D'` while the claim
-      names `D` → rejected, inside `stark_verify`
-      (`operand_forged_under_another_single_proof_digest_is_rejected`). Covers
-      the mismatched-operands case too: what a wrong `D` on one operand does is
-      exactly this. One test, not two: `verify_operand` is a single closure
-      applied to both operands, reading `D` from the same static address either
-      time, so the copy-paste slip has nowhere to live.
-- [x] divined `D`: poke `single_proof_digest` in the witness's memory image,
-      leave the public input alone → must still verify
-      (`witness_supplied_single_proof_digest_is_ignored`). The negative stated as
-      a positive: a branch that divined would fail it.
-- [x] mixed provenance: `Chain(Forge'd with D₁, Cast'd with D₂)` → rejected.
-      Two halves, and the first one dissolves the item's premise. `Chain` never
-      *compares* two digests, because there is only one: `D` is read from the
-      public input into a single static slot, and `generate_link_proof_claim`
-      appends that one value to both operand claims (`chain.rs:945`). Operands
-      supply no digest of their own, so mixed provenance is unrepresentable
-      rather than rejected, and there is no laundering hazard to defend against
-      — both operands are forced into the same `Link[D]` family by
-      construction. How the junk operand was produced (`Forge` or `Cast`) is
-      likewise irrelevant: `Chain` only ever checks the claim.
-      What *is* worth pinning is that both claims are actually checked, and that
-      needed a test: every other operand negative corrupts both operands at once
-      (`operand_forged_under_another_single_proof_digest_is_rejected` forges each
-      under `D'`; `operand_proof_must_attest_to_its_own_operand` swaps them), so
-      the left verification alone trips all of them and deleting the right
-      `verify_operand` call would have gone unnoticed by the whole suite.
-      `each_operand_is_verified_against_the_claims_d` corrupts exactly one
-      operand, in each direction, so the surviving verification is the only thing
-      that can fire. Costs cache hits, not forges.
+- [x] `operand_forged_under_another_single_proof_digest_is_rejected`: operands
+      proven under `D'` while the claim names `D` are rejected inside
+      `stark_verify`.
+- [x] `each_operand_is_verified_against_the_claims_d`: corrupting exactly one
+      operand, in each direction, is rejected — so both operand verifications
+      run.
+- [x] `witness_supplied_single_proof_digest_is_ignored`: a `single_proof_digest`
+      poked into the witness's memory image, public input untouched, still
+      verifies.
+- [x] Mixed provenance — `Chain(Forge'd with D₁, Cast'd with D₂)` — is
+      unrepresentable rather than rejected: `D` is read once into a static slot
+      and appended to both operand claims, and operands carry no digest of their
+      own.
 
 `Update`:
-- [x] operand claim with `D' ≠ D` → rejected
-      (`old_proof_forged_under_another_single_proof_digest_is_rejected`).
-- [x] divined `D`: poke `single_proof_digest` in the witness's memory image,
-      leave the public input alone → must still verify
-      (`witness_supplied_single_proof_digest_is_ignored`). Narrower than
-      `Chain`'s namesake: the dispatcher-slot-to-claim route is
-      `GenerateLinkProofClaim`, shared and pinned there, so what this adds is
-      that `Update` does not read the witness's copy on top of it.
--     `Update` cannot re-target `D`: output claim `D_new ≠ D_old` → rejected.
-      Not written as its own test: there is no second `D` for the branch to
-      name. It reads one digest, from the dispatcher's slot, and copies it into
-      the operand claim; the *output* claim is not built by the branch at all --
-      it is the public input. So re-targeting can only *look* like the two tests
-      above: an operand proven under one digest and claimed under another
-      (rejected), or a witness-supplied second digest (ignored).
+- [x] `old_proof_forged_under_another_single_proof_digest_is_rejected`: an
+      operand claim naming `D' ≠ D` is rejected.
+- [x] `witness_supplied_single_proof_digest_is_ignored`: a `single_proof_digest`
+      poked into the witness's memory image, public input untouched, still
+      verifies.
+- [x] Re-targeting `D` is unrepresentable: the branch reads one digest and never
+      builds the output claim, which is the public input.
 
 `Cast`:
-- [x] inner `SingleProof` claim built with a program digest ≠ `D` from public
-      input → rejected
-      (`transaction_proven_under_another_program_digest_is_rejected`), plus its
-      mirror image `witness_supplied_single_proof_digest_is_ignored`: `D` poked
-      in the witness's memory image, public input untouched → must still verify.
-- [x] `Cast` under a bogus `SingleProof` program: the `Cast` succeeds, and the
-      result is un-`Fix`able —
-      `cast_under_a_bogus_single_proof_program_is_un_fixable`, in
-      `fix_branch.rs` since that is where the payoff is asserted.
-      `Cast` cannot check `D`, so a prover may name any program at all,
-      including `read_io 5 halt` -- one that approves every transaction put to
-      it and is claim-compatible by construction. Its proof verifies, the `Cast`
-      is accepted (a plain `unwrap`, so that half cannot pass vacuously), and a
-      `LinkTx` now exists attesting to nothing whatsoever. `Fix` then refuses
-      it, *inside* `stark_verify`, which is what says the link proof is itself
-      real and the digest is the sole disqualification. Together with
-      `fix_accepts_a_resolved_link_transaction` -- the same construction under
-      the true `D` -- that discharges "the only thing standing between it and a
-      block".
-      Note for anyone re-reading this item's original wording: the test does not
-      literally name the `LinkProof` digest as `D`. That special case is
-      *weaker*, not sharper -- `single_proof_claim` carries `txkmh` alone while
-      `LinkProof` reads `lkmh || D`, so no proof of `LinkProof` answers a `Cast`
-      inner claim and the substitution fails on input length, an accident of two
-      unrelated claim shapes rather than a defence. A bogus program built to fit
-      the claim is the real attack, and the only one worth pinning.
-- [x] `Cast` of a `Transaction` whose `SingleProof` does not answer the claim →
-      rejected: the recursion actually runs, which guards against `D` being read
-      and then unused. Folded into
-      `transaction_proven_under_another_program_digest_is_rejected`, which
-      asserts the failure happens *inside* `stark_verify`; a *mock* proof is
-      deliberately not used, since the verifier reads its garbage as lengths and
-      exhausts the machine instead of rejecting. The positive counterpart,
-      `cast_accepts_a_single_proof_backed_transaction`, runs the recursion
-      against a real `SingleProof` and is the only test that does.
+- [x] `transaction_proven_under_another_program_digest_is_rejected`: a
+      transaction whose single proof was made under a digest other than the
+      claim's `D` is rejected inside `stark_verify`.
+- [x] `witness_supplied_single_proof_digest_is_ignored`: a `single_proof_digest`
+      poked into the witness's memory image, public input untouched, still
+      verifies.
+- [x] `cast_accepts_a_single_proof_backed_transaction`: `Cast` accepts a
+      transaction backed by a real `SingleProof`.
+- [x] `cast_under_a_bogus_single_proof_program_is_un_fixable`: a transaction
+      "proven" under `read_io 5 halt` casts successfully and is then rejected by
+      `Fix` inside `stark_verify`.
+- [x] `link_kernel_must_be_the_transaction_kernel_without_thruputs`: a claimed
+      link kernel that is not the transaction's kernel with empty thruputs is
+      rejected.
+- [x] `coinbase_or_merge_bit_on_the_cast_kernel_is_rejected`: a coinbase or merge
+      bit on the cast kernel is rejected.
 
 `Fix`:
-- [x] a `Forge`'d `LinkTx` carrying an arbitrary junk `D` → rejected: the
-      inert-by-construction argument, as a test
-      (`link_proof_forged_under_another_single_proof_digest_is_rejected`). This
-      is also the `D ≠ own_program_digest()` case: the branch reads one digest,
-      its own, so a wrong `D` can only appear on the *proof*, never in the claim
-      it builds. Naming the previous rule set's `SingleProof` digest, or the
-      `LinkProof` digest, is the same test with a different junk value.
-- [x] `Fix` with non-empty thruputs → rejected (also listed under §New Tests):
-      `link_transaction_with_thruputs_is_rejected`.
-- [x] the link proof must attest to the transaction the claim is about
-      (`link_proof_must_attest_to_the_claimed_transaction`) -- the same single
-      hash as the thruputs case, approached from the other side.
+- [x] `link_proof_forged_under_another_single_proof_digest_is_rejected`: a link
+      transaction forged under a `D` other than `own_program_digest()` is
+      rejected.
+- [x] `link_transaction_with_thruputs_is_rejected`: a link transaction still
+      carrying thruputs is rejected.
+- [x] `link_proof_must_attest_to_the_claimed_transaction`: a link proof about a
+      transaction other than the claimed one is rejected.
 
 Positive counterparts (so the negatives cannot pass vacuously):
-- [x] `Forge → Fix` with `D` = the real `SingleProof` digest accepts
-      (`fix_accepts_a_resolved_link_transaction`) -- the one test that runs
-      `Fix`'s recursion against a real `LinkProof`, and hence the one saying
-      both digits of the claim it builds are the ones `LinkProof` establishes.
-- [ ] end-to-end `Forge → Chain → Fix` with `D` = the real `SingleProof` digest
-      throughout accepts, and the resulting `SingleProof` verifies. The
-      `Forge → Fix` leg now runs all the way to a *proven* single proof, checked
-      against the claim `single_proof_claim` hands a block
-      (`forge_then_fix_yields_a_verifying_single_proof`) -- so what is missing is
-      only the `Chain` in the middle.
-- [ ] `Cast → Chain → Fix` round-trip with the real `D` accepts. The
-      `Cast → Fix` leg is done and is the one test where the cycle closes end to
-      end: a real `SingleProof` recursively verified by `Cast`, under the very
-      digest a real `SingleProof` then instantiates in `Fix`
-      (`cast_then_fix_yields_a_verifying_single_proof`; the transaction is proven
-      under delta, not gamma as `cast.rs`'s own fixture is, because `D` is
-      actually cashed out here). Missing, again, only the `Chain` in the middle.
+- [x] `fix_accepts_a_resolved_link_transaction`: `Fix` accepts a `Forge`'d link
+      transaction with no thruputs, under the real `SingleProof` digest.
+- [x] `forge_then_fix_yields_a_verifying_single_proof`: `Forge → Fix` produces a
+      `SingleProof` that verifies against the claim `single_proof_claim` builds.
+- [x] `cast_then_fix_yields_a_verifying_single_proof`: `Cast → Fix` produces a
+      verifying `SingleProof` answering the claim the cast transaction started
+      from.
+- [ ] `Forge → Chain → Fix` with the real `D` throughout accepts and the
+      resulting `SingleProof` verifies.
+- [ ] `Cast → Chain → Fix` with the real `D` throughout accepts and the
+      resulting `SingleProof` verifies.
 
 
 ## New Tests
-- [x] Property: `Chain` associativity:
-      `Chain(Chain(A, B), C) = Chain(A, Chain(B, C))` (`chain_is_associative`),
-      up to the order of the multisets, and on the cut-through sets too.
-- [ ] Property: `Fix` distributivity: `Fix(Chain(A, B)) = Merge(Fix(A), Fix(B))`
-      when `thruputs == []`
-- [x] `Chain`: new timestamp unequal to max rejected
-- [ ] Thruput-input integrity: a thruput must equal an output of a predecessor
-      in the chain (validated against that output, not mutator-set membership).
-      The negatives are all there -- `cut_through_on_unequal_commitments_is_rejected`
-      bounds the cut-through set below the outputs, `non_maximal_cut_through_is_rejected`
-      above, `a_thruput_cannot_be_cut_through_twice` fixes the multiplicity, and
-      `link_transaction_with_thruputs_is_rejected` closes the far end. The
-      positive is `thruputs_resolve_in_two_stages`: a successor funded entirely
-      by unconfirmed money, one thruput from each of two predecessors, chained
-      in one at a time. The intermediate carries a thruput of its own, which is
-      the honest carry-forward -- and the shape that makes the property mean
-      anything, since both other positives chain to zero thruputs
-      (`chain_accepts_a_predecessor_successor_pair` asserts as much;
-      `chain_accepts_a_chain_produced_operand` uses `from_primitive_witness(pw, 0)`).
-      It is also the two-stage resolution the mempool will actually produce,
-      parents arriving separately. The fixture had to grow a range rather than a
-      count -- `predecessor_resolving(&pw, range)`, which
-      `chainable_link_primitive_witnesses` now delegates to -- because a
-      successor's thruputs need not all come from one predecessor.
-- [x] Negative: `LinkKernel` carrying a coinbase rejected. All four branches
-      that mint or rewrite a kernel now have it:
-      `coinbase_or_merge_bit_on_the_forged_kernel_is_rejected` (new),
-      `..._on_the_chained_kernel_...`, `..._on_the_new_kernel_...` (`Update`),
-      `..._on_the_cast_kernel_...`; each pokes both leafs and expects
-      `ROOT_MISMATCH`, the two being constants the branches authenticate rather
-      than values they read. `Fix` needs none: it derives the link kernel from
-      the transaction kernel and verifies a `LinkProof`, and no branch that can
-      produce one admits a coinbase, so it holds by induction.
-      `coinbase_kernel_is_rejected` / `merge_bit_is_rejected` are the proof-free
-      tier's counterparts.
-- [ ] `Update` then `Fix` == `Fix` on the updated mutator set
-- [x] `Cast` round-trip: `Cast(tx)` then `Fix` == `tx`
-      (`cast_then_fix_yields_a_verifying_single_proof`). Equality is asserted on
-      the *claim*: `Cast` adds nothing and `Fix` takes nothing away, so the
-      composition is the identity on what a block checks -- which is what makes
-      casting safe to do opportunistically, a transaction that joins a chain and
-      finds no partner being no worse off than one that never joined.
-- [x] Negative: `Fix` with non-empty thruputs rejected
-      (`link_transaction_with_thruputs_is_rejected`)
-- [x] Negative: `Chain` with mismatched thruputs rejected (a cut-through whose
-      commitment matches no output)
-- [ ] End-to-end: `Fix`'d tx passes existing `SingleProof` verification & enters
-      into a block. First half done: both pipeline tests above prove the fixed
-      transaction and verify the proof with `triton_vm::verify` against
-      `single_proof_claim`, which is the claim the verifier out in the world
-      builds. Entering a block waits on §Integration.
-- [x] Phantom thruputs / phantom confirmed UTXOs are rejected. One assert covers
-      both partitions rather than two: an unbacked UTXO in *either* half changes
-      `|input_utxos|` and nothing else, so it dies on the cardinality equality
-      (`phantom_input_utxo_is_rejected`, `CARDINALITY_MISMATCH_ERROR`) before
-      either per-partition loop runs. The count-preserving flavors -- a UTXO
-      swapped for another rather than appended -- are the "bad commitments"
-      entry below; between them the inflation path is closed from both sides.
-- [x] Bad commitments are rejected, on all three lists. Thruput side:
-      `tampered_thruput_is_rejected` (`UTXO_COMMITMENT_MISMATCH_ERROR`). Output
-      side: `output_utxos_unbound_to_addition_records_is_rejected` (same id).
-      Confirmed-input side: `confirmed_input_utxo_unbound_to_its_removal_record_is_rejected`
-      (new) -- the recomputed commitment stops being the AOCL leaf, so the
-      inlined RRI membership check rejects; and
-      `bad_absolute_index_set_is_rejected` for the index-set half of the same
-      binding.
-- [x] Cardinality. `phantom_input_utxo_is_rejected` /
-      `phantom_output_utxo_is_rejected` trip the input- and output-side guards.
-      Only the "one too many" direction is poked; both guards are equality
-      asserts, so "too few" reaches the identical instruction. The
-      parallel-vector lengths (`membership_proofs`, `thruput_sender_randomnesses`,
-      ...) are checked at the proof-free tier instead --
-      `short_thruput_randomness_fails_cardinality`.
-- [x] Two representations of thruputs must agree.
-      `unauthenticated_thruput_is_rejected` pins the kernel's `thruputs` leaf to
-      the witness vector (`ROOT_MISMATCH`); `tampered_thruput_is_rejected` pins
-      that vector to the input-UTXO tail partition. Count disagreement is the
-      cardinality entry above. There is no third representation to disagree --
-      `ForgeWitness` holds one `thruputs` field.
-- [x] Faithful union. `forge_accepts_valid_witnesses` runs every split of
-      `0..=3` inputs into confirmed and thruputs -- so the genuinely mixed
-      shapes (1+1, 2+1, 1+2) and both extremes -- through `produce`, which
-      proves the *unchanged* type scripts over the union `confirmed || thruputs`,
-      and `Forge` then recursively verifies them.
-      `forge_accepts_timelocked_witness` repeats it for a two-type-script
-      witness. Caveat worth keeping: the balance claim rests on NativeCurrency
-      proving at all, not on an assertion of the sum. `all_thruputs_is_valid` is
-      the sharpest statement of it -- a witness with zero confirmed inputs
-      balances only if thruput value counts toward the input side.
-- [x] Chain rejects a bad MAST auth path for an operand's `inputs` / `outputs` /
-      `thruputs` / `fee`. (One path tampered; every field goes through the same
-      snippet.)
-- [x] cut-through value conservation (positive): a cut-through cancels a
-      (thruput, output) pair only when their canonical commitments are equal,
-      and removes it from both sides together — so no value is created or
-      destroyed.
-- [x] Cut-through is maximal: a short `cut_through`, leaving a cancellable
-      (output, thruput) pair standing, is rejected
-      (`non_maximal_cut_through_is_rejected`).
-- [x] Cut-through value conservation (negative): one-sided removal, or a cancel
-      on unequal commitments, is rejected.
+- [x] `chain_is_associative`: `Chain(Chain(A, B), C)` and `Chain(A, Chain(B, C))`
+      agree as multisets, on the chained kernel and the cut-through set.
+- [ ] `Fix` distributivity: `Fix(Chain(A, B)) = Merge(Fix(A), Fix(B))` when
+      `thruputs == []`.
+- [x] `chained_timestamp_must_be_the_later_of_the_operand_timestamps`: a chained
+      timestamp other than the later of the two is rejected.
+- [x] `thruputs_resolve_in_two_stages`: a successor with one thruput from each of
+      two predecessors is chained onto them in turn, and only the second empties
+      the thruput list.
+- [x] `coinbase_or_merge_bit_on_the_forged_kernel_is_rejected` /
+      `..._on_the_chained_kernel_...` / `..._on_the_new_kernel_...` /
+      `..._on_the_cast_kernel_...`: a coinbase or merge bit on any minted or
+      rewritten `LinkKernel` trips `ROOT_MISMATCH`.
+- [ ] `Update` then `Fix` equals `Fix` on the updated mutator set.
+- [x] `cast_then_fix_yields_a_verifying_single_proof`: `Cast(tx)` then `Fix`
+      answers the claim `tx` itself answered.
+- [x] `link_transaction_with_thruputs_is_rejected`: a link transaction still
+      carrying thruputs is rejected by `Fix`.
+- [x] `cut_through_on_unequal_commitments_is_rejected`: cancelling a (thruput,
+      output) pair whose commitments differ is rejected.
+- [ ] A `Fix`'d transaction enters a block. Its single proof already verifies
+      against `single_proof_claim`
+      (`forge_then_fix_yields_a_verifying_single_proof`,
+      `cast_then_fix_yields_a_verifying_single_proof`); the block half waits on
+      §Integration.
+- [x] `phantom_input_utxo_is_rejected` / `phantom_output_utxo_is_rejected`: an
+      input or output UTXO backed by no record trips
+      `CARDINALITY_MISMATCH_ERROR`.
+- [x] `tampered_thruput_is_rejected` /
+      `output_utxos_unbound_to_addition_records_is_rejected`: a thruput or output
+      UTXO that is not the one its addition record commits trips
+      `UTXO_COMMITMENT_MISMATCH_ERROR`.
+- [x] `confirmed_input_utxo_unbound_to_its_removal_record_is_rejected`: a
+      confirmed input UTXO whose commitment is not the AOCL leaf its removal
+      record spends is rejected.
+- [x] `unauthenticated_thruput_is_rejected`: a witness thruput vector that is not
+      the kernel's `thruputs` leaf trips `ROOT_MISMATCH`.
+- [x] `forge_accepts_valid_witnesses`: `Forge` accepts every split of `0..=3`
+      inputs into confirmed inputs and thruputs, type scripts proven over the
+      union.
+- [x] `bad_authentication_path_is_rejected`: an operand's `inputs`, `outputs`,
+      `thruputs` or `fee` absent from its kernel MAST is rejected by `Chain`.
+- [x] `cut_through_removes_matching_pairs_from_both_sides`: each cut-through pair
+      drops one output and one thruput.
+- [x] `non_maximal_cut_through_is_rejected`: a cut-through leaving a cancellable
+      (output, thruput) pair standing is rejected.
+- [x] `one_sided_cut_through_is_rejected`: a record removed from the outputs but
+      not the thruputs, or the reverse, is rejected.
 
 ## Benchmarks
 - [ ] `Forge` (inlined RRI) vs `Prove`+`Raise` (recursive RRI) — the cost claim
