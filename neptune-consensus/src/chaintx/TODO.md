@@ -402,18 +402,7 @@ would bind that check to the wrong tree without crashing.
       (`consensus_rule_set.rs::infer_from`): `HardforkDelta`, at
       `BLOCK_HEIGHT_HARDFORK_DELTA_{MAIN_NET,TESTNET}`. **The heights are
       placeholders** (60_000 / 6_000) and want a real schedule before release.
-  - [x] Delta also bumps the claim's Triton VM version (`V5` -> `V6`), the fork
-        being deployed together with the upstream bump. So a gamma proof fails a
-        delta claim twice over: wrong program digest *and* wrong version.
-  - [ ] `TritonProofVersion::V6` is ahead of the linked `triton-vm`, whose
-        `CURRENT_VERSION` is what `Claim::new` stamps -- so a delta proof
-        produced *today* would carry version 5 and answer nothing.
-        `produce_single_proof` accepts delta anyway, which is unreachable (no
-        caller names delta, and the activation height is far off) but wrong
-        until the dependency lands.
-        `newest_producible_version_is_the_linked_one` is the tripwire: it fails
-        the moment `CURRENT_VERSION` reaches 6, which is when delta becomes
-        producible and its proof artifacts want regenerating.
+  - [ ] Give delta its own `TritonProofVersion` when `triton-vm` bumps.
   - [x] `SingleProof` becomes a family indexed by the rule set, with
         `ConsensusRuleSet::has_fix_branch` as the one axis: two programs, two
         `OnceLock`s. Everything that produces or names a single proof takes a
@@ -826,10 +815,18 @@ Positive counterparts (so the negatives cannot pass vacuously):
       `Fix`'s recursion against a real `LinkProof`, and hence the one saying
       both digits of the claim it builds are the ones `LinkProof` establishes.
 - [ ] end-to-end `Forge → Chain → Fix` with `D` = the real `SingleProof` digest
-      throughout accepts, and the resulting `SingleProof` verifies. (The
-      `Forge → Fix` leg above is done; what is missing is a `Chain` in the
-      middle and a *proven* `SingleProof` at the end rather than a program run.)
-- [ ] `Cast → Chain → Fix` round-trip with the real `D` accepts.
+      throughout accepts, and the resulting `SingleProof` verifies. The
+      `Forge → Fix` leg now runs all the way to a *proven* single proof, checked
+      against the claim `single_proof_claim` hands a block
+      (`forge_then_fix_yields_a_verifying_single_proof`) -- so what is missing is
+      only the `Chain` in the middle.
+- [ ] `Cast → Chain → Fix` round-trip with the real `D` accepts. The
+      `Cast → Fix` leg is done and is the one test where the cycle closes end to
+      end: a real `SingleProof` recursively verified by `Cast`, under the very
+      digest a real `SingleProof` then instantiates in `Fix`
+      (`cast_then_fix_yields_a_verifying_single_proof`; the transaction is proven
+      under delta, not gamma as `cast.rs`'s own fixture is, because `D` is
+      actually cashed out here). Missing, again, only the `Chain` in the middle.
 
 
 ## New Tests
@@ -844,16 +841,19 @@ Positive counterparts (so the negatives cannot pass vacuously):
       The negatives are all there -- `cut_through_on_unequal_commitments_is_rejected`
       bounds the cut-through set below the outputs, `non_maximal_cut_through_is_rejected`
       above, `a_thruput_cannot_be_cut_through_twice` fixes the multiplicity, and
-      `link_transaction_with_thruputs_is_rejected` closes the far end. What is
-      missing is the *positive*: `prop_positive` has never been run over a
-      chained witness whose `new_kernel.thruputs` is non-empty, so nothing shows
-      `Chain` accepts an honest carry-forward -- the shape that makes the
-      property mean anything. Both existing positives chain to zero thruputs
+      `link_transaction_with_thruputs_is_rejected` closes the far end. The
+      positive is `thruputs_resolve_in_two_stages`: a successor funded entirely
+      by unconfirmed money, one thruput from each of two predecessors, chained
+      in one at a time. The intermediate carries a thruput of its own, which is
+      the honest carry-forward -- and the shape that makes the property mean
+      anything, since both other positives chain to zero thruputs
       (`chain_accepts_a_predecessor_successor_pair` asserts as much;
       `chain_accepts_a_chain_produced_operand` uses `from_primitive_witness(pw, 0)`).
-      Needs a fixture where the predecessor resolves only some of the
-      successor's thruputs, which `chainable_link_primitive_witnesses` cannot
-      currently express -- hence left open rather than bodged.
+      It is also the two-stage resolution the mempool will actually produce,
+      parents arriving separately. The fixture had to grow a range rather than a
+      count -- `predecessor_resolving(&pw, range)`, which
+      `chainable_link_primitive_witnesses` now delegates to -- because a
+      successor's thruputs need not all come from one predecessor.
 - [x] Negative: `LinkKernel` carrying a coinbase rejected. All four branches
       that mint or rewrite a kernel now have it:
       `coinbase_or_merge_bit_on_the_forged_kernel_is_rejected` (new),
@@ -866,13 +866,21 @@ Positive counterparts (so the negatives cannot pass vacuously):
       `coinbase_kernel_is_rejected` / `merge_bit_is_rejected` are the proof-free
       tier's counterparts.
 - [ ] `Update` then `Fix` == `Fix` on the updated mutator set
-- [ ] `Cast` round-trip: `Cast(tx)` then `Fix` == `tx`
+- [x] `Cast` round-trip: `Cast(tx)` then `Fix` == `tx`
+      (`cast_then_fix_yields_a_verifying_single_proof`). Equality is asserted on
+      the *claim*: `Cast` adds nothing and `Fix` takes nothing away, so the
+      composition is the identity on what a block checks -- which is what makes
+      casting safe to do opportunistically, a transaction that joins a chain and
+      finds no partner being no worse off than one that never joined.
 - [x] Negative: `Fix` with non-empty thruputs rejected
       (`link_transaction_with_thruputs_is_rejected`)
 - [x] Negative: `Chain` with mismatched thruputs rejected (a cut-through whose
       commitment matches no output)
 - [ ] End-to-end: `Fix`'d tx passes existing `SingleProof` verification & enters
-      into a block
+      into a block. First half done: both pipeline tests above prove the fixed
+      transaction and verify the proof with `triton_vm::verify` against
+      `single_proof_claim`, which is the claim the verifier out in the world
+      builds. Entering a block waits on §Integration.
 - [x] Phantom thruputs / phantom confirmed UTXOs are rejected. One assert covers
       both partitions rather than two: an unbacked UTXO in *either* half changes
       `|input_utxos|` and nothing else, so it dies on the cardinality equality
