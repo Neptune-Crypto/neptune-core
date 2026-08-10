@@ -30,7 +30,7 @@ use crate::transaction::TransactionKernel;
 ///
 /// The thruputs are not among the fields, and neither is the `LinkKernel`. They
 /// do not have to be: a `LinkKernel` with no thruputs is its transaction kernel
-/// paired with a constant (see [`no_thruputs_subtree_root`]), so the branch
+/// paired with a constant (see `no_thruputs_subtree_root`), so the branch
 /// derives the link kernel's MAST hash from the transaction kernel's, and a
 /// `LinkTx` that still carries thruputs simply has no proof answering the claim
 /// the branch builds. The empty thruputs are not a separate check; they are

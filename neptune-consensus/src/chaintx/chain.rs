@@ -66,7 +66,7 @@ const ANNOUNCEMENTS_ARE_NOT_THE_OPERANDS_ANNOUNCEMENTS_ERROR: i128 = 1_000_548;
 const TIMESTAMP_IS_NOT_MAX_OF_OPERAND_TIMESTAMPS_ERROR: i128 = 1_000_549;
 const MUTATOR_SET_HASH_MISMATCH_ERROR: i128 = 1_000_550;
 
-/// The witness consumed by [`Chain`](super::chain::Chain).
+/// The witness consumed by [`Chain`].
 ///
 /// Consists of the two operand [`LinkTx`]es (kernels plus link proofs), the
 /// chained kernel they produce, and the addition records cut through along the

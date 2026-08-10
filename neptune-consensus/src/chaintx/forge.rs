@@ -191,7 +191,7 @@ impl ForgeWitness {
 /// of each execution. The rest arrives on the non-determinism streams.
 ///
 /// Wrapped in
-/// [`LinkProofWitnessMemory::Forge`](super::link_proof_witness::LinkProofWitnessMemory::Forge)
+/// [`LinkProofWitnessMemory::Forge`]
 /// before it is written to memory -- `Forge` is a branch of `LinkProof`, not a
 /// program of its own.
 #[derive(Clone, Debug, BFieldCodec, TasmObject)]

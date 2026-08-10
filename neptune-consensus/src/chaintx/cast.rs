@@ -183,7 +183,7 @@ impl SecretWitness for CastWitness {
 /// single hash: a `LinkKernel`'s MAST root is the wrapped transaction kernel's
 /// root paired with the subtree holding the thruputs leaf and the padding, and
 /// for empty thruputs the latter is a constant (see
-/// [`no_thruputs_subtree_root`]). So the branch divines `txkmh`, hashes it with
+/// `no_thruputs_subtree_root`). So the branch divines `txkmh`, hashes it with
 /// that constant, and asserts the result is `lkmh`. The empty thruputs are not a
 /// separate check; they are baked into the constant.
 ///

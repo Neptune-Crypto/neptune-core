@@ -78,7 +78,8 @@ pub(super) fn merge_bit_false_leaf() -> Digest {
 /// [`SingleProof`](crate::transaction::validity::single_proof::SingleProof),
 /// and structured the same way: a thin dispatcher over the branches of
 /// [`LinkProofWitness`](super::link_proof_witness::LinkProofWitness), each of
-/// which is a [`BasicSnippet`] that establishes the same claim by a different
+/// which is a [`BasicSnippet`](tasm_lib::prelude::BasicSnippet) that
+/// establishes the same claim by a different
 /// route. `Forge` is the entry point, `Chain` combines two link transactions,
 /// `Update` re-targets one at a newer mutator set, and `Cast` pulls a legacy
 /// transaction in.
