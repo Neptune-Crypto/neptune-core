@@ -276,9 +276,9 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::chaintx::cast::CastWitness;
+    use crate::chaintx::mock_single_proof_digest;
     use crate::chaintx::test_helpers::deterministic_chainable_link_primitive_witnesses;
     use crate::chaintx::test_helpers::forge;
-    use crate::chaintx::mock_single_proof_digest;
     use crate::consensus_rule_set::ConsensusRuleSet;
     use crate::proof_abstractions::tasm::builtins as tasm;
     use crate::proof_abstractions::tasm::program::prove_triton_program;

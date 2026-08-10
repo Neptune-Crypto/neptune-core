@@ -691,9 +691,9 @@ pub(crate) mod tests {
     use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 
     use super::*;
-    pub(super) use crate::chaintx::test_helpers::forge;
     use crate::chaintx::link_primitive_witness::LinkPrimitiveWitness;
     use crate::chaintx::mock_single_proof_digest;
+    pub(super) use crate::chaintx::test_helpers::forge;
     use crate::proof_abstractions::tasm::builtins as tasm;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::transaction::primitive_witness::PrimitiveWitness;
