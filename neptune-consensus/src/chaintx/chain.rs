@@ -151,6 +151,15 @@ impl ChainWitness {
         }
     }
 
+    /// The [`LinkKernel`] the chained transaction carries.
+    ///
+    /// Mirrors [`CastWitness::link_kernel`](crate::chaintx::cast::CastWitness::link_kernel):
+    /// the caller that proved this witness needs the kernel to pair with the
+    /// proof into a [`LinkTx`].
+    pub fn link_kernel(&self) -> LinkKernel {
+        self.new_kernel.clone()
+    }
+
     /// The [`LinkKernel`] two operands chain into, and the addition records cut
     /// through in the process.
     ///
@@ -1053,9 +1062,11 @@ pub(crate) mod tests {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::chaintx::forge::ForgeWitness;
     use crate::chaintx::link_primitive_witness::LinkPrimitiveWitness;
     use crate::chaintx::mock_single_proof_digest;
+    use crate::chaintx::test_helpers::deterministic_chainable_link_primitive_witnesses;
+    use crate::chaintx::test_helpers::forge;
+    use crate::chaintx::test_helpers::predecessor_resolving;
     use crate::proof_abstractions::tasm::builtins as tasm;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
@@ -1307,163 +1318,6 @@ pub(crate) mod tests {
             &operand_claim(right_lkmh),
             &witness.right_proof,
         );
-    }
-
-    /// The predecessor that resolves the successor's inputs `range`, over the
-    /// same mutator set.
-    ///
-    /// It spends exactly those UTXOs and pays them straight back out with the
-    /// very randomness their membership proofs carry -- so its addition records
-    /// are, element for element, the commitments those inputs became when
-    /// [`LinkPrimitiveWitness::from_primitive_witness`] turned them into
-    /// thruputs. Balanced by construction (same UTXOs in and out, zero fee), so
-    /// no re-balancing is needed.
-    ///
-    /// A range rather than a count because the successor's thruputs need not
-    /// all come from the same predecessor: see
-    /// [`thruputs_resolve_in_two_stages`]. `range` must sit inside the tail
-    /// `from_primitive_witness` reclassifies, or the "predecessor" resolves an
-    /// input the successor still holds as confirmed and nothing cuts through.
-    fn predecessor_resolving(
-        successor_pw: &PrimitiveWitness,
-        range: std::ops::Range<usize>,
-    ) -> LinkPrimitiveWitness {
-        use crate::transaction::transaction_kernel::TransactionKernelProxy;
-        use crate::type_scripts::known_type_scripts::match_type_script_and_generate_witness;
-
-        // The UTXOs the successor will hold as thruputs, together with the
-        // randomness that commits them.
-        let utxos = successor_pw.input_utxos.utxos[range.clone()].to_vec();
-        let membership_proofs = successor_pw.input_membership_proofs[range.clone()].to_vec();
-        let sender_randomnesses = membership_proofs
-            .iter()
-            .map(|mp| mp.sender_randomness)
-            .collect_vec();
-        let receiver_digests = membership_proofs
-            .iter()
-            .map(|mp| mp.receiver_preimage.hash())
-            .collect_vec();
-
-        // The predecessor: spend exactly those UTXOs, and pay them back out
-        // with the same randomness.
-        let mutator_set_accumulator = successor_pw.mutator_set_accumulator.clone();
-        let salted_utxos = crate::transaction::primitive_witness::SaltedUtxos::new_with_rng(
-            utxos.clone(),
-            &mut rand::rngs::StdRng::seed_from_u64(0),
-        );
-        let inputs = utxos
-            .iter()
-            .zip(&membership_proofs)
-            .map(|(utxo, mp)| mutator_set_accumulator.drop(Tip5::hash(utxo), mp))
-            .collect_vec();
-        let outputs = utxos
-            .iter()
-            .zip(&sender_randomnesses)
-            .zip(&receiver_digests)
-            .map(|((utxo, sr), rd)| neptune_mutator_set::commit(Tip5::hash(utxo), *sr, *rd))
-            .collect_vec();
-        let predecessor_kernel = TransactionKernelProxy {
-            inputs,
-            outputs,
-            announcements: vec![],
-            fee: NativeCurrencyAmount::coins(0),
-            coinbase: None,
-            timestamp: successor_pw.kernel.timestamp,
-            mutator_set_hash: mutator_set_accumulator.hash(),
-            merge_bit: false,
-        }
-        .into_kernel();
-        let type_scripts_and_witnesses = successor_pw
-            .type_scripts_and_witnesses
-            .iter()
-            .map(|tsaw| {
-                match_type_script_and_generate_witness(
-                    tsaw.program.hash(),
-                    predecessor_kernel.clone(),
-                    salted_utxos.clone(),
-                    salted_utxos.clone(),
-                )
-                .expect("type script hash should be known")
-            })
-            .collect_vec();
-        let predecessor_pw = PrimitiveWitness {
-            input_utxos: salted_utxos.clone(),
-            input_membership_proofs: membership_proofs,
-            lock_scripts_and_witnesses: successor_pw.lock_scripts_and_witnesses[range].to_vec(),
-            type_scripts_and_witnesses,
-            output_utxos: salted_utxos,
-            output_sender_randomnesses: sender_randomnesses,
-            output_receiver_digests: receiver_digests,
-            mutator_set_accumulator,
-            kernel: predecessor_kernel,
-        };
-
-        LinkPrimitiveWitness::from_primitive_witness(predecessor_pw, 0)
-    }
-
-    /// A predecessor/successor pair over one mutator set: the successor's
-    /// thruputs are exactly the predecessor's outputs, so chaining them cuts
-    /// through every one.
-    pub(super) fn chainable_link_primitive_witnesses(
-        successor_pw: PrimitiveWitness,
-        num_thruputs: usize,
-    ) -> (LinkPrimitiveWitness, LinkPrimitiveWitness) {
-        let num_inputs = successor_pw.input_utxos.utxos.len();
-        assert!(num_thruputs <= num_inputs);
-
-        let predecessor =
-            predecessor_resolving(&successor_pw, num_inputs - num_thruputs..num_inputs);
-
-        (
-            predecessor,
-            LinkPrimitiveWitness::from_primitive_witness(successor_pw, num_thruputs),
-        )
-    }
-
-    /// [`chainable_link_primitive_witnesses`] over a fixed fixture.
-    ///
-    /// Deterministic on purpose: the tests that reach the recursion have to
-    /// `Forge` their operands, and a fixture that moved between runs would mean
-    /// a fresh claim, hence a fresh proof, every time. The mock-proof negatives
-    /// draw at random instead -- they pay no proving cost, so there is nothing
-    /// to amortize and everything to gain.
-    pub(crate) fn deterministic_chainable_link_primitive_witnesses(
-        num_inputs: usize,
-        num_thruputs: usize,
-    ) -> (LinkPrimitiveWitness, LinkPrimitiveWitness) {
-        let mut test_runner = TestRunner::deterministic();
-        let successor_pw = PrimitiveWitness::arbitrary_with_size_numbers(Some(num_inputs), 2, 1)
-            .new_tree(&mut test_runner)
-            .unwrap()
-            .current();
-
-        chainable_link_primitive_witnesses(successor_pw, num_thruputs)
-    }
-
-    /// Forge a link primitive witness into a proof-backed [`LinkTx`].
-    pub(crate) async fn forge(lpw: &LinkPrimitiveWitness, single_proof_digest: Digest) -> LinkTx {
-        let witness = ForgeWitness::produce(
-            lpw,
-            single_proof_digest,
-            vm_job_queue(),
-            TritonVmProofJobOptions::default(),
-        )
-        .await
-        .unwrap();
-        let proof = LinkProof
-            .prove(
-                witness.claim(),
-                witness.nondeterminism(),
-                vm_job_queue(),
-                TritonVmProofJobOptions::default(),
-            )
-            .await
-            .unwrap();
-
-        LinkTx {
-            kernel: lpw.kernel.clone(),
-            proof: LinkTxProof::Proof(proof),
-        }
     }
 
     /// Assertion is that both the Rust shadow and the tasm run to completion
@@ -1741,10 +1595,10 @@ mod negative_tests {
     use proptest::strategy::Strategy;
     use test_strategy::proptest;
 
-    use super::tests::chainable_link_primitive_witnesses;
-    use super::tests::deterministic_chainable_link_primitive_witnesses;
-    use super::tests::forge;
     use super::*;
+    use crate::chaintx::test_helpers::chainable_link_primitive_witnesses;
+    use crate::chaintx::test_helpers::deterministic_chainable_link_primitive_witnesses;
+    use crate::chaintx::test_helpers::forge;
     use crate::chaintx::link_primitive_witness::LinkPrimitiveWitness;
     use crate::chaintx::mock_single_proof_digest;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;

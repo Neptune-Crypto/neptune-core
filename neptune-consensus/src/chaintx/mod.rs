@@ -13,6 +13,8 @@ pub mod link_primitive_witness;
 pub mod link_proof;
 pub mod link_proof_witness;
 pub mod link_tx;
+#[cfg(any(test, feature = "test-helpers"))]
+pub mod test_helpers;
 pub mod update;
 
 /// A stand-in for the `SingleProof` program digest `D` that a `LinkProof` claim
