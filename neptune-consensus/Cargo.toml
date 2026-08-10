@@ -121,5 +121,12 @@ test-strategy = "0.3"
 tokio = { version = "1.47", features = ["macros", "rt-multi-thread"] }
 tracing-test = "0.2"
 
+## `harness = false` so that the divan reports land on stdout.
+
+[[bench]]
+name = "chaintx"
+path = "benches/chaintx.rs"
+harness = false
+
 [lints]
 workspace = true
