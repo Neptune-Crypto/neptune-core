@@ -14,8 +14,13 @@ txs):
 - **Spending unconfirmed funds.** Ordinary users (and wallets doing
   change-splitting or consolidation) can build on outputs that aren't yet in a
   block, instead of waiting a full confirmation between dependent payments.
-- **Cheaper initiation.** `Forge` inlines `RemovalRecordsIntegrity`
-  *non-recursively*, avoiding the expensive recursive `Raise` per transaction.
+- **Cheaper initiation.** `Forge` inlines `RemovalRecordsIntegrity`,
+  `KernelToOutputs`, `CollectLockScripts`, and `CollectTypeScripts`
+  *non-recursively*, and the route to a `SingleProof` comes out roughly a third
+  cheaper than the legacy one (§Benchmarks). The saving is not in the inlining
+  itself — proving them separately is a rounding error against either route's
+  total. It is that the chained route recursively verifies three fewer proofs.
+  Recursive verification is the dominant cost in all of these programs.
 
 ## Governing invariants
 
@@ -800,8 +805,17 @@ Positive counterparts (so the negatives cannot pass vacuously):
       not the thruputs, or the reverse, is rejected.
 
 ## Benchmarks
-- [ ] `Forge` (inlined RRI) vs `Prove`+`Raise` (recursive RRI) — the cost claim
-- [ ] N chained interactions in one block vs N separate txs (throughput claim)
+
+`neptune-consensus/benches/chaintx.rs`, run with `cargo bench -p
+neptune-consensus --bench chaintx`.
+
+- [x] `cost::forge_versus_raise`: `Forge → Fix` against `Collect`+`Raise`.
+      Confirmed ~30% speedup.
+- [x] `throughput::chained_{2,4}` / `throughput::separate_{2,4}`: `N`
+      interactions with one self-perpetuating UTXO on the chaining pipeline
+      versus `N` with `N` independent UTXOs. While not a like-for-like
+      comparison, this is the closest counterpart the legacy pipeline admits.
+      Confirmed ~36% speedup at `N = 2`.
 
 ## Audit
 - [ ] Scoped security audit
