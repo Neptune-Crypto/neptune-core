@@ -2,6 +2,9 @@ use tasm_lib::data_type::DataType;
 use tasm_lib::prelude::*;
 use tasm_lib::triton_vm::prelude::*;
 
+use crate::consensus_rule_set::ConsensusRuleSet;
+use crate::consensus_rule_set::TritonProofVersion;
+
 /// Generates a new Claim object given the lengths of the input and output.
 /// Returns pointers to:
 ///  - the claim
@@ -9,7 +12,17 @@ use tasm_lib::triton_vm::prelude::*;
 ///  - the input
 ///  - the program digest.
 #[derive(Debug, Copy, Clone)]
-pub struct NewClaim;
+pub struct NewClaim {
+    proof_version: TritonProofVersion,
+}
+
+impl NewClaim {
+    pub fn new(consensus_rule_set: ConsensusRuleSet) -> Self {
+        Self {
+            proof_version: consensus_rule_set.triton_proof_version(),
+        }
+    }
+}
 
 impl BasicSnippet for NewClaim {
     fn parameters(&self) -> Vec<(DataType, String)> {
@@ -94,7 +107,7 @@ impl BasicSnippet for NewClaim {
                 hint version: Pointer = stack[0]
                 // _ *claim *output *input *version
 
-                push {triton_vm::proof::CURRENT_VERSION}
+                push {self.proof_version.version()}
                 pick 1
                 write_mem 1
                 hint program_digest: Pointer = stack[0]
@@ -165,7 +178,7 @@ mod tests {
             memory.insert(output_len_pointer, bfe!(output_len));
             memory.insert(input_size_pointer, bfe!(input_len + 1));
             memory.insert(input_len_pointer, bfe!(input_len));
-            memory.insert(version_pointer, bfe!(triton_vm::proof::CURRENT_VERSION));
+            memory.insert(version_pointer, bfe!(self.proof_version.version()));
 
             stack.push(claim_pointer);
             stack.push(output_pointer);
@@ -175,6 +188,7 @@ mod tests {
             // sanity check
             let the_new_claim = *Claim::decode_from_memory(memory, claim_pointer).unwrap();
             let empty_claim = Claim::new(Digest::default())
+                .about_version(self.proof_version.version())
                 .with_input(bfe_vec![0; input_len])
                 .with_output(bfe_vec![0; output_len]);
             assert_eq!(empty_claim, the_new_claim);
@@ -205,6 +219,7 @@ mod tests {
 
     #[test]
     fn unit_test() {
-        ShadowedFunction::new(NewClaim).test()
+        ShadowedFunction::new(NewClaim::new(ConsensusRuleSet::HardforkGamma)).test();
+        ShadowedFunction::new(NewClaim::new(ConsensusRuleSet::HardforkDelta)).test();
     }
 }

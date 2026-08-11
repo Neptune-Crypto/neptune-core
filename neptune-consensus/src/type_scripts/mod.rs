@@ -21,6 +21,7 @@ use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use super::transaction::primitive_witness::SaltedUtxos;
 use super::transaction::transaction_kernel::TransactionKernel;
 use super::transaction::utxo::Coin;
+use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::proof_abstractions::error::CreateProofError;
 use crate::proof_abstractions::proof_builder::ProofBuilder;
 use crate::proof_abstractions::tasm::program::TritonProgram;
@@ -106,6 +107,7 @@ impl TypeScriptAndWitness {
         txk_mast_hash: Digest,
         salted_inputs_hash: Digest,
         salted_outputs_hash: Digest,
+        consensus_rule_set: ConsensusRuleSet,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> Result<Proof, CreateProofError> {
@@ -113,7 +115,9 @@ impl TypeScriptAndWitness {
             .into_iter()
             .flat_map(|d| d.reversed().values())
             .collect();
-        let claim = Claim::new(self.program.hash()).with_input(input);
+        let claim = Claim::new(self.program.hash())
+            .about_version(consensus_rule_set.triton_proof_version().version())
+            .with_input(input);
 
         ProofBuilder::new()
             .program(self.program.clone())

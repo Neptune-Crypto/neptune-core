@@ -3,10 +3,19 @@ use tasm_lib::prelude::BasicSnippet;
 use tasm_lib::prelude::Library;
 use tasm_lib::triton_vm::prelude::*;
 
+use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::transaction::validity::tasm::claims::new_claim::NewClaim;
 
 #[derive(Debug, Copy, Clone)]
-pub(crate) struct GenerateSingleProofClaim;
+pub(crate) struct GenerateSingleProofClaim {
+    consensus_rule_set: ConsensusRuleSet,
+}
+
+impl GenerateSingleProofClaim {
+    pub(crate) fn new(consensus_rule_set: ConsensusRuleSet) -> Self {
+        Self { consensus_rule_set }
+    }
+}
 
 impl BasicSnippet for GenerateSingleProofClaim {
     fn parameters(&self) -> Vec<(DataType, String)> {
@@ -25,7 +34,7 @@ impl BasicSnippet for GenerateSingleProofClaim {
     }
 
     fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
-        let new_claim = library.import(Box::new(NewClaim));
+        let new_claim = library.import(Box::new(NewClaim::new(self.consensus_rule_set)));
         let single_proof_digest_alloc = library.kmalloc(u32::try_from(Digest::LEN).unwrap());
 
         triton_asm!(
@@ -107,8 +116,9 @@ mod tests {
             let single_proof_digest = pop_digest(stack);
             let mast_hash = pop_digest(stack);
 
-            let claim =
-                Claim::new(single_proof_digest).with_input(mast_hash.reversed().values().to_vec());
+            let claim = Claim::new(single_proof_digest)
+                .about_version(self.consensus_rule_set.triton_proof_version().version())
+                .with_input(mast_hash.reversed().values().to_vec());
             let claim_pointer =
                 rust_shadowing_helper_functions::dyn_malloc::dynamic_allocator(memory);
             encode_to_memory(memory, claim_pointer, &claim);
@@ -146,6 +156,13 @@ mod tests {
 
     #[test]
     fn rust_and_tasm_agree() {
-        ShadowedAlgorithm::new(GenerateSingleProofClaim).test()
+        ShadowedAlgorithm::new(GenerateSingleProofClaim::new(
+            ConsensusRuleSet::HardforkGamma,
+        ))
+        .test();
+        ShadowedAlgorithm::new(GenerateSingleProofClaim::new(
+            ConsensusRuleSet::HardforkDelta,
+        ))
+        .test();
     }
 }

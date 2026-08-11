@@ -274,7 +274,7 @@ mod route {
         // The collection the raise recurses into. Assembled through the cache:
         // its four proofs are the ones just measured, and its script proofs are
         // the ones the chained route also pays for.
-        let collection = ProofCollection::produce(pw, vm_job_queue(), options())
+        let collection = ProofCollection::produce(pw, RULE_SET, vm_job_queue(), options())
             .await
             .unwrap();
         let witness = SingleProofWitness::from_collection(collection);

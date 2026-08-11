@@ -17,9 +17,7 @@ use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::triton_vm::prelude::LabelledInstruction;
 use tasm_lib::triton_vm::prelude::Tip5;
 use tasm_lib::triton_vm::proof::Claim;
-use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
-use tasm_lib::verifier::stark_verify::StarkVerify;
 use tracing::debug;
 
 use super::block_proof_witness::BlockProofWitness;
@@ -27,6 +25,8 @@ use crate::block::block_body::BlockBody;
 use crate::block::block_body::BlockBodyField;
 use crate::block::BlockAppendix;
 use crate::consensus_rule_set::ConsensusRuleSet;
+use crate::proof_abstractions::tasm::legacy_stark_verify::import_stark_verify;
+use crate::proof_abstractions::tasm::legacy_stark_verify::uses_legacy_proof_system;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::proof_abstractions::verifier::verify;
 use crate::transaction::transaction_kernel::TransactionKernel;
@@ -38,11 +38,17 @@ use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
 ///
 /// The witness for this program is `BlockProofWitness`.
 #[derive(Debug, Clone, Copy)]
-pub struct BlockProgram;
+pub struct BlockProgram {
+    consensus_rule_set: ConsensusRuleSet,
+}
 
 impl BlockProgram {
     const ILLEGAL_FEE: i128 = 1_000_210;
     const PROOF_SIZE_INDICATOR_TOO_BIG: i128 = 1_000_211;
+
+    pub fn new(consensus_rule_set: ConsensusRuleSet) -> Self {
+        Self { consensus_rule_set }
+    }
 
     pub fn claim(
         block_body: &BlockBody,
@@ -59,7 +65,9 @@ impl BlockProgram {
                 | ConsensusRuleSet::HardforkBeta => {
                     Digest::try_from_hex(PRE_HF_GAMMA_PROGRAM_HASH).unwrap()
                 }
-                ConsensusRuleSet::HardforkGamma | ConsensusRuleSet::HardforkDelta => Self.hash(),
+                ConsensusRuleSet::HardforkGamma | ConsensusRuleSet::HardforkDelta => {
+                    Self::new(consensus_rule_set).hash()
+                }
             };
 
             (hash, consensus_rule_set.triton_proof_version().version())
@@ -97,9 +105,7 @@ impl TritonProgram for BlockProgram {
 
         let mut library = Library::new();
 
-        let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
-            Stark::default(),
-        )));
+        let stark_verify = import_stark_verify(&mut library, self.consensus_rule_set);
 
         let block_body_field = field!(BlockProofWitness::block_body);
         let body_field_kernel = field!(BlockBody::transaction_kernel);
@@ -343,9 +349,18 @@ impl TritonProgram for BlockProgram {
     }
 
     fn hash(&self) -> Digest {
-        static HASH: OnceLock<Digest> = OnceLock::new();
+        static WITH_LEGACY_VERIFIER: OnceLock<Digest> = OnceLock::new();
+        static WITH_LINKED_VERIFIER: OnceLock<Digest> = OnceLock::new();
 
-        *HASH.get_or_init(|| self.program().hash())
+        // The embedded STARK verifier follows the rule set's proof system, so
+        // there is one program -- and one cache -- per proof system.
+        let cache = if uses_legacy_proof_system(self.consensus_rule_set) {
+            &WITH_LEGACY_VERIFIER
+        } else {
+            &WITH_LINKED_VERIFIER
+        };
+
+        *cache.get_or_init(|| self.program().hash())
     }
 }
 
@@ -356,6 +371,7 @@ pub(crate) mod tests {
     use tasm_lib::triton_vm;
     use tasm_lib::triton_vm::prelude::BFieldElement;
     use tasm_lib::triton_vm::prelude::Program;
+    use tasm_lib::triton_vm::stark::Stark;
     use tasm_lib::triton_vm::vm::NonDeterminism;
     use tasm_lib::triton_vm::vm::PublicInput;
     use tracing_test::traced_test;
@@ -366,7 +382,6 @@ pub(crate) mod tests {
     use crate::proof_abstractions::tasm::builtins::verify_stark;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::proof_abstractions::tasm::program::tests::test_program_snapshot;
-    use crate::proof_abstractions::SecretWitness;
 
     impl TritonProgramSpecification for BlockProgram {
         fn source(&self) {
@@ -434,16 +449,21 @@ pub(crate) mod tests {
                 .to_vec(),
         );
 
+        let block_height = block_primitive_witness
+            .body()
+            .block_mmr_accumulator
+            .num_leafs();
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height.into());
         let block_proof_witness = BlockProofWitness::produce(block_primitive_witness);
 
         let block_program_nondeterminism = block_proof_witness.nondeterminism();
-        let rust_output = BlockProgram
+        let rust_output = BlockProgram::new(consensus_rule_set)
             .run_rust(
                 &block_body_mast_hash_as_input,
                 block_program_nondeterminism.clone(),
             )
             .unwrap();
-        let tasm_output = match BlockProgram
+        let tasm_output = match BlockProgram::new(consensus_rule_set)
             .run_tasm(&block_body_mast_hash_as_input, block_program_nondeterminism)
         {
             Ok(std_out) => std_out,
@@ -490,17 +510,22 @@ pub(crate) mod tests {
         )
         .unwrap();
 
+        let block_height = block_primitive_witness
+            .body()
+            .block_mmr_accumulator
+            .num_leafs();
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height.into());
         let block_proof_witness = BlockProofWitness::produce(block_primitive_witness)
             .with_claim_test(halt_claim, halt_proof.into());
 
         let block_program_nondeterminism = block_proof_witness.nondeterminism();
-        let rust_output = BlockProgram
+        let rust_output = BlockProgram::new(consensus_rule_set)
             .run_rust(
                 &block_body_mast_hash_as_input,
                 block_program_nondeterminism.clone(),
             )
             .unwrap();
-        let tasm_output = match BlockProgram
+        let tasm_output = match BlockProgram::new(consensus_rule_set)
             .run_tasm(&block_body_mast_hash_as_input, block_program_nondeterminism)
         {
             Ok(std_out) => std_out,
@@ -520,8 +545,16 @@ pub(crate) mod tests {
         );
     }
 
-    test_program_snapshot!(
-        BlockProgram,
-        "f87bda68a0959a023fd1843ca47ab72fab871a853f392fc6e3f889ef10206f89b3f8a8ec2743d78d"
-    );
+    mod gamma_program {
+        use super::*;
+
+        test_program_snapshot!(
+            BlockProgram::new(ConsensusRuleSet::HardforkGamma),
+            "f87bda68a0959a023fd1843ca47ab72fab871a853f392fc6e3f889ef10206f89b3f8a8ec2743d78d"
+        );
+    }
+
+    // TODO: Pin the delta block program's digest once the delta programs are
+    // final; it differs from gamma's because the embedded STARK verifier
+    // follows the proof system.
 }

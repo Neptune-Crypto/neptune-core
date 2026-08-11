@@ -12,14 +12,17 @@ use tasm_lib::prelude::BasicSnippet;
 use tasm_lib::prelude::Library;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
-use tasm_lib::triton_vm;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::prelude::*;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
-use tasm_lib::verifier::stark_verify::StarkVerify;
 
+use crate::consensus_rule_set::ConsensusRuleSet;
+use crate::proof_abstractions::tasm::legacy_stark_verify::import_stark_verify;
+use crate::proof_abstractions::tasm::legacy_stark_verify::update_nondeterminism_for_stark_verification;
+use crate::proof_abstractions::verifier::verify_sync;
 use crate::transaction::transaction_kernel::TransactionKernelField;
+use crate::transaction::validity::single_proof::single_proof_claim;
 use crate::transaction::validity::single_proof::DISCRIMINANT_FOR_UPDATE;
 use crate::transaction::validity::tasm::authenticate_txk_field::AuthenticateTxkField;
 use crate::transaction::validity::tasm::claims::generate_single_proof_claim::GenerateSingleProofClaim;
@@ -110,23 +113,18 @@ impl UpdateWitness {
     pub fn populate_nd_streams(
         &self,
         nondeterminism: &mut NonDeterminism,
-        single_proof_program_hash: Digest,
+        consensus_rule_set: ConsensusRuleSet,
     ) {
         // update nondeterminism to account for verifying one STARK proof
-        let claim = Claim::new(single_proof_program_hash)
-            .with_input(self.old_kernel_mast_hash.reversed().values().to_vec());
+        let claim = single_proof_claim(self.old_kernel_mast_hash, consensus_rule_set);
 
         // this check is needed for regtest mode, to prevent a panic
         // because regtest mode uses mock (empty) proofs.
-        if !triton_vm::verify(Stark::default(), &claim, &self.old_proof) {
+        if !verify_sync(&claim, &self.old_proof) {
             tracing::warn!("attempting to update invalid transaction ...");
             return;
         }
-        StarkVerify::new_with_dynamic_layout(Stark::default()).update_nondeterminism(
-            nondeterminism,
-            &self.old_proof,
-            &claim,
-        );
+        update_nondeterminism_for_stark_verification(nondeterminism, &self.old_proof, &claim);
 
         nondeterminism.digests.extend(
             [
@@ -177,9 +175,15 @@ impl UpdateWitness {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub struct UpdateBranch;
+pub struct UpdateBranch {
+    consensus_rule_set: ConsensusRuleSet,
+}
 
 impl UpdateBranch {
+    pub(crate) fn new(consensus_rule_set: ConsensusRuleSet) -> Self {
+        Self { consensus_rule_set }
+    }
+
     pub(crate) const INPUT_SETS_NOT_EQUAL_ERROR: i128 = 1_000_100;
     pub(crate) const NEW_TIMESTAMP_NOT_GEQ_THAN_OLD_ERROR: i128 = 1_000_101;
     pub(crate) const WITNESS_SIZE_CHANGED_ERROR: i128 = 1_000_102;
@@ -213,9 +217,7 @@ impl BasicSnippet for UpdateBranch {
     fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
         let load_digest = triton_asm!(push {Digest::LEN - 1} add read_mem {Digest::LEN} pop 1);
 
-        let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
-            Stark::default(),
-        )));
+        let stark_verify = import_stark_verify(library, self.consensus_rule_set);
         let authenticate_msa = library.import(Box::new(AuthenticateMsaAgainstTxk {
             mast_height: TransactionKernel::MAST_HEIGHT as u32,
         }));
@@ -241,7 +243,9 @@ impl BasicSnippet for UpdateBranch {
         );
 
         let field_old_txk_mh = field!(UpdateWitness::old_kernel_mast_hash);
-        let generate_single_proof_claim = library.import(Box::new(GenerateSingleProofClaim));
+        let generate_single_proof_claim = library.import(Box::new(GenerateSingleProofClaim::new(
+            self.consensus_rule_set,
+        )));
 
         let audit_preloaded_data =
             library.import(Box::new(VerifyNdSiIntegrity::<UpdateWitness>::default()));
@@ -694,7 +698,12 @@ pub(crate) mod tests {
     // The main tests are actually in [`../../single_proof.rs`].
 
     impl UpdateWitness {
-        pub fn branch_source(&self, single_proof_program_digest: Digest, new_txk_digest: Digest) {
+        pub fn branch_source(
+            &self,
+            single_proof_program_digest: Digest,
+            new_txk_digest: Digest,
+            consensus_rule_set: ConsensusRuleSet,
+        ) {
             // divine the witness for this proof
             let uw: UpdateWitness = tasm::decode_from_memory(UPDATE_WITNESS_ADDRESS);
 
@@ -704,8 +713,9 @@ pub(crate) mod tests {
                 old_txk_digest.reversed().values().to_vec();
 
             // verify the proof of the out-of-date transaction
-            let claim: Claim =
-                Claim::new(single_proof_program_digest).with_input(old_txk_digest_as_input);
+            let claim: Claim = Claim::new(single_proof_program_digest)
+                .with_input(old_txk_digest_as_input)
+                .about_version(consensus_rule_set.triton_proof_version().version());
             let proof = &uw.old_proof;
             tasm::verify_stark(Stark::default(), &claim, proof);
 

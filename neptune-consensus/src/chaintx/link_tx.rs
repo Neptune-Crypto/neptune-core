@@ -69,8 +69,8 @@ pub struct LinkTx {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    #[cfg(test)]
-    use proptest::{prop_assert_eq, prop_assert_ne};
+    use proptest::prop_assert_eq;
+    use proptest::prop_assert_ne;
     use test_strategy::proptest;
 
     use super::*;

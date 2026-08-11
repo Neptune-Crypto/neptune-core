@@ -333,7 +333,6 @@ pub(crate) mod proof_cache {
     use std::time::SystemTime;
 
     use itertools::Itertools;
-    use tasm_lib::triton_vm;
     use tasm_lib::triton_vm::stark::Stark;
     use tracing::debug;
 
@@ -341,6 +340,7 @@ pub(crate) mod proof_cache {
     use crate::proof_abstractions::test_helpers::test_helper_data_dir;
     use crate::proof_abstractions::test_helpers::try_fetch_file;
     use crate::proof_abstractions::test_helpers::try_load_file_from_disk;
+    use crate::proof_abstractions::verifier::verify_sync;
 
     /// Derive a file name from the claim, includes the extension
     pub(crate) fn proof_filename(claim: &Claim) -> String {
@@ -396,7 +396,7 @@ pub(crate) mod proof_cache {
             Some(proof) => {
                 debug!(" - Loaded proof from disk: {name}.");
                 assert!(
-                    triton_vm::verify(Stark::default(), claim, &proof),
+                    verify_sync(claim, &proof),
                     "proof loaded from disk is invalid: {}\n\
                      Delete the file and re-run the test to re-fetch or re-prove.",
                     proof_path(claim).display()
@@ -432,7 +432,7 @@ pub(crate) mod proof_cache {
         let filename = proof_filename(claim);
         let (proof, server) = try_fetch_from_server_inner(filename.clone())?;
 
-        if !triton_vm::verify(Stark::default(), claim, &proof) {
+        if !verify_sync(claim, &proof) {
             eprintln!("Invalid proof served by {server}. Proof {filename} does not verify.");
             return None;
         }
@@ -489,6 +489,14 @@ pub(crate) mod proof_cache {
             .collect_vec()
             .try_into()
             .unwrap();
+
+        use crate::proof_abstractions::tasm::legacy_stark_verify::claim_uses_legacy_proof_system;
+        use crate::proof_abstractions::tasm::legacy_stark_verify::LegacyProverPipeline;
+        if claim_uses_legacy_proof_system(claim) {
+            let pipeline = LegacyProverPipeline::trace(&program, claim, nondeterminism);
+            return pipeline.prove().into();
+        }
+
         let (aet, public_output) =
             VM::trace_execution(program, (&claim.input).into(), nondeterminism.clone())
                 .expect("Cannot produce algebraic execution trace");

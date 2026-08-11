@@ -10,6 +10,7 @@ use neptune_consensus::block::validity::block_primitive_witness::BlockPrimitiveW
 use neptune_consensus::block::Block;
 use neptune_consensus::block::BlockProof;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_consensus::consensus_rule_set::BLOCK_HEIGHT_HARDFORK_DELTA_MAIN_NET;
 use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use neptune_consensus::proof_abstractions::triton_vm_job_queue::vm_job_queue;
 use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
@@ -17,7 +18,9 @@ use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifie
 use neptune_consensus::transaction::transaction_proof::TransactionProofType;
 use neptune_consensus::transaction::validity::neptune_proof::NeptuneProof;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_mempool::upgrade_priority::UpgradePriority;
 use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::difficulty_control::Difficulty;
 use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 use neptune_wallet::address::generation_address::GenerationReceivingAddress;
@@ -299,6 +302,147 @@ async fn new_blocks_at_block_height_100_000_async(
         bob.set_new_tip(next_block.clone()).await.unwrap();
         predecessor = next_block;
     }
+}
+
+#[traced_test]
+#[test]
+fn hard_fork_delta() {
+    // Start two blocks before the hardfork activation.
+    let network = Network::Main;
+    let init_block_height = BLOCK_HEIGHT_HARDFORK_DELTA_MAIN_NET
+        .previous()
+        .unwrap()
+        .previous()
+        .unwrap();
+    let bpw = BlockPrimitiveWitness::deterministic_with_block_height_and_difficulty(
+        init_block_height,
+        Difficulty::MINIMUM,
+        network,
+    );
+
+    tokio_runtime().block_on(hard_fork_delta_async(bpw, network));
+}
+
+async fn hard_fork_delta_async(block_primitive_witness: BlockPrimitiveWitness, network: Network) {
+    let mut rng = StdRng::seed_from_u64(5551234665);
+    let bob_wallet = WalletEntropy::new_pseudorandom(rng.random());
+    let cli = cli_args::Args {
+        network,
+        compose: true,
+        guess: true,
+        tx_proving_capability: Some(TxProvingCapability::SingleProof),
+        number_of_mps_per_utxo: 3,
+        ..Default::default()
+    };
+
+    let (fake_genesis, minus2) =
+        Block::fake_block_pair_genesis_and_child_from_witness(block_primitive_witness).await;
+    let mut now = minus2.header().timestamp;
+    assert!(minus2.is_valid(&fake_genesis, now, network).await);
+    assert_eq!(
+        ConsensusRuleSet::HardforkGamma,
+        ConsensusRuleSet::infer_from(network, minus2.header().height)
+    );
+
+    let mut bob = mock_genesis_global_state_with_block(0, bob_wallet, cli, fake_genesis).await;
+    bob.set_new_tip(minus2.clone()).await.unwrap();
+
+    // The last block under the gamma rule set, composed to own wallet so a
+    // transaction can be made later.
+    now += Timestamp::hours(1);
+    let (mut minus1, composer_utxos) = mine_to_own_wallet(bob.clone(), now).await;
+    assert!(minus1.is_valid(&minus2, now, network).await);
+    assert_eq!(
+        ConsensusRuleSet::HardforkGamma,
+        ConsensusRuleSet::infer_from(network, minus1.header().height)
+    );
+    minus1.satisfy_pow(minus2.header().difficulty, ConsensusRuleSet::HardforkGamma);
+    assert!(minus1.has_proof_of_work(network, minus2.header()));
+    bob.set_new_self_composed_tip(minus1.clone(), composer_utxos)
+        .await
+        .unwrap();
+    assert_eq!(
+        BLOCK_HEIGHT_HARDFORK_DELTA_MAIN_NET.previous().unwrap(),
+        bob.lock_guard().await.chain.tip().header().height
+    );
+
+    // A gamma transaction in the mempool at the boundary. It answers the
+    // gamma proof system, so the hardfork block cannot mine it.
+    let gamma_tx = tx_with_n_outputs(bob.clone(), 1, now, None, None, None)
+        .await
+        .unwrap();
+    assert!(
+        gamma_tx
+            .transaction()
+            .is_valid(network, ConsensusRuleSet::HardforkGamma)
+            .await
+    );
+    assert!(
+        !gamma_tx
+            .transaction()
+            .is_valid(network, ConsensusRuleSet::HardforkDelta)
+            .await
+    );
+    bob.lock_guard_mut()
+        .await
+        .mempool_insert(gamma_tx.transaction().to_owned(), UpgradePriority::Critical)
+        .await;
+
+    // The block that activates hardfork delta.
+    now += Timestamp::hours(1);
+    let (mut hf, hf_composer_utxos) = mine_to_own_wallet(bob.clone(), now).await;
+    assert!(hf.is_valid(&minus1, now, network).await);
+    assert_eq!(
+        ConsensusRuleSet::HardforkDelta,
+        ConsensusRuleSet::infer_from(network, hf.header().height)
+    );
+    assert!(
+        hf.body().transaction_kernel.inputs.is_empty(),
+        "Transaction from mempool must not be mined by the block that activates the hardfork"
+    );
+    hf.satisfy_pow(minus1.header().difficulty, ConsensusRuleSet::HardforkDelta);
+    assert!(hf.has_proof_of_work(network, minus1.header()));
+
+    assert!(!bob.lock_guard().await.mempool().is_empty());
+    bob.set_new_self_composed_tip(hf.clone(), hf_composer_utxos)
+        .await
+        .unwrap();
+    assert!(
+        bob.lock_guard().await.mempool().is_empty(),
+        "Activating hardfork must clear mempool"
+    );
+    assert_eq!(
+        BLOCK_HEIGHT_HARDFORK_DELTA_MAIN_NET,
+        bob.lock_guard().await.chain.tip().header().height
+    );
+
+    // A delta transaction, mined in the block after activation.
+    now += Timestamp::hours(1);
+    let delta_tx = tx_with_n_outputs(bob.clone(), 2, now, None, None, None)
+        .await
+        .unwrap();
+    assert!(
+        delta_tx
+            .transaction()
+            .is_valid(network, ConsensusRuleSet::HardforkDelta)
+            .await
+    );
+    bob.lock_guard_mut()
+        .await
+        .mempool_insert(delta_tx.transaction().to_owned(), UpgradePriority::Critical)
+        .await;
+
+    let (plus1, _) = mine_to_own_wallet(bob.clone(), now).await;
+    assert!(plus1.is_valid(&hf, now, network).await);
+    assert!(
+        !plus1.body().transaction_kernel.inputs.is_empty(),
+        "The delta transaction must be mined in the block after activation"
+    );
+    bob.set_new_tip(plus1.clone()).await.unwrap();
+    assert_eq!(
+        BLOCK_HEIGHT_HARDFORK_DELTA_MAIN_NET.next(),
+        bob.lock_guard().await.chain.tip().header().height
+    );
 }
 
 #[traced_test]

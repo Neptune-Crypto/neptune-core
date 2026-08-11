@@ -42,6 +42,7 @@ use super::link_proof::no_coinbase_leaf;
 use super::link_proof::LinkProof;
 use super::link_proof_witness::LinkProofWitnessMemory;
 use super::link_proof_witness::DISCRIMINANT_FOR_FORGE;
+use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::proof_abstractions::error::CreateProofError;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
@@ -256,6 +257,7 @@ impl ForgeWitness {
             lock_scripts_halt.push(
                 lsaw.prove(
                     lock_script_input.clone(),
+                    ConsensusRuleSet::HardforkDelta,
                     job_queue.clone(),
                     options.clone(),
                 )
@@ -286,6 +288,7 @@ impl ForgeWitness {
                     inner_root,
                     salted_inputs_hash,
                     salted_outputs_hash,
+                    ConsensusRuleSet::HardforkDelta,
                     job_queue.clone(),
                     options.clone(),
                 )
@@ -732,7 +735,8 @@ impl BasicSnippet for Forge {
         let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
             Stark::default(),
         )));
-        let new_claim = library.import(Box::new(NewClaim));
+
+        let new_claim = library.import(Box::new(NewClaim::new(ConsensusRuleSet::HardforkDelta)));
 
         // Verifier-side imports too: these `kmalloc` internally, so like
         // `StarkVerify` they must land *after* the four RRI-matching allocs.

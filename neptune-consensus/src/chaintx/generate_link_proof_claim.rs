@@ -4,6 +4,7 @@ use tasm_lib::prelude::BasicSnippet;
 use tasm_lib::prelude::Library;
 use tasm_lib::triton_vm::prelude::*;
 
+use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::transaction::validity::tasm::claims::new_claim::NewClaim;
 
 /// Build the claim `{ program, input: [lkmh] || [D] }` that a `LinkProof`
@@ -49,7 +50,7 @@ impl BasicSnippet for GenerateLinkProofClaim {
     }
 
     fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
-        let new_claim = library.import(Box::new(NewClaim));
+        let new_claim = library.import(Box::new(NewClaim::new(ConsensusRuleSet::HardforkDelta)));
 
         // Copy a digest into the claim's *input*, where digests are held
         // *reversed*: the copies are pushed top-word-first so that the deepest

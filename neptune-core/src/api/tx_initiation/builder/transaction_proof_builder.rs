@@ -344,8 +344,11 @@ impl<'a> TransactionProofBuilder<'a> {
                 Ok(TransactionProof::Witness(primitive_witness.into_owned()))
             }
             TransactionProofType::ProofCollection => {
+                let consensus_rule_set =
+                    consensus_rule_set.ok_or(ProofRequirement::ConsensusRuleSet)?;
                 let pc = proof_collection_from_witness(
                     primitive_witness,
+                    consensus_rule_set,
                     job_queue,
                     proof_job_options,
                     valid_mock,
@@ -407,6 +410,7 @@ where
 ///           != TransactionProofType::ProofCollection`
 async fn proof_collection_from_witness(
     witness_cow: Cow<'_, PrimitiveWitness>,
+    consensus_rule_set: ConsensusRuleSet,
     job_queue: Arc<TritonVmJobQueue>,
     proof_job_options: TritonVmProofJobOptions,
     valid_mock: bool,
@@ -429,7 +433,13 @@ async fn proof_collection_from_witness(
         });
     }
 
-    let pc = ProofCollection::produce(witness_cow.borrow(), job_queue, proof_job_options).await?;
+    let pc = ProofCollection::produce(
+        witness_cow.borrow(),
+        consensus_rule_set,
+        job_queue,
+        proof_job_options,
+    )
+    .await?;
 
     Ok(pc)
 }

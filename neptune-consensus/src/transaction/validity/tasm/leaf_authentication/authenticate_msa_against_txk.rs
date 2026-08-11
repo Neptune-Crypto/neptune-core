@@ -157,6 +157,7 @@ mod tests {
     use std::collections::VecDeque;
 
     use itertools::Itertools;
+    use neptune_primitives::mast_hash::MastHash;
     use prop::test_runner::RngAlgorithm;
     use prop::test_runner::TestRng;
     use prop::test_runner::TestRunner;
@@ -178,8 +179,6 @@ mod tests {
     use tasm_lib::twenty_first::prelude::Mmr;
     use tasm_lib::twenty_first::prelude::Sponge;
     use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-
-    use neptune_primitives::mast_hash::MastHash;
 
     use super::*;
     use crate::transaction::primitive_witness::PrimitiveWitness;

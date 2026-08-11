@@ -1588,11 +1588,10 @@ pub(crate) mod tests {
 mod negative_tests {
     use neptune_mutator_set::addition_record::AdditionRecord;
     use num_traits::CheckedSub;
-    use tasm_lib::hashing::merkle_verify::MerkleVerify;
-
     use proptest::prop_assert_eq;
     use proptest::prop_assume;
     use proptest::strategy::Strategy;
+    use tasm_lib::hashing::merkle_verify::MerkleVerify;
     use test_strategy::proptest;
 
     use super::*;
