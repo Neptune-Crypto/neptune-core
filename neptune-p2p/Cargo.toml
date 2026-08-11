@@ -48,7 +48,7 @@ semver = "^1.0.23"
 serde = { version = "1.0", features = ["derive"] }
 sha2 = "0.10.9"
 strum = { version = "0.27.0", features = ["derive"] }
-tasm-lib = "7.0.0"
+tasm-lib = "8.0.0"
 thiserror = "1.0.65"
 tracing = "0.1"
 

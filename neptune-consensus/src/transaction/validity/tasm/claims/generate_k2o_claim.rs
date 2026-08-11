@@ -5,12 +5,21 @@ use tasm_lib::prelude::*;
 use tasm_lib::traits::basic_snippet::BasicSnippet;
 use tasm_lib::triton_vm::prelude::*;
 
+use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::transaction::validity::kernel_to_outputs::KernelToOutputs;
 use crate::transaction::validity::proof_collection::ProofCollection;
 use crate::transaction::validity::tasm::claims::new_claim::NewClaim;
 
-pub(crate) struct GenerateK2oClaim;
+pub(crate) struct GenerateK2oClaim {
+    consensus_rule_set: ConsensusRuleSet,
+}
+
+impl GenerateK2oClaim {
+    pub(crate) fn new(consensus_rule_set: ConsensusRuleSet) -> Self {
+        Self { consensus_rule_set }
+    }
+}
 
 impl BasicSnippet for GenerateK2oClaim {
     fn parameters(&self) -> Vec<(DataType, String)> {
@@ -66,7 +75,7 @@ impl BasicSnippet for GenerateK2oClaim {
             // _ [digest]
         );
 
-        let new_claim = library.import(Box::new(NewClaim));
+        let new_claim = library.import(Box::new(NewClaim::new(self.consensus_rule_set)));
 
         triton_asm!(
             // BEFORE: _ [txk_digest] garb0 garb1 *proof_collection
@@ -146,7 +155,8 @@ mod tests {
 
     #[test]
     fn unit_test() {
-        ShadowedFunction::new(GenerateK2oClaim).test();
+        ShadowedFunction::new(GenerateK2oClaim::new(ConsensusRuleSet::HardforkGamma)).test();
+        ShadowedFunction::new(GenerateK2oClaim::new(ConsensusRuleSet::HardforkDelta)).test();
     }
 
     impl Function for GenerateK2oClaim {
@@ -174,7 +184,7 @@ mod tests {
                 "Inconsistent initial state detected"
             );
 
-            let claim = proof_collection.kernel_to_outputs_claim();
+            let claim = proof_collection.kernel_to_outputs_claim(self.consensus_rule_set);
             let claim_pointer =
                 rust_shadowing_helper_functions::dyn_malloc::dynamic_allocator(memory);
             encode_to_memory(memory, claim_pointer, &claim);
@@ -208,6 +218,7 @@ mod tests {
             let proof_collection = rt
                 .block_on(ProofCollection::produce(
                     &primitive_witness,
+                    self.consensus_rule_set,
                     TritonVmJobQueue::get_instance(),
                     TritonVmProofJobOptions::default_with_network(Network::Main),
                 ))

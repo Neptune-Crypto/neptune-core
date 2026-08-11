@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use get_size2::GetSize;
 use itertools::Itertools;
 use neptune_mutator_set::commit;
@@ -11,8 +13,6 @@ use tasm_lib::prelude::Tip5;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tracing::warn;
-
-use std::collections::HashMap;
 
 use super::link_kernel::LinkKernel;
 use crate::transaction::lock_script::LockScriptAndWitness;

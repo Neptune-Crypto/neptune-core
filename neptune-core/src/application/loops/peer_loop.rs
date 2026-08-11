@@ -5568,7 +5568,7 @@ mod tests {
                         match proof_type {
                             TransactionProofQuality::ProofCollection => {
                                 PrimitiveWitnessToProofCollection { primitive_witness }
-                                    .upgrade(vm_job_queue(), &proof_job_options)
+                                    .upgrade(vm_job_queue(), &proof_job_options, consensus_rule_set)
                                     .await
                                     .unwrap()
                             }

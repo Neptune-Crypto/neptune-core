@@ -78,7 +78,6 @@ use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 use crate::proof_abstractions::verifier::verify;
-use crate::proof_abstractions::SecretWitness;
 use crate::transaction::transaction_kernel::TransactionLustrationError;
 use crate::transaction::validity::neptune_proof::Proof;
 
@@ -235,7 +234,7 @@ impl Block {
             let claim = BlockProgram::claim(&body, &appendix, consensus_rule_set);
 
             let proof = ProofBuilder::new()
-                .program(BlockProgram.program())
+                .program(BlockProgram::new(consensus_rule_set).program())
                 .claim(claim)
                 .nondeterminism(|| block_proof_witness.nondeterminism())
                 .job_queue(triton_vm_job_queue)

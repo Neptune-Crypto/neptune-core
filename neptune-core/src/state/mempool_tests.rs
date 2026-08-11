@@ -111,10 +111,13 @@ mod tests {
                     let pc_job = PrimitiveWitnessToProofCollection {
                         primitive_witness: new_pw.clone(),
                     };
+                    let consensus_rule_set =
+                        ConsensusRuleSet::infer_from(network, new_block.header().height);
                     let upgrade_result = pc_job
                         .upgrade(
                             TritonVmJobQueue::get_instance(),
                             &TritonVmProofJobOptions::default(),
+                            consensus_rule_set,
                         )
                         .await
                         .unwrap();

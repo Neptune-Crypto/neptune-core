@@ -33,7 +33,7 @@ num-traits = "0.2"
 rand = "0.9"
 serde = { version = "1.0", features = ["derive"] }
 strum = { version = "0.27.0", features = ["derive"] }
-tasm-lib = "7.0.0"
+tasm-lib = "8.0.0"
 thiserror = "1.0.65"
 tokio = { version = "1.47", features = ["fs"] }
 

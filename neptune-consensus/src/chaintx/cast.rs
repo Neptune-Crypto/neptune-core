@@ -26,6 +26,7 @@ use super::link_proof::no_coinbase_leaf;
 use super::link_proof::LinkProof;
 use super::link_proof_witness::LinkProofWitnessMemory;
 use super::link_proof_witness::DISCRIMINANT_FOR_CAST;
+use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::proof_abstractions::SecretWitness;
 use crate::transaction::transaction_kernel::TransactionKernel;
@@ -231,7 +232,10 @@ impl BasicSnippet for Cast {
     fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
         let audit_preloaded_data =
             library.import(Box::new(VerifyNdSiIntegrity::<CastWitness>::default()));
-        let generate_single_proof_claim = library.import(Box::new(GenerateSingleProofClaim));
+
+        let generate_single_proof_claim = library.import(Box::new(GenerateSingleProofClaim::new(
+            ConsensusRuleSet::HardforkDelta,
+        )));
         let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
             Stark::default(),
         )));
@@ -436,10 +440,9 @@ pub(crate) mod tests {
     /// proof-backed test below; the negatives that need no valid proof draw
     /// their fixtures at random instead.
     pub(super) async fn deterministic_cast_witness() -> CastWitness {
-        // `Cast` never inspects `D`, only names it, so the rule set here is
-        // whichever one keeps the transaction's single proof in the cache -- not
-        // necessarily the one the chain pipeline activates under.
-        let consensus_rule_set = ConsensusRuleSet::HardforkGamma;
+        // The cast transaction's single proof must answer the proof system of
+        // the linked VM, whose verifier `Cast` embeds.
+        let consensus_rule_set = ConsensusRuleSet::HardforkDelta;
 
         let mut test_runner = TestRunner::deterministic();
         let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 1)

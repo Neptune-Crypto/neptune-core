@@ -171,6 +171,7 @@ impl PrimitiveWitnessToProofCollection {
         self,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: &TritonVmProofJobOptions,
+        consensus_rule_set: ConsensusRuleSet,
     ) -> anyhow::Result<Transaction> {
         let options = TritonVmProofJobOptionsBuilder::new()
             .template(proof_job_options)
@@ -179,6 +180,7 @@ impl PrimitiveWitnessToProofCollection {
 
         info!("Proof-upgrader: Start producing proof collection");
         let proof_collection = TransactionProofBuilder::new()
+            .consensus_rule_set(consensus_rule_set)
             .primitive_witness_ref(&self.primitive_witness)
             .job_queue(triton_vm_job_queue.clone())
             .proof_job_options(options)
@@ -816,7 +818,11 @@ impl UpgradeJob {
             }
             UpgradeJob::PrimitiveWitnessToProofCollection(pw_to_pc) => Ok((
                 pw_to_pc
-                    .upgrade(triton_vm_job_queue.clone(), &proof_job_options)
+                    .upgrade(
+                        triton_vm_job_queue.clone(),
+                        &proof_job_options,
+                        consensus_rule_set,
+                    )
                     .await?,
                 None,
             )),

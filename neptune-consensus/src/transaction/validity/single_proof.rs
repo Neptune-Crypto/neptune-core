@@ -14,7 +14,6 @@ use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::error::BFieldCodecError;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
-use tasm_lib::verifier::stark_verify::StarkVerify;
 use tracing::info;
 
 use super::tasm::single_proof::fix_branch::FixBranch;
@@ -24,6 +23,8 @@ use super::tasm::single_proof::update_branch::UpdateWitness;
 use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::proof_abstractions::error::CreateProofError;
 use crate::proof_abstractions::proof_builder::ProofBuilder;
+use crate::proof_abstractions::tasm::legacy_stark_verify::import_stark_verify;
+use crate::proof_abstractions::tasm::legacy_stark_verify::update_nondeterminism_for_stark_verification;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
@@ -203,7 +204,6 @@ impl SingleProofWitness {
         );
 
         let mut nondeterminism = NonDeterminism::default().with_ram(memory);
-        let stark_verify_snippet = StarkVerify::new_with_dynamic_layout(Stark::default());
         let single_proof_program_hash = SingleProof::new(consensus_rule_set).hash();
 
         match self {
@@ -213,36 +213,37 @@ impl SingleProofWitness {
                     .extend_from_slice(&proof_collection.merge_bit_mast_path);
 
                 // removal records integrity
-                let rri_claim = proof_collection.removal_records_integrity_claim();
+                let rri_claim =
+                    proof_collection.removal_records_integrity_claim(consensus_rule_set);
                 let rri_proof = &proof_collection.removal_records_integrity;
-                stark_verify_snippet.update_nondeterminism(
+                update_nondeterminism_for_stark_verification(
                     &mut nondeterminism,
                     rri_proof,
                     &rri_claim,
                 );
 
                 // kernel to outputs
-                let k2o_claim = proof_collection.kernel_to_outputs_claim();
+                let k2o_claim = proof_collection.kernel_to_outputs_claim(consensus_rule_set);
                 let k2o_proof = &proof_collection.kernel_to_outputs;
-                stark_verify_snippet.update_nondeterminism(
+                update_nondeterminism_for_stark_verification(
                     &mut nondeterminism,
                     k2o_proof,
                     &k2o_claim,
                 );
 
                 // collect lock scripts
-                let cls_claim = proof_collection.collect_lock_scripts_claim();
+                let cls_claim = proof_collection.collect_lock_scripts_claim(consensus_rule_set);
                 let cls_proof = &proof_collection.collect_lock_scripts;
-                stark_verify_snippet.update_nondeterminism(
+                update_nondeterminism_for_stark_verification(
                     &mut nondeterminism,
                     cls_proof,
                     &cls_claim,
                 );
 
                 // collect type scripts
-                let cts_claim = proof_collection.collect_type_scripts_claim();
+                let cts_claim = proof_collection.collect_type_scripts_claim(consensus_rule_set);
                 let cts_proof = &proof_collection.collect_type_scripts;
-                stark_verify_snippet.update_nondeterminism(
+                update_nondeterminism_for_stark_verification(
                     &mut nondeterminism,
                     cts_proof,
                     &cts_claim,
@@ -250,28 +251,35 @@ impl SingleProofWitness {
 
                 // lock scripts
                 for (claim, proof) in proof_collection
-                    .lock_script_claims()
+                    .lock_script_claims(consensus_rule_set)
                     .into_iter()
                     .zip(&proof_collection.lock_scripts_halt)
                 {
-                    stark_verify_snippet.update_nondeterminism(&mut nondeterminism, proof, &claim);
+                    update_nondeterminism_for_stark_verification(
+                        &mut nondeterminism,
+                        proof,
+                        &claim,
+                    );
                 }
 
                 // type scripts
                 for (claim, proof) in proof_collection
-                    .type_script_claims()
+                    .type_script_claims(consensus_rule_set)
                     .into_iter()
                     .zip(&proof_collection.type_scripts_halt)
                 {
-                    stark_verify_snippet.update_nondeterminism(&mut nondeterminism, proof, &claim);
+                    update_nondeterminism_for_stark_verification(
+                        &mut nondeterminism,
+                        proof,
+                        &claim,
+                    );
                 }
             }
             SingleProofWitness::Update(witness) => {
-                witness.populate_nd_streams(&mut nondeterminism, single_proof_program_hash);
+                witness.populate_nd_streams(&mut nondeterminism, consensus_rule_set);
             }
             SingleProofWitness::Merger(witness_of_merge) => {
-                witness_of_merge
-                    .populate_nd_streams(&mut nondeterminism, single_proof_program_hash);
+                witness_of_merge.populate_nd_streams(&mut nondeterminism, consensus_rule_set);
             }
             SingleProofWitness::Fix(witness) => {
                 witness.populate_nd_streams(&mut nondeterminism, single_proof_program_hash);
@@ -319,6 +327,7 @@ impl SingleProof {
     ) -> Result<Proof, CreateProofError> {
         let proof_collection = ProofCollection::produce(
             primitive_witness,
+            self.consensus_rule_set,
             triton_vm_job_queue.clone(),
             proof_job_options.clone(),
         )
@@ -407,17 +416,23 @@ impl TritonProgram for SingleProof {
         let mut library = Library::new();
 
         // imports
-        let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
-            Stark::default(),
+        let stark_verify = import_stark_verify(&mut library, self.consensus_rule_set);
+        let assemble_rri_claim =
+            library.import(Box::new(GenerateRriClaim::new(self.consensus_rule_set)));
+        let assemble_k2o_claim =
+            library.import(Box::new(GenerateK2oClaim::new(self.consensus_rule_set)));
+        let assemble_cls_claim = library.import(Box::new(GenerateCollectLockScriptsClaim::new(
+            self.consensus_rule_set,
         )));
-        let assemble_rri_claim = library.import(Box::new(GenerateRriClaim));
-        let assemble_k2o_claim = library.import(Box::new(GenerateK2oClaim));
-        let assemble_cls_claim = library.import(Box::new(GenerateCollectLockScriptsClaim));
-        let assemble_cts_claim = library.import(Box::new(GenerateCollectTypeScriptsClaim));
-        let assemble_lock_script_claim_template =
-            library.import(Box::new(GenerateLockScriptClaimTemplate));
-        let assemble_type_script_claim_template =
-            library.import(Box::new(GenerateTypeScriptClaimTemplate));
+        let assemble_cts_claim = library.import(Box::new(GenerateCollectTypeScriptsClaim::new(
+            self.consensus_rule_set,
+        )));
+        let assemble_lock_script_claim_template = library.import(Box::new(
+            GenerateLockScriptClaimTemplate::new(self.consensus_rule_set),
+        ));
+        let assemble_type_script_claim_template = library.import(Box::new(
+            GenerateTypeScriptClaimTemplate::new(self.consensus_rule_set),
+        ));
 
         let proof_collection_field_kernel_mast_hash = field!(ProofCollection::kernel_mast_hash);
         let proof_collection_field_removal_records_integrity =
@@ -430,8 +445,8 @@ impl TritonProgram for SingleProof {
         let proof_collection_field_lock_scripts_halt = field!(ProofCollection::lock_scripts_halt);
         let proof_collection_field_type_scripts_halt = field!(ProofCollection::type_scripts_halt);
 
-        let update_branch = library.import(Box::new(UpdateBranch));
-        let merge_branch = library.import(Box::new(MergeBranch));
+        let update_branch = library.import(Box::new(UpdateBranch::new(self.consensus_rule_set)));
+        let merge_branch = library.import(Box::new(MergeBranch::new(self.consensus_rule_set)));
 
         let audit_witness_of_proof_collection =
             library.import(Box::new(VerifyNdSiIntegrity::<ProofCollection>::default()));
@@ -929,24 +944,27 @@ pub(crate) mod tests {
                     );
 
                     let removal_records_integrity_claim: Claim =
-                        pc.removal_records_integrity_claim();
+                        pc.removal_records_integrity_claim(self.consensus_rule_set);
                     tasm::verify_stark(
                         stark,
                         &removal_records_integrity_claim,
                         &pc.removal_records_integrity,
                     );
 
-                    let kernel_to_outputs_claim: Claim = pc.kernel_to_outputs_claim();
+                    let kernel_to_outputs_claim: Claim =
+                        pc.kernel_to_outputs_claim(self.consensus_rule_set);
                     tasm::verify_stark(stark, &kernel_to_outputs_claim, &pc.kernel_to_outputs);
 
-                    let collect_lock_scripts_claim: Claim = pc.collect_lock_scripts_claim();
+                    let collect_lock_scripts_claim: Claim =
+                        pc.collect_lock_scripts_claim(self.consensus_rule_set);
                     tasm::verify_stark(
                         stark,
                         &collect_lock_scripts_claim,
                         &pc.collect_lock_scripts,
                     );
 
-                    let collect_type_scripts_claim: Claim = pc.collect_type_scripts_claim();
+                    let collect_type_scripts_claim: Claim =
+                        pc.collect_type_scripts_claim(self.consensus_rule_set);
                     tasm::verify_stark(
                         stark,
                         &collect_type_scripts_claim,
@@ -954,7 +972,8 @@ pub(crate) mod tests {
                     );
 
                     let mut i = 0;
-                    let lock_script_claims: Vec<Claim> = pc.lock_script_claims();
+                    let lock_script_claims: Vec<Claim> =
+                        pc.lock_script_claims(self.consensus_rule_set);
                     assert_eq!(lock_script_claims.len(), pc.lock_script_hashes.len());
                     while i < pc.lock_script_hashes.len() {
                         let claim: &Claim = &lock_script_claims[i];
@@ -965,7 +984,7 @@ pub(crate) mod tests {
                     }
 
                     i = 0;
-                    let type_script_claims = pc.type_script_claims();
+                    let type_script_claims = pc.type_script_claims(self.consensus_rule_set);
                     assert_eq!(type_script_claims.len(), pc.type_script_hashes.len());
                     while i < pc.type_script_hashes.len() {
                         let claim: &Claim = &type_script_claims[i];
@@ -976,10 +995,10 @@ pub(crate) mod tests {
                 }
                 SingleProofWitness::Update(witness) => {
                     debug_assert_eq!(txk_digest, witness.new_kernel_mast_hash);
-                    witness.branch_source(own_program_digest, txk_digest);
+                    witness.branch_source(own_program_digest, txk_digest, self.consensus_rule_set);
                 }
                 SingleProofWitness::Merger(witness) => {
-                    witness.branch_source(own_program_digest, txk_digest)
+                    witness.branch_source(own_program_digest, txk_digest, self.consensus_rule_set)
                 }
                 SingleProofWitness::Fix(witness) => {
                     witness.branch_source(own_program_digest, txk_digest)
@@ -1062,16 +1081,17 @@ pub(crate) mod tests {
                     .unwrap()
                     .current();
 
-            let good_proof_collection = ProofCollection::produce(
-                &good_primitive_witness,
-                TritonVmJobQueue::get_instance(),
-                TritonVmProofJobOptions::default_with_network(Network::Main),
-            )
-            .await
-            .unwrap();
-            let good_witness = SingleProofWitness::from_collection(good_proof_collection.clone());
             for consensus_rule_set in PROGRAM_VERSIONS {
-                positive_prop(good_witness.clone(), consensus_rule_set);
+                let good_proof_collection = ProofCollection::produce(
+                    &good_primitive_witness,
+                    consensus_rule_set,
+                    TritonVmJobQueue::get_instance(),
+                    TritonVmProofJobOptions::default_with_network(Network::Main),
+                )
+                .await
+                .unwrap();
+                let good_witness = SingleProofWitness::from_collection(good_proof_collection);
+                positive_prop(good_witness, consensus_rule_set);
             }
 
             // Setting the `merge_bit` must make program crash, as this bit may
@@ -1082,20 +1102,20 @@ pub(crate) mod tests {
                     .unwrap()
                     .current();
 
-            let bad_proof_collection = ProofCollection::produce(
-                &bad_primitive_witness,
-                TritonVmJobQueue::get_instance(),
-                TritonVmProofJobOptions::default_with_network(Network::Main),
-            )
-            .await
-            .unwrap();
-
-            let bad_witness = SingleProofWitness::from_collection(bad_proof_collection);
-
             // This witness fails with a Merkle auth path error since it never
             // reads the actual bit but rather just verifies that it is set to
             // false in this execution path.
             for consensus_rule_set in PROGRAM_VERSIONS {
+                let bad_proof_collection = ProofCollection::produce(
+                    &bad_primitive_witness,
+                    consensus_rule_set,
+                    TritonVmJobQueue::get_instance(),
+                    TritonVmProofJobOptions::default_with_network(Network::Main),
+                )
+                .await
+                .unwrap();
+
+                let bad_witness = SingleProofWitness::from_collection(bad_proof_collection);
                 SingleProof::new(consensus_rule_set)
                     .test_assertion_failure(
                         bad_witness.standard_input(),
@@ -1117,17 +1137,24 @@ pub(crate) mod tests {
                 .current();
             let txk_mast_hash = primitive_witness.kernel.mast_hash();
 
-            let proof_collection = ProofCollection::produce(
-                &primitive_witness,
-                TritonVmJobQueue::get_instance(),
-                TritonVmProofJobOptions::default_with_network(Network::Main),
-            )
-            .await
-            .unwrap();
-            assert!(proof_collection.verify(txk_mast_hash, network).await);
-
-            let witness = SingleProofWitness::from_collection(proof_collection.clone());
+            // The collection's proofs answer the rule set's proof system, so
+            // each program version gets a collection of its own.
             for consensus_rule_set in PROGRAM_VERSIONS {
+                let proof_collection = ProofCollection::produce(
+                    &primitive_witness,
+                    consensus_rule_set,
+                    TritonVmJobQueue::get_instance(),
+                    TritonVmProofJobOptions::default_with_network(Network::Main),
+                )
+                .await
+                .unwrap();
+                assert!(
+                    proof_collection
+                        .verify(txk_mast_hash, network, consensus_rule_set)
+                        .await
+                );
+
+                let witness = SingleProofWitness::from_collection(proof_collection);
                 positive_prop(witness.clone(), consensus_rule_set);
 
                 // Verify equivalence of claim functions. `single_proof_claim`
@@ -1158,18 +1185,25 @@ pub(crate) mod tests {
                     .current();
             let txk_mast_hash = primitive_witness.kernel.mast_hash();
 
-            let proof_collection = ProofCollection::produce(
-                &primitive_witness,
-                TritonVmJobQueue::get_instance(),
-                TritonVmProofJobOptions::default_with_network(Network::Main),
-            )
-            .await
-            .unwrap();
-            assert!(proof_collection.verify(txk_mast_hash, network).await);
-
-            let witness = SingleProofWitness::from_collection(proof_collection.clone());
+            // The collection's proofs answer the rule set's proof system, so
+            // each program version gets a collection of its own.
             for consensus_rule_set in PROGRAM_VERSIONS {
-                positive_prop(witness.clone(), consensus_rule_set);
+                let proof_collection = ProofCollection::produce(
+                    &primitive_witness,
+                    consensus_rule_set,
+                    TritonVmJobQueue::get_instance(),
+                    TritonVmProofJobOptions::default_with_network(Network::Main),
+                )
+                .await
+                .unwrap();
+                assert!(
+                    proof_collection
+                        .verify(txk_mast_hash, network, consensus_rule_set)
+                        .await
+                );
+
+                let witness = SingleProofWitness::from_collection(proof_collection);
+                positive_prop(witness, consensus_rule_set);
             }
         }
     }
@@ -1480,7 +1514,7 @@ pub(crate) mod tests {
 
         test_program_snapshot!(
             SingleProof::new(ConsensusRuleSet::HardforkDelta),
-            "05c2c83266cbb651cf202e88e09a2035bda95721630b51feaf9810a9f31d51246008031aae2682ad"
+            "770221e677332ae7f00117b11fda8ae6631187593abf44aee3bdf5325f1503c96de719b604bafc0e"
         );
     }
 }

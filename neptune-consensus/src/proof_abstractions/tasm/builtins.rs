@@ -14,6 +14,9 @@ use super::environment::PROGRAM_DIGEST;
 use super::environment::PUB_INPUT;
 use super::environment::PUB_OUTPUT;
 use crate::proof_abstractions::tasm::environment::ND_DIGESTS;
+use crate::proof_abstractions::tasm::legacy_stark_verify::claim_uses_legacy_proof_system;
+use crate::proof_abstractions::tasm::legacy_stark_verify::LegacyStarkVerify;
+use crate::proof_abstractions::verifier::verify_sync;
 
 /// Get the hash digest of the program that's currently running.
 pub fn own_program_digest() -> Digest {
@@ -292,7 +295,35 @@ pub fn decode_from_memory<T: TasmObject>(start_address: BFieldElement) -> T {
 /// tokens stream. The latter number happens to be 0 right now, but that might
 /// change if the `StarkVerify` snippet changes.
 pub fn verify_stark(stark_parameters: Stark, claim: &Claim, proof: &Proof) {
-    assert!(triton_vm::verify(stark_parameters, claim, proof));
+    assert!(verify_sync(claim, proof));
+
+    // The claim's version selects the proof system, and with it the verifier
+    // snippet whose nondeterminism consumption must be mirrored here.
+    if claim_uses_legacy_proof_system(claim) {
+        let stark_verify_snippet = LegacyStarkVerify::new_with_dynamic_layout();
+
+        let num_digests_consumed =
+            stark_verify_snippet.number_of_nondeterministic_digests_consumed(proof);
+        ND_DIGESTS.with_borrow_mut(|digest_stream| {
+            (0..num_digests_consumed).for_each(|_| {
+                digest_stream.pop_front().expect(
+                    "digest stream should contain all digests divined by `StarkVerify` snippet",
+                );
+            })
+        });
+
+        let num_tokens_consumed =
+            stark_verify_snippet.number_of_nondeterministic_tokens_consumed(proof, claim);
+        ND_INDIVIDUAL_TOKEN.with_borrow_mut(|token_stream| {
+            (0..num_tokens_consumed).for_each(|_| {
+                token_stream.pop_front().expect(
+                    "token stream should contain all tokens divined by `StarkVerify` snippet",
+                );
+            })
+        });
+
+        return;
+    }
 
     let stark_verify_snippet = StarkVerify::new_with_dynamic_layout(stark_parameters);
 

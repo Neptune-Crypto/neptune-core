@@ -1639,7 +1639,6 @@ mod negative_tests {
     use neptune_mutator_set::addition_record::AdditionRecord;
     use neptune_primitives::timestamp::Timestamp;
     use tasm_lib::hashing::merkle_verify::MerkleVerify;
-
     use test_strategy::proptest;
 
     use super::tests::deterministic_updatable;

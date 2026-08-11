@@ -450,10 +450,13 @@ impl MainLoopHandler {
                             let pc_job = PrimitiveWitnessToProofCollection {
                                 primitive_witness: new_pw.clone(),
                             };
+                            let consensus_rule_set =
+                                global_state_lock.lock_guard().await.consensus_rule_set();
 
                             // No locks may be held here!
-                            let upgrade_result =
-                                pc_job.upgrade(job_queue.clone(), &proof_job_options).await;
+                            let upgrade_result = pc_job
+                                .upgrade(job_queue.clone(), &proof_job_options, consensus_rule_set)
+                                .await;
                             match upgrade_result {
                                 Ok(upgraded) => upgraded,
                                 Err(_) => {

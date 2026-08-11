@@ -1313,6 +1313,7 @@ pub mod tests {
                 txk_mast_hash,
                 salted_input_utxos_hash,
                 salted_output_utxos_hash,
+                crate::consensus_rule_set::ConsensusRuleSet::HardforkDelta,
                 TritonVmJobQueue::get_instance(),
                 TritonVmProofJobOptions::default_with_network(network),
             )

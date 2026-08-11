@@ -49,12 +49,12 @@ pub const BLOCK_HEIGHT_HARDFORK_GAMMA_TESTNET: BlockHeight =
 /// Height of the first block after hard fork delta, which activates
 /// transaction chaining, on main net.
 pub const BLOCK_HEIGHT_HARDFORK_DELTA_MAIN_NET: BlockHeight =
-    BlockHeight::new(BFieldElement::new(60_000u64));
+    BlockHeight::new(BFieldElement::new(55_000u64));
 
 /// Height of the first block after hard fork delta, which activates
 /// transaction chaining, on test net.
 pub const BLOCK_HEIGHT_HARDFORK_DELTA_TESTNET: BlockHeight =
-    BlockHeight::new(BFieldElement::new(6_000));
+    BlockHeight::new(BFieldElement::new(5_400));
 
 /// Transactions that are more than three days older than the block are
 /// disallowed. Only enforced from hardfork gamma and onwards.
@@ -99,10 +99,7 @@ pub enum ConsensusRuleSet {
     /// A new branch is a new program, hence a new program digest, hence a
     /// different claim about every transaction. See [`Self::has_fix_branch`].
     ///
-    /// Intended to deploy together with an upstream Triton VM bump, which will
-    /// move the claim's *version* as well. That version cannot be named ahead of
-    /// the dependency, though -- see [`Self::triton_proof_version`] -- so for
-    /// now delta differs from gamma by the program digest alone.
+    /// Also bumps the Triton VM version.
     HardforkDelta,
 }
 
@@ -111,6 +108,7 @@ pub enum TritonProofVersion {
     V0,
     V1,
     V5,
+    V7,
 }
 
 impl TritonProofVersion {
@@ -120,6 +118,7 @@ impl TritonProofVersion {
             TritonProofVersion::V0 => 0,
             TritonProofVersion::V1 => 1,
             TritonProofVersion::V5 => 5,
+            TritonProofVersion::V7 => 7,
         }
     }
 }
@@ -289,22 +288,7 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::TvmProofVersion1 => TritonProofVersion::V1,
             ConsensusRuleSet::HardforkBeta => TritonProofVersion::V1,
             ConsensusRuleSet::HardforkGamma => TritonProofVersion::V5,
-
-            // Delta ships together with an upstream Triton VM bump, so its
-            // claims will carry a higher version -- but that version cannot be
-            // named here ahead of the dependency. `triton_vm::proof::
-            // CURRENT_VERSION` is compiled *into the consensus programs*: the
-            // tasm claim generator pushes it as a literal
-            // (`tasm/claims/new_claim.rs`), and `Claim::new` stamps it on every
-            // recursive claim built in Rust. Naming a version the linked VM
-            // does not use therefore breaks recursion outright -- operand
-            // proofs answer one version, every verifier expects another.
-            //
-            // So delta tracks the linked VM, and moves when the dependency
-            // does. `newest_rule_set_tracks_the_linked_triton_vm` fails at that
-            // moment, which is the cue to give delta a variant of its own and
-            // leave gamma pinned at V5.
-            ConsensusRuleSet::HardforkDelta => TritonProofVersion::V5,
+            ConsensusRuleSet::HardforkDelta => TritonProofVersion::V7,
         }
     }
 
@@ -570,7 +554,7 @@ pub(crate) mod tests {
                 .version(),
         );
         assert_eq!(
-            5,
+            7,
             ConsensusRuleSet::HardforkDelta
                 .triton_proof_version()
                 .version(),
@@ -578,17 +562,6 @@ pub(crate) mod tests {
     }
 
     /// The newest rule set must name the version the *linked* Triton VM uses.
-    ///
-    /// `triton_vm::proof::CURRENT_VERSION` is baked into the consensus programs
-    /// themselves -- the tasm claim generator pushes it as a literal, and
-    /// `Claim::new` stamps it on every recursive claim built in Rust. A rule set
-    /// naming any other version therefore cannot recurse: its operand proofs
-    /// answer one version while every verifier, in-VM and out, expects another.
-    ///
-    /// This is also the tripwire for hardfork delta's planned Triton VM bump.
-    /// When the dependency moves to 6 this fails, and the fix is to give delta a
-    /// `TritonProofVersion` variant of its own while gamma stays pinned at V5 --
-    /// which is the point at which the fork becomes deployable.
     #[test]
     fn newest_rule_set_tracks_the_linked_triton_vm() {
         use tasm_lib::triton_vm::proof::CURRENT_VERSION;
@@ -598,10 +571,6 @@ pub(crate) mod tests {
             ConsensusRuleSet::HardforkDelta
                 .triton_proof_version()
                 .version(),
-            "the newest rule set must use the linked Triton VM's claim version, \
-             or recursion breaks: `new_claim.rs` compiles CURRENT_VERSION into \
-             the program. If the dependency just bumped, give delta its own \
-             TritonProofVersion variant and leave gamma at V5."
         );
         assert_eq!(
             5,
@@ -646,7 +615,7 @@ pub(crate) mod tests {
     #[test]
     fn allow_non_zero_version() {
         // Start well into hardfork gamma
-        let init_block_heigth = BlockHeight::from(59998u64);
+        let init_block_heigth = BlockHeight::from(49998u64);
         let network = Network::Main;
         let bpw = BlockPrimitiveWitness::deterministic_with_block_height_and_difficulty(
             init_block_heigth,
