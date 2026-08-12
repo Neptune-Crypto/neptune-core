@@ -15,6 +15,7 @@ use tasm_lib::verifier::stark_verify::StarkVerify;
 use crate::chaintx::generate_link_proof_claim::GenerateLinkProofClaim;
 use crate::chaintx::link_kernel::no_thruputs_subtree_root;
 use crate::chaintx::link_proof::link_proof_public_input;
+use crate::chaintx::link_proof::link_proof_public_output;
 use crate::chaintx::link_proof::LinkProof;
 use crate::chaintx::link_tx::LinkTx;
 use crate::chaintx::link_tx::LinkTxProof;
@@ -91,7 +92,9 @@ impl FixWitness {
     /// doing the instantiating, which the outer verifier has already pinned.
     fn link_proof_claim(&self, single_proof_digest: Digest) -> Claim {
         let input = link_proof_public_input(self.link_kernel_mast_hash(), single_proof_digest);
-        Claim::new(LinkProof.hash()).with_input(input.individual_tokens)
+        Claim::new(LinkProof.hash())
+            .with_input(input.individual_tokens)
+            .with_output(link_proof_public_output(single_proof_digest))
     }
 
     pub(crate) fn populate_nd_streams(
@@ -309,7 +312,9 @@ pub(crate) mod tests {
             /* recursively verify the link proof, naming this very program as the
             `D` the whole `LinkProof` derivation was indexed by */
             let input = link_proof_public_input(lkmh, single_proof_program_digest);
-            let claim = Claim::new(LinkProof.hash()).with_input(input.individual_tokens);
+            let claim = Claim::new(LinkProof.hash())
+                .with_input(input.individual_tokens)
+                .with_output(link_proof_public_output(single_proof_program_digest));
             tasm::verify_stark(Stark::default(), &claim, &self.link_proof);
         }
     }

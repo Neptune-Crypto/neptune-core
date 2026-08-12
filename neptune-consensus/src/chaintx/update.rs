@@ -43,6 +43,7 @@ use super::generate_link_proof_claim::GenerateLinkProofClaim;
 use super::link_kernel::LinkKernel;
 use super::link_kernel::LinkKernelField;
 use super::link_proof::link_proof_public_input;
+use super::link_proof::link_proof_public_output;
 use super::link_proof::merge_bit_false_leaf;
 use super::link_proof::no_coinbase_leaf;
 use super::link_proof::LinkProof;
@@ -62,6 +63,7 @@ const NEW_TIMESTAMP_IS_OLDER_THAN_OLD_ERROR: i128 = 1_000_561;
 const PROMOTED_THRUPUTS_DO_NOT_MATCH_ERROR: i128 = 1_000_562;
 const PROMOTED_INDEX_SETS_DO_NOT_MATCH_ERROR: i128 = 1_000_563;
 const PROMOTIONS_ARE_NOT_ASCENDING_ERROR: i128 = 1_000_564;
+const UPDATED_LINK_HAS_NO_INPUTS_AND_NO_THRUPUTS_ERROR: i128 = 1_000_565;
 
 /// One promoted thruput.
 ///
@@ -107,6 +109,7 @@ impl Promotion {
         )
     }
 }
+
 
 /// The witness consumed by [`Update`].
 ///
@@ -187,6 +190,10 @@ impl UpdateWitness {
             new_msa.hash(),
             "the new kernel must name the new mutator set"
         );
+        assert!(
+            !new_kernel.kernel.inputs.is_empty() || !new_kernel.thruputs.is_empty(),
+            "cannot update a link transaction with no inputs and no thruputs"
+        );
 
         // The two promotion equations, up to order, plus the per-entry AOCL
         // membership: exactly what `Update` asserts, checked here so a bad
@@ -264,7 +271,9 @@ impl UpdateWitness {
     /// the old kernel's MAST hash, under the same `D`.
     fn old_claim(&self) -> Claim {
         let input = link_proof_public_input(self.old_kernel.mast_hash(), self.single_proof_digest);
-        Claim::new(LinkProof.hash()).with_input(input.individual_tokens)
+        Claim::new(LinkProof.hash())
+            .with_input(input.individual_tokens)
+            .with_output(link_proof_public_output(self.single_proof_digest))
     }
 }
 
@@ -274,7 +283,7 @@ impl SecretWitness for UpdateWitness {
     }
 
     fn output(&self) -> Vec<BFieldElement> {
-        std::vec![]
+        link_proof_public_output(self.single_proof_digest)
     }
 
     fn program(&self) -> Program {
@@ -382,7 +391,8 @@ impl SecretWitness for UpdateWitness {
 ///   themselves may differ, since re-targeting rewrites their membership data,
 ///   but what a double spend collides on may not move;
 /// - outputs, thruputs, announcements and the fee are byte-for-byte the same in
-///   both kernels;
+///   both kernels (so a non-negative fee stays non-negative);
+/// - the inputs and the thruputs are not both empty;
 /// - the timestamp does not go backwards;
 /// - the new kernel carries no coinbase and no merge bit.
 ///
@@ -393,12 +403,18 @@ impl SecretWitness for UpdateWitness {
 /// Thruputs are either a) carried across unchanged, or b) promoted into inputs.
 /// (Right now (b) is not supported yet.)
 ///
-/// Unlike its single-proof sibling, `Update` does *not* require a non-empty input set.
-/// A `LinkTx` may legitimately have zero confirmed inputs -- an all-thruputs
-/// link, funded entirely by its predecessors -- and such a link still has to
-/// follow the mutator set, because `Chain` requires all three of its kernels to
-/// agree on the mutator set hash. Refusing to update it would strand it the
-/// moment any chain partner moved.
+/// Unlike its single-proof sibling, `Update` does *not* require a non-empty
+/// input set. A `LinkTx` may legitimately have zero confirmed inputs -- an
+/// all-thruputs link, funded entirely by its predecessors -- and such a link
+/// still has to follow the mutator set, because `Chain` requires all three of
+/// its kernels to agree on the mutator set hash. Refusing to update it would
+/// strand it the moment any chain partner moved.
+///
+/// A link with no inputs *and* no thruputs, however, may not be updated: it
+/// commits to nothing the mutator set moves, and updating one is a shortcut to
+/// a block composition. A composer's fastest route to a composition must be
+/// picking a transaction up from the mempool -- the same reason the
+/// single-proof `Update` bans updates of transactions without inputs.
 #[derive(Debug, Copy, Clone)]
 pub struct Update {
     /// Where the dispatcher stashed the `SingleProof` program digest `D` it read
@@ -525,7 +541,9 @@ impl BasicSnippet for Update {
         // A `LinkKernel` composes a `TransactionKernel`, so every inner
         // field is reached through this one extra hop.
         let field_inner_kernel = field!(LinkKernel::kernel);
+        let field_thruputs = field!(LinkKernel::thruputs);
         let field_with_size_thruputs = field_with_size!(LinkKernel::thruputs);
+        let field_inputs = field!(TransactionKernel::inputs);
         let field_with_size_inputs = field_with_size!(TransactionKernel::inputs);
         let field_with_size_outputs = field_with_size!(TransactionKernel::outputs);
         let field_with_size_announcements = field_with_size!(TransactionKernel::announcements);
@@ -950,6 +968,39 @@ impl BasicSnippet for Update {
             )
         };
 
+        // A link with no inputs and no thruputs commits to nothing the mutator
+        // set moves; updating one is a composition shortcut, not a
+        // re-targeting. Read off the old kernel, whose fields the asserts
+        // above bound to both roots.
+        let assert_link_is_not_empty = triton_asm!(
+            // _ *witness *old_lk *new_lk
+            dup 1
+            {&inner(&field_inputs)}
+            read_mem 1
+            pop 1
+            // _ *witness *old_lk *new_lk num_inputs
+
+            push 0
+            eq
+            // _ *witness *old_lk *new_lk (num_inputs == 0)
+
+            dup 2
+            {&field_thruputs}
+            read_mem 1
+            pop 1
+            // _ *witness *old_lk *new_lk (num_inputs == 0) num_thruputs
+
+            push 0
+            eq
+            mul
+            // _ *witness *old_lk *new_lk (num_inputs == 0 && num_thruputs == 0)
+
+            push 0
+            eq
+            assert error_id {UPDATED_LINK_HAS_NO_INPUTS_AND_NO_THRUPUTS_ERROR}
+            // _ *witness *old_lk *new_lk
+        );
+
         // A re-targeted transaction may sit still or move forward in time, but
         // never backwards -- otherwise updating would be a way to walk a
         // transaction back past a time lock.
@@ -1042,6 +1093,7 @@ impl BasicSnippet for Update {
                 &authenticate_announcements,
             )}
             {&assert_field_is_unchanged(&inner(&field_with_size_fee), &authenticate_fee)}
+            {&assert_link_is_not_empty}
             {&assert_timestamp_does_not_go_backwards}
             // _ [own_program_digest] disc *witness *old_lk *new_lk
 
@@ -1275,6 +1327,9 @@ pub(crate) mod tests {
         );
         unchanged(LinkKernelField::Fee, Tip5::hash(&old.kernel.fee));
 
+        /* a link with no inputs and no thruputs may not be updated */
+        assert!(!old.kernel.inputs.is_empty() || !old.thruputs.is_empty());
+
         /* the timestamp may stand still or move forward, never backwards */
         authenticate(
             old_lkmh,
@@ -1295,7 +1350,9 @@ pub(crate) mod tests {
 
         /* last: recursively verify the old link proof */
         let input = link_proof_public_input(old_lkmh, single_proof_digest);
-        let claim = Claim::new(own_program_digest).with_input(input.individual_tokens);
+        let claim = Claim::new(own_program_digest)
+            .with_input(input.individual_tokens)
+            .with_output(link_proof_public_output(single_proof_digest));
         tasm::verify_stark(Stark::default(), &claim, &witness.old_proof);
     }
 

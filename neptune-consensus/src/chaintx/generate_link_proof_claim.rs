@@ -7,8 +7,8 @@ use tasm_lib::triton_vm::prelude::*;
 use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::transaction::validity::tasm::claims::new_claim::NewClaim;
 
-/// Build the claim `{ program, input: [lkmh] || [D] }` that a `LinkProof`
-/// establishes.
+/// Build the claim `{ program, input: [lkmh] || [D], output: [D] }` that a
+/// `LinkProof` establishes.
 ///
 /// The transaction-chaining analog of
 /// [`GenerateSingleProofClaim`](crate::transaction::validity::tasm::claims::generate_single_proof_claim::GenerateSingleProofClaim),
@@ -92,13 +92,23 @@ impl BasicSnippet for GenerateLinkProofClaim {
             // AFTER:  _ *claim
             {self.entrypoint()}:
             push {2 * Digest::LEN}
-            push 0
+            push {Digest::LEN}
             call {new_claim}
             // _ [lkmh; 5] [program_digest; 5] *claim *output *input *program_digest
 
-            // The claim has no output, so that pointer is dead on arrival.
-            // Dropping it now is what keeps `lkmh` within `dup` range below.
+            // `D` goes into the output first: it needs no stack digest, and
+            // spending `*output` here is what keeps `lkmh` within `dup` range
+            // below. The output holds the digest as it lies, unreversed.
             pick 2
+            // _ [lkmh; 5] [program_digest; 5] *claim *input *program_digest *output
+
+            push {self.single_proof_digest_address}
+            read_mem {Digest::LEN}
+            pop 1
+            // _ ... *claim *input *program_digest *output [single_proof_digest; 5]
+
+            pick {Digest::LEN}
+            write_mem {Digest::LEN}
             pop 1
             // _ [lkmh; 5] [program_digest; 5] *claim *input *program_digest
 
@@ -202,7 +212,9 @@ mod tests {
                 .into_iter()
                 .flat_map(|digest| digest.reversed().values())
                 .collect_vec();
-            let claim = Claim::new(program_digest).with_input(input);
+            let claim = Claim::new(program_digest)
+                .with_input(input)
+                .with_output(single_proof_digest.values().to_vec());
             let claim_pointer =
                 rust_shadowing_helper_functions::dyn_malloc::dynamic_allocator(memory);
             encode_to_memory(memory, claim_pointer, &claim);

@@ -17,10 +17,12 @@ use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 
+use super::authenticate_link_kernel_field::AuthenticateLinkKernelField;
 use super::link_kernel::no_thruputs_subtree_root;
 use super::link_kernel::LinkKernel;
 use super::link_kernel::LinkKernelField;
 use super::link_proof::link_proof_public_input;
+use super::link_proof::link_proof_public_output;
 use super::link_proof::merge_bit_false_leaf;
 use super::link_proof::no_coinbase_leaf;
 use super::link_proof::LinkProof;
@@ -34,8 +36,10 @@ use crate::transaction::transaction_proof::TransactionProof;
 use crate::transaction::validity::neptune_proof::Proof;
 use crate::transaction::validity::tasm::claims::generate_single_proof_claim::GenerateSingleProofClaim;
 use crate::transaction::Transaction;
+use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
 const CAST_KERNEL_IS_NOT_THE_CLAIMED_ONE_ERROR: i128 = 1_000_570;
+const CAST_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT_ERROR: i128 = 1_000_571;
 
 /// The witness consumed by [`Cast`].
 ///
@@ -81,6 +85,10 @@ impl CastWitness {
         let TransactionProof::SingleProof(proof) = transaction.proof else {
             panic!("cannot cast a transaction that is not backed by a single proof");
         };
+        assert!(
+            !transaction.kernel.fee.is_negative(),
+            "cannot cast a transaction with a negative fee"
+        );
 
         Self {
             kernel: transaction.kernel,
@@ -119,7 +127,7 @@ impl SecretWitness for CastWitness {
     }
 
     fn output(&self) -> Vec<BFieldElement> {
-        std::vec![]
+        link_proof_public_output(self.single_proof_digest)
     }
 
     fn program(&self) -> Program {
@@ -142,12 +150,13 @@ impl SecretWitness for CastWitness {
         let individual_tokens = self.kernel.mast_hash().reversed().values().to_vec();
         let mut nondeterminism = NonDeterminism::new(individual_tokens).with_ram(memory);
 
-        // Then the two constant leafs, in program order.
+        // Then the two constant leafs and the fee, in program order.
         let link_kernel = self.link_kernel();
         nondeterminism.digests.extend(
             [
                 link_kernel.mast_path(LinkKernelField::Coinbase),
                 link_kernel.mast_path(LinkKernelField::MergeBit),
+                link_kernel.mast_path(LinkKernelField::Fee),
             ]
             .concat(),
         );
@@ -241,7 +250,15 @@ impl BasicSnippet for Cast {
         )));
         let merkle_verify = library.import(Box::new(MerkleVerify));
 
+        let authenticate_fee =
+            library.import(Box::new(AuthenticateLinkKernelField(LinkKernelField::Fee)));
+        let lt_u128 = library.import(Box::new(tasm_lib::arithmetic::u128::lt::Lt));
+
         let field_proof = field!(CastWitness::proof);
+        let field_kernel = field!(CastWitness::kernel);
+        let field_fee = field!(TransactionKernel::fee);
+        let fee_size = NativeCurrencyAmount::static_length().unwrap();
+        let push_max_amount = NativeCurrencyAmount::max().push_to_stack();
 
         // Push a compile-time-known digest such that its 0th element ends up on
         // top -- the layout `merkle_verify` and `hash` expect.
@@ -325,6 +342,34 @@ impl BasicSnippet for Cast {
 
             {&authenticate_constant_leaf(LinkKernelField::Coinbase, no_coinbase_leaf())}
             {&authenticate_constant_leaf(LinkKernelField::MergeBit, merge_bit_false_leaf())}
+            // _ [own_program_digest] disc [lkmh] *witness [txkmh]
+
+            /* The cast transaction's fee is a non-negative amount in range. A
+               negative fee is legal in the single-proof pipeline; nothing in
+               the chain pipeline may carry one, and `Cast` is where such a
+               transaction would enter. */
+            dup 5
+            {&field_kernel}
+            {&field_fee}
+            // _ [own_program_digest] disc [lkmh] *witness [txkmh] *fee
+
+            dup 11 dup 11 dup 11 dup 11 dup 11
+            // _ .. disc [lkmh] *witness [txkmh] *fee [lkmh]
+
+            dup 5
+            push {fee_size}
+            call {authenticate_fee}
+            // _ .. disc [lkmh] *witness [txkmh] *fee
+
+            addi {fee_size - 1}
+            read_mem {fee_size}
+            pop 1
+            // _ .. disc [lkmh] *witness [txkmh] [fee; 4]
+
+            {&push_max_amount}
+            call {lt_u128}
+            push 0 eq
+            assert error_id {CAST_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT_ERROR}
             // _ [own_program_digest] disc [lkmh] *witness [txkmh]
 
             /* Last: the recursion. `D` comes from where the dispatcher put the
@@ -416,13 +461,23 @@ pub(crate) mod tests {
             height,
         );
 
+        /* the cast transaction's fee is a non-negative amount in range */
+        tasm::tasmlib_hashing_merkle_verify(
+            lkmh,
+            LinkKernelField::Fee.discriminant() as u32,
+            Tip5::hash(&witness.kernel.fee),
+            height,
+        );
+        assert!(!witness.kernel.fee.is_negative());
+        assert!(witness.kernel.fee <= NativeCurrencyAmount::max());
+
         /* last: recursively verify the transaction's single proof */
         let claim = Claim::new(single_proof_digest).with_input(txkmh.reversed().values().to_vec());
         tasm::verify_stark(Stark::default(), &claim, &witness.proof);
     }
 
-    /// `Cast` writes nothing to stdout, so the assertion is that both the Rust
-    /// shadow and the tasm run to completion: every `assert` in either one held.
+    /// The assertion is that both the Rust shadow and the tasm run to
+    /// completion: every `assert` in either one held.
     fn prop_positive(witness: CastWitness) {
         LinkProof
             .run_rust(&witness.standard_input(), witness.nondeterminism())
