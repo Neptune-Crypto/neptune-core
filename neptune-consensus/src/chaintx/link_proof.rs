@@ -45,6 +45,13 @@ pub(crate) fn link_proof_public_input(
     )
 }
 
+/// The public output of a `LinkProof` claim: the `SingleProof` program digest
+/// `D` again, so that the digest the derivation is indexed by can be read off
+/// either end of the claim.
+pub(crate) fn link_proof_public_output(single_proof_digest: Digest) -> Vec<BFieldElement> {
+    single_proof_digest.values().to_vec()
+}
+
 /// The MAST leaf a [`LinkKernel`](super::link_kernel::LinkKernel) must carry at
 /// [`LinkKernelField::Coinbase`](super::link_kernel::LinkKernelField::Coinbase).
 ///
@@ -88,10 +95,10 @@ pub(super) fn merge_bit_false_leaf() -> Digest {
 /// does not recurse into `LinkProof` -- `Forge` -- simply leaves the digest
 /// buried; the dispatcher pops it.
 ///
-/// The claim is `{ program: LinkProof, input: [lkmh] || [D] }`, where `D` is the
-/// `SingleProof` program digest. `LinkProof` never chooses `D` for itself: it is
-/// a family `Link[D]` indexed by a digest its verifier names, which is what
-/// breaks the `Fix`/`Cast` circular dependency.
+/// The claim is `{ program: LinkProof, input: [lkmh] || [D], output: [D] }`,
+/// where `D` is the `SingleProof` program digest. `LinkProof` never chooses `D`
+/// for itself: it is a family `Link[D]` indexed by a digest its verifier names,
+/// which is what breaks the `Fix`/`Cast` circular dependency.
 ///
 /// The dispatcher reads `D` and stashes it in static memory, where every branch
 /// that recurses into `LinkProof` reads it from. It must be *copied* from there
@@ -201,6 +208,13 @@ impl TritonProgram for LinkProof {
             assert error_id {NO_BRANCH_TAKEN_ERROR}
             // _ [own_program_digest] [dispatcher_scratch] *link_proof_witness
 
+            // Print `D`, from the dispatcher's copy of the public input.
+            push {single_proof_digest_alloc.read_address()}
+            read_mem {Digest::LEN}
+            pop 1
+            write_io {Digest::LEN}
+            // _ [own_program_digest] [dispatcher_scratch] *link_proof_witness
+
             // By convention all consensus programs *must* leave the stack
             // empty.
             pop 1 pop 5 pop 5
@@ -270,16 +284,20 @@ mod tests {
                     cast_branch_source(lkmh, single_proof_digest, *witness)
                 }
             }
+
+            tasm::tasmlib_io_write_to_stdout___digest(single_proof_digest);
         }
     }
 
     /// The claim shape is consensus-visible, and every branch -- including the
     /// ones not written yet -- has to agree on it. Pinned here in the form the
-    /// design note gives it: `lkmh.reversed() || D.reversed()`, ten words, in
-    /// that order. Neither the order nor the length may ever drift.
+    /// design note gives it: input `lkmh.reversed() || D.reversed()`, ten words,
+    /// in that order; output `D`, five words, unreversed. Neither the order nor
+    /// the lengths may ever drift.
     ///
     /// `ForgeWitness` stands in for all of them: every branch witness reaches
-    /// the public input through [`link_proof_public_input`].
+    /// the public input through [`link_proof_public_input`] and the public
+    /// output through [`link_proof_public_output`].
     #[proptest(cases = 1)]
     fn link_proof_claim_shape_is_pinned(
         #[strategy(LinkPrimitiveWitness::arbitrary_strategy())] lpw: LinkPrimitiveWitness,
@@ -292,6 +310,10 @@ mod tests {
 
         prop_assert_eq!(2 * Digest::LEN, expected.len());
         prop_assert_eq!(expected, witness.standard_input().individual_tokens);
+
+        let expected_output = mock_single_proof_digest(0).values().to_vec();
+        prop_assert_eq!(Digest::LEN, expected_output.len());
+        prop_assert_eq!(expected_output, witness.output());
     }
 
     /// A discriminant no branch claims must halt the program, not fall through
@@ -320,6 +342,6 @@ mod tests {
 
     test_program_snapshot!(
         LinkProof,
-        "74d0868f5562d84f1192666846908bd9d7c91227cd8bfc67bc7f560b23cea416abf8136d46a67fbe"
+        "ea11f22b5a2944742257afd6f4e1c87684b10ff37672ece4e1d3bccf4b277d27e3eec1db8dbb50a9"
     );
 }

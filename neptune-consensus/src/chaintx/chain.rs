@@ -38,6 +38,7 @@ use super::generate_link_proof_claim::GenerateLinkProofClaim;
 use super::link_kernel::LinkKernel;
 use super::link_kernel::LinkKernelField;
 use super::link_proof::link_proof_public_input;
+use super::link_proof::link_proof_public_output;
 use super::link_proof::merge_bit_false_leaf;
 use super::link_proof::no_coinbase_leaf;
 use super::link_proof::LinkProof;
@@ -251,7 +252,9 @@ impl ChainWitness {
     /// program, on the operand's kernel MAST hash, under the same `D`.
     fn operand_claim(&self, kernel: &LinkKernel) -> Claim {
         let input = link_proof_public_input(kernel.mast_hash(), self.single_proof_digest);
-        Claim::new(LinkProof.hash()).with_input(input.individual_tokens)
+        Claim::new(LinkProof.hash())
+            .with_input(input.individual_tokens)
+            .with_output(link_proof_public_output(self.single_proof_digest))
     }
 }
 
@@ -261,7 +264,7 @@ impl SecretWitness for ChainWitness {
     }
 
     fn output(&self) -> Vec<BFieldElement> {
-        std::vec![]
+        link_proof_public_output(self.single_proof_digest)
     }
 
     fn program(&self) -> Program {
@@ -1306,7 +1309,9 @@ pub(crate) mod tests {
         /* last: recursively verify both operands' link proofs */
         let operand_claim = |operand_lkmh: Digest| {
             let input = link_proof_public_input(operand_lkmh, single_proof_digest);
-            Claim::new(own_program_digest).with_input(input.individual_tokens)
+            Claim::new(own_program_digest)
+                .with_input(input.individual_tokens)
+                .with_output(link_proof_public_output(single_proof_digest))
         };
         tasm::verify_stark(
             Stark::default(),

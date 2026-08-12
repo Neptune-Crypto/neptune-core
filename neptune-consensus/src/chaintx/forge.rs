@@ -37,6 +37,7 @@ use super::link_kernel::LinkKernel;
 use super::link_kernel::LinkKernelField;
 use super::link_primitive_witness::LinkPrimitiveWitness;
 use super::link_proof::link_proof_public_input;
+use super::link_proof::link_proof_public_output;
 use super::link_proof::merge_bit_false_leaf;
 use super::link_proof::no_coinbase_leaf;
 use super::link_proof::LinkProof;
@@ -57,6 +58,7 @@ use crate::transaction::validity::tasm::claims::new_claim::NewClaim;
 use crate::transaction::validity::tasm::compute_absolute_indices::ComputeAbsoluteIndices;
 use crate::transaction::validity::tasm::leaf_authentication::authenticate_msa_against_txk::AuthenticateMsaAgainstTxk;
 use crate::type_scripts::native_currency::NativeCurrency;
+use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
 const CARDINALITY_MISMATCH_ERROR: i128 = 1_000_520;
 const COMPUTED_AND_CLAIMED_INDICES_DISAGREE_ERROR: i128 = 1_000_521;
@@ -67,6 +69,7 @@ const INNER_ROOT_MISMATCH_ERROR: i128 = 1_000_525;
 const TOO_MANY_COINS_ERROR: i128 = 1_000_526;
 const WRONG_NUMBER_OF_TYPE_SCRIPT_PROOFS_ERROR: i128 = 1_000_527;
 const WRONG_NUMBER_OF_LOCK_SCRIPT_PROOFS_ERROR: i128 = 1_000_528;
+const FORGE_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT_ERROR: i128 = 1_000_529;
 
 /// Number of coins per UTXO must be strictly less than this. Copied, with the
 /// guard, from [`CollectTypeScripts`](crate::transaction::validity::collect_type_scripts).
@@ -102,6 +105,10 @@ pub struct ForgeWitness {
     membership_proofs: Vec<MsMembershipProof>,
     aocl_auth_paths: Vec<MmrMembershipProof>,
     swbfa_hash: Digest,
+
+    /// The kernel's fee. In the witness so that `Forge` can authenticate it
+    /// against the kernel MAST hash and assert it is a non-negative amount.
+    fee: NativeCurrencyAmount,
 
     /// Commitment randomness for the thruputs, parallel to `thruputs`.
     thruput_sender_randomnesses: Vec<Digest>,
@@ -209,6 +216,7 @@ pub(super) struct ForgeWitnessMemory {
     /// image carries them pre-reduced rather than the raw swbfi MMR.
     swbfi_bagged: Digest,
     swbfa_hash: Digest,
+    fee: NativeCurrencyAmount,
     lock_scripts_halt: Vec<Proof>,
     type_scripts_halt: Vec<Proof>,
 }
@@ -225,6 +233,7 @@ impl From<&ForgeWitness> for ForgeWitnessMemory {
             aocl: witness.aocl.clone(),
             swbfi_bagged: witness.swbfi.bag_peaks(),
             swbfa_hash: witness.swbfa_hash,
+            fee: witness.fee,
             lock_scripts_halt: witness.lock_scripts_halt.clone(),
             type_scripts_halt: witness.type_scripts_halt.clone(),
         }
@@ -339,6 +348,8 @@ impl ForgeWitness {
                 .collect(),
             swbfa_hash: Tip5::hash(&lpw.mutator_set_accumulator.swbf_active),
 
+            fee: kernel.kernel.fee,
+
             thruput_sender_randomnesses: lpw.thruput_sender_randomnesses.clone(),
             thruput_receiver_digests: lpw.thruput_receiver_digests.clone(),
 
@@ -404,6 +415,8 @@ impl ForgeWitness {
             || leaf(LinkKernelField::Outputs) != Tip5::hash(&self.outputs)
             || leaf(LinkKernelField::Coinbase) != no_coinbase_leaf()
             || leaf(LinkKernelField::MergeBit) != merge_bit_false_leaf()
+            || leaf(LinkKernelField::Fee) != Tip5::hash(&self.fee)
+            || self.fee.is_negative()
         {
             return false;
         }
@@ -531,7 +544,7 @@ impl SecretWitness for ForgeWitness {
     }
 
     fn output(&self) -> Vec<BFieldElement> {
-        std::vec![]
+        link_proof_public_output(self.single_proof_digest)
     }
 
     fn program(&self) -> Program {
@@ -593,6 +606,7 @@ impl SecretWitness for ForgeWitness {
             mast_path(LinkKernelField::Outputs),
             mast_path(LinkKernelField::Coinbase),
             mast_path(LinkKernelField::MergeBit),
+            mast_path(LinkKernelField::Fee),
             self.aocl_auth_paths
                 .iter()
                 .flat_map(|mp| mp.authentication_path.clone())
@@ -896,6 +910,42 @@ impl BasicSnippet for Forge {
         let authenticate_merge_bit_false =
             authenticate_constant_leaf(LinkKernelField::MergeBit, &push_merge_bit_false_leaf);
 
+        let authenticate_fee_field =
+            library.import(Box::new(AuthenticateLinkKernelField(LinkKernelField::Fee)));
+        let lt_u128 = library.import(Box::new(tasm_lib::arithmetic::u128::lt::Lt));
+        let field_fee = field!(ForgeWitnessMemory::fee);
+        let fee_size = NativeCurrencyAmount::static_length().unwrap();
+        let push_max_amount = NativeCurrencyAmount::max().push_to_stack();
+
+        // The kernel's fee is a non-negative amount in range: `Forge` is an
+        // entry point into the chain pipeline, and no link transaction may
+        // carry a negative fee.
+        let assert_fee_is_valid_amount = triton_asm!(
+            // _ [lkmh] *witness
+            dup 0
+            {&field_fee}
+            // _ [lkmh] *witness *fee
+
+            dup 6 dup 6 dup 6 dup 6 dup 6
+            // _ [lkmh] *witness *fee [lkmh]
+
+            dup 5
+            push {fee_size}
+            call {authenticate_fee_field}
+            // _ [lkmh] *witness *fee
+
+            addi {fee_size - 1}
+            read_mem {fee_size}
+            pop 1
+            // _ [lkmh] *witness [fee; 4]
+
+            {&push_max_amount}
+            call {lt_u128}
+            push 0 eq
+            assert error_id {FORGE_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT_ERROR}
+            // _ [lkmh] *witness
+        );
+
         // The type scripts see `input_utxos` as one flat list and contain all
         // inputs, both confirmed inputs and thruputs. Binding its length to
         // `|confirmed| + |thruputs|` is what stops a phantom input UTXO --
@@ -967,6 +1017,7 @@ impl BasicSnippet for Forge {
             {&authenticate_outputs}
             {&authenticate_no_coinbase}
             {&authenticate_merge_bit_false}
+            {&assert_fee_is_valid_amount}
             {&assert_cardinality}
             // _ [lkmh] *witness
 
@@ -1908,6 +1959,16 @@ pub(crate) mod tests {
             merge_bit_false_leaf(),
             LinkKernel::MAST_HEIGHT as u32,
         );
+
+        // the kernel's fee is a non-negative amount in range
+        tasm::tasmlib_hashing_merkle_verify(
+            lkmh,
+            LinkKernelField::Fee as u32,
+            Tip5::hash(&witness.fee),
+            LinkKernel::MAST_HEIGHT as u32,
+        );
+        assert!(!witness.fee.is_negative());
+        assert!(witness.fee <= NativeCurrencyAmount::max());
 
         // the two input kinds exactly cover the type-script-facing list
         let num_confirmed: usize = witness.confirmed_inputs.len();
