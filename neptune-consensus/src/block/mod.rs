@@ -1064,36 +1064,49 @@ impl Block {
     ///
     /// Given two blocks, determine which one is more canonical. This function
     /// evaluates the following logic:
-    ///  - if the height is different, prefer the block with more accumulated
+    ///  - if the parents are different, prefer the block with more accumulated
     ///    proof-of-work;
-    ///  - otherwise, if exactly one of the blocks' transactions has no inputs,
-    ///    reject that one;
-    ///  - otherwise, prefer the current tip.
+    ///  - otherwise, prefer the one with the most inputs.
+    ///  - if same parents and same number of inputs, prefer the one with the
+    ///    most cumulative proof of work, which is equivalent to the one with
+    ///    the highest difficulty.
     ///
     /// This function assumes the blocks are valid and have the self-declared
     /// accumulated proof-of-work.
-    ///
-    /// This function is called exclusively in
-    /// `GlobalState::incoming_block_is_more_canonical`, which is in turn
-    /// called in two places:
-    ///  1. In `peer_loop`, when a peer sends a block. The `peer_loop` task only
-    ///     sends the incoming block to the `main_loop` if it is more canonical.
-    ///  2. In `main_loop`, when it receives a block from a `peer_loop` or from
-    ///     the `mine_loop`. It is possible that despite (1), race conditions
-    ///     arise, and they must be solved here.
     pub fn fork_choice_rule<'a>(current_tip: &'a Self, incoming_block: &'a Self) -> &'a Self {
-        if current_tip.header().height != incoming_block.header().height {
-            if current_tip.header().cumulative_proof_of_work
-                >= incoming_block.header().cumulative_proof_of_work
-            {
-                current_tip
-            } else {
-                incoming_block
+        if current_tip.hash() == incoming_block.hash() {
+            // The blocks are the same. Prefer current to avoid a meaningless
+            // state update.
+            return current_tip;
+        }
+
+        // If blocks have different parent, prefer the one with most cumulative
+        // proof of work.
+        let current_cumpow = current_tip.header().cumulative_proof_of_work;
+        let incoming_cumpow = incoming_block.header().cumulative_proof_of_work;
+        if current_tip.header().prev_block_digest != incoming_block.header().prev_block_digest {
+            if current_cumpow >= incoming_cumpow {
+                return current_tip;
             }
-        } else if current_tip.body().transaction_kernel.inputs.is_empty() {
-            incoming_block
-        } else {
+            return incoming_block;
+        }
+
+        // Candidates have the same parent. Prefer the one with most inputs.
+        let current_num_inputs = current_tip.body().transaction_kernel.inputs.len();
+        let incoming_num_inputs = incoming_block.body().transaction_kernel.inputs.len();
+        if current_num_inputs != incoming_num_inputs {
+            if current_num_inputs > incoming_num_inputs {
+                return current_tip;
+            }
+            return incoming_block;
+        }
+
+        // Candidates have same parent and same number of inputs. Prefer the one
+        // with the most cumulative proof of work.
+        if current_cumpow >= incoming_cumpow {
             current_tip
+        } else {
+            incoming_block
         }
     }
 
