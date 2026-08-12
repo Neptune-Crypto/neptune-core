@@ -49,7 +49,7 @@ pub enum LinkProofWitness {
     /// `LinkTx -> LinkTx`: re-target a link transaction at a newer mutator set.
     Update(Box<UpdateWitness>),
 
-    /// `Transaction -> LinkTx`: pull a legacy, `SingleProof`-backed transaction
+    /// `Transaction -> LinkTx`: pull a `SingleProof`-backed transaction
     /// into the chain pipeline.
     Cast(Box<CastWitness>),
 }

@@ -29,7 +29,7 @@ places:
 - **Cheaper initiation.** `Forge` inlines `RemovalRecordsIntegrity`,
   `KernelToOutputs`, `CollectLockScripts`, and `CollectTypeScripts`
   *non-recursively*, and the route to a `SingleProof` comes out roughly a third
-  cheaper than the legacy one (§Benchmarks). The saving is not in the inlining
+  cheaper than the single-proof one (§Benchmarks). The saving is not in the inlining
   itself — proving them separately is a rounding error against either route's
   total. It is that the chained route recursively verifies three fewer proofs.
   Recursive verification is the dominant cost in all of these programs.
@@ -56,9 +56,9 @@ places:
   and an AOCL membership proof exactly as `Forge`'s confirmed loop does, so a
   soundness bug there is equally a double-spend path and carries the same audit
   bar.
-- **Type scripts see a legacy transaction.** The type-script-facing salted input
+- **Type scripts see a singleproof transaction.** The type-script-facing salted input
   UTXOs contain *both* confirmed UTXOs *and* thruputs, and the kernel MAST
-  exposes fee/coinbase/timestamp at legacy leaf positions — so `NativeCurrency`
+  exposes fee/coinbase/timestamp at transaction-kernel leaf positions — so `NativeCurrency`
   / `TimeLock` run unchanged, unaware of chaining. Induced obligation: `Forge`
   *must* bind that combined `salted_input_utxos` digest to
   `confirmed_inputs || thruputs` (and validate only the confirmed ones via MSA
@@ -81,11 +81,11 @@ places:
   set: `Chain` requires all three of its kernels to agree on the mutator set
   hash, so a link that cannot be advanced is stranded the moment any chain
   partner moves. This is a deliberate divergence from `update_branch`, which
-  rejects an empty input set outright (`INPUT_SET_IS_EMPTY_ERROR`). The legacy
+  rejects an empty input set outright (`INPUT_SET_IS_EMPTY_ERROR`). The single-proof pipeline's
   restriction's rationale is recorded nowhere -- not in the code, not in the
   (squashed) history -- so the divergence rests on the reasoning above rather
   than on a demonstrated equivalence. Induced obligation: the audit has to
-  either confirm that reasoning or recover what the legacy check was defending,
+  either confirm that reasoning or recover what the single-proof check was defending,
   in which case whatever it defends has to be re-established for the chain
   pipeline some other way.
 - **Promotion is permitted, not mandatory.** `Advance` *may* move a thruput
@@ -117,7 +117,7 @@ places:
   precisely so that a negative fee on its LHS wraps and adds correctly, and
   therefore still needs an explicit bound on its RHS. Consequence: an upgrader
   that pays itself by merging in a negative-fee transaction has to do it on the
-  legacy `Transaction`/`Merge` path; there is no negative-fee `LinkTx` to
+  single-proof `Transaction`/`Merge` path; there is no negative-fee `LinkTx` to
   `Chain` in.
 - **The `SingleProof` digest is a *parameter* of the `LinkProof` claim, never a
   constant inside it.** See §Breaking the `Fix`/`Cast` cycle.
@@ -277,7 +277,7 @@ verified", i.e. universal forgery. Covered by §Negative tests for `D`.
           membership proof verifies against the *new* mutator set, each
           commitment is one of `old.thruputs`. It sorts by AOCL leaf index, so
           no caller ever sees the branch's ordering requirement.
-  - [x] `Cast(Box<CastWitness>)` (3) — holds the legacy transaction's kernel and
+  - [x] `Cast(Box<CastWitness>)` (3) — holds the singleproof transaction's kernel and
         its `SingleProof`. Its own memory projection, like `Chain`'s, though the
         branch reads only the proof out of it: the kernel is bound through its
         MAST hash, which is divined rather than recomputed, so the copy in memory
@@ -350,7 +350,7 @@ would bind that check to the wrong tree without crashing.
         absorbs `CollectTypeScripts`: seed `NativeCurrency`, dedup with
         `Contains` across every coin of every input then output UTXO.)
   - [x] recursively verify the lock-script and type-script proofs. Needs the
-        *inner* `TransactionKernel` MAST root (type scripts see the legacy
+        *inner* `TransactionKernel` MAST root (type scripts see the transaction
         kernel, height 3) derived from the `LinkKernel` leafs (height 4).
         (Inner root divined, authenticated against `lkmh`, then kept at the
         bottom of the stack -- reusing the now-dead `lkmh` slot -- so both
@@ -494,7 +494,7 @@ would bind that check to the wrong tree without crashing.
       name a *program*; everywhere else it is passed along untouched.
   - [x] the cast kernel is the transaction's kernel with no thruputs, in one
         hash: a `LinkKernel`'s nine leafs pad to sixteen and its first eight are
-        exactly the legacy kernel's (already a power of two), so `txkmh` is the
+        exactly the transaction kernel's (already a power of two), so `txkmh` is the
         left child of `lkmh` and, thruputs being empty, the right child is the
         constant `no_thruputs_subtree_root()`. `txkmh` is divined and
         `hash_pair(txkmh, that constant)` must be `lkmh`. Empty thruputs are not
@@ -600,7 +600,7 @@ would bind that check to the wrong tree without crashing.
       pins that authorization to one thruput.
 
 ### Mempool
-The mempool holds both legacy `Transaction`s and `LinkTx`s. A `LinkTx` with
+The mempool holds both single-proof `Transaction`s and `LinkTx`s. A `LinkTx` with
 non-empty `thruputs` is *unresolved* — not yet block-eligible.
 Chaining is opportunistic and bounded: the authoritative `LinkTx`->`Transaction`
 map happens at time of block-template construction. The mempool `Chain`s
@@ -636,8 +636,8 @@ the worst case, space is wasted, until transactions are evicted.
       (already now) + TTL for `LinkTx`s whose thruputs never resolve (new).
 - [ ] Block template: select a fee-maximizing, all-thruputs-cut-through chain,
       `Chain` it to a single `LinkTx`, `Fix` into the block's `SingleProof`
-      `Transaction`, then merge with legacy txs as today.
-- [ ] Cast-on-demand: when a `LinkTx` can chain onto a resident legacy
+      `Transaction`, then merge with single-proof txs as today.
+- [ ] Cast-on-demand: when a `LinkTx` can chain onto a resident single-proof
       `Transaction`, `Cast` the latter in if the fee is beneficial.
 
 ## Peer
@@ -717,7 +717,7 @@ Two tiers: the proof-free `LinkPrimitiveWitness::validate` (above) and the tasm 
 (below). The `validate`-tier tests already cover several §onto `Forge` items;
 when `Forge` exists, mirror those rather than reinventing them.
 
-The soundness tests that sit on the legacy `ProofCollection`/`SingleProof`
+The soundness tests that sit on the single-proof pipeline's `ProofCollection`/`SingleProof`
 programs test meaningful soundness properties. Some of those properties should be
 tested on the new dual pipeline as well.
 - `NativeCurrency` and `TimeLock` are recursively verified by `Forge` *unchanged*,
@@ -725,12 +725,12 @@ tested on the new dual pipeline as well.
   consequences below are re-stated against a `LinkKernel`.
 - `CollectLockScripts` / `CollectTypeScripts` do NOT appear as separate programs
   in the dual pipeline; `Forge` absorbs them (they remain, unchanged and
-  consensus-pinned, in the legacy pipeline). Their *net behavior* must be tested
+  consensus-pinned, in the single-proof pipeline). Their *net behavior* must be tested
   on `Forge` (below).
 - Reuse strategy: build the base `LinkPrimitiveWitness` via
-  `LinkPrimitiveWitness::from_primitive_witness(pw, k)` off the same legacy
+  `LinkPrimitiveWitness::from_primitive_witness(pw, k)` off the same single-proof
   `PrimitiveWitness::arbitrary_*` strategy the mirrored test uses, then poke one
-  field (legacy negative-test idiom) — no per-test strategy duplication.
+  field (single-proof negative-test idiom) — no per-test strategy duplication.
 
 ### onto `Forge`
 - [x] `bad_mutator_set_accumulator_is_rejected`: a mutator-set accumulator other
@@ -1038,7 +1038,7 @@ neptune-consensus --bench chaintx`.
 - [x] `throughput::chained_{2,4}` / `throughput::separate_{2,4}`: `N`
       interactions with one self-perpetuating UTXO on the chaining pipeline
       versus `N` with `N` independent UTXOs. While not a like-for-like
-      comparison, this is the closest counterpart the legacy pipeline admits.
+      comparison, this is the closest counterpart the single-proof pipeline admits.
       Confirmed ~36% speedup at `N = 2`.
 
 ## Audit

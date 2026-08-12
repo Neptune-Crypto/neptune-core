@@ -19,9 +19,9 @@ use crate::transaction::validity::tasm::claims::new_claim::NewClaim;
 /// passes `own_program_digest()`.
 ///
 /// `D` is not taken on the stack, because it is not a per-claim value: the
-/// dispatcher reads it off the public input once and stashes it where every
-/// branch reads it from, so this snippet reads it from that same address rather
-/// than have callers ferry it around. `lkmh` differs per operand and has no such
+/// caller reads it off the public input once and stashes it where every branch
+/// reads it from, so this snippet reads it from that same address rather than
+/// have callers ferry it around. `lkmh` differs per operand and has no such
 /// home, so it stays a stack argument.
 ///
 /// Lives in `chaintx` rather than beside its sibling so that no Rust edge
@@ -29,7 +29,7 @@ use crate::transaction::validity::tasm::claims::new_claim::NewClaim;
 /// the point of promoting `D` to a claim parameter in the first place.
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct GenerateLinkProofClaim {
-    /// Where the dispatcher stashed `D`. See [`LinkProof`](super::link_proof::LinkProof).
+    /// Where the caller stashed `D`. See [`LinkProof`](super::link_proof::LinkProof).
     pub(crate) single_proof_digest_address: BFieldElement,
 }
 

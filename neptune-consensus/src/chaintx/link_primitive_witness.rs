@@ -32,7 +32,7 @@ use crate::type_scripts::TypeScriptAndWitness;
 /// A chained transaction has two kinds of inputs:
 ///
 /// - **Confirmed inputs** are UTXOs already in the mutator set. They are spent
-///   the legacy way: each has a [`RemovalRecord`](neptune_mutator_set::removal_record::RemovalRecord)
+///   the single-proof way: each has a [`RemovalRecord`](neptune_mutator_set::removal_record::RemovalRecord)
 ///   in `kernel.kernel.inputs` and a membership proof in
 ///   [`input_membership_proofs`](Self::input_membership_proofs).
 /// - **Thruputs** are UTXOs that are outputs of a *predecessor* in the chain and
@@ -47,7 +47,7 @@ use crate::type_scripts::TypeScriptAndWitness;
 ///
 /// The type-script-facing [`input_utxos`](Self::input_utxos) list is the
 /// concatenation `confirmed_inputs || thruputs`, so `NativeCurrency` and
-/// `TimeLock` (or other type scripts) see a legacy transaction and count both
+/// `TimeLock` (or other type scripts) see a single-proof transaction and count both
 /// kinds of inputs toward the input balance. The partition boundary is
 /// `input_membership_proofs.len()`: the first that-many entries are confirmed
 /// inputs, and the remaining `kernel.thruputs.len()` are thruputs.
@@ -182,7 +182,7 @@ impl LinkPrimitiveWitness {
         }
 
         // 4. Type scripts run unchanged over the combined input list, against
-        //    the inner (legacy) kernel's mast hash.
+        //    the inner (transaction) kernel's mast hash.
         let required_type_script_hashes = Utxo::type_script_hashes(
             self.output_utxos
                 .utxos
@@ -451,7 +451,7 @@ mod tests {
     // ------------------------------------------------------------------ positive
 
     /// Lifting a *valid* `PrimitiveWitness` at any thruput count yields a valid
-    /// `LinkPrimitiveWitness` -- for free, off any legacy strategy.
+    /// `LinkPrimitiveWitness` -- for free, off any single-proof strategy.
     #[proptest(cases = 5, async = "tokio")]
     async fn lift_preserves_validity(
         #[strategy(pw_strategy(Some(4)))] pw: PrimitiveWitness,
@@ -473,7 +473,7 @@ mod tests {
         prop_assert!(result.is_ok(), "{result:?}");
     }
 
-    // -------------------------------------------- coverage gap (mirrors legacy)
+    // -------------------------------------------- coverage gap (mirrors single-proof)
 
     /// `validate()` does not check lock-script *coverage* against the inputs;
     /// that binding is `Forge`/`CollectLockScripts`'s job, and

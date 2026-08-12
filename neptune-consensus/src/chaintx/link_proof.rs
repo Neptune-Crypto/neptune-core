@@ -63,10 +63,10 @@ pub(super) fn no_coinbase_leaf() -> Digest {
 /// The MAST leaf a [`LinkKernel`](super::link_kernel::LinkKernel) must carry at
 /// [`LinkKernelField::MergeBit`](super::link_kernel::LinkKernelField::MergeBit).
 ///
-/// The merge bit marks a transaction that has been through `Merge`, which is a
-/// legacy-pipeline operation; nothing in the chain pipeline sets it, and
-/// `Chain` is not a `Merge`. Same constant-leaf treatment, and the same
-/// obligation on every branch, as [`no_coinbase_leaf`].
+/// No transactions in the chain pipeline may set the merge bit. Only the
+/// `Merge` branch in the non-chaining pipeline may set it. Same constant-leaf
+/// treatment, and the same requirement on every branch, as
+/// [`no_coinbase_leaf`].
 pub(super) fn merge_bit_false_leaf() -> Digest {
     Tip5::hash(&false)
 }
@@ -76,15 +76,14 @@ pub(super) fn merge_bit_false_leaf() -> Digest {
 ///
 /// The transaction-chaining analog of
 /// [`SingleProof`](crate::transaction::validity::single_proof::SingleProof),
-/// and structured the same way: a thin dispatcher over the branches of
+/// and structured the same way: a jump table over the branches of
 /// [`LinkProofWitness`](super::link_proof_witness::LinkProofWitness), each of
 /// which is a [`BasicSnippet`](tasm_lib::prelude::BasicSnippet) that
-/// establishes the same claim by a different
-/// route. `Forge` is the entry point, `Chain` combines two link transactions,
-/// `Update` re-targets one at a newer mutator set, and `Cast` pulls a legacy
-/// transaction in.
+/// establishes the same claim by a different route. `Forge` is the entry point,
+/// `Chain` combines two link transactions, `Update` re-syncs one to a newer
+/// mutator set, and `Cast` pulls a non-chaining transaction into this pipeline.
 ///
-/// The dispatcher hands each branch `[own_program_digest] [lkmh] *witness disc`
+/// The jump table hands each branch `[own_program_digest] [lkmh] *witness disc`
 /// and expects `[own_program_digest] [scratch] *witness -1` back. A branch that
 /// does not recurse into `LinkProof` -- `Forge` -- simply leaves the digest
 /// buried; the dispatcher pops it.
@@ -120,8 +119,6 @@ impl TritonProgram for LinkProof {
             single_proof_digest_address: single_proof_digest_alloc.read_address(),
         }));
 
-        // Sum the per-branch equality flags: exactly one may be set. Extend with
-        // `dup n push {DISCRIMINANT_FOR_X} eq` + one more `add` per branch.
         let verify_discriminant_has_legal_value = triton_asm!(
             // _ disc
 
@@ -164,10 +161,8 @@ impl TritonProgram for LinkProof {
             hint link_kernel_mast_hash = stack[0..5]
             // _ [own_program_digest] [lkmh]
 
-            // The `SingleProof` program digest `D`: read here, once, and stashed
-            // where every branch can reach it. Deliberately not handed down on
-            // the stack -- `Chain`'s frame already reaches `own_program_digest`
-            // with `dup 11`, and five more words would bury it past `dup 15`.
+            // The `SingleProof` program digest `D`: read here, once, and store
+            // in memory where every branch can read it.
             read_io {Digest::LEN}
             hint single_proof_program_digest = stack[0..5]
             push {single_proof_digest_alloc.write_address()}
@@ -206,14 +201,8 @@ impl TritonProgram for LinkProof {
             assert error_id {NO_BRANCH_TAKEN_ERROR}
             // _ [own_program_digest] [dispatcher_scratch] *link_proof_witness
 
-            // The digest slot belongs to the dispatcher, and it is scratch: a
-            // branch may leave anything there (`Forge` leaves the inner kernel
-            // root, having reused the slot once `lkmh` went dead). Nothing may
-            // read it -- it is popped here unexamined. Should a check ever need
-            // `lkmh` after dispatch, stash it in a `kmalloc` *here*, once, for
-            // every branch; do not make branches hand it back, which would put
-            // the burden -- and the chance of handing back the wrong digest --
-            // on each of them.
+            // By convention all consensus programs *must* leave the stack
+            // empty.
             pop 1 pop 5 pop 5
             // _
 

@@ -19,12 +19,12 @@ use super::link_kernel::LinkKernelField;
 /// The [`LinkKernel`] analog of
 /// [`AuthenticateTxkField`](crate::transaction::validity::tasm::authenticate_txk_field::AuthenticateTxkField),
 /// and a copy of it but for the tree height and the leaf enum. Deliberately
-/// *not* a shared, height-parameterized snippet: the legacy one is baked into
+/// *not* a shared, height-parameterized snippet: the single-proof one is baked into
 /// the consensus-pinned `SingleProof` hash, so widening it could only ever risk
 /// that hash, for no gain here. (Contrast
 /// [`AuthenticateMsaAgainstTxk`](crate::transaction::validity::tasm::leaf_authentication::authenticate_msa_against_txk::AuthenticateMsaAgainstTxk),
 /// which *was* worth parameterizing: its body is substantial, and its one
-/// legacy caller could absorb the change.)
+/// single-proof caller could absorb the change.)
 ///
 /// Only for leafs whose field is read out of memory. A leaf whose value is fixed
 /// by consensus -- [`no_coinbase_leaf`](super::link_proof::no_coinbase_leaf),

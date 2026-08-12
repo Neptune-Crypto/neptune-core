@@ -13,7 +13,7 @@ use crate::transaction::transaction_kernel::TransactionKernelField;
 /// which the kernel mast hash was built.
 ///
 /// `mast_height` is the height of that tree -- `TransactionKernel::MAST_HEIGHT`
-/// for the legacy pipeline, `LinkKernel::MAST_HEIGHT` for the chaining pipeline.
+/// for the single-proof pipeline, `LinkKernel::MAST_HEIGHT` for the chaining pipeline.
 /// The `MutatorSetHash` leaf index (6) is the same in both kernels, so only the
 /// height varies. The entrypoint deliberately does *not* encode the height: no
 /// single program authenticates against two kernel heights, so a fixed name
@@ -306,7 +306,7 @@ mod tests {
         }
     }
 
-    /// The snippet, instantiated for the legacy `TransactionKernel` (height 3).
+    /// The snippet, instantiated for the `TransactionKernel` (height 3).
     const SNIPPET: AuthenticateMsaAgainstTxk = AuthenticateMsaAgainstTxk {
         mast_height: TransactionKernel::MAST_HEIGHT as u32,
     };

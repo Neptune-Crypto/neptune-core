@@ -106,21 +106,14 @@ impl SingleProofWitness {
     /// The `SingleProof` program of the given rule set.
     //
     // Deliberately *not* a `SecretWitness` impl, unlike every other witness in
-    // this crate: `SingleProof` is two programs from hardfork delta onwards, and
-    // a witness does not know which one it is being proven under. Taking the
-    // rule set here forces every caller to say.
+    // this crate: `SingleProof` is two different programs, one before hardfork
+    // delta and one after. A witness does not know which one it is being proven
+    // under. Taking the rule set here forces every caller to say.
     pub fn program(&self, consensus_rule_set: ConsensusRuleSet) -> Program {
         SingleProof::new(consensus_rule_set).program()
     }
 
     /// The claim this witness is proven against.
-    ///
-    /// Delegates to [`single_proof_claim`], which is the *one* place the shape
-    /// of a `SingleProof` claim is spelled out. Building it here instead would
-    /// mean two constructions that have to agree on both the program digest and
-    /// the claim's Triton VM version -- and the version is part of the
-    /// Fiat-Shamir transcript, so a disagreement is not a mismatched constant
-    /// but a proof that answers nothing.
     pub fn claim(&self, consensus_rule_set: ConsensusRuleSet) -> Claim {
         single_proof_claim(self.kernel_mast_hash(), consensus_rule_set)
     }
@@ -768,9 +761,8 @@ impl TritonProgram for SingleProof {
                 return
         };
 
-        // The `Fix` discriminant is legal only where the branch exists: a
-        // pre-delta program must reject a `Fix` witness rather than fall through
-        // it, which is the same reason this check exists at all.
+        // The `Fix` discriminat is only legal when the branch is active. A
+        // pre-delta program must reject a `Fix` witness.
         let (accept_fix_discriminant, dispatch_fix) = match fix_branch {
             None => (triton_asm!(), triton_asm!()),
             Some(fix_branch) => (
@@ -800,7 +792,7 @@ impl TritonProgram for SingleProof {
             // _ discr (discr == proof_coll || discr == update || discr == merge)
 
             {&accept_fix_discriminant}
-            // _ discr (.. || discr == fix)
+            // _ discr (.. [|| discr == fix])
 
             assert error_id {INVALID_WITNESS_DISCRIMINANT_ERROR}
             // _ discr

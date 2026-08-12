@@ -30,12 +30,11 @@ use crate::transaction::TransactionKernel;
 ///
 /// The thruputs are not among the fields, and neither is the `LinkKernel`. They
 /// do not have to be: a `LinkKernel` with no thruputs is its transaction kernel
-/// paired with a constant (see `no_thruputs_subtree_root`), so the branch
-/// derives the link kernel's MAST hash from the transaction kernel's, and a
-/// `LinkTx` that still carries thruputs simply has no proof answering the claim
-/// the branch builds. The empty thruputs are not a separate check; they are
-/// baked into the constant. This is [`Cast`](crate::chaintx::cast::Cast)'s
-/// binding read in the other direction.
+/// paired with a constant (see `no_thruputs_subtree_root`), so this branch
+/// derives the link kernel's MAST hash from the transaction kernel's under the
+/// assumption that the `thruputs` field is empty. A `LinkTx` that has thruputs
+/// will not have a proof for the claim this branch builds. This branch is the
+/// inverse of [`Cast`](crate::chaintx::cast::Cast).
 ///
 /// The tasm reads only the proof out of the memory image; the kernel is there
 /// for the prover's sake, being bound to the claim through its MAST hash, which
@@ -48,7 +47,7 @@ pub struct FixWitness {
 }
 
 impl FixWitness {
-    /// Send a fully resolved chained transaction back to the legacy pipeline.
+    /// Send a fully resolved chained transaction back to the single-proof pipeline.
     ///
     /// # Panics
     ///
@@ -118,7 +117,7 @@ impl FixWitness {
 }
 
 /// `Fix: LinkTx -> Transaction`: send a chained transaction whose thruputs are
-/// all resolved back to the legacy pipeline, where a block can carry it.
+/// all resolved back to the single-proof pipeline, where a block can include it.
 ///
 /// The counterpart of [`Cast`](crate::chaintx::cast::Cast), and the other half
 /// of the `Fix`/`Cast` cycle break. `Cast` cannot hardcode the `SingleProof`
@@ -126,23 +125,23 @@ impl FixWitness {
 /// hardcode the `LinkProof` digest, which it does here. The dependency between
 /// the two programs runs one way only, and this is that way.
 ///
-/// The branch recursively verifies the link proof against
+/// The branch verifies the link proof against
 /// `{ program: LinkProof, input: [lkmh, own_program_digest()] }`, and that is
 /// nearly all it does. Two things are worth spelling out:
 ///
 /// - **`lkmh` is derived, not divined.** It is the transaction kernel's MAST
 ///   hash -- which the claim being proven *is about* -- paired with the constant
 ///   subtree of an empty thruput list. So the claim binds the link transaction
-///   to this transaction and asserts its thruputs are empty in the same hash.
+///   to this transaction and asserts its thruputs are empty.
 /// - **`D := own_program_digest()`.** Every `LinkProof` in the derivation tree
 ///   was verified against the `D` its claim carries (`Chain` and `Update` copy
-///   it verbatim, `Forge` ignores it, `Cast` is the only one that lets it name a
-///   program), so instantiating it here means: anything reaching a block was
+///   it verbatim, `Forge` ignores it, `Cast` is the only one that lets it name
+///   a program), so instantiating it here means: anything reaching a block was
 ///   `Cast` from a genuine `SingleProof` under these very rules.
 ///
-/// Nothing else is checked. It does not need to be: no coinbase and no merge bit
-/// hold on the link kernel by induction over the `LinkProof` branches, and those
-/// two leafs sit at the same MAST positions in a `LinkKernel` as in the
+/// Nothing else is checked. It does not need to be: no coinbase and no merge
+/// bit hold on the link kernel by induction over the `LinkProof` branches, and
+/// those two leafs sit at the same MAST positions in a `LinkKernel` as in the
 /// `TransactionKernel` it wraps.
 ///
 /// This branch exists only from hardfork delta onwards; see
@@ -227,7 +226,7 @@ impl BasicSnippet for FixBranch {
             // _ [own_program_digest] disc [txk_digest] *witness
 
             /* The link kernel this transaction came from: its kernel, with no
-               thruputs. One hash, because the legacy kernel's eight leafs are
+               thruputs. One hash, because the transaction kernel's eight leafs are
                the left half of the `LinkKernel`'s sixteen and, thruputs being
                empty, the right child is a constant. A link transaction that
                still carries thruputs has a different `lkmh`, hence a claim its
@@ -565,7 +564,7 @@ pub(crate) mod tests {
     /// [`fix_accepts_a_resolved_link_transaction`] takes the same route but
     /// stops at running the program. What this adds is the last step, the one
     /// that says the chain pipeline's output is *interchangeable* with the
-    /// legacy pipeline's: a proof answering the very claim
+    /// single-proof pipeline's: a proof answering the very claim
     /// [`single_proof_claim`] hands to a block.
     ///
     /// This test involves producing proofs and might take a while to complete
@@ -577,7 +576,7 @@ pub(crate) mod tests {
     }
 
     /// The whole `Cast -> Fix` pipeline, end to end -- and a round trip: a
-    /// legacy transaction is pulled into the chain pipeline and sent straight
+    /// single-proof transaction is pulled into the chain pipeline and sent straight
     /// back out, and what comes out answers the claim that went in.
     ///
     /// That equality is the point. `Cast` adds nothing to a transaction and

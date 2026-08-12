@@ -160,7 +160,7 @@ impl ForgeWitness {
     }
 
     /// The *inner* [`TransactionKernel`] MAST hash (height 3), the root of the
-    /// first `2^3` of [`Self::mast_leafs`]. A [`LinkKernel`] reuses the legacy
+    /// first `2^3` of [`Self::mast_leafs`]. A [`LinkKernel`] reuses the transaction
     /// kernel's leafs for its first eight fields (`Inputs..=MergeBit`, before
     /// `Thruputs`), so this is exactly the hash the type scripts and lock
     /// scripts were proven against -- `Forge` must feed *this*, not its own
@@ -688,7 +688,7 @@ impl BasicSnippet for Forge {
     }
 
     /// The digest slot is the dispatcher's scratch space, not a return value:
-    /// this branch leaves the *inner* (legacy `TransactionKernel`) root there,
+    /// this branch leaves the *inner* (`TransactionKernel`) root there,
     /// having reused the slot once `lkmh` went dead. See `LinkProof`.
     fn return_values(&self) -> Vec<(DataType, String)> {
         vec![
@@ -1037,7 +1037,7 @@ impl BasicSnippet for Forge {
             /* Recursively verify every input lock script and every type script
                halts. */
 
-            // Divine the inner (legacy transaction kernel MAST) root and
+            // Divine the inner (transaction kernel MAST) root and
             // authenticate it against lkmh: it is the left child of the
             // LinkKernel root, so hashing it with the divined right sibling
             // must reconstruct lkmh.
@@ -1859,168 +1859,164 @@ pub(crate) mod tests {
     /// the tasm, where the dispatcher does exactly that before `call`ing this
     /// branch.
     pub(in crate::chaintx) fn forge_branch_source(lkmh: Digest, witness: ForgeWitnessMemory) {
-        {
-            let input_utxos: &[Utxo] = &witness.input_utxos.utxos;
-            let aocl: MmrAccumulator = witness.aocl;
+        let input_utxos: &[Utxo] = &witness.input_utxos.utxos;
+        let aocl: MmrAccumulator = witness.aocl;
 
-            // authenticate the mutator set accumulator (mirrors the shared
-            // `AuthenticateMsaAgainstTxk` snippet: bag only the AOCL, take the
-            // swbfi/swbfa digests from the witness)
-            let left = Tip5::hash_pair(aocl.bag_peaks(), witness.swbfi_bagged);
-            let right = Tip5::hash_pair(witness.swbfa_hash, Digest::default());
-            let msah: Digest = Tip5::hash_pair(left, right);
-            tasm::tasmlib_hashing_merkle_verify(
-                lkmh,
-                LinkKernelField::MutatorSetHash as u32,
-                Tip5::hash(&msah),
-                LinkKernel::MAST_HEIGHT as u32,
+        // authenticate the mutator set accumulator (mirrors the shared
+        // `AuthenticateMsaAgainstTxk` snippet: bag only the AOCL, take the
+        // swbfi/swbfa digests from the witness)
+        let left = Tip5::hash_pair(aocl.bag_peaks(), witness.swbfi_bagged);
+        let right = Tip5::hash_pair(witness.swbfa_hash, Digest::default());
+        let msah: Digest = Tip5::hash_pair(left, right);
+        tasm::tasmlib_hashing_merkle_verify(
+            lkmh,
+            LinkKernelField::MutatorSetHash as u32,
+            Tip5::hash(&msah),
+            LinkKernel::MAST_HEIGHT as u32,
+        );
+
+        // authenticate the confirmed removal records and the thruputs
+        tasm::tasmlib_hashing_merkle_verify(
+            lkmh,
+            LinkKernelField::Inputs as u32,
+            Tip5::hash(&witness.confirmed_inputs),
+            LinkKernel::MAST_HEIGHT as u32,
+        );
+        tasm::tasmlib_hashing_merkle_verify(
+            lkmh,
+            LinkKernelField::Thruputs as u32,
+            Tip5::hash(&witness.thruputs),
+            LinkKernel::MAST_HEIGHT as u32,
+        );
+        tasm::tasmlib_hashing_merkle_verify(
+            lkmh,
+            LinkKernelField::Outputs as u32,
+            Tip5::hash(&witness.outputs),
+            LinkKernel::MAST_HEIGHT as u32,
+        );
+
+        // a LinkTx is never a coinbase transaction and never pre-merged
+        tasm::tasmlib_hashing_merkle_verify(
+            lkmh,
+            LinkKernelField::Coinbase as u32,
+            no_coinbase_leaf(),
+            LinkKernel::MAST_HEIGHT as u32,
+        );
+        tasm::tasmlib_hashing_merkle_verify(
+            lkmh,
+            LinkKernelField::MergeBit as u32,
+            merge_bit_false_leaf(),
+            LinkKernel::MAST_HEIGHT as u32,
+        );
+
+        // the two input kinds exactly cover the type-script-facing list
+        let num_confirmed: usize = witness.confirmed_inputs.len();
+        let num_thruputs: usize = witness.thruputs.len();
+        assert_eq!(input_utxos.len(), num_confirmed + num_thruputs);
+
+        let output_utxos: &[Utxo] = &witness.output_utxos.utxos;
+        let num_outputs: usize = witness.outputs.len();
+        assert_eq!(output_utxos.len(), num_outputs);
+
+        // confirmed inputs: RemovalRecordsIntegrity, inlined
+        let mut i: usize = 0;
+        while i < num_confirmed {
+            let utxo_hash = Tip5::hash(&input_utxos[i]);
+
+            let aocl_leaf_index: u64 = tasm::tasmlib_io_read_secin___u64();
+            let receiver_preimage: Digest = tasm::tasmlib_io_read_secin___digest();
+            let sender_randomness: Digest = tasm::tasmlib_io_read_secin___digest();
+            let addition_record: AdditionRecord =
+                commit(utxo_hash, sender_randomness, receiver_preimage.hash());
+            assert!(tasm::mmr_verify_from_secret_in_leaf_index_on_stack(
+                &aocl.peaks(),
+                aocl.num_leafs(),
+                aocl_leaf_index,
+                addition_record.canonical_commitment,
+            ));
+
+            let index_set = AbsoluteIndexSet::compute(
+                utxo_hash,
+                sender_randomness,
+                receiver_preimage,
+                aocl_leaf_index,
             );
+            assert_eq!(index_set, witness.confirmed_inputs[i].absolute_indices);
 
-            // authenticate the confirmed removal records and the thruputs
-            tasm::tasmlib_hashing_merkle_verify(
-                lkmh,
-                LinkKernelField::Inputs as u32,
-                Tip5::hash(&witness.confirmed_inputs),
-                LinkKernel::MAST_HEIGHT as u32,
-            );
-            tasm::tasmlib_hashing_merkle_verify(
-                lkmh,
-                LinkKernelField::Thruputs as u32,
-                Tip5::hash(&witness.thruputs),
-                LinkKernel::MAST_HEIGHT as u32,
-            );
-            tasm::tasmlib_hashing_merkle_verify(
-                lkmh,
-                LinkKernelField::Outputs as u32,
-                Tip5::hash(&witness.outputs),
-                LinkKernel::MAST_HEIGHT as u32,
-            );
+            i += 1;
+        }
 
-            // a LinkTx is never a coinbase transaction and never pre-merged
-            tasm::tasmlib_hashing_merkle_verify(
-                lkmh,
-                LinkKernelField::Coinbase as u32,
-                no_coinbase_leaf(),
-                LinkKernel::MAST_HEIGHT as u32,
-            );
-            tasm::tasmlib_hashing_merkle_verify(
-                lkmh,
-                LinkKernelField::MergeBit as u32,
-                merge_bit_false_leaf(),
-                LinkKernel::MAST_HEIGHT as u32,
-            );
+        // thruputs: each commits to the matching tail input UTXO
+        let mut j: usize = 0;
+        while j < num_thruputs {
+            let utxo_hash = Tip5::hash(&input_utxos[num_confirmed + j]);
 
-            // the two input kinds exactly cover the type-script-facing list
-            let num_confirmed: usize = witness.confirmed_inputs.len();
-            let num_thruputs: usize = witness.thruputs.len();
-            assert_eq!(input_utxos.len(), num_confirmed + num_thruputs);
+            let receiver_digest: Digest = tasm::tasmlib_io_read_secin___digest();
+            let sender_randomness: Digest = tasm::tasmlib_io_read_secin___digest();
+            let addition_record: AdditionRecord =
+                commit(utxo_hash, sender_randomness, receiver_digest);
+            assert_eq!(addition_record, witness.thruputs[j]);
 
-            let output_utxos: &[Utxo] = &witness.output_utxos.utxos;
-            let num_outputs: usize = witness.outputs.len();
-            assert_eq!(output_utxos.len(), num_outputs);
+            j += 1;
+        }
 
-            // confirmed inputs: RemovalRecordsIntegrity, inlined
-            let mut i: usize = 0;
-            while i < num_confirmed {
-                let utxo_hash = Tip5::hash(&input_utxos[i]);
+        // outputs: each addition record commits to the matching output UTXO
+        let mut k: usize = 0;
+        while k < num_outputs {
+            let utxo_hash = Tip5::hash(&output_utxos[k]);
 
-                let aocl_leaf_index: u64 = tasm::tasmlib_io_read_secin___u64();
-                let receiver_preimage: Digest = tasm::tasmlib_io_read_secin___digest();
-                let sender_randomness: Digest = tasm::tasmlib_io_read_secin___digest();
-                let addition_record: AdditionRecord =
-                    commit(utxo_hash, sender_randomness, receiver_preimage.hash());
-                assert!(tasm::mmr_verify_from_secret_in_leaf_index_on_stack(
-                    &aocl.peaks(),
-                    aocl.num_leafs(),
-                    aocl_leaf_index,
-                    addition_record.canonical_commitment,
-                ));
+            let receiver_digest: Digest = tasm::tasmlib_io_read_secin___digest();
+            let sender_randomness: Digest = tasm::tasmlib_io_read_secin___digest();
+            let addition_record: AdditionRecord =
+                commit(utxo_hash, sender_randomness, receiver_digest);
+            assert_eq!(addition_record, witness.outputs[k]);
 
-                let index_set = AbsoluteIndexSet::compute(
-                    utxo_hash,
-                    sender_randomness,
-                    receiver_preimage,
-                    aocl_leaf_index,
-                );
-                assert_eq!(index_set, witness.confirmed_inputs[i].absolute_indices);
+            k += 1;
+        }
 
-                i += 1;
-            }
+        // Divine the inner (height-3) TransactionKernel root and bind it to
+        // lkmh: it is the left child of the LinkKernel root, so hashing it
+        // with the divined right sibling must reconstruct lkmh. Preimage
+        // resistance then pins `inner_root` to the genuine left child -- but
+        // only the *retained* value is authenticated, so the tasm must keep
+        // this exact digest (not re-divine) and feed it to the claims below.
+        let inner_root: Digest = tasm::tasmlib_io_read_secin___digest();
+        let right_sibling: Digest = tasm::tasmlib_io_read_secin___digest();
+        assert_eq!(lkmh, Tip5::hash_pair(inner_root, right_sibling));
 
-            // thruputs: each commits to the matching tail input UTXO
-            let mut j: usize = 0;
-            while j < num_thruputs {
-                let utxo_hash = Tip5::hash(&input_utxos[num_confirmed + j]);
+        // Verify the scripts in the same order the tasm does: type scripts
+        // first, then lock scripts. The order is immaterial to what is
+        // proven, but the shadow must consume the witness proofs (and the
+        // nondeterminism) in the same sequence as the program.
 
-                let receiver_digest: Digest = tasm::tasmlib_io_read_secin___digest();
-                let sender_randomness: Digest = tasm::tasmlib_io_read_secin___digest();
-                let addition_record: AdditionRecord =
-                    commit(utxo_hash, sender_randomness, receiver_digest);
-                assert_eq!(addition_record, witness.thruputs[j]);
+        // every unique type script must halt on the inner root plus the two
+        // salted-UTXO hashes -- the input the type scripts see
+        let type_script_input: Vec<BFieldElement> = [
+            inner_root,
+            Tip5::hash(&witness.input_utxos),
+            Tip5::hash(&witness.output_utxos),
+        ]
+        .into_iter()
+        .flat_map(|d| d.reversed().values())
+        .collect();
+        let type_script_hashes = Utxo::type_script_hashes(input_utxos.iter().chain(output_utxos));
+        assert_eq!(type_script_hashes.len(), witness.type_scripts_halt.len());
+        let mut ts: usize = 0;
+        while ts < type_script_hashes.len() {
+            let claim = Claim::new(type_script_hashes[ts]).with_input(type_script_input.clone());
+            tasm::verify_stark(Stark::default(), &claim, &witness.type_scripts_halt[ts]);
+            ts += 1;
+        }
 
-                j += 1;
-            }
-
-            // outputs: each addition record commits to the matching output UTXO
-            let mut k: usize = 0;
-            while k < num_outputs {
-                let utxo_hash = Tip5::hash(&output_utxos[k]);
-
-                let receiver_digest: Digest = tasm::tasmlib_io_read_secin___digest();
-                let sender_randomness: Digest = tasm::tasmlib_io_read_secin___digest();
-                let addition_record: AdditionRecord =
-                    commit(utxo_hash, sender_randomness, receiver_digest);
-                assert_eq!(addition_record, witness.outputs[k]);
-
-                k += 1;
-            }
-
-            // Divine the inner (height-3) TransactionKernel root and bind it to
-            // lkmh: it is the left child of the LinkKernel root, so hashing it
-            // with the divined right sibling must reconstruct lkmh. Preimage
-            // resistance then pins `inner_root` to the genuine left child -- but
-            // only the *retained* value is authenticated, so the tasm must keep
-            // this exact digest (not re-divine) and feed it to the claims below.
-            let inner_root: Digest = tasm::tasmlib_io_read_secin___digest();
-            let right_sibling: Digest = tasm::tasmlib_io_read_secin___digest();
-            assert_eq!(lkmh, Tip5::hash_pair(inner_root, right_sibling));
-
-            // Verify the scripts in the same order the tasm does: type scripts
-            // first, then lock scripts. The order is immaterial to what is
-            // proven, but the shadow must consume the witness proofs (and the
-            // nondeterminism) in the same sequence as the program.
-
-            // every unique type script must halt on the inner root plus the two
-            // salted-UTXO hashes -- the input the type scripts see
-            let type_script_input: Vec<BFieldElement> = [
-                inner_root,
-                Tip5::hash(&witness.input_utxos),
-                Tip5::hash(&witness.output_utxos),
-            ]
-            .into_iter()
-            .flat_map(|d| d.reversed().values())
-            .collect();
-            let type_script_hashes =
-                Utxo::type_script_hashes(input_utxos.iter().chain(output_utxos));
-            assert_eq!(type_script_hashes.len(), witness.type_scripts_halt.len());
-            let mut ts: usize = 0;
-            while ts < type_script_hashes.len() {
-                let claim =
-                    Claim::new(type_script_hashes[ts]).with_input(type_script_input.clone());
-                tasm::verify_stark(Stark::default(), &claim, &witness.type_scripts_halt[ts]);
-                ts += 1;
-            }
-
-            // every input lock script must halt on that same inner kernel root
-            assert_eq!(input_utxos.len(), witness.lock_scripts_halt.len());
-            let lock_script_input: Vec<BFieldElement> = inner_root.reversed().values().to_vec();
-            let mut l: usize = 0;
-            while l < input_utxos.len() {
-                let claim = Claim::new(input_utxos[l].lock_script_hash())
-                    .with_input(lock_script_input.clone());
-                tasm::verify_stark(Stark::default(), &claim, &witness.lock_scripts_halt[l]);
-                l += 1;
-            }
+        // every input lock script must halt on that same inner kernel root
+        assert_eq!(input_utxos.len(), witness.lock_scripts_halt.len());
+        let lock_script_input: Vec<BFieldElement> = inner_root.reversed().values().to_vec();
+        let mut l: usize = 0;
+        while l < input_utxos.len() {
+            let claim =
+                Claim::new(input_utxos[l].lock_script_hash()).with_input(lock_script_input.clone());
+            tasm::verify_stark(Stark::default(), &claim, &witness.lock_scripts_halt[l]);
+            l += 1;
         }
     }
 
@@ -2101,11 +2097,11 @@ pub(crate) mod tests {
     }
 
     /// The inner height-3 root derived from the first eight leafs must equal
-    /// the legacy `TransactionKernel`'s own MAST hash -- the value lock and
+    /// the `TransactionKernel`'s own MAST hash -- the value lock and
     /// type scripts were proven against. If this drifts, every recursive
     /// script-proof claim is fed the wrong input and silently fails to bind.
     #[proptest(cases = 4)]
-    fn inner_kernel_root_matches_legacy_kernel(
+    fn inner_kernel_root_matches_transaction_kernel(
         #[strategy(LinkPrimitiveWitness::arbitrary_strategy())] lpw: LinkPrimitiveWitness,
     ) {
         let witness = ForgeWitness::without_proofs(&lpw);
