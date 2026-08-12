@@ -1,7 +1,7 @@
 //! Transaction chaining.
 //!
 //! Data structures and consensus programs for the transaction-chaining
-//! (`LinkTx`) pipeline that runs parallel to the legacy `Transaction` pipeline.
+//! (`LinkTx`) pipeline that runs parallel to the single-proof `Transaction` pipeline.
 
 mod authenticate_link_kernel_field;
 pub mod cast;

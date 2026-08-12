@@ -39,7 +39,7 @@ const CAST_KERNEL_IS_NOT_THE_CLAIMED_ONE_ERROR: i128 = 1_000_570;
 
 /// The witness consumed by [`Cast`].
 ///
-/// Holds the legacy transaction being pulled into the chain pipeline: its
+/// Holds the single-proof transaction being pulled into the chain pipeline: its
 /// kernel and the `SingleProof` backing it.
 ///
 /// Like [`ChainWitness`](super::chain::ChainWitness) and
@@ -66,7 +66,7 @@ pub struct CastWitness {
 impl CastWitness {
     /// Pull a `SingleProof`-backed [`Transaction`] into the chain pipeline.
     ///
-    /// The resulting link transaction has no thruputs: a legacy transaction is
+    /// The resulting link transaction has no thruputs: a single-proof transaction is
     /// complete on its own, and all `Cast` adds is the ability to be an operand
     /// of `Chain`.
     ///
@@ -168,7 +168,7 @@ impl SecretWitness for CastWitness {
     }
 }
 
-/// `Cast: Transaction -> LinkTx`: pull a legacy transaction into the chain
+/// `Cast: Transaction -> LinkTx`: pull a single-proof transaction into the chain
 /// pipeline, so that it can be an operand of `Chain`.
 ///
 /// The branch recursively verifies the transaction's `SingleProof` against the
@@ -296,7 +296,7 @@ impl BasicSnippet for Cast {
 
             /* The transaction kernel's MAST hash, and the claimed link kernel
                is it with no thruputs. Divined, then bound to `lkmh` by the one
-               hash below: the legacy kernel's eight leafs are the left half of
+               hash below: the transaction kernel's eight leafs are the left half of
                the `LinkKernel`'s sixteen, so its root is `lkmh`'s left child,
                and with empty thruputs the right child is a constant. The
                recursive verification at the end is what forces the divined
@@ -467,7 +467,7 @@ pub(crate) mod tests {
         )
     }
 
-    /// A legacy transaction enters the chain pipeline: its single proof is
+    /// A single-proof transaction enters the chain pipeline: its single proof is
     /// recursively verified, and the link kernel it is cast to is that
     /// transaction's kernel with no thruputs.
     ///

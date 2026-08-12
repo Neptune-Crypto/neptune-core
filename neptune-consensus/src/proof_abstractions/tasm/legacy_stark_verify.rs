@@ -277,12 +277,7 @@ impl LegacyProverPipeline {
 }
 
 /// Prepare the nondeterminism for in-VM verification of the given (claim,
-/// proof) pair, dispatching on the proof system the proof answers.
-///
-/// The claim's version is stamped by this node from the consensus rule set --
-/// never taken from a peer -- so it soundly selects the proof system, exactly
-/// as `verifier::verify` does on the Rust side: at most the legacy VM's
-/// version means pre-delta.
+/// proof) pair, dispatching on the proof system the proof relates to.
 pub(crate) fn update_nondeterminism_for_stark_verification(
     nondeterminism: &mut NonDeterminism,
     proof: &VmProof,

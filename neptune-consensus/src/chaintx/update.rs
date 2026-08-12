@@ -393,7 +393,7 @@ impl SecretWitness for UpdateWitness {
 /// Thruputs are either a) carried across unchanged, or b) promoted into inputs.
 /// (Right now (b) is not supported yet.)
 ///
-/// Unlike its legacy sibling, `Update` does *not* require a non-empty input set.
+/// Unlike its single-proof sibling, `Update` does *not* require a non-empty input set.
 /// A `LinkTx` may legitimately have zero confirmed inputs -- an all-thruputs
 /// link, funded entirely by its predecessors -- and such a link still has to
 /// follow the mutator set, because `Chain` requires all three of its kernels to
@@ -522,7 +522,7 @@ impl BasicSnippet for Update {
         let field_peaks = field!(MmrAccumulator::peaks);
         let field_leaf_count = field!(MmrAccumulator::leaf_count);
 
-        // A `LinkKernel` composes a legacy `TransactionKernel`, so every legacy
+        // A `LinkKernel` composes a `TransactionKernel`, so every inner
         // field is reached through this one extra hop.
         let field_inner_kernel = field!(LinkKernel::kernel);
         let field_with_size_thruputs = field_with_size!(LinkKernel::thruputs);

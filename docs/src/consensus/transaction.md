@@ -62,6 +62,38 @@ These forms are not independent: each is produced from an earlier one, and once 
 
 Only a `SingleProof`-backed transaction is mineable; `Raise`, `Merge`, and `Update` are the three ways to obtain or preserve one. Note that `Merge` and `Update` consume `SingleProof`s and produce a `SingleProof`, so they can be applied repeatedly.
 
+From hardfork delta onwards, a second pipeline runs parallel to the one above: transaction chaining. A `LinkTx` can spend outputs that the mutator set has not heard of yet: its *thruputs*, each one matched by an output of another `LinkTx` it can be chained with. `Cast` and `Fix` convert between single-proof transactions and chaining transactions.
+
+```text
+  SINGLE-PROOF PIPELINE (Transaction)   CHAIN PIPELINE (LinkTx, HF delta)
+
+        PrimitiveWitness                      LinkPrimitiveWitness
+                │                                       │
+                │ prove each subclaim                   │ Forge
+                ▼                                       │
+         ProofCollection                                │
+                │                                       │
+                │ Raise                                 │
+                ▼                                       ▼
+      ╔══┌─────────────┐                         ┌─────────────┐──┐
+      ║  │             │───────── Cast ─────────▶│             │  │
+      ╚═▶│ SingleProof │                         │   LinkTx    │◀─┘
+         │             │◀───────── Fix ──────────│             │
+         └─────────────┘                         └─────────────┘
+                │
+                │ block appendix claim
+                ▼
+        mineable in a block
+```
+
+The loop on `SingleProof` is `Merge`/`Update`; the loop on `LinkTx` is `Chain`/`Update`. Writing `t` for the number of thruputs a `LinkTx` carries:
+
+ - `Forge` proves lock scripts, type scripts, and input/output integrity as one proof — the chain pipeline has no collection stage — and forges any `t = k ≥ 0`.
+ - `Cast` pulls a `SingleProof`-backed transaction into the chain pipeline; no coinbase no merge bit allowed, and `t := 0`.
+ - `Chain` combines two `LinkTx`es, cutting through the matched output/thruput pairs: `t := t₁ + t₂ − cut`. Only `Chain` can lower `t`.
+ - `Update` (in either pipeline) re-syncs the transaction to a newer mutator set; `t` is unchanged.
+ - `Fix` sends a `t = 0` `LinkTx` back to the single-proof pipeline. After this, the transaction can be included in a block.
+
 For the purpose of describing computations and claims, the following notation is used. The symbol `:` denotes the type of an object, whereas `::` denotes the type signature of a computation (interpreting the input and output streams as arguments and return values, respectively).
 
 ### A: Witness Validity

@@ -17,11 +17,11 @@ use crate::transaction::transaction_kernel::TransactionKernel;
 
 /// The kernel of a chained transaction (`LinkTx`).
 ///
-/// A `LinkKernel` composes a legacy [`TransactionKernel`] with a list of
+/// A `LinkKernel` composes a [`TransactionKernel`] with a list of
 /// *thruputs*: [`AdditionRecord`]s that are simultaneously an *unconfirmed*
 /// input to this transaction and an output of a predecessor in the transaction
 /// chain. The wrapped kernel is reused verbatim -- same fields, same MAST leafs
-/// -- so the view of the type script is exactly a legacy transaction.
+/// -- so the view of the type script is exactly a single-proof transaction.
 ///
 /// The thruputs are carried as one extra MAST leaf beside the existing kernel
 /// leafs (see [`LinkKernelField`]).
@@ -35,7 +35,7 @@ pub struct LinkKernel {
 /// MAST leaf positions of a [`LinkKernel`].
 ///
 /// The first eight variants mirror `TransactionKernelField` exactly, so the
-/// legacy kernel fields keep their leaf positions; `Thruputs` is the one extra
+/// transaction-kernel fields keep their leaf positions; `Thruputs` is the one extra
 /// leaf. (The drift guard `link_kernel_field_mirrors_transaction_kernel_field`
 /// asserts this alignment.)
 #[derive(VariantArray, Debug, Clone, EnumCount, Copy, strum::Display)]
@@ -105,7 +105,7 @@ mod tests {
     use super::*;
     use crate::transaction::transaction_kernel::TransactionKernelField;
 
-    /// The legacy kernel fields must keep their MAST leaf positions, *i.e.*,
+    /// The transaction-kernel fields must keep their MAST leaf positions, *i.e.*,
     /// the first eight `LinkKernelField` variants line up with
     /// `TransactionKernelField`.
     #[test]
@@ -115,12 +115,12 @@ mod tests {
             LinkKernelField::COUNT,
             "LinkKernel adds exactly one leaf"
         );
-        for (legacy, link) in TransactionKernelField::VARIANTS
+        for (txk_field, link_field) in TransactionKernelField::VARIANTS
             .iter()
             .zip(LinkKernelField::VARIANTS.iter())
         {
-            assert_eq!(legacy.discriminant(), link.discriminant());
-            assert_eq!(legacy.to_string(), link.to_string());
+            assert_eq!(txk_field.discriminant(), link_field.discriminant());
+            assert_eq!(txk_field.to_string(), link_field.to_string());
         }
         assert_eq!(
             TransactionKernelField::COUNT,

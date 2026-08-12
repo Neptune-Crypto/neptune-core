@@ -52,13 +52,13 @@ impl LinkTxProof {
 /// A chained transaction: a [`LinkKernel`] together with the [`LinkTxProof`]
 /// that backs it.
 ///
-/// This is the transaction-chaining analog of the legacy
+/// This is the transaction-chaining analog of the single-proof
 /// [`Transaction`](crate::transaction::Transaction), and spans the same
 /// lifecycle: it starts witness-backed ([`LinkTxProof::Witness`]) and becomes
 /// proof-backed ([`LinkTxProof::Proof`]) once `Forge` runs.
 ///
 /// A `LinkTx` whose `kernel.thruputs` is non-empty is *unresolved*: not yet
-/// block-eligible. It becomes block-borne only after `Fix` sends it to a legacy
+/// block-eligible. It becomes block-borne only after `Fix` sends it to a
 /// SingleProof-backed `Transaction`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize)]
 pub struct LinkTx {

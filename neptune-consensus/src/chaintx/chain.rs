@@ -531,7 +531,7 @@ impl BasicSnippet for Chain {
         let field_left_proof = field!(ChainWitness::left_proof);
         let field_right_proof = field!(ChainWitness::right_proof);
 
-        // A `LinkKernel` composes a legacy `TransactionKernel`, so every legacy
+        // A `LinkKernel` composes a `TransactionKernel`, so every inner
         // field is reached through this one extra hop.
         let field_inner_kernel = field!(LinkKernel::kernel);
         let field_thruputs = field!(LinkKernel::thruputs);
