@@ -12,6 +12,9 @@ use tasm_lib::triton_vm::proof::Proof as VmProof;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib_legacy::traits::basic_snippet::BasicSnippet as LegacyBasicSnippet;
 use tasm_lib_legacy::triton_vm as triton_vm_legacy;
+use tasm_lib_legacy::triton_vm::proof::Proof as LegacyProof;
+use tasm_lib_legacy::triton_vm::proof_stream::ProofStream as LegacyProofStream;
+use tasm_lib_legacy::triton_vm::stark::Stark as LegacyStark;
 
 use crate::consensus_rule_set::ConsensusRuleSet;
 
@@ -55,6 +58,42 @@ pub(crate) struct LegacyStarkVerify {
 }
 
 impl LegacyStarkVerify {
+    /// Determine whether the proof holds exactly those proof items that the
+    /// legacy Triton VM verifier reads, and no others.
+    pub(crate) fn has_expected_num_proof_items(proof: &VmProof) -> bool {
+        /// Items read outside of FRI: the padded height, three Merkle roots,
+        /// four out-of-domain rows, the out-of-domain quotient segments, and,
+        /// for each of the three tables, the revealed rows plus their
+        /// authentication structure.
+        const NUM_ITEMS_OUTSIDE_FRI: usize = 15;
+
+        /// Items read by FRI independently of the number of rounds: the Merkle
+        /// root of the first round, the last round's codeword and polynomial,
+        /// and the first round's revealed leafs.
+        const NUM_ROUND_INDEPENDENT_FRI_ITEMS: usize = 4;
+
+        /// Items read by FRI for every round: a Merkle root, and the revealed
+        /// leafs of the round's partial codeword.
+        const NUM_FRI_ITEMS_PER_ROUND: usize = 2;
+
+        let proof = LegacyProof(proof.0.clone());
+        let Ok(proof_stream) = LegacyProofStream::try_from(&proof) else {
+            return false;
+        };
+        let Ok(padded_height) = proof.padded_height() else {
+            return false;
+        };
+        let Ok(fri) = LegacyStark::default().fri(padded_height) else {
+            return false;
+        };
+
+        let expected_num_items = NUM_ITEMS_OUTSIDE_FRI
+            + NUM_ROUND_INDEPENDENT_FRI_ITEMS
+            + NUM_FRI_ITEMS_PER_ROUND * fri.num_rounds();
+
+        proof_stream.items.len() == expected_num_items
+    }
+
     pub(crate) fn new_with_dynamic_layout() -> Self {
         let inner = tasm_lib_legacy::verifier::stark_verify::StarkVerify::new_with_dynamic_layout(
             triton_vm_legacy::stark::Stark::default(),
@@ -214,6 +253,18 @@ pub(crate) fn uses_legacy_proof_system(consensus_rule_set: ConsensusRuleSet) -> 
 /// Never taken from a peer. so it soundly selects the proof system.
 pub fn claim_uses_legacy_proof_system(claim: &Claim) -> bool {
     claim.version <= triton_vm_legacy::proof::CURRENT_VERSION
+}
+
+/// The padded height encoded in the proof, decoded under the proof system that
+/// the claim's version selects.
+/// Returns `None` if the proof does not decode under the selected proof system,
+/// or does not encode exactly one padded height.
+pub(crate) fn proof_padded_height(claim: &Claim, proof: &VmProof) -> Option<usize> {
+    if claim_uses_legacy_proof_system(claim) {
+        LegacyProof(proof.0.clone()).padded_height().ok()
+    } else {
+        proof.padded_height().ok()
+    }
 }
 
 /// The pre-delta prover pipeline: trace and prove under the legacy proof
