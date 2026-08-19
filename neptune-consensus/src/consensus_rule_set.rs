@@ -108,7 +108,7 @@ pub enum TritonProofVersion {
     V0,
     V1,
     V5,
-    V7,
+    V8,
 }
 
 impl TritonProofVersion {
@@ -118,7 +118,7 @@ impl TritonProofVersion {
             TritonProofVersion::V0 => 0,
             TritonProofVersion::V1 => 1,
             TritonProofVersion::V5 => 5,
-            TritonProofVersion::V7 => 7,
+            TritonProofVersion::V8 => 8,
         }
     }
 }
@@ -288,7 +288,7 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::TvmProofVersion1 => TritonProofVersion::V1,
             ConsensusRuleSet::HardforkBeta => TritonProofVersion::V1,
             ConsensusRuleSet::HardforkGamma => TritonProofVersion::V5,
-            ConsensusRuleSet::HardforkDelta => TritonProofVersion::V7,
+            ConsensusRuleSet::HardforkDelta => TritonProofVersion::V8,
         }
     }
 
@@ -554,7 +554,7 @@ pub(crate) mod tests {
                 .version(),
         );
         assert_eq!(
-            7,
+            8,
             ConsensusRuleSet::HardforkDelta
                 .triton_proof_version()
                 .version(),
