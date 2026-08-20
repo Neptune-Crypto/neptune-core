@@ -18,6 +18,7 @@ use bytesize::ByteSize;
 use get_size2::GetSize;
 use itertools::Itertools;
 use neptune_consensus::block::Block;
+use neptune_consensus::chaintx::link_tx::LinkTx;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
 use neptune_consensus::transaction::Transaction;
@@ -61,6 +62,7 @@ use tasm_lib::twenty_first::prelude::BFieldCodec;
 use tracing::debug;
 use tracing::error;
 
+use crate::any_tx::AnyTx;
 use crate::mempool_event::MempoolEvent;
 use crate::mempool_update_job::MempoolUpdateJob;
 use crate::merge_input_cache::MergeInputCache;
@@ -78,12 +80,12 @@ pub const MEMPOOL_TX_THRESHOLD_AGE: Timestamp = Timestamp::hours(10);
 
 pub const TRANSACTION_NOTIFICATION_AGE_LIMIT_IN_SECS: u64 = 60 * 60 * 24;
 
-type LookupItem<'a> = (TransactionKernelId, &'a Transaction);
+type LookupItem<'a> = (TransactionKernelId, &'a AnyTx);
 
 #[derive(Debug, GetSize, Clone)]
 #[cfg_attr(any(test, feature = "test-helpers"), derive(serde::Serialize))]
 struct MempoolTransaction {
-    transaction: Transaction,
+    transaction: AnyTx,
 
     /// The value of a transaction for the node operator.
     upgrade_priority: UpgradePriority,
@@ -203,6 +205,72 @@ pub struct Mempool {
     upgrade_failures: HashSet<TransactionKernelId>,
 }
 
+/// The quality a mempool member or arrival occupies in the mempool's
+/// replacement hierarchy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ContestTier {
+    /// primitive-witness backed, either link transaction or regular transaction.
+    Witness,
+
+    /// One proving step away from block eligibility. Proof collection or
+    /// LinkTx.
+    Intermediate,
+    SingleProof,
+}
+
+impl AnyTx {
+    fn contest_tier(&self) -> ContestTier {
+        match self {
+            AnyTx::Standard(transaction) => match &transaction.proof {
+                TransactionProof::Witness(_) => ContestTier::Witness,
+                TransactionProof::ProofCollection(_) => ContestTier::Intermediate,
+                TransactionProof::SingleProof(_) => ContestTier::SingleProof,
+            },
+            AnyTx::Link(link_tx) => {
+                if link_tx.proof.is_proof() {
+                    ContestTier::Intermediate
+                } else {
+                    ContestTier::Witness
+                }
+            }
+        }
+    }
+}
+
+/// Whether an arrival replaces its conflicts on proof quality alone,
+/// irrespective of fee densities.
+///
+/// Considers both the proofs proximity to block inclusion and sync status.
+fn new_tx_wins_by_quality(
+    new_tier: ContestTier,
+    new_txid: TransactionKernelId,
+    new_tx_mutator_set_hash: Digest,
+    conflicts: &HashMap<TransactionKernelId, &AnyTx>,
+    current_msa_hash: Digest,
+) -> bool {
+    match new_tier {
+        ContestTier::Witness => conflicts.values().all(|existing_tx| {
+            existing_tx.contest_tier() == ContestTier::Witness
+                && existing_tx.kernel().mutator_set_hash != current_msa_hash
+                && new_tx_mutator_set_hash == current_msa_hash
+        }),
+        ContestTier::Intermediate => {
+            conflicts
+                .values()
+                .any(|x| x.contest_tier() == ContestTier::Witness)
+                || conflicts.values().all(|existing_tx| {
+                    existing_tx.contest_tier() == ContestTier::Intermediate
+                        && existing_tx.kernel().mutator_set_hash != current_msa_hash
+                        && new_tx_mutator_set_hash == current_msa_hash
+                })
+        }
+        ContestTier::SingleProof => conflicts.iter().any(|(conflicting_txkid, conflicting_tx)| {
+            conflicting_tx.contest_tier() != ContestTier::SingleProof
+                || *conflicting_txkid == new_txid && new_tx_mutator_set_hash == current_msa_hash
+        }),
+    }
+}
+
 /// Enumerate ways that transactions in the mempool can be filtered.
 enum TxMatcher<'a> {
     Inputs(&'a HashSet<AbsoluteIndexSet>),
@@ -297,7 +365,12 @@ impl Mempool {
             return !self.merge_input_cache.contains(&new_tx_txid);
         };
 
-        match existing_tx.transaction.proof.proof_quality() {
+        let Some(existing_tx) = existing_tx.transaction.as_standard() else {
+            // Existing transaction is a link transaction.
+            return matches!(new_tx_proof_quality, TransactionProofQuality::SingleProof);
+        };
+
+        match existing_tx.proof.proof_quality() {
             Ok(mempool_proof_quality) => {
                 if mempool_proof_quality > new_tx_proof_quality {
                     // New tx has lower proof quality.
@@ -307,7 +380,7 @@ impl Mempool {
                     // represents a valid mutator set, if it does, return
                     // true as the new transaction is more likely to be
                     // included in a block when it's synced.
-                    existing_tx.transaction.kernel.mutator_set_hash != self.tip_mutator_set_hash
+                    existing_tx.kernel.mutator_set_hash != self.tip_mutator_set_hash
                         && new_tx_mutator_set_hash == self.tip_mutator_set_hash
                 } else {
                     // New tx has higher proof quality.
@@ -370,8 +443,12 @@ impl Mempool {
                 .map(|(txid, _)| (txid, UpgradePriority::Irrelevant)),
         ) {
             let candidate = self
-                .get(txid)
+                .get_any(txid)
                 .expect("Referenced tx in iterators must exist");
+
+            let Some(candidate) = candidate.as_standard() else {
+                continue;
+            };
 
             let TransactionProof::SingleProof(single_proof) = &candidate.proof else {
                 continue;
@@ -440,16 +517,20 @@ impl Mempool {
                 continue;
             }
 
-            if self.tx_is_synced(&candidate.transaction.kernel) {
+            let Some(transaction) = candidate.transaction.as_standard() else {
+                continue;
+            };
+
+            if self.tx_is_synced(&transaction.kernel) {
                 continue;
             }
 
             // Transactions with no inputs cannot be updated.
-            if candidate.transaction.kernel.inputs.is_empty() {
+            if transaction.kernel.inputs.is_empty() {
                 continue;
             }
 
-            let TransactionProof::SingleProof(single_proof) = &candidate.transaction.proof else {
+            let TransactionProof::SingleProof(single_proof) = &transaction.proof else {
                 continue;
             };
 
@@ -460,7 +541,7 @@ impl Mempool {
             }
 
             return Some((
-                &candidate.transaction.kernel,
+                &transaction.kernel,
                 single_proof,
                 candidate.upgrade_priority,
             ));
@@ -501,8 +582,11 @@ impl Mempool {
                 continue;
             }
 
-            let TransactionProof::ProofCollection(proof_collection) = &candidate.transaction.proof
-            else {
+            let Some(candidate_tx) = candidate.transaction.as_standard() else {
+                continue;
+            };
+
+            let TransactionProof::ProofCollection(proof_collection) = &candidate_tx.proof else {
                 continue;
             };
 
@@ -517,7 +601,7 @@ impl Mempool {
             }
 
             return Some((
-                &candidate.transaction.kernel,
+                &candidate_tx.kernel,
                 proof_collection,
                 candidate.upgrade_priority,
             ));
@@ -554,19 +638,21 @@ impl Mempool {
                 continue;
             }
 
-            if !self.tx_is_synced(&candidate.transaction.kernel) {
+            let Some(candidate_tx) = candidate.transaction.as_standard() else {
+                continue;
+            };
+
+            if !self.tx_is_synced(&candidate_tx.kernel) {
                 continue;
             }
 
-            let TransactionProof::SingleProof(_) = &candidate.transaction.proof else {
+            let TransactionProof::SingleProof(_) = &candidate_tx.proof else {
                 continue;
             };
 
             // Do not attempt to merge transactions that neither have a value to
             // us nor pay a fee.
-            if candidate.upgrade_priority.is_irrelevant()
-                && candidate.transaction.kernel.fee.is_zero()
-            {
+            if candidate.upgrade_priority.is_irrelevant() && candidate_tx.kernel.fee.is_zero() {
                 continue;
             }
 
@@ -611,10 +697,16 @@ impl Mempool {
         }
 
         let [left, right] = ret.try_into().ok()?;
-        let left = &self.tx_dictionary.get(&left).unwrap().transaction;
-        let right = &self.tx_dictionary.get(&right).unwrap().transaction;
-        let candidates =
-            [left, right].map(|t| (t.kernel.to_owned(), t.proof.to_owned().into_single_proof()));
+        let candidates = [left, right].map(|txid| {
+            let t = self
+                .tx_dictionary
+                .get(&txid)
+                .unwrap()
+                .transaction
+                .as_standard()
+                .expect("selected candidates must be single-proof backed transactions");
+            (t.kernel.to_owned(), t.proof.to_owned().into_single_proof())
+        });
         Some((candidates, priority))
     }
 
@@ -627,14 +719,18 @@ impl Mempool {
 
     /// get transaction from mempool
     ///
+    /// Returns `None` for link-transactions.
+    ///
     /// Computes in O(1) from HashMap
     pub fn get(&self, transaction_id: TransactionKernelId) -> Option<&Transaction> {
         self.tx_dictionary
             .get(&transaction_id)
-            .map(|x| &x.transaction)
+            .and_then(|x| x.transaction.as_standard())
     }
 
     /// get transaction from mempool, with its associated upgrade priority.
+    ///
+    /// Returns `None` for link-transactions.
     ///
     /// Computes in O(1) from HashMap
     pub fn get_with_priority(
@@ -643,7 +739,16 @@ impl Mempool {
     ) -> Option<(&Transaction, UpgradePriority)> {
         self.tx_dictionary
             .get(&transaction_id)
-            .map(|x| (&x.transaction, x.upgrade_priority))
+            .and_then(|x| x.transaction.as_standard().map(|t| (t, x.upgrade_priority)))
+    }
+
+    /// get transaction from mempool, on whichever pipeline it is.
+    ///
+    /// Computes in O(1) from HashMap
+    fn get_any(&self, transaction_id: TransactionKernelId) -> Option<&AnyTx> {
+        self.tx_dictionary
+            .get(&transaction_id)
+            .map(|x| &x.transaction)
     }
 
     /// Returns an iterator over mempool items that are in conflict (not
@@ -661,7 +766,7 @@ impl Mempool {
 
         self.tx_dictionary.iter().filter(move |(_txkid, mptx)| {
             mptx.transaction
-                .kernel
+                .kernel()
                 .inputs
                 .iter()
                 .any(|rr| tx_sbf_index_sets.contains(&rr.absolute_indices.to_array()))
@@ -697,13 +802,13 @@ impl Mempool {
         self.transactions_kicked_by_block(block)
             .filter(move |(_txkid, mptx)| {
                 mptx.transaction
-                    .kernel
+                    .kernel()
                     .outputs
                     .iter()
                     .all(|ar| block_outputs.contains(ar))
                     && mptx
                         .transaction
-                        .kernel
+                        .kernel()
                         .inputs
                         .iter()
                         .all(|rr| block_inputs.contains(&rr.absolute_indices))
@@ -744,53 +849,6 @@ impl Mempool {
     ///   0 events: tx not added because an older conflicting tx has a higher
     ///             fee.
     pub fn insert(&mut self, new_tx: Transaction, priority: UpgradePriority) -> Vec<MempoolEvent> {
-        fn new_tx_has_higher_proof_quality_than_conflicts(
-            new_tx: &Transaction,
-            conflicts: &HashMap<TransactionKernelId, &Transaction>,
-            current_msa_hash: Digest,
-        ) -> bool {
-            match &new_tx.proof {
-                TransactionProof::Witness(witness) => {
-                    // A primitive witness backed transaction *can* replace
-                    // another transaction, if the other transaction is also
-                    // primitive witness backed, *and* it is synced against a
-                    // the current mutator set, and the previous one is not.
-                    conflicts.iter().all(|(_, existing_tx)| {
-                        matches!(&existing_tx.proof, TransactionProof::Witness(_))
-                            && existing_tx.kernel.mutator_set_hash != current_msa_hash
-                            && witness.kernel.mutator_set_hash == current_msa_hash
-                    })
-                }
-                TransactionProof::ProofCollection(_) => {
-                    // A ProofCollection backed transaction will always replace
-                    // a primitive witness backed transaction, and will replace
-                    // other proof collection backed transaction if the mutator
-                    // set is updated, and the old transaction does not have an
-                    // updated mutator set.
-                    conflicts
-                        .iter()
-                        .any(|x| matches!(&x.1.proof, TransactionProof::Witness(_)))
-                        || conflicts.iter().all(|(_, existing_tx)| {
-                            matches!(&existing_tx.proof, TransactionProof::ProofCollection(_))
-                                && existing_tx.kernel.mutator_set_hash != current_msa_hash
-                                && new_tx.kernel.mutator_set_hash == current_msa_hash
-                        })
-                }
-                TransactionProof::SingleProof(_) => {
-                    // A SingleProof-backed transaction kicks out conflicts if
-                    // a) any conflicts are not SingleProof, or
-                    // b) the conflict (as there can be only one) has the same
-                    //    txk-id, which indicates mutator set update, and the
-                    //    new transaction has an updated mutator set hash.
-                    conflicts.iter().any(|(conflicting_txkid, conflicting_tx)| {
-                        !matches!(&conflicting_tx.proof, TransactionProof::SingleProof(_))
-                            || *conflicting_txkid == new_tx.kernel.txid()
-                                && new_tx.kernel.mutator_set_hash == current_msa_hash
-                    })
-                }
-            }
-        }
-
         // If transaction to be inserted conflicts with transactions already in
         // the mempool, we replace them -- but only if the new transaction has a
         // higher fee-density than the ones already in mempool, or if it has
@@ -800,7 +858,7 @@ impl Mempool {
         // that were merged since the merged transaction is *very* likely to
         // have a higher fee density that the lowest one of the ones that were
         // merged.
-        let conflicts: HashMap<TransactionKernelId, &Transaction> = self
+        let conflicts: HashMap<TransactionKernelId, &AnyTx> = self
             .transactions_in_conflict_with(&new_tx.kernel)
             .map(|(txkid, mptx)| (*txkid, &mptx.transaction))
             .collect();
@@ -808,7 +866,7 @@ impl Mempool {
         // Do not insert an existing transaction again, if its an exact copy.
         let txid = new_tx.txid();
         if let Some(existing_tx) = conflicts.get(&txid)
-            && **existing_tx == new_tx
+            && existing_tx.as_standard() == Some(&new_tx)
         {
             return vec![];
         }
@@ -841,25 +899,32 @@ impl Mempool {
             .map(|conflicting| conflicting.upgrade_priority)
             .fold(priority, |acc, conflicting| acc.max(conflicting));
 
-        let new_tx = MempoolTransaction {
-            transaction: new_tx,
-            upgrade_priority: priority,
-            primitive_witness,
-        };
-
         let mut events = vec![];
-        let new_tx_has_higher_proof_quality = new_tx_has_higher_proof_quality_than_conflicts(
-            &new_tx.transaction,
+        let new_tier = match &new_tx.proof {
+            TransactionProof::Witness(_) => ContestTier::Witness,
+            TransactionProof::ProofCollection(_) => ContestTier::Intermediate,
+            TransactionProof::SingleProof(_) => ContestTier::SingleProof,
+        };
+        let new_tx_has_higher_proof_quality = new_tx_wins_by_quality(
+            new_tier,
+            txid,
+            new_tx.kernel.mutator_set_hash,
             &conflicts,
             self.tip_mutator_set_hash,
         );
+        let new_tx_fee_density = new_tx.fee_density();
         let min_fee_of_conflicts = conflicts.values().map(|tx| tx.fee_density()).min();
         let conflicts = conflicts
             .into_iter()
-            .map(|x| (x.0, x.1.proof.as_single_proof()))
+            .map(|x| {
+                (
+                    x.0,
+                    x.1.as_standard().and_then(|t| t.proof.as_single_proof()),
+                )
+            })
             .collect_vec();
         if let Some(min_fee_of_conflicting_tx) = min_fee_of_conflicts {
-            let better_fee_density = min_fee_of_conflicting_tx < new_tx.transaction.fee_density();
+            let better_fee_density = min_fee_of_conflicting_tx < new_tx_fee_density;
             let should_replace_conflict = new_tx_has_higher_proof_quality || better_fee_density;
             if should_replace_conflict {
                 for (conflicting_txid, single_proof) in conflicts {
@@ -873,11 +938,8 @@ impl Mempool {
                     // Conditionally store existing transaction in conflict
                     // cache.
                     if let Some(old_proof) = single_proof
-                        && new_tx.transaction.proof.is_single_proof()
-                        && TransactionKernel::have_merge_relationship(
-                            &new_tx.transaction.kernel,
-                            removed,
-                        )
+                        && new_tx.proof.is_single_proof()
+                        && TransactionKernel::have_merge_relationship(&new_tx.kernel, removed)
                     {
                         let upgrade_priority = self
                             .upgrade_priorities
@@ -906,11 +968,149 @@ impl Mempool {
 
         // Insert the new transaction, if transaction with this txid already
         // existed, add the implied removal to events list.
-        self.fee_densities
-            .push(txid, new_tx.transaction.fee_density());
-        events.push(MempoolEvent::AddTx(new_tx.transaction.kernel.clone()));
+        self.fee_densities.push(txid, new_tx_fee_density);
+        events.push(MempoolEvent::AddTx(new_tx.kernel.clone()));
+        let new_tx = MempoolTransaction {
+            transaction: AnyTx::Standard(Box::new(new_tx)),
+            upgrade_priority: priority,
+            primitive_witness,
+        };
         if let Some(removed) = self.tx_dictionary.insert(txid, new_tx) {
-            events.push(MempoolEvent::RemoveTx(removed.transaction.kernel));
+            events.push(MempoolEvent::RemoveTx(removed.transaction.into_kernel()));
+        }
+
+        if !priority.is_irrelevant() {
+            self.upgrade_priorities.push(txid, priority);
+        }
+
+        assert_eq!(
+            self.tx_dictionary.len(),
+            self.fee_densities.len(),
+            "mempool's table and queue length must agree prior to shrink"
+        );
+        assert!(
+            self.upgrade_priorities.len() <= self.tx_dictionary.len(),
+            "Length of upgrade priority queue may not exceed num txs"
+        );
+
+        let dropped_bc_size_restriction = self.shrink_to_max_size();
+        events.extend(dropped_bc_size_restriction);
+
+        assert_eq!(
+            self.tx_dictionary.len(),
+            self.fee_densities.len(),
+            "mempool's table and queue length must agree after shrink"
+        );
+        assert!(
+            self.upgrade_priorities.len() <= self.tx_dictionary.len(),
+            "Length of upgrade priority queue may not exceed num txs"
+        );
+
+        MempoolEvent::normalize(events)
+    }
+
+    /// Insert a link transaction into the mempool. It is the caller's
+    /// responsibility to validate the transaction.
+    ///
+    /// Conflicts on shared confirmed inputs follow the same replacement
+    /// contest as [`Self::insert`].
+    ///
+    /// This method may return the same events as [`Self::insert`].
+    pub fn insert_link(
+        &mut self,
+        new_link: LinkTx,
+        priority: UpgradePriority,
+    ) -> Vec<MempoolEvent> {
+        let txid = new_link.txid();
+
+        let mut same_id_win = false;
+        if let Some(existing) = self.get_any(txid) {
+            let AnyTx::Link(existing) = existing else {
+                return vec![];
+            };
+
+            // Do not insert an existing link transaction again, if its an
+            // exact copy.
+            if **existing == new_link {
+                return vec![];
+            }
+
+            same_id_win = match (existing.proof.is_proof(), new_link.proof.is_proof()) {
+                (false, true) => true,
+                (true, false) => false,
+                _ => {
+                    !self.tx_is_synced(&existing.kernel.kernel)
+                        && self.tx_is_synced(&new_link.kernel.kernel)
+                }
+            };
+            if !same_id_win {
+                return vec![];
+            }
+        }
+
+        let mut conflicts: HashMap<TransactionKernelId, &AnyTx> = self
+            .transactions_in_conflict_with(&new_link.kernel.kernel)
+            .map(|(txkid, mptx)| (*txkid, &mptx.transaction))
+            .collect();
+        if same_id_win && let Some(existing) = self.tx_dictionary.get(&txid) {
+            conflicts.insert(txid, &existing.transaction);
+        }
+
+        let new_tier = if new_link.proof.is_proof() {
+            ContestTier::Intermediate
+        } else {
+            ContestTier::Witness
+        };
+        let quality_win = same_id_win
+            || new_tx_wins_by_quality(
+                new_tier,
+                txid,
+                new_link.kernel.kernel.mutator_set_hash,
+                &conflicts,
+                self.tip_mutator_set_hash,
+            );
+        let new_link_fee_density = new_link.fee_density();
+        let min_fee_of_conflicts = conflicts.values().map(|tx| tx.fee_density()).min();
+        let victims = conflicts.keys().copied().collect_vec();
+
+        // The inserted link must inherit at least the highest priority among
+        // the conflicts it replaces; see [`Self::insert`].
+        let priority = victims
+            .iter()
+            .filter_map(|conflicting_txid| self.tx_dictionary.get(conflicting_txid))
+            .map(|conflicting| conflicting.upgrade_priority)
+            .fold(priority, |acc, conflicting| acc.max(conflicting));
+
+        let mut events = vec![];
+        if let Some(min_fee_of_conflicting_tx) = min_fee_of_conflicts {
+            let better_fee_density = min_fee_of_conflicting_tx < new_link_fee_density;
+            if !(quality_win || better_fee_density) {
+                debug!(
+                    "Attempted to insert link transaction into mempool but it's \
+                     fee density was eclipsed by another transaction."
+                );
+                return events;
+            }
+
+            // Links do not participate in the merge-input cache; conflicts
+            // are simply removed.
+            for conflicting_txid in victims {
+                let e = self
+                    .remove(conflicting_txid)
+                    .unwrap_or_else(|| panic!("Reported conflict {conflicting_txid} must exist"));
+                events.push(e);
+            }
+        }
+
+        self.fee_densities.push(txid, new_link_fee_density);
+        events.push(MempoolEvent::AddTx(new_link.kernel.kernel.clone()));
+        let new_link = MempoolTransaction {
+            transaction: AnyTx::Link(Box::new(new_link)),
+            upgrade_priority: priority,
+            primitive_witness: None,
+        };
+        if let Some(removed) = self.tx_dictionary.insert(txid, new_link) {
+            events.push(MempoolEvent::RemoveTx(removed.transaction.into_kernel()));
         }
 
         if !priority.is_irrelevant() {
@@ -951,7 +1151,7 @@ impl Mempool {
             self.fee_densities.remove(&transaction_id);
             self.upgrade_priorities.remove(&transaction_id);
             debug_assert_eq!(self.tx_dictionary.len(), self.fee_densities.len());
-            MempoolEvent::RemoveTx(tx.transaction.kernel)
+            MempoolEvent::RemoveTx(tx.transaction.into_kernel())
         })
     }
 
@@ -1006,9 +1206,12 @@ impl Mempool {
         let mut count = 0;
         for (txid, _) in self.fee_density_iter() {
             let tx = self
-                .get(txid)
+                .get_any(txid)
                 .expect("Transaction referenced in fee density iter must exist in mempool.");
-            if tx.proof.proof_type() == proof_quality {
+            if tx
+                .as_standard()
+                .is_some_and(|t| t.proof.proof_type() == proof_quality)
+            {
                 count += 1;
             }
         }
@@ -1037,14 +1240,14 @@ impl Mempool {
         let is_match: Box<dyn Fn(&MempoolTransaction) -> bool> = match match_method {
             TxMatcher::Inputs(index_sets) => Box::new(move |tx| {
                 tx.transaction
-                    .kernel
+                    .kernel()
                     .inputs
                     .iter()
                     .any(|ais| index_sets.contains(&ais.absolute_indices))
             }),
             TxMatcher::Outputs(addition_records) => Box::new(move |tx| {
                 tx.transaction
-                    .kernel
+                    .kernel()
                     .outputs
                     .iter()
                     .any(|ar| addition_records.contains(ar))
@@ -1059,8 +1262,11 @@ impl Mempool {
                 .get(&txid)
                 .expect("Txid returned by fee density iter must match tx in mempool");
 
-            let sp_backed_and_synced = tx.transaction.proof.is_single_proof()
-                && tx.transaction.kernel.mutator_set_hash == self.tip_mutator_set_hash;
+            let sp_backed_and_synced = tx
+                .transaction
+                .as_standard()
+                .is_some_and(|t| t.proof.is_single_proof())
+                && tx.transaction.kernel().mutator_set_hash == self.tip_mutator_set_hash;
             if is_match(tx) {
                 let queue_position = if sp_backed_and_synced {
                     Some(queue_count)
@@ -1069,7 +1275,7 @@ impl Mempool {
                 };
 
                 matching_txs_with_queue_position
-                    .push((tx.transaction.kernel.clone(), queue_position));
+                    .push((tx.transaction.kernel().clone(), queue_position));
             }
 
             if sp_backed_and_synced {
@@ -1178,12 +1384,12 @@ impl Mempool {
 
         let mut transactions = vec![];
 
-        for (transaction_digest, _fee_density) in self.fee_density_iter() {
+        for (txkid, _fee_density) in self.fee_density_iter() {
             if max_num_txs.is_some_and(|max| transactions.len() == max) {
                 break;
             }
 
-            if let Some(transaction_ptr) = self.get(transaction_digest) {
+            if let Some(transaction_ptr) = self.get(txkid) {
                 // Only return transaction synced to tip
                 if !self.tx_is_synced(&transaction_ptr.kernel) {
                     continue;
@@ -1249,7 +1455,7 @@ impl Mempool {
 
             debug_assert_eq!(self.tx_dictionary.len(), self.fee_densities.len());
 
-            let event = MempoolEvent::RemoveTx(tx.transaction.kernel);
+            let event = MempoolEvent::RemoveTx(tx.transaction.into_kernel());
 
             return Some((event, fee_density));
         }
@@ -1268,7 +1474,7 @@ impl Mempool {
         let mut victims = vec![];
 
         for (&transaction_id, _fee_density) in &self.fee_densities {
-            let transaction = self.get(transaction_id).unwrap();
+            let transaction = self.get_any(transaction_id).unwrap();
             if !predicate((transaction_id, transaction)) {
                 victims.push(transaction_id);
             }
@@ -1295,7 +1501,7 @@ impl Mempool {
         let cutoff = Timestamp::now() - MEMPOOL_TX_THRESHOLD_AGE;
 
         let keep = |(_transaction_id, transaction): LookupItem| -> bool {
-            cutoff < transaction.kernel.timestamp
+            cutoff < transaction.kernel().timestamp
         };
 
         self.retain(keep)
@@ -1347,7 +1553,7 @@ impl Mempool {
             .collect();
         let still_valid = |(_transaction_id, tx): LookupItem| -> bool {
             let transaction_index_sets: HashSet<_> = tx
-                .kernel
+                .kernel()
                 .inputs
                 .iter()
                 .map(|rr| rr.absolute_indices.to_array())
@@ -1363,6 +1569,31 @@ impl Mempool {
         // Remove the transactions that become invalid with this block
         {
             let removed = self.retain(still_valid);
+            events.extend(removed);
+        }
+
+        // Remove link transactions with a mined thruput. Such a thruput can
+        // never be cut through.
+        let block_outputs: HashSet<AdditionRecord> = new_block
+            .kernel
+            .body
+            .transaction_kernel
+            .outputs
+            .iter()
+            .copied()
+            .collect();
+        let no_mined_thruput = |(_transaction_id, tx): LookupItem| -> bool {
+            match tx {
+                AnyTx::Standard(_) => true,
+                AnyTx::Link(link) => link
+                    .kernel
+                    .thruputs
+                    .iter()
+                    .all(|thruput| !block_outputs.contains(thruput)),
+            }
+        };
+        {
+            let removed = self.retain(no_mined_thruput);
             events.extend(removed);
         }
 
@@ -1397,13 +1628,22 @@ impl Mempool {
             // mempool and only removed once they become double-spends (one of
             // their inputs were mined), or they expire (their age exceeds a
             // threshold).
-            if tx.transaction.kernel.inputs.is_empty() {
+            // An all-thruputs link transaction also has no confirmed inputs,
+            // but that one can be updated, so it gets to stay.
+            let is_all_thruputs_link =
+                matches!(&tx.transaction, AnyTx::Link(link) if !link.kernel.thruputs.is_empty());
+            if tx.transaction.kernel().inputs.is_empty() && !is_all_thruputs_link {
                 debug!("Not updating transaction since empty transactions cannot be updated.");
                 kick_outs.push(*tx_id);
                 continue;
             }
 
-            let update_job = match &tx.transaction.proof {
+            let AnyTx::Standard(transaction) = &tx.transaction else {
+                // No update path for link transactions yet.
+                continue;
+            };
+
+            let update_job = match &transaction.proof {
                 // Proof-collection backed transaction cannot be updated
                 // directly. But if the transaction was initiated locally, the
                 // primitive witness will be known, and it can be updated to the
@@ -1434,7 +1674,7 @@ impl Mempool {
                     {
                         // Node initiated transaction and can update.
                         let update_sp = MempoolUpdateJob::SingleProof {
-                            old_kernel: tx.transaction.kernel.clone(),
+                            old_kernel: transaction.kernel.clone(),
                             old_single_proof: sp.to_owned(),
                         };
 
@@ -1571,10 +1811,12 @@ impl Mempool {
 #[cfg(any(test, feature = "test-helpers"))]
 impl Mempool {
     /// Mutable reference to a stored transaction. Computes in O(1).
+    ///
+    /// Returns `None` for link-transactions.
     pub fn get_mut(&mut self, transaction_id: TransactionKernelId) -> Option<&mut Transaction> {
         self.tx_dictionary
             .get_mut(&transaction_id)
-            .map(|x| &mut x.transaction)
+            .and_then(|x| x.transaction.as_standard_mut())
     }
 
     /// The digest of the chain tip the mempool is currently synced to.
@@ -1600,6 +1842,16 @@ impl Mempool {
     /// Whether the merge-input cache is empty.
     pub fn merge_input_cache_is_empty(&self) -> bool {
         self.merge_input_cache.is_empty()
+    }
+
+    /// The link transaction with this id, if any.
+    pub fn get_link(&self, transaction_id: TransactionKernelId) -> Option<&LinkTx> {
+        self.tx_dictionary
+            .get(&transaction_id)
+            .and_then(|x| match &x.transaction {
+                AnyTx::Link(link) => Some(link.as_ref()),
+                AnyTx::Standard(_) => None,
+            })
     }
 
     /// Whether the stored transaction still retains its primitive witness.
@@ -2716,6 +2968,318 @@ mod tests {
                 priority,
                 "merge that replaces a Critical tx must inherit its priority"
             );
+        }
+    }
+
+    mod link_tx_tests {
+        use neptune_consensus::chaintx::link_kernel::LinkKernel;
+        use neptune_consensus::chaintx::link_primitive_witness::LinkPrimitiveWitness;
+        use neptune_consensus::chaintx::link_tx::LinkTx;
+        use neptune_consensus::chaintx::link_tx::LinkTxProof;
+        use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
+        use neptune_consensus::transaction::validity::neptune_proof::NeptuneProof;
+        use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+
+        use super::*;
+
+        /// A proof-backed link transaction wrapping the given kernel.
+        /// Invalid, like the mock standard transactions.
+        fn proof_backed_link(kernel: TransactionKernel, thruputs: Vec<AdditionRecord>) -> LinkTx {
+            LinkTx {
+                kernel: LinkKernel { kernel, thruputs },
+                proof: LinkTxProof::Proof(NeptuneProof::invalid()),
+            }
+        }
+
+        /// `n` distinct addition records; deterministic across calls, so two
+        /// calls yield overlapping records.
+        fn arbitrary_addition_records(n: usize) -> Vec<AdditionRecord> {
+            let mut test_runner = TestRunner::deterministic();
+            proptest::collection::vec(arb::<AdditionRecord>(), n)
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current()
+        }
+
+        fn genesis_mempool() -> (Mempool, Digest) {
+            let genesis_block = Block::genesis(Network::Main);
+            let mutator_set_hash = genesis_block
+                .mutator_set_accumulator_after()
+                .unwrap()
+                .hash();
+            let mempool = Mempool::new(
+                ByteSize::gb(1),
+                TxProvingCapability::ProofCollection,
+                &genesis_block,
+            );
+
+            (mempool, mutator_set_hash)
+        }
+
+        #[test]
+        fn inserted_link_is_held_but_invisible_to_standard_getters() {
+            let (mut mempool, _) = genesis_mempool();
+            let [tx] = make_plenty_mock_transaction_supported_by_invalid_single_proofs(1)
+                .try_into()
+                .unwrap();
+            let link = proof_backed_link(tx.kernel.clone(), arbitrary_addition_records(1));
+            let txid = link.txid();
+            assert_eq!(tx.kernel.txid(), txid, "sanity: wrapped-kernel identity");
+
+            let events = mempool.insert_link(link.clone(), UpgradePriority::Critical);
+            assert_eq!(1, events.len());
+            let MempoolEvent::AddTx(added_kernel) = &events[0] else {
+                panic!("insertion must produce an AddTx event");
+            };
+            assert_eq!(
+                link.kernel.kernel, *added_kernel,
+                "event carries the wrapped kernel"
+            );
+
+            assert_eq!(1, mempool.len());
+            assert!(mempool.contains(txid));
+            assert_eq!(1, mempool.num_own_txs());
+            assert!(
+                mempool.get(txid).is_none(),
+                "link tx is invisible to the standard getter"
+            );
+            assert!(mempool.get_link(txid).is_some());
+
+            assert!(
+                mempool
+                    .insert_link(link, UpgradePriority::Critical)
+                    .is_empty(),
+                "reinserting an exact copy is a no-op"
+            );
+            assert_eq!(1, mempool.len());
+        }
+
+        #[test]
+        fn fixed_transaction_replaces_its_link() {
+            let (mut mempool, tip_msh) = genesis_mempool();
+            let [mut tx] = make_plenty_mock_transaction_supported_by_invalid_single_proofs(1)
+                .try_into()
+                .unwrap();
+            tx.kernel = TransactionKernelModifier::default()
+                .mutator_set_hash(tip_msh)
+                .modify(tx.kernel);
+            let txid = tx.txid();
+
+            mempool.insert_link(
+                proof_backed_link(tx.kernel.clone(), vec![]),
+                UpgradePriority::Irrelevant,
+            );
+            assert!(mempool.get_link(txid).is_some());
+
+            mempool.insert(tx, UpgradePriority::Irrelevant);
+            assert_eq!(1, mempool.len());
+            assert!(
+                mempool.get(txid).is_some(),
+                "the Fix'd transaction must replace its link"
+            );
+            assert!(mempool.get_link(txid).is_none());
+        }
+
+        #[test]
+        fn cast_shaped_link_does_not_replace_standard_transaction() {
+            let (mut mempool, tip_msh) = genesis_mempool();
+            let [mut tx] = make_plenty_mock_transaction_supported_by_invalid_single_proofs(1)
+                .try_into()
+                .unwrap();
+            tx.kernel = TransactionKernelModifier::default()
+                .mutator_set_hash(tip_msh)
+                .modify(tx.kernel);
+            let txid = tx.txid();
+
+            mempool.insert(tx.clone(), UpgradePriority::Irrelevant);
+            let events = mempool.insert_link(
+                proof_backed_link(tx.kernel.clone(), vec![]),
+                UpgradePriority::Irrelevant,
+            );
+
+            assert!(events.is_empty());
+            assert_eq!(1, mempool.len());
+            assert!(
+                mempool.get(txid).is_some(),
+                "the standard Tx must survive a Cast-shaped link arrival"
+            );
+        }
+
+        #[test]
+        fn same_id_link_contest_follows_sync_status() {
+            let (mut mempool, tip_msh) = genesis_mempool();
+            let [tx] = make_plenty_mock_transaction_supported_by_invalid_single_proofs(1)
+                .try_into()
+                .unwrap();
+            let thruputs = arbitrary_addition_records(1);
+            let unsynced = proof_backed_link(tx.kernel.clone(), thruputs.clone());
+            let synced_kernel = TransactionKernelModifier::default()
+                .mutator_set_hash(tip_msh)
+                .modify(tx.kernel);
+            let synced = proof_backed_link(synced_kernel, thruputs);
+            let txid = synced.txid();
+            assert_eq!(txid, unsynced.txid(), "sanity: same id across sync status");
+
+            // A synced link replaces an unsynced one of the same id ...
+            mempool.insert_link(unsynced.clone(), UpgradePriority::Irrelevant);
+            mempool.insert_link(synced.clone(), UpgradePriority::Irrelevant);
+            assert_eq!(1, mempool.len());
+            assert!(mempool.tx_is_synced(&mempool.get_link(txid).unwrap().kernel.kernel));
+
+            // ... and the unsynced one does not replace it back.
+            let events = mempool.insert_link(unsynced, UpgradePriority::Irrelevant);
+            assert!(events.is_empty());
+            assert!(mempool.tx_is_synced(&mempool.get_link(txid).unwrap().kernel.kernel));
+        }
+
+        #[test]
+        fn proof_backed_link_replaces_witness_backed_and_not_conversely() {
+            let (mut mempool, _) = genesis_mempool();
+            let [tx] = make_plenty_mock_transaction_supported_by_primitive_witness(1)
+                .try_into()
+                .unwrap();
+            let TransactionProof::Witness(pw) = tx.proof else {
+                panic!("mock transaction must be witness-backed");
+            };
+            let link_witness = LinkPrimitiveWitness::from_primitive_witness(pw, 0);
+            let witness_backed = LinkTx {
+                kernel: link_witness.kernel.clone(),
+                proof: LinkTxProof::Witness(Box::new(link_witness)),
+            };
+            let proof_backed = proof_backed_link(witness_backed.kernel.kernel.clone(), vec![]);
+            let txid = proof_backed.txid();
+            assert_eq!(
+                txid,
+                witness_backed.txid(),
+                "sanity: same id across proof forms"
+            );
+
+            mempool.insert_link(witness_backed.clone(), UpgradePriority::Critical);
+            mempool.insert_link(proof_backed.clone(), UpgradePriority::Critical);
+            assert!(
+                mempool.get_link(txid).unwrap().proof.is_proof(),
+                "proof-backed link must replace the witness-backed form"
+            );
+
+            let events = mempool.insert_link(witness_backed, UpgradePriority::Critical);
+            assert!(events.is_empty());
+            assert!(
+                mempool.get_link(txid).unwrap().proof.is_proof(),
+                "witness-backed link must not replace the proof-backed form"
+            );
+        }
+
+        #[test]
+        fn cross_pipeline_conflict_is_decided_by_fee_density() {
+            let (mut mempool, tip_msh) = genesis_mempool();
+            let [tx] = make_plenty_mock_transaction_supported_by_invalid_single_proofs(1)
+                .try_into()
+                .unwrap();
+            let resident_kernel = TransactionKernelModifier::default()
+                .mutator_set_hash(tip_msh)
+                .fee(NativeCurrencyAmount::coins(5))
+                .modify(tx.kernel);
+            let resident = Transaction {
+                kernel: resident_kernel.clone(),
+                proof: tx.proof,
+            };
+            let resident_txid = resident.txid();
+            mempool.insert(resident, UpgradePriority::Irrelevant);
+
+            // Same confirmed inputs, different fee => a conflicting link with
+            // a different id.
+            let link_kernel = |fee| {
+                TransactionKernelModifier::default()
+                    .fee(fee)
+                    .modify(resident_kernel.clone())
+            };
+
+            let cheap = proof_backed_link(
+                link_kernel(NativeCurrencyAmount::coins(1)),
+                arbitrary_addition_records(1),
+            );
+            assert_ne!(
+                resident_txid,
+                cheap.txid(),
+                "sanity: fee change changes the id"
+            );
+            let events = mempool.insert_link(cheap, UpgradePriority::Irrelevant);
+            assert!(events.is_empty(), "low fee density loses the contest");
+            assert!(mempool.get(resident_txid).is_some());
+
+            let rich = proof_backed_link(
+                link_kernel(NativeCurrencyAmount::coins(50)),
+                arbitrary_addition_records(1),
+            );
+            let rich_txid = rich.txid();
+            mempool.insert_link(rich, UpgradePriority::Irrelevant);
+            assert_eq!(1, mempool.len());
+            assert!(
+                mempool.get_link(rich_txid).is_some(),
+                "high fee density wins the contest"
+            );
+            assert!(!mempool.contains(resident_txid));
+        }
+
+        #[test]
+        fn link_with_mined_thruput_is_evicted() {
+            use neptune_consensus::block::block_transaction::BlockTransaction;
+            use neptune_consensus::transaction::test_helpers::make_mock_transaction_with_mutator_set_hash_and_timestamp;
+
+            let network = Network::Main;
+            let genesis_block = Block::genesis(network);
+            let mut mempool = Mempool::new(
+                ByteSize::gb(1),
+                TxProvingCapability::ProofCollection,
+                &genesis_block,
+            );
+
+            let [tx_a, tx_b] = make_plenty_mock_transaction_supported_by_invalid_single_proofs(2)
+                .try_into()
+                .unwrap();
+            let [mined_thruput, pending_thruput] =
+                arbitrary_addition_records(2).try_into().unwrap();
+            let doomed = proof_backed_link(tx_a.kernel, vec![mined_thruput]);
+            let unaffected = proof_backed_link(tx_b.kernel, vec![pending_thruput]);
+            mempool.insert_link(doomed.clone(), UpgradePriority::Irrelevant);
+            mempool.insert_link(unaffected.clone(), UpgradePriority::Irrelevant);
+            assert_eq!(2, mempool.len());
+
+            // A block whose transaction mines the doomed link tx's thruput,
+            // without the cut-through.
+            let block_timestamp = genesis_block.header().timestamp + Timestamp::hours(1);
+            let block_tx = make_mock_transaction_with_mutator_set_hash_and_timestamp(
+                vec![],
+                vec![mined_thruput],
+                genesis_block
+                    .mutator_set_accumulator_after()
+                    .unwrap()
+                    .hash(),
+                block_timestamp,
+            );
+            let block1 = Block::block_template_invalid_proof(
+                &genesis_block,
+                BlockTransaction::upgrade(block_tx),
+                block_timestamp,
+                None,
+                network,
+            );
+
+            let (events, update_jobs) = mempool.update_with_block(&block1).unwrap();
+            assert!(update_jobs.is_empty());
+            assert_eq!(1, mempool.len());
+            assert!(
+                !mempool.contains(doomed.txid()),
+                "a link whose thruput was mined must be evicted"
+            );
+            assert!(
+                mempool.contains(unaffected.txid()),
+                "a link whose thruput is still pending must survive"
+            );
+            assert!(events.iter().any(|e| matches!(
+                e,
+                MempoolEvent::RemoveTx(kernel) if *kernel == doomed.kernel.kernel
+            )));
         }
     }
 }
