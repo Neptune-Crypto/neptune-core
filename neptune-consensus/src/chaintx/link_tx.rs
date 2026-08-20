@@ -1,4 +1,6 @@
 use get_size2::GetSize;
+use num_bigint::BigInt;
+use num_rational::BigRational;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
@@ -66,6 +68,17 @@ pub struct LinkTx {
     pub proof: LinkTxProof,
 }
 
+impl LinkTx {
+    /// Calculates a fraction representing the fee-density, defined as:
+    /// `transaction_fee/transaction_size`.
+    pub fn fee_density(&self) -> BigRational {
+        let link_tx_as_bytes = bincode::serialize(&self).unwrap();
+        let link_tx_size = BigInt::from(link_tx_as_bytes.get_size());
+        let link_tx_fee = self.kernel.kernel.fee.to_nau();
+        BigRational::new_raw(link_tx_fee.into(), link_tx_size)
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -89,5 +102,33 @@ mod tests {
     ) {
         let decoded = *LinkTxProof::decode(&proof.encode()).unwrap();
         prop_assert_eq!(proof, decoded);
+    }
+
+    #[proptest]
+    fn fee_density_decreases_with_proof_size(
+        #[strategy(proptest_arbitrary_interop::arb())] link_kernel: LinkKernel,
+    ) {
+        use proptest::prop_assert;
+
+        use crate::transaction::transaction_kernel::TransactionKernelModifier;
+        use crate::transaction::validity::neptune_proof::NeptuneProof;
+        use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
+
+        let kernel = LinkKernel {
+            kernel: TransactionKernelModifier::default()
+                .fee(NativeCurrencyAmount::coins(1))
+                .modify(link_kernel.kernel),
+            thruputs: link_kernel.thruputs,
+        };
+        let small = LinkTx {
+            kernel: kernel.clone(),
+            proof: LinkTxProof::Proof(NeptuneProof::invalid()),
+        };
+        let large = LinkTx {
+            kernel,
+            proof: LinkTxProof::Proof(NeptuneProof::invalid_with_size(1 << 15)),
+        };
+
+        prop_assert!(large.fee_density() < small.fee_density());
     }
 }

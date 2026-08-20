@@ -18,6 +18,7 @@
 // otherwise.
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
+mod any_tx;
 pub mod mempool;
 pub mod mempool_event;
 pub mod mempool_update_job;
