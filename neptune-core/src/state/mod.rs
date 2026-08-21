@@ -43,6 +43,7 @@ use neptune_consensus::block::block_header::BlockHeaderWithBlockHashWitness;
 use neptune_consensus::block::guesser_receiver_data::GuesserReceiverData;
 use neptune_consensus::block::mutator_set_update::MutatorSetUpdate;
 use neptune_consensus::block::Block;
+use neptune_consensus::chaintx::link_tx::LinkTx;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
 use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
@@ -3294,6 +3295,13 @@ impl GlobalState {
     /// the value that the transaction has to caller.
     pub async fn mempool_insert(&mut self, transaction: Transaction, priority: UpgradePriority) {
         let events = self.mempool.insert(transaction, priority);
+        self.wallet_state.handle_mempool_events(events).await
+    }
+
+    /// adds link tx to mempool and notifies wallet of change. value represents
+    /// the value that the link transaction has to caller.
+    pub async fn mempool_insert_link(&mut self, link_tx: LinkTx, priority: UpgradePriority) {
+        let events = self.mempool.insert_link(link_tx, priority);
         self.wallet_state.handle_mempool_events(events).await
     }
 

@@ -3,8 +3,10 @@ use std::net::SocketAddr;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
 use neptune_consensus::block::Block;
+use neptune_consensus::chaintx::link_tx::LinkTx;
 use neptune_consensus::transaction::Transaction;
 use neptune_p2p::block_proposal_notification::BlockProposalNotification;
+use neptune_p2p::peer::link_tx_notification::LinkTxNotification;
 use neptune_p2p::peer::transaction_notification::TransactionNotification;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::difficulty_control::ProofOfWork;
@@ -35,6 +37,9 @@ pub(crate) enum MainToPeerTask {
 
     /// Publish knowledge of a transaction
     TransactionNotification(TransactionNotification),
+
+    /// Publish knowledge of a link transaction
+    LinkTxNotification(LinkTxNotification),
 
     /// Disconnect from a specific peer
     Disconnect(PeerId),
@@ -77,6 +82,7 @@ impl MainToPeerTask {
                 "make specific peer discovery req"
             }
             MainToPeerTask::TransactionNotification(_) => "transaction notification",
+            MainToPeerTask::LinkTxNotification(_) => "link tx notification",
             MainToPeerTask::Disconnect(_) => "disconnect",
             MainToPeerTask::DisconnectAll() => "disconnect all",
             MainToPeerTask::BlockProposalNotification(_) => "block proposal notification",
@@ -99,6 +105,7 @@ impl MainToPeerTask {
             MainToPeerTask::MakePeerDiscoveryRequest => false,
             MainToPeerTask::MakeSpecificPeerDiscoveryRequest(_) => false,
             MainToPeerTask::TransactionNotification(_) => true,
+            MainToPeerTask::LinkTxNotification(_) => true,
             MainToPeerTask::Disconnect(_) => false,
             MainToPeerTask::DisconnectAll() => false,
             MainToPeerTask::RequestBlockNotification => false,
@@ -128,6 +135,7 @@ pub(crate) enum PeerTaskToMain {
     PeerDiscoveryAnswer((Vec<(SocketAddr, u128)>, PeerId, u8)),
 
     Transaction(Box<PeerTaskToMainTransaction>),
+    LinkTx(Box<PeerTaskToMainLinkTx>),
     BlockProposal(Box<Block>),
     DisconnectFromLongestLivedPeer,
     NewSyncTarget(Box<Block>),
@@ -158,6 +166,12 @@ pub struct PeerTaskToMainTransaction {
     pub confirmable_for_block: Digest,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PeerTaskToMainLinkTx {
+    pub link_tx: LinkTx,
+    pub confirmable_for_block: Digest,
+}
+
 impl PeerTaskToMain {
     pub fn get_type(&self) -> String {
         match self {
@@ -165,6 +179,7 @@ impl PeerTaskToMain {
             PeerTaskToMain::AddPeerMaxBlockHeight { .. } => "add peer max block height",
             PeerTaskToMain::PeerDiscoveryAnswer(_) => "peer discovery answer",
             PeerTaskToMain::Transaction(_) => "transaction",
+            PeerTaskToMain::LinkTx(_) => "link tx",
             PeerTaskToMain::BlockProposal(_) => "block proposal",
             PeerTaskToMain::DisconnectFromLongestLivedPeer => "disconnect from longest lived peer",
             PeerTaskToMain::NewSyncTarget(_block) => "new sync target",

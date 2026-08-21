@@ -12,6 +12,7 @@ use super::link_proof_witness::DISCRIMINANT_FOR_CHAIN;
 use super::link_proof_witness::DISCRIMINANT_FOR_FORGE;
 use super::link_proof_witness::DISCRIMINANT_FOR_UPDATE;
 use super::update::Update;
+use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
@@ -50,6 +51,19 @@ pub(crate) fn link_proof_public_input(
 /// either end of the claim.
 pub(crate) fn link_proof_public_output(single_proof_digest: Digest) -> Vec<BFieldElement> {
     single_proof_digest.values().to_vec()
+}
+
+/// The claim a [`LinkProof`]-backed link transaction's proof must relate to.
+pub fn link_proof_claim(
+    link_kernel_mast_hash: Digest,
+    single_proof_digest: Digest,
+    consensus_rule_set: ConsensusRuleSet,
+) -> Claim {
+    let input = link_proof_public_input(link_kernel_mast_hash, single_proof_digest);
+    Claim::new(LinkProof.hash())
+        .with_input(input.individual_tokens)
+        .with_output(link_proof_public_output(single_proof_digest))
+        .about_version(consensus_rule_set.triton_proof_version().version())
 }
 
 /// The MAST leaf a [`LinkKernel`](super::link_kernel::LinkKernel) must carry at
