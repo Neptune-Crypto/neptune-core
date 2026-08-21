@@ -404,6 +404,29 @@ impl Mempool {
         }
     }
 
+    /// Check if mempool will accept a link transaction for insertion.
+    ///
+    /// Returns true if the link transaction is not known, or if the member
+    /// is a link transaction that the arrival would replace: a witness one, or
+    /// one that is unsynced.
+    pub fn accept_link_transaction(
+        &self,
+        new_link_txid: TransactionKernelId,
+        new_link_mutator_set_hash: Digest,
+    ) -> bool {
+        match self.tx_dictionary.get(&new_link_txid) {
+            None => true,
+            Some(member) => match &member.transaction {
+                AnyTx::Standard(_) => false,
+                AnyTx::Link(member_tx) => {
+                    member_tx.proof.is_witness()
+                        || member_tx.kernel.kernel.mutator_set_hash != self.tip_mutator_set_hash
+                            && new_link_mutator_set_hash == self.tip_mutator_set_hash
+                }
+            },
+        }
+    }
+
     /// Return a transaction that can be merged with the specified transaction
     /// if any is present in the mempool.
     ///
@@ -751,6 +774,39 @@ impl Mempool {
             .map(|x| &x.transaction)
     }
 
+    /// get link transaction from mempool, if that is what resides under this
+    /// id.
+    ///
+    /// Computes in O(1) from HashMap
+    pub fn get_link(&self, transaction_id: TransactionKernelId) -> Option<&LinkTx> {
+        self.tx_dictionary
+            .get(&transaction_id)
+            .and_then(|x| match &x.transaction {
+                AnyTx::Link(link) => Some(link.as_ref()),
+                AnyTx::Standard(_) => None,
+            })
+    }
+
+    /// Whether every given addition record is an output of some transaction
+    /// currently in the mempool, on either pipeline.
+    ///
+    /// True for an empty list.
+    ///
+    /// Computes in O(total number of outputs in the mempool)
+    pub fn contains_outputs(&self, addition_records: &[AdditionRecord]) -> bool {
+        let mut missing: HashSet<&AdditionRecord> = addition_records.iter().collect();
+        for mptx in self.tx_dictionary.values() {
+            if missing.is_empty() {
+                break;
+            }
+            for output in &mptx.transaction.kernel().outputs {
+                missing.remove(output);
+            }
+        }
+
+        missing.is_empty()
+    }
+
     /// Returns an iterator over mempool items that are in conflict (not
     /// simultaneously confirmable) with the given transaction kernel.
     fn transactions_in_conflict_with(
@@ -1012,6 +1068,12 @@ impl Mempool {
     /// Insert a link transaction into the mempool. It is the caller's
     /// responsibility to validate the transaction.
     ///
+    /// Every thruput must be an output of a transaction currently in the
+    /// mempoolm an unmined, known predecessor. A link transaction whose
+    /// thruputs are not all accounted for is refused: it may be stranded
+    /// already (its predecessor confirmed or never seen), and holding it risks
+    /// filling the mempool.
+    ///
     /// Conflicts on shared confirmed inputs follow the same replacement
     /// contest as [`Self::insert`].
     ///
@@ -1022,6 +1084,11 @@ impl Mempool {
         priority: UpgradePriority,
     ) -> Vec<MempoolEvent> {
         let txid = new_link.txid();
+
+        if !self.contains_outputs(&new_link.kernel.thruputs) {
+            debug!("Attempted to insert link transaction with unknown thruputs.");
+            return vec![];
+        }
 
         let mut same_id_win = false;
         if let Some(existing) = self.get_any(txid) {
@@ -3016,13 +3083,46 @@ mod tests {
             (mempool, mutator_set_hash)
         }
 
+        /// Insert a standard mock transaction remodeled to have exactly the
+        /// given outputs, making those records known unmined outputs.
+        fn insert_predecessor_with_outputs(
+            mempool: &mut Mempool,
+            base_tx: Transaction,
+            outputs: Vec<AdditionRecord>,
+        ) {
+            let predecessor = Transaction {
+                kernel: TransactionKernelModifier::default()
+                    .outputs(outputs)
+                    .modify(base_tx.kernel),
+                proof: base_tx.proof,
+            };
+            let events = mempool.insert(predecessor, UpgradePriority::Irrelevant);
+            assert!(!events.is_empty(), "sanity: predecessor must be inserted");
+        }
+
         #[test]
-        fn inserted_link_is_held_but_invisible_to_standard_getters() {
+        fn link_with_unknown_thruputs_is_refused() {
             let (mut mempool, _) = genesis_mempool();
             let [tx] = make_plenty_mock_transaction_supported_by_invalid_single_proofs(1)
                 .try_into()
                 .unwrap();
-            let link = proof_backed_link(tx.kernel.clone(), arbitrary_addition_records(1));
+            let link = proof_backed_link(tx.kernel, arbitrary_addition_records(1));
+
+            let events = mempool.insert_link(link, UpgradePriority::Critical);
+            assert!(events.is_empty());
+            assert!(mempool.is_empty(), "unknown thruputs must refuse the link");
+        }
+
+        #[test]
+        fn inserted_link_is_held_but_invisible_to_standard_getters() {
+            let (mut mempool, _) = genesis_mempool();
+            let [tx, predecessor_base] =
+                make_plenty_mock_transaction_supported_by_invalid_single_proofs(2)
+                    .try_into()
+                    .unwrap();
+            let thruputs = arbitrary_addition_records(1);
+            insert_predecessor_with_outputs(&mut mempool, predecessor_base, thruputs.clone());
+            let link = proof_backed_link(tx.kernel.clone(), thruputs);
             let txid = link.txid();
             assert_eq!(tx.kernel.txid(), txid, "sanity: wrapped-kernel identity");
 
@@ -3036,7 +3136,7 @@ mod tests {
                 "event carries the wrapped kernel"
             );
 
-            assert_eq!(1, mempool.len());
+            assert_eq!(2, mempool.len());
             assert!(mempool.contains(txid));
             assert_eq!(1, mempool.num_own_txs());
             assert!(
@@ -3051,7 +3151,7 @@ mod tests {
                     .is_empty(),
                 "reinserting an exact copy is a no-op"
             );
-            assert_eq!(1, mempool.len());
+            assert_eq!(2, mempool.len());
         }
 
         #[test]
@@ -3108,10 +3208,12 @@ mod tests {
         #[test]
         fn same_id_link_contest_follows_sync_status() {
             let (mut mempool, tip_msh) = genesis_mempool();
-            let [tx] = make_plenty_mock_transaction_supported_by_invalid_single_proofs(1)
-                .try_into()
-                .unwrap();
+            let [tx, predecessor_base] =
+                make_plenty_mock_transaction_supported_by_invalid_single_proofs(2)
+                    .try_into()
+                    .unwrap();
             let thruputs = arbitrary_addition_records(1);
+            insert_predecessor_with_outputs(&mut mempool, predecessor_base, thruputs.clone());
             let unsynced = proof_backed_link(tx.kernel.clone(), thruputs.clone());
             let synced_kernel = TransactionKernelModifier::default()
                 .mutator_set_hash(tip_msh)
@@ -3123,7 +3225,7 @@ mod tests {
             // A synced link replaces an unsynced one of the same id ...
             mempool.insert_link(unsynced.clone(), UpgradePriority::Irrelevant);
             mempool.insert_link(synced.clone(), UpgradePriority::Irrelevant);
-            assert_eq!(1, mempool.len());
+            assert_eq!(2, mempool.len());
             assert!(mempool.tx_is_synced(&mempool.get_link(txid).unwrap().kernel.kernel));
 
             // ... and the unsynced one does not replace it back.
@@ -3172,9 +3274,12 @@ mod tests {
         #[test]
         fn cross_pipeline_conflict_is_decided_by_fee_density() {
             let (mut mempool, tip_msh) = genesis_mempool();
-            let [tx] = make_plenty_mock_transaction_supported_by_invalid_single_proofs(1)
-                .try_into()
-                .unwrap();
+            let [tx, predecessor_base] =
+                make_plenty_mock_transaction_supported_by_invalid_single_proofs(2)
+                    .try_into()
+                    .unwrap();
+            let thruputs = arbitrary_addition_records(1);
+            insert_predecessor_with_outputs(&mut mempool, predecessor_base, thruputs.clone());
             let resident_kernel = TransactionKernelModifier::default()
                 .mutator_set_hash(tip_msh)
                 .fee(NativeCurrencyAmount::coins(5))
@@ -3196,7 +3301,7 @@ mod tests {
 
             let cheap = proof_backed_link(
                 link_kernel(NativeCurrencyAmount::coins(1)),
-                arbitrary_addition_records(1),
+                thruputs.clone(),
             );
             assert_ne!(
                 resident_txid,
@@ -3207,13 +3312,10 @@ mod tests {
             assert!(events.is_empty(), "low fee density loses the contest");
             assert!(mempool.get(resident_txid).is_some());
 
-            let rich = proof_backed_link(
-                link_kernel(NativeCurrencyAmount::coins(50)),
-                arbitrary_addition_records(1),
-            );
+            let rich = proof_backed_link(link_kernel(NativeCurrencyAmount::coins(50)), thruputs);
             let rich_txid = rich.txid();
             mempool.insert_link(rich, UpgradePriority::Irrelevant);
-            assert_eq!(1, mempool.len());
+            assert_eq!(2, mempool.len());
             assert!(
                 mempool.get_link(rich_txid).is_some(),
                 "high fee density wins the contest"
@@ -3234,16 +3336,22 @@ mod tests {
                 &genesis_block,
             );
 
-            let [tx_a, tx_b] = make_plenty_mock_transaction_supported_by_invalid_single_proofs(2)
-                .try_into()
-                .unwrap();
+            let [tx_a, tx_b, predecessor_base] =
+                make_plenty_mock_transaction_supported_by_invalid_single_proofs(3)
+                    .try_into()
+                    .unwrap();
             let [mined_thruput, pending_thruput] =
                 arbitrary_addition_records(2).try_into().unwrap();
+            insert_predecessor_with_outputs(
+                &mut mempool,
+                predecessor_base,
+                vec![mined_thruput, pending_thruput],
+            );
             let doomed = proof_backed_link(tx_a.kernel, vec![mined_thruput]);
             let unaffected = proof_backed_link(tx_b.kernel, vec![pending_thruput]);
             mempool.insert_link(doomed.clone(), UpgradePriority::Irrelevant);
             mempool.insert_link(unaffected.clone(), UpgradePriority::Irrelevant);
-            assert_eq!(2, mempool.len());
+            assert_eq!(3, mempool.len());
 
             // A block whose transaction mines the doomed link tx's thruput,
             // without the cut-through.
@@ -3267,7 +3375,7 @@ mod tests {
 
             let (events, update_jobs) = mempool.update_with_block(&block1).unwrap();
             assert!(update_jobs.is_empty());
-            assert_eq!(1, mempool.len());
+            assert_eq!(2, mempool.len());
             assert!(
                 !mempool.contains(doomed.txid()),
                 "a link whose thruput was mined must be evicted"

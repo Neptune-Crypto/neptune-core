@@ -17,11 +17,13 @@ use itertools::Itertools;
 use libp2p::PeerId;
 use neptune_consensus::block::guesser_receiver_data::GuesserReceiverData;
 use neptune_consensus::block::Block;
+use neptune_consensus::proof_abstractions::tasm::program::TritonProgram;
 use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use neptune_consensus::proof_abstractions::triton_vm_job_queue::vm_job_queue;
 use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
 use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+use neptune_consensus::transaction::validity::single_proof::SingleProof;
 use neptune_consensus::transaction::Transaction;
 use neptune_consensus::transaction::TransactionProof;
 use neptune_mempool::mempool_update_job::MempoolUpdateJob;
@@ -30,6 +32,7 @@ use neptune_mempool::transaction_kernel_id::Txid;
 use neptune_mempool::upgrade_incentive::UpgradeIncentive;
 use neptune_mempool::upgrade_priority::UpgradePriority;
 use neptune_p2p::peer::handshake_data::HandshakeData;
+use neptune_p2p::peer::link_tx_notification::LinkTxNotification;
 use neptune_p2p::peer::peer_info::PeerInfo;
 use neptune_p2p::peer::transaction_notification::TransactionNotification;
 use neptune_primitives::timestamp::Timestamp;
@@ -1040,6 +1043,40 @@ impl MainLoopHandler {
                     let pmsg = MainToPeerTask::TransactionNotification(transaction_notification);
                     self.main_to_peer_broadcast(pmsg);
                 }
+            }
+            PeerTaskToMain::LinkTx(link_tx) => {
+                log_slow_scope!(fn_name!() + "::PeerTaskToMain::LinkTx");
+
+                debug!(
+                    "`peer_loop` received link transaction from peer. {} confirmed inputs, \
+                     {} thruputs, {} outputs. Synced to mutator set hash: {}",
+                    link_tx.link_tx.kernel.kernel.inputs.len(),
+                    link_tx.link_tx.kernel.thruputs.len(),
+                    link_tx.link_tx.kernel.kernel.outputs.len(),
+                    link_tx.link_tx.kernel.kernel.mutator_set_hash
+                );
+
+                {
+                    let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
+                    if link_tx.confirmable_for_block != global_state_mut.chain.tip().hash() {
+                        warn!(
+                            "main loop got link transaction with bad mutator set data, \
+                             discarding transaction"
+                        );
+                        return Ok(());
+                    }
+
+                    global_state_mut
+                        .mempool_insert_link(
+                            link_tx.link_tx.to_owned(),
+                            UpgradePriority::Irrelevant,
+                        )
+                        .await;
+                }
+
+                let link_tx_notification: LinkTxNotification = (&link_tx.link_tx).try_into()?;
+                let pmsg = MainToPeerTask::LinkTxNotification(link_tx_notification);
+                self.main_to_peer_broadcast(pmsg);
             }
             PeerTaskToMain::BlockProposal(block) => {
                 log_slow_scope!(fn_name!() + "::PeerTaskToMain::BlockProposal");

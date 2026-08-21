@@ -396,6 +396,18 @@ pub fn single_proof_claim(
     claim.about_version(consensus_rule_set.triton_proof_version().version())
 }
 
+/// The claim a proof-backed [`LinkTx`](crate::chaintx::link_tx::LinkTx)'s
+/// proof must relate to, for this consensus rule set: the
+/// [`link_proof_claim`](crate::chaintx::link_proof::link_proof_claim) with `D`
+/// instantiated to the rule set's `SingleProof` digest.
+pub fn link_tx_claim(link_kernel_mast_hash: Digest, consensus_rule_set: ConsensusRuleSet) -> Claim {
+    crate::chaintx::link_proof::link_proof_claim(
+        link_kernel_mast_hash,
+        SingleProof::new(consensus_rule_set).hash(),
+        consensus_rule_set,
+    )
+}
+
 pub fn produce_single_proof_mock(valid_mock: bool) -> Proof {
     if valid_mock {
         Proof::valid_mock()

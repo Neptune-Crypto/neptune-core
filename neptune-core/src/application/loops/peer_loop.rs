@@ -18,8 +18,10 @@ use libp2p::multiaddr::Protocol;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
 use neptune_consensus::block::Block;
+use neptune_consensus::chaintx::link_tx::LinkTx;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_consensus::transaction::transaction_kernel::TransactionConfirmabilityError;
+use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
 use neptune_consensus::transaction::transaction_kernel::TransactionLustrationError;
 use neptune_consensus::transaction::Transaction;
 use neptune_mempool::transaction_kernel_id::Txid;
@@ -32,6 +34,7 @@ use neptune_p2p::peer::handshake_data::HandshakeData;
 use neptune_p2p::peer::peer_info::PeerConnectionInfo;
 use neptune_p2p::peer::peer_info::PeerInfo;
 use neptune_p2p::peer::transfer_block::TransferBlock;
+use neptune_p2p::peer::transfer_link_tx::TransferLinkTx;
 use neptune_p2p::peer::BlockProposalRequest;
 use neptune_p2p::peer::BlockRequestBatch;
 use neptune_p2p::peer::IssuedSyncChallenge;
@@ -66,6 +69,7 @@ use crate::application::loops::connect_to_peers::close_peer_connected_callback;
 use crate::application::loops::main_loop::MAX_NUM_DIGESTS_IN_BATCH_REQUEST;
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
 use crate::application::loops::peer_loop::channel::PeerTaskToMain;
+use crate::application::loops::peer_loop::channel::PeerTaskToMainLinkTx;
 use crate::application::loops::peer_loop::channel::PeerTaskToMainTransaction;
 use crate::application::loops::sync_loop::rapid_block_download::truncate_auth_path;
 use crate::application::loops::sync_loop::synchronization_bit_mask::SynchronizationBitMask;
@@ -428,15 +432,107 @@ impl PeerLoopHandler {
 
     /// Log why a transaction cannot be confirmed, and pick the sanction that
     /// its sender has earned.
+    /// Map an admission rejection to the sanction it earns the sending peer,
+    /// if any. `None` covers rejections that are not necessarily the peer's
+    /// fault.
+    fn sanction_for_inadmissible(
+        kernel: &TransactionKernel,
+        mutator_set_accumulator: &MutatorSetAccumulator,
+        rejection: TxAdmissionError,
+    ) -> Option<NegativePeerSanction> {
+        let txid = kernel.txid();
+        match rejection {
+            TxAdmissionError::HasCoinbase => {
+                warn!("Received non-mined transaction with coinbase.");
+                Some(NegativePeerSanction::NonMinedTransactionHasCoinbase)
+            }
+            TxAdmissionError::NegativeFee => {
+                warn!("Received negative-fee transaction.");
+                Some(NegativePeerSanction::TransactionWithNegativeFee)
+            }
+            TxAdmissionError::AlreadyKnown => {
+                // Not held against the peer: the same transaction
+                // is requested from several peers, so duplicates
+                // arrive whenever more than one of them answers.
+                warn!("Received transaction that was already known");
+                None
+            }
+            TxAdmissionError::TooManyInputs
+            | TxAdmissionError::TooManyOutputs
+            | TxAdmissionError::TooManyAnnouncements => {
+                warn!(
+                    "Received transaction with TXID {txid} that exceeds the \
+                     allowed limits, and can therefore never be mined."
+                );
+                Some(NegativePeerSanction::UnrelayableTransaction)
+            }
+            TxAdmissionError::TooOld => {
+                // TODO: Consider punishing here
+                warn!("Received too old tx");
+                None
+            }
+            TxAdmissionError::FutureDated => {
+                // TODO: Consider punishing here
+                warn!(
+                    "Received tx too far into the future. Got timestamp: {:?}",
+                    kernel.timestamp
+                );
+                None
+            }
+            TxAdmissionError::NotConfirmable(error) => {
+                warn!(
+                    "Received unconfirmable transaction with TXID {txid}. \
+                     Unconfirmable because:"
+                );
+                Some(Self::sanction_for_unconfirmable(
+                    kernel,
+                    mutator_set_accumulator,
+                    error,
+                ))
+            }
+            TxAdmissionError::CannotApplyToMutatorSet => {
+                warn!("Cannot apply transaction to current mutator set.");
+                warn!("Transaction ID: {txid}");
+                Some(NegativePeerSanction::CannotApplyTransactionToMutatorSet)
+            }
+            TxAdmissionError::Lustration(
+                TransactionLustrationError::MissingLustrationAnnouncement,
+            ) => {
+                warn!("Missing lustration announcement in incoming transaction");
+                Some(NegativePeerSanction::MissingLustrationAnnouncement)
+            }
+            TxAdmissionError::Lustration(_) => {
+                warn!("Invalid transaction");
+                Some(NegativePeerSanction::InvalidTransaction)
+            }
+            TxAdmissionError::LustrationsWouldMakeCounterNegative => {
+                warn!("Rejecting transaction that would make lustration counter negative");
+                Some(NegativePeerSanction::LustrationsWouldMakeCounterNegative)
+            }
+            TxAdmissionError::NotYetActive => {
+                debug!("Ignoring link transaction received before activation");
+                None
+            }
+            TxAdmissionError::NotSynced => {
+                debug!("Transaction {txid} refers to non-canonical mutator set state");
+                None
+            }
+            TxAdmissionError::Invalid => {
+                warn!("Received invalid tx");
+                Some(NegativePeerSanction::InvalidTransaction)
+            }
+        }
+    }
+
     fn sanction_for_unconfirmable(
-        transaction: &Transaction,
+        kernel: &TransactionKernel,
         mutator_set_accumulator: &MutatorSetAccumulator,
         error: TransactionConfirmabilityError,
     ) -> NegativePeerSanction {
         match error {
             TransactionConfirmabilityError::InvalidRemovalRecord(index) => {
                 warn!("invalid removal record (at index {index})");
-                let invalid_removal_record = &transaction.kernel.inputs[index];
+                let invalid_removal_record = &kernel.inputs[index];
                 debug!(
                     "Absolute index set of removal record {index}: {:?}",
                     invalid_removal_record.absolute_indices
@@ -1879,7 +1975,7 @@ impl PeerLoopHandler {
                 };
 
                 let admission = tx_admission::admissible(
-                    &transaction,
+                    (&transaction).into(),
                     &mutator_set_accumulator_after,
                     lustration_status,
                     already_known,
@@ -1890,83 +1986,11 @@ impl PeerLoopHandler {
                 .await;
 
                 if let Err(rejection) = admission {
-                    let txid = transaction.kernel.txid();
-                    let sanction = match rejection {
-                        TxAdmissionError::HasCoinbase => {
-                            warn!("Received non-mined transaction with coinbase.");
-                            Some(NegativePeerSanction::NonMinedTransactionHasCoinbase)
-                        }
-                        TxAdmissionError::NegativeFee => {
-                            warn!("Received negative-fee transaction.");
-                            Some(NegativePeerSanction::TransactionWithNegativeFee)
-                        }
-                        TxAdmissionError::AlreadyKnown => {
-                            // Not held against the peer: the same transaction
-                            // is requested from several peers, so duplicates
-                            // arrive whenever more than one of them answers.
-                            warn!("Received transaction that was already known");
-                            None
-                        }
-                        TxAdmissionError::TooManyInputs
-                        | TxAdmissionError::TooManyOutputs
-                        | TxAdmissionError::TooManyAnnouncements => {
-                            warn!(
-                                "Received transaction with TXID {txid} that exceeds the \
-                                 allowed limits, and can therefore never be mined."
-                            );
-                            Some(NegativePeerSanction::UnrelayableTransaction)
-                        }
-                        TxAdmissionError::TooOld => {
-                            // TODO: Consider punishing here
-                            warn!("Received too old tx");
-                            None
-                        }
-                        TxAdmissionError::FutureDated => {
-                            // TODO: Consider punishing here
-                            warn!(
-                                "Received tx too far into the future. Got timestamp: {:?}",
-                                transaction.kernel.timestamp
-                            );
-                            None
-                        }
-                        TxAdmissionError::NotConfirmable(error) => {
-                            warn!(
-                                "Received unconfirmable transaction with TXID {txid}. \
-                                 Unconfirmable because:"
-                            );
-                            Some(Self::sanction_for_unconfirmable(
-                                &transaction,
-                                &mutator_set_accumulator_after,
-                                error,
-                            ))
-                        }
-                        TxAdmissionError::CannotApplyToMutatorSet => {
-                            warn!("Cannot apply transaction to current mutator set.");
-                            warn!("Transaction ID: {txid}");
-                            Some(NegativePeerSanction::CannotApplyTransactionToMutatorSet)
-                        }
-                        TxAdmissionError::Lustration(
-                            TransactionLustrationError::MissingLustrationAnnouncement,
-                        ) => {
-                            warn!("Missing lustration announcement in incoming transaction");
-                            Some(NegativePeerSanction::MissingLustrationAnnouncement)
-                        }
-                        TxAdmissionError::Lustration(_) => {
-                            warn!("Invalid transaction");
-                            Some(NegativePeerSanction::InvalidTransaction)
-                        }
-                        TxAdmissionError::LustrationsWouldMakeCounterNegative => {
-                            warn!(
-                                "Rejecting transaction that would make lustration counter negative"
-                            );
-                            Some(NegativePeerSanction::LustrationsWouldMakeCounterNegative)
-                        }
-                        TxAdmissionError::Invalid => {
-                            warn!("Received invalid tx");
-                            Some(NegativePeerSanction::InvalidTransaction)
-                        }
-                    };
-
+                    let sanction = Self::sanction_for_inadmissible(
+                        &transaction.kernel,
+                        &mutator_set_accumulator_after,
+                        rejection,
+                    );
                     if let Some(sanction) = sanction {
                         self.punish(sanction).await?;
                     }
@@ -2046,6 +2070,169 @@ impl PeerLoopHandler {
                 drop(state);
 
                 peer.send(PeerMessage::Transaction(Box::new(transfer_transaction)))
+                    .await?;
+
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            PeerMessage::LinkTx(transfer_link_tx) => {
+                log_slow_scope!(fn_name!() + "::PeerMessage::LinkTx");
+
+                // Early check for oversized announcements to prevent DoS
+                for announcement in &transfer_link_tx.kernel.kernel.announcements {
+                    if announcement.message.len() > MAX_ANNOUNCEMENT_MESSAGE_SIZE {
+                        warn!(
+                            "Received link transaction with oversized announcement: {} BFEs \
+                             (max: {})",
+                            announcement.message.len(),
+                            MAX_ANNOUNCEMENT_MESSAGE_SIZE
+                        );
+                        self.punish(NegativePeerSanction::OversizedAnnouncement)
+                            .await?;
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    }
+                }
+
+                let link_tx: LinkTx = (*transfer_link_tx).into();
+
+                let (tip, mutator_set_accumulator_after, current_block_height) = {
+                    let state = self.global_state_lock.lock_guard().await;
+
+                    (
+                        state.chain.tip_hash(),
+                        state.chain.tip_mutator_set_after(),
+                        state.chain.tip_height(),
+                    )
+                };
+                let network = self.global_state_lock.cli().network;
+                let consensus_rule_set =
+                    ConsensusRuleSet::infer_from(network, current_block_height);
+
+                let (already_known, thruputs_known) = {
+                    let state = self.global_state_lock.lock_guard().await;
+                    (
+                        !state.mempool().accept_link_transaction(
+                            link_tx.txid(),
+                            link_tx.kernel.kernel.mutator_set_hash,
+                        ),
+                        state.mempool().contains_outputs(&link_tx.kernel.thruputs),
+                    )
+                };
+
+                // Every thruput must be an output of a mempool tx; the
+                // mempool would refuse the link anyway, so its proof is not
+                // worth verifying. Not punished since peer might be acting in
+                // good faith: this node may simply not hold the predecessor.
+                if !thruputs_known {
+                    debug!("Received link transaction with unknown thruputs");
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                let lustration_status = if current_block_height
+                    > ConsensusRuleSet::first_lustration_block(network)
+                {
+                    Some(
+                        self.global_state_lock
+                            .lock_guard()
+                            .await
+                            .chain
+                            .tip()
+                            .header()
+                            .pow
+                            .lustration_status()
+                            .expect("Lustration status of tip must be parseable after hardfork"),
+                    )
+                } else {
+                    None
+                };
+
+                let admission = tx_admission::admissible(
+                    (&link_tx).into(),
+                    &mutator_set_accumulator_after,
+                    lustration_status,
+                    already_known,
+                    self.now(),
+                    network,
+                    consensus_rule_set,
+                )
+                .await;
+
+                if let Err(rejection) = admission {
+                    let sanction = Self::sanction_for_inadmissible(
+                        &link_tx.kernel.kernel,
+                        &mutator_set_accumulator_after,
+                        rejection,
+                    );
+
+                    if let Some(sanction) = sanction {
+                        self.punish(sanction).await?;
+                    }
+
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // Otherwise, relay to main
+                let pt2m_link_tx = PeerTaskToMainLinkTx {
+                    link_tx,
+                    confirmable_for_block: tip,
+                };
+                self.to_main_tx
+                    .send(PeerTaskToMain::LinkTx(Box::new(pt2m_link_tx)))
+                    .await?;
+
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            PeerMessage::LinkTxNotification(link_tx_notification) => {
+                {
+                    log_slow_scope!(fn_name!() + "::PeerMessage::LinkTxNotification");
+
+                    // No negative fees anywhere in the chain pipeline.
+                    if link_tx_notification.fee.is_negative() {
+                        debug!("link transaction notification carries a negative fee");
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    }
+
+                    let state = self.global_state_lock.lock_guard().await;
+                    if !state.mempool().accept_link_transaction(
+                        link_tx_notification.txid,
+                        link_tx_notification.mutator_set_hash,
+                    ) {
+                        debug!("link transaction was already known");
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    }
+
+                    // Only accept link transactions synced to the tip.
+                    if state.chain.tip_mutator_set_after().hash()
+                        != link_tx_notification.mutator_set_hash
+                    {
+                        debug!("link transaction refers to non-canonical mutator set state");
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    }
+                }
+
+                debug!("requesting link transaction from peer");
+                peer.send(PeerMessage::LinkTxRequest(link_tx_notification.txid))
+                    .await?;
+
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            PeerMessage::LinkTxRequest(link_tx_identifier) => {
+                let state = self.global_state_lock.lock_guard().await;
+                let Some(link_tx) = state.mempool().get_link(link_tx_identifier) else {
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                };
+
+                let Ok(transfer_link_tx) = TransferLinkTx::try_from(link_tx) else {
+                    warn!(
+                        "Peer requested link transaction that cannot be converted to \
+                         transfer object"
+                    );
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                };
+
+                // Drop state immediately to prevent holding over a response.
+                drop(state);
+
+                peer.send(PeerMessage::LinkTx(Box::new(transfer_link_tx)))
                     .await?;
 
                 Ok(KEEP_CONNECTION_ALIVE)
@@ -2378,6 +2565,21 @@ impl PeerLoopHandler {
                 ))
                 .await?;
                 debug!("Sent PeerMessage::TransactionNotification");
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            MainToPeerTask::LinkTxNotification(link_tx_notification) => {
+                if !self
+                    .peer_handshake_data
+                    .version
+                    .supports_link_transactions()
+                {
+                    debug!("Peer version does not understand link transactions; not notifying");
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                debug!("Sending PeerMessage::LinkTxNotification");
+                peer.send(PeerMessage::LinkTxNotification(link_tx_notification))
+                    .await?;
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             MainToPeerTask::BlockProposalNotification(block_proposal_notification) => {
