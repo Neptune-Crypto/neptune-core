@@ -1,5 +1,6 @@
 use std::cmp::max;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use itertools::Itertools;
 use neptune_mutator_set::addition_record::AdditionRecord;
@@ -37,16 +38,22 @@ use super::authenticate_link_kernel_field::AuthenticateLinkKernelField;
 use super::generate_link_proof_claim::GenerateLinkProofClaim;
 use super::link_kernel::LinkKernel;
 use super::link_kernel::LinkKernelField;
+use super::link_proof::link_proof_claim;
 use super::link_proof::link_proof_public_input;
 use super::link_proof::link_proof_public_output;
 use super::link_proof::merge_bit_false_leaf;
 use super::link_proof::no_coinbase_leaf;
 use super::link_proof::LinkProof;
+use super::link_proof_witness::LinkProofWitness;
 use super::link_proof_witness::LinkProofWitnessMemory;
 use super::link_proof_witness::DISCRIMINANT_FOR_CHAIN;
 use super::link_tx::LinkTx;
 use super::link_tx::LinkTxProof;
+use crate::consensus_rule_set::ConsensusRuleSet;
+use crate::proof_abstractions::error::CreateProofError;
 use crate::proof_abstractions::tasm::program::TritonProgram;
+use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use crate::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 use crate::proof_abstractions::SecretWitness;
 use crate::transaction::transaction_kernel::TransactionKernel;
 use crate::transaction::transaction_kernel::TransactionKernelProxy;
@@ -109,6 +116,49 @@ pub struct ChainWitness {
     /// Rust-side only: it is here to build the public input and the two operand
     /// claims. The tasm branch reads `D` off the public input instead.
     pub(super) single_proof_digest: Digest,
+}
+
+/// Chain two proof-backed [`LinkTx`]s into one, with maximal cut-through.
+///
+/// Both operands must be proof-backed, name the same mutator set hash, and
+/// have been proven under `single_proof_digest`. The chained kernel
+/// concatenates inputs, outputs, announcements and thruputs, sums the fees,
+/// takes the later timestamp, and cancels every matching (output, thruput)
+/// pair.
+///
+/// On a [mock-proof network](neptune_primitives::network::Network::use_mock_proof)
+/// no proving happens; the kernel is real, the proof a valid mock.
+pub async fn chain(
+    left: LinkTx,
+    right: LinkTx,
+    single_proof_digest: Digest,
+    consensus_rule_set: ConsensusRuleSet,
+    shuffle_seed: [u8; 32],
+    job_queue: Arc<TritonVmJobQueue>,
+    proof_job_options: TritonVmProofJobOptions,
+) -> Result<LinkTx, CreateProofError> {
+    let witness = ChainWitness::chain(left, right, single_proof_digest, shuffle_seed);
+    let kernel = witness.link_kernel();
+
+    let proof = if proof_job_options.job_settings.network.use_mock_proof() {
+        Proof::valid_mock()
+    } else {
+        let claim = link_proof_claim(kernel.mast_hash(), single_proof_digest, consensus_rule_set);
+        let witness = LinkProofWitness::from_chain(witness);
+        LinkProof
+            .prove(
+                claim,
+                witness.nondeterminism(),
+                job_queue,
+                proof_job_options,
+            )
+            .await?
+    };
+
+    Ok(LinkTx {
+        kernel,
+        proof: LinkTxProof::Proof(proof),
+    })
 }
 
 impl ChainWitness {

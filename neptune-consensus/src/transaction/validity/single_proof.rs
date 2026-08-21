@@ -20,6 +20,7 @@ use super::tasm::single_proof::fix_branch::FixBranch;
 use super::tasm::single_proof::fix_branch::FixWitness;
 use super::tasm::single_proof::merge_branch::MergeWitness;
 use super::tasm::single_proof::update_branch::UpdateWitness;
+use crate::chaintx::link_tx::LinkTx;
 use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::proof_abstractions::error::CreateProofError;
 use crate::proof_abstractions::proof_builder::ProofBuilder;
@@ -31,6 +32,7 @@ use crate::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 use crate::transaction::primitive_witness::PrimitiveWitness;
 use crate::transaction::transaction_kernel::TransactionKernel;
 use crate::transaction::transaction_kernel::TransactionKernelField;
+use crate::transaction::transaction_proof::TransactionProof;
 use crate::transaction::validity::neptune_proof::Proof;
 use crate::transaction::validity::proof_collection::ProofCollection;
 use crate::transaction::validity::tasm::claims::generate_collect_lock_scripts_claim::GenerateCollectLockScriptsClaim;
@@ -42,6 +44,7 @@ use crate::transaction::validity::tasm::claims::generate_type_script_claim_templ
 use crate::transaction::validity::tasm::single_proof::merge_branch::MergeBranch;
 use crate::transaction::validity::tasm::single_proof::update_branch::UpdateBranch;
 use crate::transaction::Claim;
+use crate::transaction::Transaction;
 
 pub(crate) const DISCRIMINANT_FOR_PROOF_COLLECTION: u64 = 0;
 pub(crate) const DISCRIMINANT_FOR_UPDATE: u64 = 1;
@@ -284,7 +287,7 @@ impl SingleProofWitness {
 }
 
 /// The consensus program backing a `SingleProof`-backed
-/// [`Transaction`](crate::transaction::Transaction).
+/// [`Transaction`].
 ///
 /// A *family* of programs, one per [`ConsensusRuleSet`], rather than a single
 /// one: hardfork delta adds the [`FixBranch`] and a branch more is a program
@@ -396,7 +399,7 @@ pub fn single_proof_claim(
     claim.about_version(consensus_rule_set.triton_proof_version().version())
 }
 
-/// The claim a proof-backed [`LinkTx`](crate::chaintx::link_tx::LinkTx)'s
+/// The claim a proof-backed [`LinkTx`]'s
 /// proof must relate to, for this consensus rule set: the
 /// [`link_proof_claim`](crate::chaintx::link_proof::link_proof_claim) with `D`
 /// instantiated to the rule set's `SingleProof` digest.
@@ -406,6 +409,43 @@ pub fn link_tx_claim(link_kernel_mast_hash: Digest, consensus_rule_set: Consensu
         SingleProof::new(consensus_rule_set).hash(),
         consensus_rule_set,
     )
+}
+
+/// Fix a resolved [`LinkTx`] into a `SingleProof`-backed [`Transaction`].
+///
+/// The exit of the chain pipeline: the link transaction must be proof-backed
+/// with no thruputs left, and the resulting transaction is block-eligible
+/// like any other single-proof transaction.
+///
+/// # Panics
+///
+/// Panics if the link transaction carries thruputs, is not proof-backed, of if
+/// the rule set's `SingleProof` program has no `Fix` branch.
+pub async fn fix_link_tx(
+    link_tx: LinkTx,
+    consensus_rule_set: ConsensusRuleSet,
+    triton_vm_job_queue: Arc<TritonVmJobQueue>,
+    proof_job_options: TritonVmProofJobOptions,
+) -> Result<Transaction, CreateProofError> {
+    let witness = FixWitness::fix(link_tx);
+    let kernel = witness.kernel.clone();
+
+    let proof = if proof_job_options.job_settings.network.use_mock_proof() {
+        Proof::valid_mock()
+    } else {
+        assert!(
+            consensus_rule_set.has_fix_branch(),
+            "cannot fix a link transaction under a rule set without the Fix branch"
+        );
+        SingleProofWitness::from_fix(witness)
+            .produce(consensus_rule_set, triton_vm_job_queue, proof_job_options)
+            .await?
+    };
+
+    Ok(Transaction {
+        kernel,
+        proof: TransactionProof::SingleProof(proof),
+    })
 }
 
 pub fn produce_single_proof_mock(valid_mock: bool) -> Proof {

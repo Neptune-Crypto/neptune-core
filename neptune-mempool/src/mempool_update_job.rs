@@ -1,3 +1,4 @@
+use neptune_consensus::chaintx::link_tx::LinkTx;
 use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
 use neptune_consensus::transaction::validity::neptune_proof::NeptuneProof;
 
@@ -19,6 +20,9 @@ pub enum MempoolUpdateJob {
     /// The transaction was proof-collection backed
     ProofCollection(PrimitiveWitnessUpdate),
 
+    /// The mempool transaction was a proof-backed link transaction
+    Link { old_link_tx: Box<LinkTx> },
+
     /// The transaction was single-proof backed
     SingleProof {
         old_kernel: TransactionKernel,
@@ -35,6 +39,7 @@ impl MempoolUpdateJob {
             MempoolUpdateJob::ProofCollection(primitive_witness_update) => {
                 primitive_witness_update.old_primitive_witness.kernel.txid()
             }
+            MempoolUpdateJob::Link { old_link_tx } => old_link_tx.txid(),
             MempoolUpdateJob::SingleProof { old_kernel, .. } => old_kernel.txid(),
         }
     }

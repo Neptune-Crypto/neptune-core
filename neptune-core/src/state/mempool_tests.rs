@@ -98,6 +98,9 @@ mod tests {
         let mutator_set_update = new_block.mutator_set_update().unwrap();
         for job in update_jobs {
             match job {
+                MempoolUpdateJob::Link { .. } => {
+                    unimplemented!("this mock does not update link transactions")
+                }
                 MempoolUpdateJob::PrimitiveWitness(primitive_witness_update) => {
                     let new_pw = primitive_witness_update
                         .old_primitive_witness

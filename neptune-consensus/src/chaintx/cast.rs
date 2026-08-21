@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use itertools::Itertools;
 use neptune_primitives::mast_hash::HasDiscriminant;
@@ -21,15 +22,22 @@ use super::authenticate_link_kernel_field::AuthenticateLinkKernelField;
 use super::link_kernel::no_thruputs_subtree_root;
 use super::link_kernel::LinkKernel;
 use super::link_kernel::LinkKernelField;
+use super::link_proof::link_proof_claim;
 use super::link_proof::link_proof_public_input;
 use super::link_proof::link_proof_public_output;
 use super::link_proof::merge_bit_false_leaf;
 use super::link_proof::no_coinbase_leaf;
 use super::link_proof::LinkProof;
+use super::link_proof_witness::LinkProofWitness;
 use super::link_proof_witness::LinkProofWitnessMemory;
 use super::link_proof_witness::DISCRIMINANT_FOR_CAST;
+use super::link_tx::LinkTx;
+use super::link_tx::LinkTxProof;
 use crate::consensus_rule_set::ConsensusRuleSet;
+use crate::proof_abstractions::error::CreateProofError;
 use crate::proof_abstractions::tasm::program::TritonProgram;
+use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use crate::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 use crate::proof_abstractions::SecretWitness;
 use crate::transaction::transaction_kernel::TransactionKernel;
 use crate::transaction::transaction_proof::TransactionProof;
@@ -65,6 +73,46 @@ pub struct CastWitness {
     /// here to build the public input and the inner claim, while the tasm branch
     /// reads `D` off the public input.
     pub(super) single_proof_digest: Digest,
+}
+
+/// Cast a `SingleProof`-backed [`Transaction`] into a proof-backed
+/// [`LinkTx`] with no thruputs, so it can join a chain.
+///
+/// The transaction must be `SingleProof`-backed with a non-negative fee.
+/// `single_proof_digest` is the `D` the link proof is claimed under; only
+/// `Cast` uses its value, naming the program that proved the operand.
+///
+/// On a [mock-proof network](neptune_primitives::network::Network::use_mock_proof)
+/// no proving happens; the kernel is real, the proof a valid mock.
+pub async fn cast(
+    transaction: Transaction,
+    single_proof_digest: Digest,
+    consensus_rule_set: ConsensusRuleSet,
+    job_queue: Arc<TritonVmJobQueue>,
+    proof_job_options: TritonVmProofJobOptions,
+) -> Result<LinkTx, CreateProofError> {
+    let witness = CastWitness::cast(transaction, single_proof_digest);
+    let kernel = witness.link_kernel();
+
+    let proof = if proof_job_options.job_settings.network.use_mock_proof() {
+        Proof::valid_mock()
+    } else {
+        let claim = link_proof_claim(kernel.mast_hash(), single_proof_digest, consensus_rule_set);
+        let witness = LinkProofWitness::from_cast(witness);
+        LinkProof
+            .prove(
+                claim,
+                witness.nondeterminism(),
+                job_queue,
+                proof_job_options,
+            )
+            .await?
+    };
+
+    Ok(LinkTx {
+        kernel,
+        proof: LinkTxProof::Proof(proof),
+    })
 }
 
 impl CastWitness {

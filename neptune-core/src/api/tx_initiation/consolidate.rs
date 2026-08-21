@@ -156,6 +156,9 @@ impl TransactionInitiator {
                 SendError::Tx(create_tx_error) => {
                     Err(ConsolidationError::CreateTxError(create_tx_error))
                 }
+
+                // Consolidation never sends chained transactions.
+                SendError::Chained(_) => unreachable!(),
                 SendError::Proof(create_proof_error) => Err(ConsolidationError::CreateProofError(
                     format!("Error creating proof: {create_proof_error}."),
                 )),

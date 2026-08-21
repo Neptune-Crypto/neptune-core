@@ -265,7 +265,14 @@ fn new_tx_wins_by_quality(
                 })
         }
         ContestTier::SingleProof => conflicts.iter().any(|(conflicting_txkid, conflicting_tx)| {
-            conflicting_tx.contest_tier() != ContestTier::SingleProof
+            // A proof-backed link only yields on quality to its own fixed
+            // form (same txid); any other single proof must outbid it on fee
+            // density.
+            let concedes_tier = match conflicting_tx {
+                AnyTx::Link(link_tx) => !link_tx.proof.is_proof(),
+                AnyTx::Standard(_) => conflicting_tx.contest_tier() != ContestTier::SingleProof,
+            };
+            concedes_tier
                 || *conflicting_txkid == new_txid && new_tx_mutator_set_hash == current_msa_hash
         }),
     }
@@ -628,6 +635,52 @@ impl Mempool {
                 proof_collection,
                 candidate.upgrade_priority,
             ));
+        }
+
+        None
+    }
+
+    /// Return the preferred link transaction for the "fix" proof upgrade,
+    /// along with this node's priority for it: a proof-backed link
+    /// transaction with no thruputs left, synced to the tip. Favors upgrade
+    /// priority first, fee density second.
+    ///
+    /// Only transactions matching the filter will be returned, unless the
+    /// mempool has been deemed to have a financial interest in the
+    /// transaction, in which case the filter is ignored.
+    pub fn preferred_link_fix(
+        &self,
+        tx_upgrade_filter: TxUpgradeFilter,
+    ) -> Option<(&LinkTx, UpgradePriority)> {
+        for candidate_txid in self
+            .upgrade_priority_iter()
+            .map(|(txid, _)| txid)
+            .chain(self.fee_density_iter().map(|(txid, _)| txid))
+        {
+            let candidate = self.tx_dictionary.get(&candidate_txid).unwrap();
+
+            if self.upgrade_failures.contains(&candidate_txid) {
+                continue;
+            }
+
+            let AnyTx::Link(link_tx) = &candidate.transaction else {
+                continue;
+            };
+
+            if !link_tx.proof.is_proof()
+                || !link_tx.kernel.thruputs.is_empty()
+                || !self.tx_is_synced(&link_tx.kernel.kernel)
+            {
+                continue;
+            }
+
+            if candidate.upgrade_priority.is_irrelevant()
+                && !tx_upgrade_filter.matches(candidate_txid)
+            {
+                continue;
+            }
+
+            return Some((link_tx, candidate.upgrade_priority));
         }
 
         None
@@ -1706,7 +1759,20 @@ impl Mempool {
             }
 
             let AnyTx::Standard(transaction) = &tx.transaction else {
-                // No update path for link transactions yet.
+                // If the link transaction was initiated locally, i.e. deemed
+                // critical, *and* the node can produce single-proof class
+                // proofs, it should be updated immediately (and be kept in the
+                // mempool). A witness-backed link needs no job: its witness is
+                // updated by the wallet when it forges.
+                if let AnyTx::Link(link) = &tx.transaction
+                    && self.tx_proving_capability == TxProvingCapability::SingleProof
+                    && tx.upgrade_priority == UpgradePriority::Critical
+                    && link.proof.is_proof()
+                {
+                    update_jobs.push(MempoolUpdateJob::Link {
+                        old_link_tx: link.clone(),
+                    });
+                }
                 continue;
             };
 
@@ -1909,16 +1975,6 @@ impl Mempool {
     /// Whether the merge-input cache is empty.
     pub fn merge_input_cache_is_empty(&self) -> bool {
         self.merge_input_cache.is_empty()
-    }
-
-    /// The link transaction with this id, if any.
-    pub fn get_link(&self, transaction_id: TransactionKernelId) -> Option<&LinkTx> {
-        self.tx_dictionary
-            .get(&transaction_id)
-            .and_then(|x| match &x.transaction {
-                AnyTx::Link(link) => Some(link.as_ref()),
-                AnyTx::Standard(_) => None,
-            })
     }
 
     /// Whether the stored transaction still retains its primitive witness.
@@ -3206,6 +3262,44 @@ mod tests {
         }
 
         #[test]
+        fn single_proof_echo_does_not_evict_conflicting_link() {
+            let (mut mempool, tip_msh) = genesis_mempool();
+            let [mut tx, other] =
+                make_plenty_mock_transaction_supported_by_invalid_single_proofs(2)
+                    .try_into()
+                    .unwrap();
+            tx.kernel = TransactionKernelModifier::default()
+                .fee(NativeCurrencyAmount::coins(1))
+                .mutator_set_hash(tip_msh)
+                .modify(tx.kernel);
+            let txid = tx.txid();
+
+            // a chained link spends the same inputs, at a higher fee density.
+            let link_kernel = TransactionKernelModifier::default()
+                .inputs(tx.kernel.inputs.clone())
+                .fee(NativeCurrencyAmount::coins(2))
+                .mutator_set_hash(tip_msh)
+                .modify(other.kernel);
+            let link = proof_backed_link(link_kernel, vec![]);
+            let link_txid = link.txid();
+
+            mempool.insert(tx.clone(), UpgradePriority::Irrelevant);
+            mempool.insert_link(link, UpgradePriority::Critical);
+            assert!(
+                mempool.get_link(link_txid).is_some(),
+                "sanity: the link must outbid the standard transaction"
+            );
+            assert!(!mempool.contains(txid));
+
+            // a gossip echo of the replaced transaction must not bounce the
+            // link back out on proof quality; it lost the fee contest.
+            let events = mempool.insert(tx, UpgradePriority::Irrelevant);
+            assert!(events.is_empty());
+            assert!(mempool.get_link(link_txid).is_some());
+            assert!(!mempool.contains(txid));
+        }
+
+        #[test]
         fn same_id_link_contest_follows_sync_status() {
             let (mut mempool, tip_msh) = genesis_mempool();
             let [tx, predecessor_base] =
@@ -3280,23 +3374,23 @@ mod tests {
                     .unwrap();
             let thruputs = arbitrary_addition_records(1);
             insert_predecessor_with_outputs(&mut mempool, predecessor_base, thruputs.clone());
-            let resident_kernel = TransactionKernelModifier::default()
+            let member_kernel = TransactionKernelModifier::default()
                 .mutator_set_hash(tip_msh)
                 .fee(NativeCurrencyAmount::coins(5))
                 .modify(tx.kernel);
-            let resident = Transaction {
-                kernel: resident_kernel.clone(),
+            let member = Transaction {
+                kernel: member_kernel.clone(),
                 proof: tx.proof,
             };
-            let resident_txid = resident.txid();
-            mempool.insert(resident, UpgradePriority::Irrelevant);
+            let member_txid = member.txid();
+            mempool.insert(member, UpgradePriority::Irrelevant);
 
             // Same confirmed inputs, different fee => a conflicting link with
             // a different id.
             let link_kernel = |fee| {
                 TransactionKernelModifier::default()
                     .fee(fee)
-                    .modify(resident_kernel.clone())
+                    .modify(member_kernel.clone())
             };
 
             let cheap = proof_backed_link(
@@ -3304,13 +3398,13 @@ mod tests {
                 thruputs.clone(),
             );
             assert_ne!(
-                resident_txid,
+                member_txid,
                 cheap.txid(),
                 "sanity: fee change changes the id"
             );
             let events = mempool.insert_link(cheap, UpgradePriority::Irrelevant);
             assert!(events.is_empty(), "low fee density loses the contest");
-            assert!(mempool.get(resident_txid).is_some());
+            assert!(mempool.get(member_txid).is_some());
 
             let rich = proof_backed_link(link_kernel(NativeCurrencyAmount::coins(50)), thruputs);
             let rich_txid = rich.txid();
@@ -3320,7 +3414,99 @@ mod tests {
                 mempool.get_link(rich_txid).is_some(),
                 "high fee density wins the contest"
             );
-            assert!(!mempool.contains(resident_txid));
+            assert!(!mempool.contains(member_txid));
+        }
+
+        #[test]
+        fn own_proof_backed_link_gets_update_job() {
+            use neptune_consensus::block::test_helpers::invalid_empty_block;
+
+            use crate::mempool_update_job::MempoolUpdateJob;
+
+            let network = Network::Main;
+            let genesis_block = Block::genesis(network);
+            let mut mempool = Mempool::new(
+                ByteSize::gb(1),
+                TxProvingCapability::SingleProof,
+                &genesis_block,
+            );
+
+            let [tx_a, tx_b, predecessor_base] =
+                make_plenty_mock_transaction_supported_by_invalid_single_proofs(3)
+                    .try_into()
+                    .unwrap();
+            let thruputs = arbitrary_addition_records(1);
+            insert_predecessor_with_outputs(&mut mempool, predecessor_base, thruputs.clone());
+
+            let own_link = proof_backed_link(tx_a.kernel, thruputs.clone());
+            mempool.insert_link(own_link.clone(), UpgradePriority::Critical);
+
+            let foreign_link = proof_backed_link(tx_b.kernel, thruputs);
+            mempool.insert_link(foreign_link, UpgradePriority::Irrelevant);
+            assert_eq!(3, mempool.len());
+
+            let block1 = invalid_empty_block(&genesis_block, network);
+            let (_events, update_jobs) = mempool.update_with_block(&block1).unwrap();
+
+            let [update_job] = update_jobs.try_into().unwrap();
+            let MempoolUpdateJob::Link { old_link_tx } = update_job else {
+                panic!("own proof-backed link must produce a link update job");
+            };
+            assert_eq!(own_link.txid(), old_link_tx.txid());
+        }
+
+        #[test]
+        fn preferred_link_fix_returns_only_resolved_synced_links() {
+            let (mut mempool, tip_msh) = genesis_mempool();
+            let [tx_a, tx_b, predecessor_base] =
+                make_plenty_mock_transaction_supported_by_invalid_single_proofs(3)
+                    .try_into()
+                    .unwrap();
+            let thruputs = arbitrary_addition_records(1);
+            insert_predecessor_with_outputs(&mut mempool, predecessor_base, thruputs.clone());
+
+            // A synced link with a thruput left: not fixable.
+            let unresolved_kernel = TransactionKernelModifier::default()
+                .mutator_set_hash(tip_msh)
+                .modify(tx_a.kernel);
+            mempool.insert_link(
+                proof_backed_link(unresolved_kernel, thruputs),
+                UpgradePriority::Irrelevant,
+            );
+            assert!(
+                mempool
+                    .preferred_link_fix(crate::tx_upgrade_filter::TxUpgradeFilter::match_all())
+                    .is_none(),
+                "a link with unresolved thruputs must not be offered for fixing"
+            );
+
+            // An unsynced, resolved link: not fixable either.
+            let unsynced = proof_backed_link(tx_b.kernel.clone(), vec![]);
+            let unsynced_txid = unsynced.txid();
+            mempool.insert_link(unsynced, UpgradePriority::Irrelevant);
+            assert!(
+                mempool
+                    .preferred_link_fix(crate::tx_upgrade_filter::TxUpgradeFilter::match_all())
+                    .is_none(),
+                "an unsynced link must not be offered for fixing"
+            );
+
+            // A synced, resolved link: fixable.
+            let resolved_kernel = TransactionKernelModifier::default()
+                .mutator_set_hash(tip_msh)
+                .modify(tx_b.kernel);
+            let resolved = proof_backed_link(resolved_kernel, vec![]);
+            let resolved_txid = resolved.txid();
+            assert_eq!(
+                unsynced_txid, resolved_txid,
+                "sanity: replaces its unsynced form"
+            );
+            mempool.insert_link(resolved, UpgradePriority::Irrelevant);
+            let (preferred, priority) = mempool
+                .preferred_link_fix(crate::tx_upgrade_filter::TxUpgradeFilter::match_all())
+                .expect("a synced, resolved link must be offered for fixing");
+            assert_eq!(resolved_txid, preferred.txid());
+            assert_eq!(UpgradePriority::Irrelevant, priority);
         }
 
         #[test]

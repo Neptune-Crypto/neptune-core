@@ -172,11 +172,7 @@ impl ConsensusRuleSet {
                     ConsensusRuleSet::HardforkDelta
                 }
             }
-            // The ephemeral networks stay on gamma until the chain pipeline has
-            // an integration path (builder, mempool, peer) to exercise. Flip
-            // this to delta together with those, not before: it is what makes
-            // `Fix` reachable end-to-end.
-            _ => ConsensusRuleSet::HardforkGamma,
+            _ => ConsensusRuleSet::HardforkDelta,
         }
     }
 

@@ -468,12 +468,56 @@ impl MainLoopHandler {
                                 }
                             }
                         }
-                        MempoolUpdateJob::SingleProof { .. } => unreachable!(),
+                        MempoolUpdateJob::Link { .. } | MempoolUpdateJob::SingleProof { .. } => {
+                            unreachable!()
+                        }
                     };
 
                     result.push(MempoolUpdateJobResult::Success {
                         new_primitive_witness: Some(Box::new(new_pw)),
                         new_transaction: Box::new(upgraded_tx),
+                    });
+                }
+                MempoolUpdateJob::Link { old_link_tx } => {
+                    // Acquire lock, and drop it immediately.
+                    let msa_lookup_result = global_state_lock
+                        .lock_guard()
+                        .await
+                        .chain
+                        .archival_state()
+                        .old_mutator_set_and_mutator_set_update_to_tip(
+                            old_link_tx.kernel.kernel.mutator_set_hash,
+                            SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE,
+                        )
+                        .await;
+                    let Some((old_msa, mutator_set_update)) = msa_lookup_result else {
+                        result.push(MempoolUpdateJobResult::Failure(txid));
+                        continue;
+                    };
+
+                    let consensus_rule_set =
+                        global_state_lock.lock_guard().await.consensus_rule_set();
+                    let single_proof_digest = SingleProof::new(consensus_rule_set).hash();
+
+                    // No locks may be held here!
+                    let update_result = old_link_tx
+                        .as_ref()
+                        .clone()
+                        .new_with_updated_mutator_set_records(
+                            &old_msa,
+                            &mutator_set_update,
+                            single_proof_digest,
+                            job_queue.clone(),
+                            proof_job_options.clone(),
+                        )
+                        .await;
+                    let Ok(new_link_tx) = update_result else {
+                        result.push(MempoolUpdateJobResult::Failure(txid));
+                        continue;
+                    };
+
+                    result.push(MempoolUpdateJobResult::SuccessLink {
+                        new_link_tx: Box::new(new_link_tx),
                     });
                 }
                 MempoolUpdateJob::SingleProof {
@@ -552,6 +596,17 @@ impl MainLoopHandler {
                             .mempool_insert(*new_transaction.to_owned(), UpgradePriority::Critical)
                             .await;
                     }
+                    MempoolUpdateJobResult::SuccessLink { new_link_tx } => {
+                        let txid = new_link_tx.txid();
+                        info!("Updated link transaction {txid} to be valid under new mutator set");
+
+                        state
+                            .mempool_insert_link(
+                                new_link_tx.as_ref().to_owned(),
+                                UpgradePriority::Critical,
+                            )
+                            .await;
+                    }
                 }
             }
         }
@@ -559,15 +614,24 @@ impl MainLoopHandler {
         // Then notify all peers about shareable transactions.
         let mut num_notifications_sent = 0;
         for updated in update_results {
-            if let MempoolUpdateJobResult::Success {
-                new_transaction, ..
-            } = updated
-            {
-                if let Ok(pmsg) = new_transaction.as_ref().try_into() {
-                    let pmsg = MainToPeerTask::TransactionNotification(pmsg);
-                    self.main_to_peer_broadcast(pmsg);
-                    num_notifications_sent += 1;
+            match updated {
+                MempoolUpdateJobResult::Success {
+                    new_transaction, ..
+                } => {
+                    if let Ok(pmsg) = new_transaction.as_ref().try_into() {
+                        let pmsg = MainToPeerTask::TransactionNotification(pmsg);
+                        self.main_to_peer_broadcast(pmsg);
+                        num_notifications_sent += 1;
+                    }
                 }
+                MempoolUpdateJobResult::SuccessLink { new_link_tx } => {
+                    if let Ok(pmsg) = new_link_tx.as_ref().try_into() {
+                        let pmsg = MainToPeerTask::LinkTxNotification(pmsg);
+                        self.main_to_peer_broadcast(pmsg);
+                        num_notifications_sent += 1;
+                    }
+                }
+                MempoolUpdateJobResult::Failure(_) => {}
             }
         }
         if num_notifications_sent > 0 {
@@ -1940,6 +2004,31 @@ impl MainLoopHandler {
         main_loop_state: &mut MutableMainLoopState,
     ) -> Result<bool> {
         match msg {
+            RPCServerToMain::BroadcastOwnLinkTx(link_tx) => {
+                debug!(
+                    "`main` received link transaction from RPC server. {} confirmed inputs, \
+                     {} thruputs, {} outputs. Synced to mutator set hash: {}",
+                    link_tx.kernel.kernel.inputs.len(),
+                    link_tx.kernel.thruputs.len(),
+                    link_tx.kernel.kernel.outputs.len(),
+                    link_tx.kernel.kernel.mutator_set_hash
+                );
+
+                // Only proof-backed link transactions can be shared; the
+                // conversion fails for witness-backed ones, which must never
+                // leave the node.
+                match link_tx.as_ref().try_into() {
+                    Ok(notification) => {
+                        let pmsg = MainToPeerTask::LinkTxNotification(notification);
+                        self.main_to_peer_broadcast(pmsg);
+                    }
+                    Err(e) => {
+                        warn!("Refusing to broadcast link transaction: {e}");
+                    }
+                }
+
+                Ok(false)
+            }
             RPCServerToMain::BroadcastOwnTx(transaction) => {
                 debug!(
                             "`main` received following transaction from RPC Server. {} inputs, {} outputs. Synced to mutator set hash: {}",
