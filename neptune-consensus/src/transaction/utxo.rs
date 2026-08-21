@@ -154,7 +154,7 @@ impl Utxo {
     /// without duplicates.
     ///
     /// Always includes [`NativeCurrency`].
-    pub(crate) fn type_script_hashes<'a, I: Iterator<Item = &'a Self>>(utxos: I) -> Vec<Digest> {
+    pub fn type_script_hashes<'a, I: Iterator<Item = &'a Self>>(utxos: I) -> Vec<Digest> {
         vec![NativeCurrency.hash()]
             .into_iter()
             .chain(

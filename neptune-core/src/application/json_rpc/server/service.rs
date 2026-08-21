@@ -780,8 +780,6 @@ impl RpcApi for RpcServer {
                 TxAdmissionError::Lustration(_)
                 | TxAdmissionError::Invalid
                 | TxAdmissionError::AlreadyKnown => SubmitTransactionError::InvalidTransaction,
-                // Link-only rejections; this endpoint submits standard
-                // transactions.
                 TxAdmissionError::NotYetActive | TxAdmissionError::NotSynced => {
                     SubmitTransactionError::NotConfirmable
                 }

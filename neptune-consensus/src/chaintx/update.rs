@@ -47,13 +47,18 @@ use super::link_proof::link_proof_public_output;
 use super::link_proof::merge_bit_false_leaf;
 use super::link_proof::no_coinbase_leaf;
 use super::link_proof::LinkProof;
+use super::link_proof_witness::LinkProofWitness;
 use super::link_proof_witness::LinkProofWitnessMemory;
 use super::link_proof_witness::DISCRIMINANT_FOR_UPDATE;
 use super::link_tx::LinkTx;
 use super::link_tx::LinkTxProof;
+use crate::block::mutator_set_update::MutatorSetUpdate;
 use crate::proof_abstractions::tasm::program::TritonProgram;
+use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use crate::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 use crate::proof_abstractions::SecretWitness;
 use crate::transaction::transaction_kernel::TransactionKernel;
+use crate::transaction::transaction_kernel::TransactionKernelModifier;
 use crate::transaction::validity::neptune_proof::Proof;
 use crate::transaction::validity::tasm::compute_absolute_indices::ComputeAbsoluteIndices;
 use crate::transaction::validity::tasm::hash_removal_record_index_sets::HashRemovalRecordIndexSets;
@@ -152,6 +157,102 @@ pub struct UpdateWitness {
     /// tasm branch reads `D` off the public input. `Update` re-targets the
     /// *mutator set*; `D` it only passes through.
     pub(super) single_proof_digest: Digest,
+}
+
+impl LinkTx {
+    /// Create a new [`LinkTx`] by re-targeting the given one at a newer
+    /// mutator set. The timestamp is carried over from the old kernel.
+    ///
+    /// The chain-pipeline analog of
+    /// [`Transaction::new_with_updated_mutator_set_records_given_proof`](crate::transaction::Transaction::new_with_updated_mutator_set_records_given_proof):
+    ///  1. Verify the old link proof (recursively, inside the branch)
+    ///  2. Update the confirmed inputs' removal records; thruputs are carried
+    ///     over byte-for-byte
+    ///  3. Prove correctness under the `Update` branch of [`LinkProof`].
+    ///
+    /// `single_proof_digest` is the `D` the old proof was made under, and
+    /// which the new claim names again.
+    pub async fn new_with_updated_mutator_set_records(
+        self,
+        previous_mutator_set_accumulator: &MutatorSetAccumulator,
+        mutator_set_update: &MutatorSetUpdate,
+        single_proof_digest: Digest,
+        triton_vm_job_queue: std::sync::Arc<TritonVmJobQueue>,
+        proof_job_options: TritonVmProofJobOptions,
+    ) -> anyhow::Result<LinkTx> {
+        anyhow::ensure!(
+            self.kernel.kernel.mutator_set_hash == previous_mutator_set_accumulator.hash(),
+            "Old link transaction kernel's mutator set hash does not agree \
+                with supplied mutator set accumulator."
+        );
+        anyhow::ensure!(
+            self.proof.is_proof(),
+            "Can only update a proof-backed link transaction."
+        );
+
+        // apply mutator set update to get new mutator set accumulator
+        let addition_records = mutator_set_update.additions.clone();
+        let mut calculated_new_mutator_set = previous_mutator_set_accumulator.clone();
+        let mut new_inputs = self.kernel.kernel.inputs.clone();
+        mutator_set_update
+            .apply_to_accumulator_and_records(
+                &mut calculated_new_mutator_set,
+                &mut new_inputs.iter_mut().collect_vec(),
+                &mut [],
+            )
+            .map_err(|err| anyhow::anyhow!("Could not apply mutator set update: {err}"))?;
+
+        let aocl_successor_proof = MmrSuccessorProof::new_from_batch_append(
+            &previous_mutator_set_accumulator.aocl,
+            &addition_records
+                .iter()
+                .map(|addition_record| addition_record.canonical_commitment)
+                .collect_vec(),
+        );
+
+        // compute new kernel; thruputs unchanged
+        let new_kernel = LinkKernel {
+            kernel: TransactionKernelModifier::default()
+                .inputs(new_inputs)
+                .mutator_set_hash(calculated_new_mutator_set.hash())
+                .clone_modify(&self.kernel.kernel),
+            thruputs: self.kernel.thruputs.clone(),
+        };
+
+        anyhow::ensure!(
+            self.kernel.thruputs.iter().all(|tp| !addition_records.contains(tp)),
+            "This function does not have the witness data to promote thruputs to confirmed inputs"
+        );
+        let promotions = vec![];
+
+        // compute updated proof through recursion
+        let update_witness = UpdateWitness::update(
+            self,
+            previous_mutator_set_accumulator,
+            new_kernel.clone(),
+            &calculated_new_mutator_set,
+            aocl_successor_proof,
+            promotions,
+            single_proof_digest,
+        );
+
+        tracing::info!("starting link proof via update ...");
+        let witness = LinkProofWitness::from_update(update_witness);
+        let proof = LinkProof
+            .prove(
+                witness.claim(),
+                witness.nondeterminism(),
+                triton_vm_job_queue,
+                proof_job_options,
+            )
+            .await?;
+        tracing::info!("done.");
+
+        Ok(LinkTx {
+            kernel: new_kernel,
+            proof: LinkTxProof::Proof(proof),
+        })
+    }
 }
 
 impl UpdateWitness {

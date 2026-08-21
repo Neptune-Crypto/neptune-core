@@ -54,6 +54,7 @@ use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
 use crate::application::loops::channel::*;
+use crate::application::loops::main_loop::proof_upgrader::FixJob;
 use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
 use crate::application::loops::mine_loop::guesser_configuration::GuessingConfiguration;
 use crate::application::loops::mine_loop::mock_block_generator::MockBlockGenerator;
@@ -616,6 +617,39 @@ pub(crate) async fn create_block_transaction_from(
     // Ensure we don't mine incompatible transactions from mempool
     if old_rules != new_rules {
         transactions_to_merge.clear();
+    }
+
+    // Before falling back to a nop, check for a synced link transaction with
+    // no thruputs in the mempool: fix + merge is much cheaper than
+    // nop proof-collection + raise + merge, and it confirms a real
+    // transaction.
+    if transactions_to_merge.is_empty() && old_rules == new_rules {
+        let link_to_fix = global_state_lock
+            .lock_guard()
+            .await
+            .mempool()
+            .preferred_link_fix(TxUpgradeFilter::match_all())
+            .map(|(link_tx, _)| link_tx.to_owned());
+        if let Some(link_tx) = link_to_fix {
+            info!("Fixing resolved link transaction from mempool instead of building a nop");
+            let fixed = FixJob {
+                link_tx,
+                consensus_rule_set: new_rules,
+            }
+            .upgrade(vm_job_queue.clone(), proof_job_options.clone())
+            .await?;
+
+            // Insert the fixed transaction into the mempool, so we don't have
+            // to fix it again if we build more than one block proposal. It
+            // replaces the link under the same txid.
+            global_state_lock
+                .lock_guard_mut()
+                .await
+                .mempool_insert(fixed.clone(), UpgradePriority::Irrelevant)
+                .await;
+
+            transactions_to_merge = vec![fixed];
+        }
     }
 
     // If necessary, populate list with nop-tx.

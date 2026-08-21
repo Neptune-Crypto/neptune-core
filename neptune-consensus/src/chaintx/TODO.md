@@ -609,35 +609,35 @@ so that a crafted flood cannot force unbounded proving. Value-safety never
 depends on the mempool — an unresolvable `LinkTx` is inert (un-`Fix`able). In
 the worst case, space is wasted, until transactions are evicted.
 
-- [ ] Store both `Transaction` and `LinkTx`. Index residents by: confirmed
+- [ ] Store both `Transaction` and `LinkTx`. Index members by: confirmed
       inputs (existing double-spend index), thruputs (new), and outputs (new) —
       the last two are what let an arrival find its `Chain` partners.
-- [ ] On arrival, look up predecessors (`resident.outputs` ⊇ `arrival.thruputs`)
-      and successors (`resident.thruputs` ⊆ `arrival.outputs`), and perform
+- [ ] On arrival, look up predecessors (`member.outputs` ⊇ `arrival.thruputs`)
+      and successors (`member.thruputs` ⊆ `arrival.outputs`), and perform
       cut-through on matching pairs if the fee is large enough.
 - [ ] Separate fee-gobbler for `LinkTx`s.
-- [ ] Conflict rules: two residents on the same confirmed input (already a
+- [ ] Conflict rules: two mempool members on the same confirmed input (already a
       conflict now), OR two successors with overlapping thruputs (new). In case
       of conflict, replicate existing policy and exit-queue construction.
-- [ ] On new block: evict residents whose confirmed inputs were spent or whose
-      predecessor was dropped, and `Advance` residents to the new mutator-set
-      hash. A resident whose predecessor was *confirmed* is no longer evicted --
+- [ ] On new block: evict members whose confirmed inputs were spent or whose
+      predecessor was dropped, and `Advance` members to the new mutator-set
+      hash. A member whose predecessor was *confirmed* is no longer evicted --
       its thruputs are promoted instead.
 - [ ] Promotion on advance, best-effort, chosen by preimage availability:
       (a) published in an announcement (self-perpetuating UTXOs) -- any node
       promotes; (b) held by the wallet -- only the owner promotes; (c) neither
-      -- plain re-target, and the resident stays unresolved until it chains or
+      -- plain re-target, and the member stays unresolved until it chains or
       its TTL expires. Candidates and their `aocl_leaf_index`es both fall out of
-      matching residents' thruputs against the new block's addition records,
+      matching members' thruputs against the new block's addition records,
       which is a scan the mempool needs anyway to notice a thruput was
       confirmed.
-- [ ] Integrate resident `LinkTx`s into priority queue.
+- [ ] Integrate mempool-member `LinkTx`s into priority queue.
 - [ ] Eviction: bound mempool size and evict lowest fee-rate in case of excess
       (already now) + TTL for `LinkTx`s whose thruputs never resolve (new).
 - [ ] Block template: select a fee-maximizing, all-thruputs-cut-through chain,
       `Chain` it to a single `LinkTx`, `Fix` into the block's `SingleProof`
       `Transaction`, then merge with single-proof txs as today.
-- [ ] Cast-on-demand: when a `LinkTx` can chain onto a resident single-proof
+- [ ] Cast-on-demand: when a `LinkTx` can chain onto a mempool-member single-proof
       `Transaction`, `Cast` the latter in if the fee is beneficial.
 
 ## Peer

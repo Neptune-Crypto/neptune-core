@@ -2,7 +2,13 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use neptune_consensus::block::mutator_set_update::MutatorSetUpdate;
+use neptune_consensus::chaintx::cast::cast;
+use neptune_consensus::chaintx::chain::chain;
+use neptune_consensus::chaintx::forge::forge;
+use neptune_consensus::chaintx::link_primitive_witness::LinkPrimitiveWitness;
+use neptune_consensus::chaintx::link_tx::LinkTx;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_consensus::proof_abstractions::tasm::program::TritonProgram;
 use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
 use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
@@ -12,6 +18,8 @@ use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
 use neptune_consensus::transaction::transaction_proof::TransactionProofType;
 use neptune_consensus::transaction::validity::neptune_proof::Proof;
 use neptune_consensus::transaction::validity::proof_collection::ProofCollection;
+use neptune_consensus::transaction::validity::single_proof::fix_link_tx;
+use neptune_consensus::transaction::validity::single_proof::SingleProof;
 use neptune_consensus::transaction::Transaction;
 use neptune_consensus::transaction::TransactionProof;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -68,6 +76,16 @@ pub enum UpgradeJob {
         upgrade_incentive: UpgradeIncentive,
     },
     UpdateMutatorSetData(UpdateMutatorSetDataJob),
+
+    /// Fix a resolved link transaction into a `SingleProof`-backed
+    /// transaction with the same txid. Performed for free: only "raise" is a
+    /// paid operation. The incentive reflects this node's own interest in
+    /// the transaction, e.g. having initiated (part of) it.
+    Fix {
+        link_tx: LinkTx,
+        mutator_set: MutatorSetAccumulator,
+        upgrade_incentive: UpgradeIncentive,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -119,6 +137,145 @@ impl ProofCollectionToSingleProof {
             self.gobble_fee_recipient.to_owned(),
             self.gobble_fee_recipient_preimage,
         ))
+    }
+}
+
+/// Forge a [`LinkPrimitiveWitness`] into a proof-backed [`LinkTx`]: the first
+/// step of a chained send.
+///
+/// Like its chain-pipeline siblings [`CastJob`] and [`ChainJob`], not a
+/// variant of [`UpgradeJob`]: the output is a [`LinkTx`], not a
+/// [`Transaction`], so it does not fit that enum's `upgrade` interface.
+#[derive(Clone, Debug)]
+pub(crate) struct ForgeJob {
+    pub link_primitive_witness: LinkPrimitiveWitness,
+    pub consensus_rule_set: ConsensusRuleSet,
+}
+
+impl ForgeJob {
+    pub(crate) async fn upgrade(
+        self,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
+        proof_job_options: TritonVmProofJobOptions,
+    ) -> anyhow::Result<LinkTx> {
+        let single_proof_digest = SingleProof::new(self.consensus_rule_set).hash();
+        Ok(forge(
+            &self.link_primitive_witness,
+            single_proof_digest,
+            self.consensus_rule_set,
+            triton_vm_job_queue,
+            proof_job_options,
+        )
+        .await?)
+    }
+}
+
+/// Cast a `SingleProof`-backed [`Transaction`] into a proof-backed
+/// [`LinkTx`], so it can be cut-through, i.e. an operand of [`ChainJob`].
+#[derive(Clone, Debug)]
+pub(crate) struct CastJob {
+    pub transaction: Transaction,
+    pub consensus_rule_set: ConsensusRuleSet,
+}
+
+impl CastJob {
+    pub(crate) async fn upgrade(
+        self,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
+        proof_job_options: TritonVmProofJobOptions,
+    ) -> anyhow::Result<LinkTx> {
+        let single_proof_digest = SingleProof::new(self.consensus_rule_set).hash();
+        Ok(cast(
+            self.transaction,
+            single_proof_digest,
+            self.consensus_rule_set,
+            triton_vm_job_queue,
+            proof_job_options,
+        )
+        .await?)
+    }
+}
+
+/// Chain two proof-backed [`LinkTx`]s into one, with maximal cut-through..
+#[derive(Clone, Debug)]
+pub(crate) struct ChainJob {
+    pub left: LinkTx,
+    pub right: LinkTx,
+    pub shuffle_seed: [u8; 32],
+    pub consensus_rule_set: ConsensusRuleSet,
+}
+
+impl ChainJob {
+    pub(crate) async fn upgrade(
+        self,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
+        proof_job_options: TritonVmProofJobOptions,
+    ) -> anyhow::Result<LinkTx> {
+        let single_proof_digest = SingleProof::new(self.consensus_rule_set).hash();
+        Ok(chain(
+            self.left,
+            self.right,
+            single_proof_digest,
+            self.consensus_rule_set,
+            self.shuffle_seed,
+            triton_vm_job_queue,
+            proof_job_options,
+        )
+        .await?)
+    }
+}
+
+/// Re-target a proof-backed [`LinkTx`] at a newer mutator set, after blocks
+/// arrived while a chained send was proving. See [`ForgeJob`].
+#[derive(Clone, Debug)]
+pub(crate) struct UpdateLinkJob {
+    pub link_tx: LinkTx,
+    pub old_mutator_set_accumulator: MutatorSetAccumulator,
+    pub mutator_set_update: MutatorSetUpdate,
+    pub consensus_rule_set: ConsensusRuleSet,
+}
+
+impl UpdateLinkJob {
+    pub(crate) async fn upgrade(
+        self,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
+        proof_job_options: TritonVmProofJobOptions,
+    ) -> anyhow::Result<LinkTx> {
+        let single_proof_digest = SingleProof::new(self.consensus_rule_set).hash();
+        self.link_tx
+            .new_with_updated_mutator_set_records(
+                &self.old_mutator_set_accumulator,
+                &self.mutator_set_update,
+                single_proof_digest,
+                triton_vm_job_queue,
+                proof_job_options,
+            )
+            .await
+    }
+}
+
+/// Fix a resolved [`LinkTx`] into a `SingleProof`-backed [`Transaction`]: the
+/// last step of a chained send, and the only one whose output leaves the
+/// node. See [`ForgeJob`].
+#[derive(Clone, Debug)]
+pub(crate) struct FixJob {
+    pub link_tx: LinkTx,
+    pub consensus_rule_set: ConsensusRuleSet,
+}
+
+impl FixJob {
+    pub(crate) async fn upgrade(
+        self,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
+        proof_job_options: TritonVmProofJobOptions,
+    ) -> anyhow::Result<Transaction> {
+        Ok(fix_link_tx(
+            self.link_tx,
+            self.consensus_rule_set,
+            triton_vm_job_queue,
+            proof_job_options,
+        )
+        .await?)
     }
 }
 
@@ -294,7 +451,8 @@ impl UpgradeJob {
             | UpgradeJob::ProofCollectionToSingleProof(_) => true,
             UpgradeJob::PrimitiveWitnessToProofCollection(_)
             | UpgradeJob::Merge { .. }
-            | UpgradeJob::UpdateMutatorSetData(_) => false,
+            | UpgradeJob::UpdateMutatorSetData(_)
+            | UpgradeJob::Fix { .. } => false,
         }
     }
 
@@ -317,6 +475,9 @@ impl UpgradeJob {
             UpgradeJob::UpdateMutatorSetData(UpdateMutatorSetDataJob {
                 upgrade_incentive, ..
             }) => *upgrade_incentive,
+            UpgradeJob::Fix {
+                upgrade_incentive, ..
+            } => *upgrade_incentive,
         }
     }
 
@@ -340,6 +501,7 @@ impl UpgradeJob {
                 vec![pw_to_sp.primitive_witness.kernel.txid()]
             }
             UpgradeJob::UpdateMutatorSetData(update_job) => vec![update_job.old_kernel.txid()],
+            UpgradeJob::Fix { link_tx, .. } => vec![link_tx.txid()],
         }
     }
 
@@ -355,6 +517,7 @@ impl UpgradeJob {
             }
             UpgradeJob::ProofCollectionToSingleProof(pc2sp) => pc2sp.mutator_set.clone(),
             UpgradeJob::Merge { mutator_set, .. } => mutator_set.clone(),
+            UpgradeJob::Fix { mutator_set, .. } => mutator_set.clone(),
             UpgradeJob::UpdateMutatorSetData(update_mutator_set_data_job) => {
                 let mut new_msa = update_mutator_set_data_job.old_mutator_set.clone();
                 update_mutator_set_data_job
@@ -385,6 +548,9 @@ impl UpgradeJob {
             }
             UpgradeJob::UpdateMutatorSetData(_) => {
                 "Transaction got mined while this update job was running?"
+            }
+            UpgradeJob::Fix { .. } => {
+                "The link transaction got mined or fixed by someone else already?"
             }
         }
     }
@@ -613,6 +779,7 @@ impl UpgradeJob {
                         }
                         UpgradeJob::PrimitiveWitnessToSingleProof { .. } => unreachable!(),
                         UpgradeJob::ProofCollectionToSingleProof { .. } => unreachable!(),
+                        UpgradeJob::Fix { .. } => unreachable!(),
                         UpgradeJob::Merge { .. } => unreachable!(),
                         UpgradeJob::UpdateMutatorSetData(_) => unreachable!(),
                     }
@@ -842,6 +1009,16 @@ impl UpgradeJob {
                     .await?;
                 Ok((ret, None))
             }
+            UpgradeJob::Fix { link_tx, .. } => {
+                let ret = FixJob {
+                    link_tx,
+                    consensus_rule_set,
+                }
+                .upgrade(triton_vm_job_queue, proof_job_options)
+                .await?;
+                info!("Proof-upgrader, fix: Done");
+                Ok((ret, None))
+            }
         }
     }
 }
@@ -859,6 +1036,18 @@ pub(super) async fn get_upgrade_task_from_mempool(
     let num_proofs_threshold = global_state.max_num_proofs();
 
     let upgrade_filter = global_state.cli().tx_upgrade_filter;
+
+    // Do we have a resolved link transaction to fix? Fixing gobbles nothing,
+    // but our own interest in the transaction can still make it urgent.
+    let fix_job = global_state
+        .mempool()
+        .preferred_link_fix(upgrade_filter)
+        .map(|(link_tx, priority)| UpgradeJob::Fix {
+            link_tx: link_tx.to_owned(),
+            mutator_set: tip_mutator_set.clone(),
+            upgrade_incentive: priority
+                .incentive_given_gobble_potential(NativeCurrencyAmount::zero()),
+        });
 
     // Do we have any `ProofCollection`s? These may be raised to a SingleProof
     // even when they are no longer synced to the current tip: raising a
@@ -958,7 +1147,7 @@ pub(super) async fn get_upgrade_task_from_mempool(
     };
 
     // pick the most profitable option
-    let mut jobs = [raise_job, merge_job, update_job]
+    let mut jobs = [raise_job, merge_job, update_job, fix_job]
         .into_iter()
         .flatten()
         .collect_vec();

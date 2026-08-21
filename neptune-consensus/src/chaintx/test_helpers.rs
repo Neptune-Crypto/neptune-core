@@ -189,6 +189,9 @@ pub fn fan_in_link_primitive_witnesses(
 }
 
 /// Forge a link primitive witness into a proof-backed [`LinkTx`].
+///
+/// No locks may be held when executing this, as this takes a long time to
+/// execute.
 pub async fn forge(lpw: &LinkPrimitiveWitness, single_proof_digest: Digest) -> LinkTx {
     let witness = ForgeWitness::produce(
         lpw,

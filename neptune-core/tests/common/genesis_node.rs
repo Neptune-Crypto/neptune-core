@@ -24,6 +24,7 @@ use neptune_wallet::wallet_file::WalletFile;
 use neptune_wallet::wallet_file::WalletFileContext;
 use rand::distr::Alphanumeric;
 use rand::distr::SampleString;
+use tasm_lib::prelude::Digest;
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 
@@ -471,6 +472,77 @@ impl GenesisNode {
             if start.elapsed() > std::time::Duration::from_secs(timeout_secs.into()) {
                 anyhow::bail!(
                     "tx not in mempool with single-proof after {} seconds",
+                    timeout_secs
+                );
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        Ok(())
+    }
+
+    /// wait until a chained transaction exists in the mempool, as a link
+    /// transaction or in its fixed form -- `Fix` keeps the txid, so both
+    /// forms answer to `contains`.
+    pub async fn wait_until_chained_tx_in_mempool(
+        &self,
+        txid: TransactionKernelId,
+        timeout_secs: u16,
+    ) -> anyhow::Result<()> {
+        let start = std::time::Instant::now();
+        while !self.gsl.lock_guard().await.mempool().contains(txid) {
+            if start.elapsed() > std::time::Duration::from_secs(timeout_secs.into()) {
+                anyhow::bail!("chained tx not in mempool after {} seconds", timeout_secs);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        Ok(())
+    }
+
+    /// wait until a link transaction exists in the mempool, as a link.
+    pub async fn wait_until_link_tx_in_mempool(
+        &self,
+        txid: TransactionKernelId,
+        timeout_secs: u16,
+    ) -> anyhow::Result<()> {
+        let start = std::time::Instant::now();
+        while self
+            .gsl
+            .lock_guard()
+            .await
+            .mempool()
+            .get_link(txid)
+            .is_none()
+        {
+            if start.elapsed() > std::time::Duration::from_secs(timeout_secs.into()) {
+                anyhow::bail!("link tx not in mempool after {} seconds", timeout_secs);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        Ok(())
+    }
+
+    /// wait until the link transaction in the mempool is synced to the given
+    /// mutator set. Fails fast if the link leaves the mempool.
+    pub async fn wait_until_link_tx_synced(
+        &self,
+        txid: TransactionKernelId,
+        mutator_set_hash: Digest,
+        timeout_secs: u16,
+    ) -> anyhow::Result<()> {
+        let start = std::time::Instant::now();
+        loop {
+            {
+                let state = self.gsl.lock_guard().await;
+                let Some(link) = state.mempool().get_link(txid) else {
+                    anyhow::bail!("link tx disappeared from mempool");
+                };
+                if link.kernel.kernel.mutator_set_hash == mutator_set_hash {
+                    break;
+                }
+            }
+            if start.elapsed() > std::time::Duration::from_secs(timeout_secs.into()) {
+                anyhow::bail!(
+                    "link tx not synced to mutator set after {} seconds",
                     timeout_secs
                 );
             }

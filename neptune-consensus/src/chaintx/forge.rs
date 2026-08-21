@@ -36,6 +36,7 @@ use super::authenticate_link_kernel_field::AuthenticateLinkKernelField;
 use super::link_kernel::LinkKernel;
 use super::link_kernel::LinkKernelField;
 use super::link_primitive_witness::LinkPrimitiveWitness;
+use super::link_proof::link_proof_claim;
 use super::link_proof::link_proof_public_input;
 use super::link_proof::link_proof_public_output;
 use super::link_proof::merge_bit_false_leaf;
@@ -43,6 +44,8 @@ use super::link_proof::no_coinbase_leaf;
 use super::link_proof::LinkProof;
 use super::link_proof_witness::LinkProofWitnessMemory;
 use super::link_proof_witness::DISCRIMINANT_FOR_FORGE;
+use super::link_tx::LinkTx;
+use super::link_tx::LinkTxProof;
 use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::proof_abstractions::error::CreateProofError;
 use crate::proof_abstractions::tasm::program::TritonProgram;
@@ -238,6 +241,47 @@ impl From<&ForgeWitness> for ForgeWitnessMemory {
             type_scripts_halt: witness.type_scripts_halt.clone(),
         }
     }
+}
+
+/// Forge a [`LinkPrimitiveWitness`] into a proof-backed [`LinkTx`].
+///
+/// The chain-pipeline analog of raising a primitive witness to a
+/// `SingleProof`: the entry point of the pipeline. `single_proof_digest` is
+/// the `D` the link proof is claimed under.
+pub async fn forge(
+    link_primitive_witness: &LinkPrimitiveWitness,
+    single_proof_digest: Digest,
+    consensus_rule_set: ConsensusRuleSet,
+    job_queue: Arc<TritonVmJobQueue>,
+    proof_job_options: TritonVmProofJobOptions,
+) -> Result<LinkTx, CreateProofError> {
+    let kernel = link_primitive_witness.kernel.clone();
+
+    let proof = if proof_job_options.job_settings.network.use_mock_proof() {
+        Proof::valid_mock()
+    } else {
+        let witness = ForgeWitness::produce(
+            link_primitive_witness,
+            single_proof_digest,
+            job_queue.clone(),
+            proof_job_options.clone(),
+        )
+        .await?;
+        let claim = link_proof_claim(kernel.mast_hash(), single_proof_digest, consensus_rule_set);
+        LinkProof
+            .prove(
+                claim,
+                witness.nondeterminism(),
+                job_queue,
+                proof_job_options,
+            )
+            .await?
+    };
+
+    Ok(LinkTx {
+        kernel,
+        proof: LinkTxProof::Proof(proof),
+    })
 }
 
 impl ForgeWitness {
