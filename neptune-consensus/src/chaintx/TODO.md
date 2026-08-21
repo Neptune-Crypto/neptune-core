@@ -4,16 +4,28 @@ Follow the design in [1].
 
 ## Motivation
 
-Two payoffs, one mechanism (chaining + cut-through of predecessor-successor
-txs):
+Two mechanisms — chaining with cut-through of predecessor-successor txs, and
+promotion of thruputs the mutator set has since confirmed — paying off in four
+places:
 
 - **Throughput for self-perpetuating UTXOs / DeFi.** Today a block admits at
   most one interaction with a given smart-contract UTXO, capping e.g. a DEX at
   one trade per block. Chaining lets many interactions accumulate and collapse
-  into a single block-borne transaction.
+  into a single block-borne transaction. And because a contract UTXO publishes
+  its spending data in an announcement (§Integration), the chain need not be
+  fully assembled before a block: one link confirming mid-chain does not break
+  the rest — any node can promote the successors' thruputs and carry on.
 - **Spending unconfirmed funds.** Ordinary users (and wallets doing
   change-splitting or consolidation) can build on outputs that aren't yet in a
   block, instead of waiting a full confirmation between dependent payments.
+- **Surviving a partial confirmation.** Without promotion, a successor whose
+  predecessor is mined *alone* is stranded permanently: its thruput can only be
+  retired by cut-through against an operand carrying that output, and the
+  predecessor is now confirmed and can never be chained again. The only recovery
+  would be a re-forge from scratch. `Advance` moving confirmed thruputs into the
+  confirmed inputs turns that into a routine advance. This is what makes
+  chaining safe to use by default, rather than only when a whole chain lands
+  together.
 - **Cheaper initiation.** `Forge` inlines `RemovalRecordsIntegrity`,
   `KernelToOutputs`, `CollectLockScripts`, and `CollectTypeScripts`
   *non-recursively*, and the route to a `SingleProof` comes out roughly a third
@@ -38,8 +50,12 @@ txs):
   upward by recursion (`Chain` -> `Fix` -> `SingleProof`) — never re-proven.
   Because `Fix` trusts that inlined RRI by recursion, a soundness bug in
   `Forge`'s RRI *is* a double-spend path. => `Forge` (and the recursion in
-  `Chain`/`Update`/`Cast`) get the full soundness audit, same bar as the
-  existing `SingleProof` branches.
+  `Chain`/`Advance`/`Cast`) get the full soundness audit, same bar as the
+  existing `SingleProof` branches. Promotion makes `Advance` a *second* RRI
+  site: its promotion loop derives an absolute index set from divined preimages
+  and an AOCL membership proof exactly as `Forge`'s confirmed loop does, so a
+  soundness bug there is equally a double-spend path and carries the same audit
+  bar.
 - **Type scripts see a legacy transaction.** The type-script-facing salted input
   UTXOs contain *both* confirmed UTXOs *and* thruputs, and the kernel MAST
   exposes fee/coinbase/timestamp at legacy leaf positions — so `NativeCurrency`
@@ -59,11 +75,11 @@ txs):
   equations do not imply it — they are satisfied by any sub-multiset of the
   intersection, a short `cut_through` included. `Chain` asserts it; see §Tasm >
   `Chain`.
-- **A `LinkTx` may hold zero confirmed inputs, so `Update` does not require
+- **A `LinkTx` may hold zero confirmed inputs, so `Advance` does not require
   otherwise.** An all-thruputs link -- one funded entirely by its predecessors
   -- is a normal shape in this pipeline, and it still has to follow the mutator
   set: `Chain` requires all three of its kernels to agree on the mutator set
-  hash, so a link that cannot be updated is stranded the moment any chain
+  hash, so a link that cannot be advanced is stranded the moment any chain
   partner moves. This is a deliberate divergence from `update_branch`, which
   rejects an empty input set outright (`INPUT_SET_IS_EMPTY_ERROR`). The legacy
   restriction's rationale is recorded nowhere -- not in the code, not in the
@@ -72,6 +88,26 @@ txs):
   either confirm that reasoning or recover what the legacy check was defending,
   in which case whatever it defends has to be re-established for the chain
   pipeline some other way.
+- **Promotion is permitted, not mandatory.** `Advance` *may* move a thruput
+  confirmed since the old mutator set into the confirmed inputs; it is never
+  obliged to, and `P = []` is the ordinary case. Unlike cut-through, maximality
+  here is not enforceable: it would take a proof that a thruput's commitment is
+  *absent* from the new AOCL, and MMR non-membership is not cheap. Nothing is
+  lost by the asymmetry — an unpromoted thruput just keeps the `LinkTx`
+  un-`Fix`able, which is inert, and the same promotion can be done by a later
+  advance. Induced obligation: no branch, and no mempool bookkeeping, may assume
+  a resident `LinkTx`'s thruputs are all still unconfirmed.
+- **Two thruputs may not be promoted at one AOCL leaf.** They would put two
+  removal records with the same absolute index set in one kernel — one confirmed
+  UTXO spent twice, while `Forge` counted it twice on the type-script-facing
+  input side, which is an inflation path rather than a mere double spend.
+  `Advance` forbids it directly (§Tasm > `Advance`). The neighbouring case, a
+  promoted index set colliding with one already in `old.kernel.inputs`, is *not*
+  visible to `Advance` — a removal record does not reveal which AOCL leaf it
+  spends — and is left to block rule 2.c (`block/mod.rs:866`,
+  `BlockValidationError::RemovalRecordsUniqueness`), which sorts and dedups the
+  block transaction's index sets unconditionally and therefore covers a `Fix`ed
+  `LinkTx`. That is the same reliance `Merge` already has.
 - **No negative fees anywhere in a chain — so upgraders must gobble fees with
   standard transactions.** `Chain` adds the operand fees as `u128`s and asserts
   the addition does not carry, which forbids a negative operand fee outright.
@@ -108,7 +144,7 @@ the witness discriminant. Per-branch obligations:
 - `Chain(A,B)`: operand claims `{ program: own_program_digest(), input:
   [lkmh_A, D] }` and likewise for `B`, with `D` **copied verbatim** from own
   public input.
-- `Update`: same verbatim pass-through onto the operand claim.
+- `Advance`: same verbatim pass-through onto the operand claim.
 - `Cast`: verifies `{ program: D, input: [txkmh] }` — the only *use* of `D`.
 - `Fix` (a `SingleProof` branch, not a `LinkProof` one): verifies
   `{ program: <hardcoded LinkProof digest>, input: [lkmh, own_program_digest()] }`
@@ -116,7 +152,7 @@ the witness discriminant. Per-branch obligations:
 
 Rust side: `LinkProofWitness::standard_input()` returns
 `lkmh.reversed() || D.reversed()`, so `D` must be reachable from the witness —
-an explicit field on each branch witness (`ChainWitness`, `UpdateWitness`,
+an explicit field on each branch witness (`ChainWitness`, `AdvanceWitness`,
 `CastWitness`, and `ForgeWitness` too since it is in the claim). **Built**, for
 `Forge` and `Chain`: `link_proof_public_input(lkmh, D)` in `link_proof.rs` is
 the one place the shape is spelled out, and `link_proof_claim_shape_is_pinned`
@@ -142,7 +178,7 @@ acyclicity structurally.
 valid `LinkProof` for claim `(LinkProof, [lkmh, D])`: *every `SingleProof`
 recursively verified anywhere in that derivation was verified against program
 digest `D`.* `Forge`: vacuous. `Cast`: verifies exactly one, against its own
-`D`. `Chain`/`Update`: operands carry the same `D`, so the IH applies to both
+`D`. `Chain`/`Advance`: operands carry the same `D`, so the IH applies to both
 subtrees. `Fix` instantiates `D := own_program_digest()`, already pinned by the
 outer verifier to the consensus `SingleProof` digest ⇒ anything block-borne was
 `Cast` only from genuine `SingleProof`s.
@@ -153,7 +189,7 @@ wrong-`D` chain is never block-borne — same shape of argument as the
 phantom-thruput case above.
 
 **The audit-critical line.** `D` must be *copied* from public input into every
-child claim in `Chain`/`Update` — never divined, never re-derived from witness
+child claim in `Chain`/`Advance` — never divined, never re-derived from witness
 data. A gap here means "attacker names the program that gets recursively
 verified", i.e. universal forgery. Covered by §Negative tests for `D`.
 
@@ -186,6 +222,9 @@ verified", i.e. universal forgery. Covered by §Negative tests for `D`.
     Forge-time check that every salted input UTXO is backed by *some*
     `RemovalRecord` or thruput `AdditionRecord`: that check rejects inputs
     backed by nothing; this argument covers inputs that have no predecessor.)
+    Promotion opens no second escape: it matches on the same canonical
+    commitment and additionally demands an AOCL membership proof for it, so a
+    thruput answering to no real UTXO can no more be promoted than cut through.
 
 ## Data Structures
 - [x] `LinkKernel { kernel: TransactionKernel, thruputs: Vec<AdditionRecord> }`
@@ -196,7 +235,7 @@ verified", i.e. universal forgery. Covered by §Negative tests for `D`.
 - [x] `LinkPrimitiveWitness` — primitive-witness analog consumed by `Forge`
   - [x] an arbitrary strategy obtained by lifting its `PrimitiveWitness` analog
   - [x] `validate` -- analogous to `PrimitiveWitness::validate`
-- [x] `LinkProofWitness` enum: `Forge | Chain | Update | Cast`
+- [x] `LinkProofWitness` enum: `Forge | Chain | Advance | Cast`
       (mirror `SingleProofWitness`; note `Fix` is NOT here)
   - [x] `Forge(Box<ForgeWitness>)` — the variant holds what the branch consumes,
         mirroring `SingleProofWitness::Collection(ProofCollection)`.
@@ -205,10 +244,22 @@ verified", i.e. universal forgery. Covered by §Negative tests for `D`.
   - [x] `Chain(Box<ChainWitness>)` — holds the two operand kernels, the chained
         kernel, the cut-through set, and the two operand link proofs. It needs
         no memory projection.
-  - [x] `Update(Box<UpdateWitness>)` — holds both kernels, both mutator set
+  - [x] `Advance(Box<AdvanceWitness>)` — holds both kernels, both mutator set
         accumulators (pre-reduced, as `AuthenticateMsaAgainstTxk` eats them),
         the AOCL successor proof, and the old link proof. Its own memory
         projection, like `Chain`'s.
+    - [ ] gains, for promotion: `promoted_thruputs: Vec<AdditionRecord>` and
+          `promoted_inputs: Vec<RemovalRecord>`, both read by the branch (only
+          `.absolute_indices` of the latter is pinned), plus
+          `promotion_proofs: Vec<MsMembershipProof>` and
+          `promoted_items: Vec<Digest>` as nondeterminism sources only.
+          `RemovalRecord` rather than a bare `AbsoluteIndexSet` so the input
+          equation reuses `HashRemovalRecordIndexSets::<2>` unchanged.
+    - [ ] `AdvanceWitness::advance` gains a promotions argument and keeps its
+          "check only what the caller cannot recover from" discipline: each
+          membership proof verifies against the *new* mutator set, each
+          commitment is one of `old.thruputs`. It sorts by AOCL leaf index, so
+          no caller ever sees the branch's ordering requirement.
   - [x] `Cast(Box<CastWitness>)` (3) — holds the legacy transaction's kernel and
         its `SingleProof`. Its own memory projection, like `Chain`'s, though the
         branch reads only the proof out of it: the kernel is bound through its
@@ -324,25 +375,80 @@ would bind that check to the wrong tree without crashing.
         disjointness does not reduce to a multiset equation; an `AdditionRecord`
         is its own commitment, so it compares unhashed.
         (`non_maximal_cut_through_is_rejected`)
-- [x] **Update** `LinkTx -> LinkTx`: re-target a new mutator-set hash without
-      re-forging (mirror `single_proof/update_branch`). Same verbatim `D`
-      pass-through onto the operand claim. `Update` re-targets the *mutator set*,
-      never `D` -- and cannot: there is only one `D` in the program, the one the
-      dispatcher read, and it goes into the operand claim verbatim.
+- [x] **Advance** `LinkTx -> LinkTx`: re-target a new mutator-set hash without
+      re-forging (mirror `single_proof/update_branch`). Named `Advance` rather
+      than `Update` deliberately: `UpdateWitness` would otherwise name two
+      different types in this repo, and once promotion lands the branch does
+      strictly more than the legacy mirror it is named after. Same verbatim `D`
+      pass-through onto the operand claim. `Advance` re-targets the *mutator
+      set*, never `D` -- and cannot: there is only one `D` in the program, the
+      one the dispatcher read, and it goes into the operand claim verbatim.
+  - [ ] percolate the rename into the code, which still says `Update`:
+        `update.rs` -> `advance.rs`, `Update`/`UpdateWitness` ->
+        `Advance`/`AdvanceWitness`, `DISCRIMINANT_FOR_UPDATE`,
+        `update_branch_source` -> `advance_branch_source`, the
+        `neptune_consensus_chaintx_link_proof_update_branch` entrypoint,
+        `LinkProofWitness::Update`, and the `updatable` /
+        `deterministic_updatable` fixtures. Discriminant *values* stay put, and
+        the entrypoint label is an assembly label rather than part of the
+        program encoding, so the rename does not move `LinkProof`'s hash --
+        `test_program_snapshot!` should still pass untouched. Do it before
+        promotion lands, so the promotion diff is not a rename diff too.
   - [x] both mutator set accumulators authenticated against their own kernels'
         MAST hashes (shared `AuthenticateMsaAgainstTxk`, at `LinkKernel`'s
         height), and the new AOCL a successor of the old one.
   - [x] the inputs' absolute index sets are unchanged. The removal records
         themselves may be rewritten -- that is what re-targeting *is* -- but
-        what a double spend collides on may not move.
-  - [x] outputs, thruputs, announcements and fee carried over byte-for-byte:
-        the *old* kernel's field bytes authenticated against *both* roots, which
-        is one hash instead of two and rules out equal-hash-different-bytes by
-        construction.
-  - [x] thruputs unchanged is not a simplification: an `AdditionRecord` is a
-        canonical commitment, which no mutator-set state enters into, so a
-        thruput means the same thing before and after. Resolving one is `Chain`'s
-        job.
+        what a double spend collides on may not move. (Superseded by promotion,
+        below: the index sets may now *grow*, by exactly the promoted set.)
+  - [x] outputs, announcements and fee carried over byte-for-byte: the *old*
+        kernel's field bytes authenticated against *both* roots, which is one
+        hash instead of two and rules out equal-hash-different-bytes by
+        construction. Thruputs were in this list until promotion; they are now
+        governed by the multiset equation below instead.
+  - [ ] **promotion**: a thruput confirmed since the old mutator set may move
+        into the confirmed inputs. This replaces the two assertions above --
+        index sets unchanged, thruputs byte-for-byte -- with one coupled pair
+        over a witness-supplied promotion set `P`:
+
+            multiset(old.thruputs) == multiset(new.thruputs) ⊎ records(P)
+            indexsets(new.inputs)  == indexsets(old.inputs) ⊎ indexsets(P)
+
+        so an addition record leaves the thruput list if and only if a removal
+        record carrying its index set joins the input list -- the same
+        leaves-one-side-iff-it-leaves-the-other shape as `Chain`'s cut-through.
+        `P = []` collapses the pair back to exactly the two old assertions, so
+        today's behaviour is the empty case rather than a special one, and
+        `INPUT_INDEX_SETS_ARE_NOT_UNCHANGED_ERROR` gives way to two new ids. The
+        machinery is already in the module: `HashRemovalRecordIndexSets::<1>`
+        and `::<2>`, `ChainMap::<1>` and `::<2>`, used exactly as `chain.rs`
+        uses them for the cut-through equations.
+  - [ ] per promoted entry, with `(item, sender_randomness, receiver_preimage,
+        aocl_leaf_index)` divined as in `Forge`'s confirmed loop:
+
+            commit(item, sr, hash(rp))                  == the retired thruput
+            aocl_verify(new_aocl, idx, that commitment)
+            compute_absolute_indices(item, sr, rp, idx) == the joined index set
+
+        The first is the inflation-critical one: without it a promoted input
+        could spend a *different* UTXO than the one whose lock script `Forge`
+        proved. The second is what "confirmed in the meantime" means, and it is
+        against the *new* AOCL -- the one the new kernel names.
+  - [ ] promoted `aocl_leaf_index`es are pairwise distinct, encoded as strictly
+        ascending: one u64 comparison per iteration against a `previous + 1`
+        held in a `kmalloc` slot, rather than a set or a sort. The `+ 1` cannot
+        wrap, since the AOCL membership check above already bounds each index
+        below `num_leafs`. Rationale and the neighbouring case that is *not*
+        checked here: §Governing invariants.
+  - [ ] the four scratch `kmalloc`s the loop needs (`aocl_leaf_index`,
+        `receiver_preimage`, `sender_randomness`, `item`) stay contiguous and
+        ahead of `StarkVerify`'s imports, the discipline `forge.rs:719-731`
+        already documents, in case a drift guard against RRI turns out to be
+        possible (§Mirror Tests > onto `Advance`).
+  - [ ] nondeterminism: the loop's divined words and AOCL authentication paths
+        interleave into both streams and must land in program order relative to
+        the two MSA authentications, `VerifyMmrSuccessor`'s tokens, and the
+        field authentications. The fiddliest part of the diff.
   - [x] timestamp does not go backwards; new kernel carries no coinbase and no
         merge bit. The old kernel's two constant leafs are not re-checked --
         induction, as in `Chain`.
@@ -427,12 +533,12 @@ would bind that check to the wrong tree without crashing.
       guard that adding `Fix` left the pre-delta program untouched, down to the
       static-memory addresses (which is why `FixBranch` is imported last).
 - [ ] soundness audit: `SingleProof` `Fix` branch, and `Forge`'s inlined RRI
-      + the recursion in `Chain`/`Update`/`Cast`, including the verbatim `D`
+      + the recursion in `Chain`/`Advance`/`Cast`, including the verbatim `D`
       pass-through
 - [ ] Regenerate/store proof artifacts for the new program versions
 - [ ] Upgrade coupling at the activation height: a new `SingleProof` hash changes
       `D`, invalidating every in-flight `LinkTx` — `Forge`'d ones need
-      re-forging, not just `Update`ing. Mempool must drop `LinkTx`s whose `D` is
+      re-forging, not just advancing. Mempool must drop `LinkTx`s whose `D` is
       not the active rule set's `SingleProof` digest at the activation height.
 
 ## Integration
@@ -441,6 +547,25 @@ would bind that check to the wrong tree without crashing.
       initiator)
 - [ ] API surface in `neptune-core/src/api`
 - [ ] `Cast` entry point for pulling an existing Transaction into a chain
+- [ ] Announcement payload for self-perpetuating UTXOs:
+      `{ utxo, sender_randomness, receiver_preimage }` — `UtxoTriple`
+      (`transaction/utxo_triple.rs:18`) with the preimage in place of the
+      digest, so it yields a `UtxoTriple` for free (`receiver_digest =
+      receiver_preimage.hash()`) and reuses its `addition_record()` rather than
+      restating the commitment. Written by the transaction that *creates* the
+      contract UTXO, for whoever later promotes a thruput spending it.
+      Deliberately not `TransparentInput`
+      (`transaction/transparent_input.rs:37`), which additionally carries
+      `aocl_leaf_index`: the creating transaction cannot know it, an output's
+      AOCL position being fixed only by the block that confirms it and by what
+      lands ahead of it there. `TransparentInput` can carry it because it is
+      written by the *spender*, who already holds a membership proof. The
+      promoter recovers the index instead, by matching the announced commitment
+      against the confirming block's addition records.
+      Publishing the preimage grants no spending authority: it lets a third
+      party *complete* an authorization the forger already gave -- the
+      lock-script proof was made at `Forge` time -- and the commitment equation
+      pins that authorization to one thruput.
 
 ### Mempool
 The mempool holds both legacy `Transaction`s and `LinkTx`s. A `LinkTx` with
@@ -463,8 +588,17 @@ the worst case, space is wasted, until transactions are evicted.
       conflict now), OR two successors with overlapping thruputs (new). In case
       of conflict, replicate existing policy and exit-queue construction.
 - [ ] On new block: evict residents whose confirmed inputs were spent or whose
-      predecessor was dropped or confirmed away, `Update` residents to the new
-      mutator-set hash.
+      predecessor was dropped, and `Advance` residents to the new mutator-set
+      hash. A resident whose predecessor was *confirmed* is no longer evicted --
+      its thruputs are promoted instead.
+- [ ] Promotion on advance, best-effort, chosen by preimage availability:
+      (a) published in an announcement (self-perpetuating UTXOs) -- any node
+      promotes; (b) held by the wallet -- only the owner promotes; (c) neither
+      -- plain re-target, and the resident stays unresolved until it chains or
+      its TTL expires. Candidates and their `aocl_leaf_index`es both fall out of
+      matching residents' thruputs against the new block's addition records,
+      which is a scan the mempool needs anyway to notice a thruput was
+      confirmed.
 - [ ] Integrate resident `LinkTx`s into priority queue.
 - [ ] Eviction: bound mempool size and evict lowest fee-rate in case of excess
       (already now) + TTL for `LinkTx`s whose thruputs never resolve (new).
@@ -597,22 +731,56 @@ Likewise partition misclassification (confirmed ↔ thruput) is not an error -- 
 partition *is* the kernel, every input carries a lock-script proof, and an
 unmatched thruput is un-`Fix`able (see §Motivation).
 
-### onto `Update`
+### onto `Advance`
 - [x] `new_timestamp_older_than_old_is_rejected`: a new kernel timestamp earlier
       than the old kernel's is rejected.
 - [x] `mutator_set_accumulator_must_be_the_one_the_kernel_names`: a new or old
       mutator-set accumulator other than the one its kernel names is rejected.
 - [x] `tampered_absolute_index_set_is_rejected`: an absolute index set whose
-      value or length changed across the update is rejected.
+      value or length changed across the advance is rejected.
 - [x] `changing_a_carried_over_field_is_rejected`: changing outputs, thruputs,
-      announcements or fee across the update is rejected.
+      announcements or fee across the advance is rejected. Still true once
+      promotion lands, but for thruputs the rejecting assertion changes from
+      byte-equality to the promotion multiset equation.
 - [x] `coinbase_or_merge_bit_on_the_new_kernel_is_rejected`: a coinbase or merge
       bit on the new kernel is rejected.
 - [x] `new_kernel_must_be_the_one_in_the_claim`: a new kernel other than the one
       the claim names is rejected.
-- [x] `update_accepts_a_forged_link_transaction` /
-      `update_accepts_an_all_thruputs_link_transaction`: `Update` re-targets a
+- [x] `advance_accepts_a_forged_link_transaction` /
+      `advance_accepts_an_all_thruputs_link_transaction`: `Advance` re-targets a
       forged link transaction, with or without confirmed inputs.
+- [ ] `advance_promotes_none`: `P = []` is the pre-promotion behaviour,
+      unchanged -- the existing positives re-run.
+- [ ] `advance_promotes_a_confirmed_thruput`: a thruput whose addition record
+      landed in the new AOCL moves into the confirmed inputs.
+- [ ] `advance_promotes_every_thruput`: promotion alone empties the thruput list
+      and the result `Fix`es -- the stranded-successor rescue, end to end.
+- [ ] `promoted_thruput_absent_from_the_old_thruputs_is_rejected`.
+- [ ] `promoted_input_index_set_other_than_the_computed_one_is_rejected`.
+- [ ] `promoted_thruput_not_in_the_new_aocl_is_rejected`: a thruput still
+      unconfirmed cannot be promoted.
+- [ ] `promotion_bound_to_the_wrong_aocl_leaf_is_rejected`: a membership proof
+      for a leaf that is not the thruput's commitment.
+- [ ] `promoted_input_spending_a_different_utxo_is_rejected`: the commitment
+      equation, i.e. the inflation-critical one.
+- [ ] `one_sided_promotion_is_rejected`: a thruput retired without the matching
+      input joining, and the reverse.
+- [ ] `duplicate_promoted_aocl_leaf_index_is_rejected`.
+- [ ] `unordered_promotions_are_rejected`: a valid promotion pair, swapped --
+      what gives the strictly-ascending encoding teeth.
+- [ ] Decide whether a `promotion_loop_matches_rri` drift guard is possible at
+      all: the loop shares RRI's commitment / AOCL-membership / index-set core
+      but not its preamble -- `item` is divined and pinned against a thruput
+      rather than hashed out of a salted list -- so the guard would have to
+      compare a sub-block rather than the loop body. Decide when the loop is
+      written; `Forge`'s guard is the model.
+- [ ] the `advanceable` fixture (`updatable`, `update.rs:838`, before the
+      rename) currently grows the AOCL with dummy leafs
+      (`Digest::new([i + 1; 5])`). Promotion needs real canonical commitments,
+      so the fixture has to reach the thruputs' `(item, sr, rp)` -- and
+      `LinkPrimitiveWitness` stores `thruput_receiver_digests`, not preimages.
+      Either generate thruputs with known preimages or add a test-only preimage
+      field.
 - Not applicable: merge-bit-unchanged (`update_branch` divines the bit and
   carries it across; a `LinkTx` never has it set, so the constant leaf is
   stronger)
@@ -704,7 +872,7 @@ Claim / plumbing:
       and appended to both operand claims, and operands carry no digest of their
       own.
 
-`Update`:
+`Advance`:
 - [x] `old_proof_forged_under_another_single_proof_digest_is_rejected`: an
       operand claim naming `D' ≠ D` is rejected.
 - [x] `witness_supplied_single_proof_digest_is_ignored`: a `single_proof_digest`
@@ -768,7 +936,7 @@ Positive counterparts (so the negatives cannot pass vacuously):
       `..._on_the_chained_kernel_...` / `..._on_the_new_kernel_...` /
       `..._on_the_cast_kernel_...`: a coinbase or merge bit on any minted or
       rewritten `LinkKernel` trips `ROOT_MISMATCH`.
-- [ ] `Update` then `Fix` equals `Fix` on the updated mutator set.
+- [ ] `Advance` then `Fix` equals `Fix` on the advanced mutator set.
 - [x] `cast_then_fix_yields_a_verifying_single_proof`: `Cast(tx)` then `Fix`
       answers the claim `tx` itself answered.
 - [x] `link_transaction_with_thruputs_is_rejected`: a link transaction still
