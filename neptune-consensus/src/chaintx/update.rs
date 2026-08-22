@@ -325,6 +325,16 @@ impl SecretWitness for UpdateWitness {
             .concat(),
         );
 
+        // Then the promotion loop's AOCL membership proofs, in promotion order.
+        // The leaf index and the commitment come off the stack --
+        // the former read out of the entry, the latter computed from it -- so
+        // the path is all the loop takes from this stream.
+        nondeterminism.digests.extend(
+            self.promotions
+                .iter()
+                .flat_map(|promotion| promotion.aocl_auth_path.authentication_path.clone()),
+        );
+
         // Then the recursive link-proof verification, which the branch does
         // last. A mock proof has no proof stream to extract nondeterminism
         // from, and never reaches a real `StarkVerify` either: in the negative
