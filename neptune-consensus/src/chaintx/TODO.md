@@ -457,10 +457,9 @@ would bind that check to the wrong tree without crashing.
         `Forge`'s stack shape after all, the slots come back -- contiguous and
         ahead of `StarkVerify`'s imports, the discipline `forge.rs:719-731`
         documents.
-  - [ ] nondeterminism: the loop's divined words and AOCL authentication paths
-        interleave into both streams and must land in program order relative to
-        the two MSA authentications, `VerifyMmrSuccessor`'s tokens, and the
-        field authentications. The fiddliest part of the diff.
+  - [x] nondeterminism: only the AOCL authentication paths, in promotion order,
+        appended to the digest stream after the field authentications and
+        before `StarkVerify`'s -- the promotion loop sits between them. 
   - [x] timestamp does not go backwards; new kernel carries no coinbase and no
         merge bit. The old kernel's two constant leafs are not re-checked --
         induction, as in `Chain`.
