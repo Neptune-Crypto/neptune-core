@@ -392,8 +392,10 @@ would bind that check to the wrong tree without crashing.
         `deterministic_updatable` fixtures. Discriminant *values* stay put, and
         the entrypoint label is an assembly label rather than part of the
         program encoding, so the rename does not move `LinkProof`'s hash --
-        `test_program_snapshot!` should still pass untouched. Do it before
-        promotion lands, so the promotion diff is not a rename diff too.
+        `test_program_snapshot!` should still pass untouched. Do it *last*,
+        after promotion and after everything else on this branch: a rename
+        touches every line it appears on, so landing it early rebases badly
+        against every diff that follows.
   - [x] both mutator set accumulators authenticated against their own kernels'
         MAST hashes (shared `AuthenticateMsaAgainstTxk`, at `LinkKernel`'s
         height), and the new AOCL a successor of the old one.
@@ -423,8 +425,17 @@ would bind that check to the wrong tree without crashing.
         machinery is already in the module: `HashRemovalRecordIndexSets::<1>`
         and `::<2>`, `ChainMap::<1>` and `::<2>`, used exactly as `chain.rs`
         uses them for the cut-through equations.
-  - [ ] per promoted entry, with `(item, sender_randomness, receiver_preimage,
-        aocl_leaf_index)` divined as in `Forge`'s confirmed loop:
+  - [x] the promotion set `P` is a `Vec<Promotion>` on `UpdateWitness`, hence in
+        the memory image -- `UpdateWitness` *is* its memory image. One entry is
+        `(item, sender_randomness, receiver_preimage, aocl_leaf_index)`, the
+        tuple `Forge`'s confirmed loop divines, plus the AOCL authentication
+        path, which reaches the branch on the digest stream and sits in memory
+        unread. Nothing in an entry names *which* thruput or *which* input it
+        moves: the two equations above do the matching. Memory-resident rather
+        than divined so the loop count is the list length rather than a
+        length difference, and so the loop re-reads its operands instead of
+        stashing them.
+  - [ ] per promoted entry, read out of `P`:
 
             commit(item, sr, hash(rp))                  == the retired thruput
             aocl_verify(new_aocl, idx, that commitment)
@@ -440,11 +451,12 @@ would bind that check to the wrong tree without crashing.
         wrap, since the AOCL membership check above already bounds each index
         below `num_leafs`. Rationale and the neighbouring case that is *not*
         checked here: §Governing invariants.
-  - [ ] the four scratch `kmalloc`s the loop needs (`aocl_leaf_index`,
-        `receiver_preimage`, `sender_randomness`, `item`) stay contiguous and
+  - [ ] no scratch `kmalloc`s: the four values `Forge`'s loop stashes are
+        fields of the entry, so the loop re-reads them from memory. If a drift
+        guard against RRI (§Mirror Tests > onto `Advance`) turns out to need
+        `Forge`'s stack shape after all, the slots come back -- contiguous and
         ahead of `StarkVerify`'s imports, the discipline `forge.rs:719-731`
-        already documents, in case a drift guard against RRI turns out to be
-        possible (§Mirror Tests > onto `Advance`).
+        documents.
   - [ ] nondeterminism: the loop's divined words and AOCL authentication paths
         interleave into both streams and must land in program order relative to
         the two MSA authentications, `VerifyMmrSuccessor`'s tokens, and the
@@ -770,9 +782,9 @@ unmatched thruput is un-`Fix`able (see §Motivation).
       what gives the strictly-ascending encoding teeth.
 - [ ] Decide whether a `promotion_loop_matches_rri` drift guard is possible at
       all: the loop shares RRI's commitment / AOCL-membership / index-set core
-      but not its preamble -- `item` is divined and pinned against a thruput
-      rather than hashed out of a salted list -- so the guard would have to
-      compare a sub-block rather than the loop body. Decide when the loop is
+      but not its preamble -- `item` is read out of `P` and pinned against a
+      thruput rather than hashed out of a salted list -- so the guard would
+      have to compare a sub-block rather than the loop body. Decide when the loop is
       written; `Forge`'s guard is the model.
 - [ ] the `advanceable` fixture (`updatable`, `update.rs:838`, before the
       rename) currently grows the AOCL with dummy leafs

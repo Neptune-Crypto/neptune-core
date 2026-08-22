@@ -1,7 +1,11 @@
 use std::collections::HashMap;
 
 use itertools::Itertools;
+use neptune_mutator_set::addition_record::AdditionRecord;
+use neptune_mutator_set::commit;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use neptune_mutator_set::removal_record::RemovalRecord;
 use neptune_primitives::mast_hash::HasDiscriminant;
 use neptune_primitives::mast_hash::MastHash;
 use neptune_primitives::timestamp::Timestamp;
@@ -22,6 +26,7 @@ use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 
@@ -46,6 +51,51 @@ use crate::transaction::validity::tasm::leaf_authentication::authenticate_msa_ag
 
 const INPUT_INDEX_SETS_ARE_NOT_UNCHANGED_ERROR: i128 = 1_000_560;
 const NEW_TIMESTAMP_IS_OLDER_THAN_OLD_ERROR: i128 = 1_000_561;
+
+/// One promoted thruput.
+///
+/// The old kernel carries a thruput (and addition record) and this thruput
+/// becomes a proper input (now removal record) in the new kernel.
+///
+/// Carries exactly what it takes to derive *both* sides of that move --
+/// the addition record or the absolute index set.
+///
+/// The `(item, sender_randomness, receiver_preimage, aocl_leaf_index)` shape is
+/// `Forge`'s confirmed-input loop verbatim -- promotion is that loop run
+/// against the *new* AOCL, on records that were thruputs a moment ago.
+#[derive(Clone, Debug, BFieldCodec, TasmObject)]
+pub struct Promotion {
+    pub(super) item: Digest,
+    pub(super) sender_randomness: Digest,
+    pub(super) receiver_preimage: Digest,
+
+    /// In the new AOCL.
+    pub(super) aocl_leaf_index: u64,
+
+    /// Relative to the new AOCL.
+    pub(super) aocl_auth_path: MmrMembershipProof,
+}
+
+impl Promotion {
+    /// The addition record that leaves the old kernel's thruput list.
+    pub(super) fn addition_record(&self) -> AdditionRecord {
+        commit(
+            self.item,
+            self.sender_randomness,
+            self.receiver_preimage.hash(),
+        )
+    }
+
+    /// The absolute index set that joins the new kernel's input list.
+    pub(super) fn absolute_indices(&self) -> AbsoluteIndexSet {
+        AbsoluteIndexSet::compute(
+            self.item,
+            self.sender_randomness,
+            self.receiver_preimage,
+            self.aocl_leaf_index,
+        )
+    }
+}
 
 /// The witness consumed by [`Update`].
 ///
@@ -73,6 +123,11 @@ pub struct UpdateWitness {
 
     pub(super) aocl_successor_proof: MmrSuccessorProof,
 
+    /// The set of thruputs that are being promoted to inputs.
+    ///
+    /// Strictly ascending by `aocl_leaf_index`. Allowed to be empty.
+    pub(super) promotions: Vec<Promotion>,
+
     pub(super) old_proof: Proof,
 
     /// The `SingleProof` program digest `D` this update is claimed under, and
@@ -88,22 +143,24 @@ pub struct UpdateWitness {
 impl UpdateWitness {
     /// Re-target an out-of-date [`LinkTx`] at a newer mutator set.
     ///
-    /// The new kernel must differ from the old one in nothing but its
-    /// mutator-set hash, its removal records' membership data (the absolute
-    /// index sets are unchanged) and, optionally, a later timestamp. The branch
-    /// is what establishes that; this constructor only checks the two things a
-    /// caller cannot recover from -- that each kernel names the accumulator it
-    /// was handed.
+    /// The new kernel must be identical to the old except for:
+    ///  - mutator set hash
+    ///  - removal records
+    ///  - promotions
+    ///  - a later timestamp.
     ///
-    /// `old` must be proof-backed and proven under `single_proof_digest`: the
-    /// digest goes into its claim verbatim, so an operand proven under any other
-    /// one simply fails to verify.
+    /// All bullet points are optional, but some change is mandatory.
+    ///
+    /// The `old` kernel must be backed by a `LinkProof` relative to SingleProof
+    /// digest D. That digest goes into the claim that is being verified. It is
+    /// also what the resulting `LinkProof` is relative to.
     pub fn update(
         old: LinkTx,
         old_msa: &MutatorSetAccumulator,
         new_kernel: LinkKernel,
         new_msa: &MutatorSetAccumulator,
         aocl_successor_proof: MmrSuccessorProof,
+        promotions: Vec<Promotion>,
         single_proof_digest: Digest,
     ) -> Self {
         let LinkTxProof::Proof(old_proof) = old.proof else {
@@ -120,6 +177,56 @@ impl UpdateWitness {
             "the new kernel must name the new mutator set"
         );
 
+        // The two promotion equations, up to order, plus the per-entry AOCL
+        // membership: exactly what `Update` asserts, checked here so a bad
+        // witness fails in milliseconds instead of after a proof.
+        let sorted = |digests: Vec<Digest>| digests.into_iter().sorted().collect_vec();
+        let records = |ars: &[AdditionRecord]| -> Vec<Digest> {
+            ars.iter().map(|ar| ar.canonical_commitment).collect()
+        };
+        let index_sets = |rrs: &[RemovalRecord]| -> Vec<Digest> {
+            rrs.iter()
+                .map(|rr| Tip5::hash(&rr.absolute_indices))
+                .collect()
+        };
+        let promoted_addition_records = promotions
+            .iter()
+            .map(|p| p.addition_record().canonical_commitment)
+            .collect_vec();
+        let promoted_index_sets = promotions
+            .iter()
+            .map(|p| Tip5::hash(&p.absolute_indices()))
+            .collect_vec();
+        assert_eq!(
+            sorted(records(&old.kernel.thruputs)),
+            sorted([records(&new_kernel.thruputs), promoted_addition_records].concat()),
+            "the promoted records must be exactly the thruputs the new kernel drops"
+        );
+        assert_eq!(
+            sorted(index_sets(&new_kernel.kernel.inputs)),
+            sorted([index_sets(&old.kernel.kernel.inputs), promoted_index_sets].concat()),
+            "the promoted index sets must be exactly the ones the new inputs add"
+        );
+        assert!(
+            promotions
+                .iter()
+                .map(|p| p.aocl_leaf_index)
+                .tuple_windows()
+                .all(|(l, r)| l < r),
+            "promotions must be sorted by strictly ascending AOCL leaf index"
+        );
+        for promotion in &promotions {
+            assert!(
+                promotion.aocl_auth_path.verify(
+                    promotion.aocl_leaf_index,
+                    promotion.addition_record().canonical_commitment,
+                    &new_msa.aocl.peaks(),
+                    new_msa.aocl.num_leafs(),
+                ),
+                "a promoted thruput must be confirmed in the new AOCL"
+            );
+        }
+
         Self {
             old_kernel: old.kernel,
             new_kernel,
@@ -130,6 +237,7 @@ impl UpdateWitness {
             new_swbfi_bagged: new_msa.swbf_inactive.bag_peaks(),
             new_swbfa_hash: Tip5::hash(&new_msa.swbf_active),
             aocl_successor_proof,
+            promotions,
             old_proof,
             single_proof_digest,
         }
@@ -256,11 +364,8 @@ impl SecretWitness for UpdateWitness {
 /// re-checked: every branch producing a `LinkProof` asserts both on the kernel
 /// it produces, so an operand that verifies has them by induction.
 ///
-/// Thruputs are carried across unchanged. That is not a simplification: an
-/// [`AdditionRecord`](neptune_mutator_set::addition_record::AdditionRecord) is a
-/// canonical commitment, which no mutator-set state enters into, so a thruput
-/// means the same thing before and after the update. Resolving one is `Chain`'s
-/// job, not `Update`'s.
+/// Thruputs are either a) carried across unchanged, or b) promoted into inputs.
+/// (Right now (b) is not supported yet.)
 ///
 /// Unlike its legacy sibling, `Update` does *not* require a non-empty input set.
 /// A `LinkTx` may legitimately have zero confirmed inputs -- an all-thruputs
@@ -970,6 +1075,7 @@ pub(crate) mod tests {
             new_kernel,
             &new_msa,
             successor_proof,
+            vec![],
             d,
         )
     }
@@ -1027,6 +1133,7 @@ mod negative_tests {
                     new_kernel,
                     &new_msa,
                     successor_proof,
+                    vec![],
                     mock_single_proof_digest(0),
                 )
             })
@@ -1188,6 +1295,7 @@ mod negative_tests {
             new_kernel,
             &new_msa,
             successor_proof,
+            vec![],
             other_d,
         );
 
@@ -1241,6 +1349,7 @@ mod negative_tests {
             new_kernel,
             &new_msa,
             successor_proof,
+            vec![],
             d,
         );
 
