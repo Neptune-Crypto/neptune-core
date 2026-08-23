@@ -789,27 +789,47 @@ unmatched thruput is un-`Fix`able (see §Motivation).
       (`update_promotes_a_confirmed_thruput`, one and two promotions, on the
       `promotable` fixture: promotion is the thruput reclassification
       `LinkPrimitiveWitness::from_primitive_witness` performs, run backwards.)
-- [ ] `advance_promotes_every_thruput`: promotion alone empties the thruput list
+- [x] `advance_promotes_every_thruput`: promotion alone empties the thruput list
       and the result `Fix`es -- the stranded-successor rescue, end to end.
-- [ ] `promoted_thruput_absent_from_the_old_thruputs_is_rejected`.
-- [ ] `promoted_input_index_set_other_than_the_computed_one_is_rejected`.
-- [ ] `promoted_thruput_not_in_the_new_aocl_is_rejected`: a thruput still
-      unconfirmed cannot be promoted.
-- [ ] `promotion_bound_to_the_wrong_aocl_leaf_is_rejected`: a membership proof
-      for a leaf that is not the thruput's commitment.
-- [ ] `promoted_input_spending_a_different_utxo_is_rejected`: the commitment
-      equation, i.e. the inflation-critical one.
-- [ ] `one_sided_promotion_is_rejected`: a thruput retired without the matching
-      input joining, and the reverse.
-- [ ] `duplicate_promoted_aocl_leaf_index_is_rejected`.
-- [ ] `unordered_promotions_are_rejected`: a valid promotion pair, swapped --
-      what gives the strictly-ascending encoding teeth.
-- [ ] Decide whether a `promotion_loop_matches_rri` drift guard is possible at
-      all: the loop shares RRI's commitment / AOCL-membership / index-set core
-      but not its preamble -- `item` is read out of `P` and pinned against a
-      thruput rather than hashed out of a salted list -- so the guard would
-      have to compare a sub-block rather than the loop body. Decide when the loop is
-      written; `Forge`'s guard is the model.
+      (`update_promotes_every_thruput`, on the all-thruputs shape: no confirmed
+      inputs before, no thruputs after. The `Fix` half is *not* asserted -- `Fix`
+      does not exist yet -- so revisit this line when it does.)
+- [x] `promoted_thruput_absent_from_the_old_thruputs_is_rejected`. (The old
+      kernel gives up one thruput while both promotions stay, so the first
+      equation is one addition record short on the left.)
+- [x] `promoted_input_index_set_other_than_the_computed_one_is_rejected`. (The
+      index set is recomputed from the promotion's own operands, so the poked
+      removal record fails the second equation.)
+- [x] `promoted_thruput_not_in_the_new_aocl_is_rejected`: a thruput still
+      unconfirmed cannot be promoted. (Poked sender randomness moves the
+      commitment off the accumulator; the MMR snippet's root mismatch is a bare
+      `error_id 10`, named locally in the test module.)
+- [x] `promotion_bound_to_the_wrong_aocl_leaf_is_rejected`: a membership proof
+      for a leaf that is not the thruput's commitment. (Corrupted in place, so
+      the digest stream keeps the length the loop expects and the failure is a
+      root mismatch rather than a desynchronised stream.)
+- [x] `promoted_input_spending_a_different_utxo_is_rejected`: the commitment
+      equation, i.e. the inflation-critical one. (Runs on a *decoy*: a promotion
+      built from an input that stays confirmed, so it names a real leaf of the
+      new AOCL and carries a valid membership proof, and still retires no
+      thruput. `promotable` now returns the decoys alongside the promotions.)
+- [x] `one_sided_promotion_is_rejected`: a thruput retired without the matching
+      input joining, and the reverse. (One direction per equation.)
+- [x] `duplicate_promoted_aocl_leaf_index_is_rejected`. (One promotion cloned
+      over the other. The equations carry the duplicate on both sides happily,
+      being between multisets, so the ordering check is what refuses it.)
+- [x] `unordered_promotions_are_rejected`: a valid promotion pair, swapped --
+      what gives the strictly-ascending encoding teeth. (Both entries valid and
+      the multisets identical either way round, so only the ordering check can
+      reject it.)
+- [x] Decided: no `promotion_loop_matches_rri` guard, because there is nothing
+      to drift. `Forge` needs its guard since it *reimplements* RRI's loop
+      inline; the promotion loop instead `call`s the very snippets RRI is built
+      from -- `Commit`, `MmrVerifyFromSecretInLeafIndexOnStack`,
+      `ComputeAbsoluteIndices` -- so the shared core cannot diverge without the
+      snippets themselves changing under both. What is left is the loop's own
+      scaffolding (the two list appends, the ordering check), which RRI has no
+      counterpart for and a sub-block comparison would have to skip anyway.
 - [x] the promotion fixture. Resolved without touching `LinkPrimitiveWitness`:
       its thruputs *are* reclassified confirmed inputs, so the primitive witness
       still holds the `(item, sr, rp)`, the AOCL leaf index and the very removal
