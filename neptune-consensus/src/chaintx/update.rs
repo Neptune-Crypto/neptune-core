@@ -9,15 +9,23 @@ use neptune_mutator_set::removal_record::RemovalRecord;
 use neptune_primitives::mast_hash::HasDiscriminant;
 use neptune_primitives::mast_hash::MastHash;
 use neptune_primitives::timestamp::Timestamp;
+use tasm_lib::arithmetic::u64::incr::Incr;
 use tasm_lib::data_type::DataType;
 use tasm_lib::field;
 use tasm_lib::field_with_size;
+use tasm_lib::hashing::algebraic_hasher::hash_static_size::HashStaticSize;
 use tasm_lib::hashing::merkle_verify::MerkleVerify;
 use tasm_lib::library::Library;
+use tasm_lib::list::higher_order::inner_function::InnerFunction;
+use tasm_lib::list::higher_order::inner_function::RawCode;
+use tasm_lib::list::higher_order::map::ChainMap;
 use tasm_lib::list::multiset_equality_digests::MultisetEqualityDigests;
+use tasm_lib::list::push::Push;
 use tasm_lib::memory::encode_to_memory;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
+use tasm_lib::mmr::verify_from_secret_in_leaf_index_on_stack::MmrVerifyFromSecretInLeafIndexOnStack;
 use tasm_lib::mmr::verify_mmr_successor::VerifyMmrSuccessor;
+use tasm_lib::neptune::mutator_set;
 use tasm_lib::prelude::BasicSnippet;
 use tasm_lib::prelude::Digest;
 use tasm_lib::structure::tasm_object::TasmObject;
@@ -46,11 +54,14 @@ use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::proof_abstractions::SecretWitness;
 use crate::transaction::transaction_kernel::TransactionKernel;
 use crate::transaction::validity::neptune_proof::Proof;
+use crate::transaction::validity::tasm::compute_absolute_indices::ComputeAbsoluteIndices;
 use crate::transaction::validity::tasm::hash_removal_record_index_sets::HashRemovalRecordIndexSets;
 use crate::transaction::validity::tasm::leaf_authentication::authenticate_msa_against_txk::AuthenticateMsaAgainstTxk;
 
-const INPUT_INDEX_SETS_ARE_NOT_UNCHANGED_ERROR: i128 = 1_000_560;
 const NEW_TIMESTAMP_IS_OLDER_THAN_OLD_ERROR: i128 = 1_000_561;
+const PROMOTED_THRUPUTS_DO_NOT_MATCH_ERROR: i128 = 1_000_562;
+const PROMOTED_INDEX_SETS_DO_NOT_MATCH_ERROR: i128 = 1_000_563;
+const PROMOTIONS_ARE_NOT_ASCENDING_ERROR: i128 = 1_000_564;
 
 /// One promoted thruput.
 ///
@@ -181,7 +192,7 @@ impl UpdateWitness {
         // membership: exactly what `Update` asserts, checked here so a bad
         // witness fails in milliseconds instead of after a proof.
         let sorted = |digests: Vec<Digest>| digests.into_iter().sorted().collect_vec();
-        let records = |ars: &[AdditionRecord]| -> Vec<Digest> {
+        let commitments = |ars: &[AdditionRecord]| -> Vec<Digest> {
             ars.iter().map(|ar| ar.canonical_commitment).collect()
         };
         let index_sets = |rrs: &[RemovalRecord]| -> Vec<Digest> {
@@ -198,9 +209,9 @@ impl UpdateWitness {
             .map(|p| Tip5::hash(&p.absolute_indices()))
             .collect_vec();
         assert_eq!(
-            sorted(records(&old.kernel.thruputs)),
-            sorted([records(&new_kernel.thruputs), promoted_addition_records].concat()),
-            "the promoted records must be exactly the thruputs the new kernel drops"
+            sorted(commitments(&old.kernel.thruputs)),
+            sorted([commitments(&new_kernel.thruputs), promoted_addition_records].concat()),
+            "the promoted addition records must be exactly the thruputs the new kernel drops"
         );
         assert_eq!(
             sorted(index_sets(&new_kernel.kernel.inputs)),
@@ -303,7 +314,8 @@ impl SecretWitness for UpdateWitness {
         VerifyMmrSuccessor::update_nondeterminism(&mut nondeterminism, &self.aocl_successor_proof);
 
         // Then the field authentications, old kernel then new kernel per field,
-        // and finally the new kernel's two constant leafs.
+        // and finally the new kernel's two constant leafs. Inputs and thruputs
+        // come first and together: the promotion equations need both.
         let per_kernel = |field: LinkKernelField| {
             [
                 self.old_kernel.mast_path(field),
@@ -311,11 +323,25 @@ impl SecretWitness for UpdateWitness {
             ]
             .concat()
         };
+        //
+        // The promotion loop's AOCL membership proofs, in promotion order, land
+        // between the thruputs and the outputs: that is where the loop runs,
+        // once the two lists its equations compare are bound to their kernels
+        // and before the fields the branch merely carries over. The leaf index
+        // and the commitment come off the stack -- the former read out of the
+        // entry, the latter computed from it -- so the path is all the loop
+        // takes from this stream.
+        let promotion_paths = self
+            .promotions
+            .iter()
+            .flat_map(|promotion| promotion.aocl_auth_path.authentication_path.clone())
+            .collect_vec();
         nondeterminism.digests.extend(
             [
                 per_kernel(LinkKernelField::Inputs),
-                per_kernel(LinkKernelField::Outputs),
                 per_kernel(LinkKernelField::Thruputs),
+                promotion_paths,
+                per_kernel(LinkKernelField::Outputs),
                 per_kernel(LinkKernelField::Announcements),
                 per_kernel(LinkKernelField::Fee),
                 per_kernel(LinkKernelField::Timestamp),
@@ -323,16 +349,6 @@ impl SecretWitness for UpdateWitness {
                 self.new_kernel.mast_path(LinkKernelField::MergeBit),
             ]
             .concat(),
-        );
-
-        // Then the promotion loop's AOCL membership proofs, in promotion order.
-        // The leaf index and the commitment come off the stack --
-        // the former read out of the entry, the latter computed from it -- so
-        // the path is all the loop takes from this stream.
-        nondeterminism.digests.extend(
-            self.promotions
-                .iter()
-                .flat_map(|promotion| promotion.aocl_auth_path.authentication_path.clone()),
         );
 
         // Then the recursive link-proof verification, which the branch does
@@ -432,6 +448,25 @@ impl BasicSnippet for Update {
         }));
         let verify_mmr_successor = library.import(Box::new(VerifyMmrSuccessor));
         let lt_u64 = library.import(Box::new(tasm_lib::arithmetic::u64::lt::Lt));
+        let increment_u64 = library.import(Box::new(Incr));
+        let ms_commit = library.import(Box::new(mutator_set::commit::Commit));
+        let mmr_verify = library.import(Box::new(MmrVerifyFromSecretInLeafIndexOnStack));
+        let compute_absolute_indices = library.import(Box::new(ComputeAbsoluteIndices));
+        let hash_absolute_indices = library.import(Box::new(HashStaticSize {
+            size: AbsoluteIndexSet::static_length().expect("absolute indices have a static size"),
+        }));
+        let list_push_digest = library.import(Box::new(Push::new(DataType::Digest)));
+
+        // Copying a list of digests is a `Map` whose function is the identity:
+        // it is how the right-hand side of the thruput equation gets a list it
+        // may grow, without touching the kernel's own.
+        let copy_digests = library.import(Box::new(ChainMap::<1>::new(InnerFunction::RawCode(
+            RawCode::new(
+                triton_asm!(neptune_consensus_chaintx_update_copy_digest: return),
+                DataType::Digest,
+                DataType::Digest,
+            ),
+        ))));
 
         let authenticate_inputs = library.import(Box::new(AuthenticateLinkKernelField(
             LinkKernelField::Inputs,
@@ -457,6 +492,17 @@ impl BasicSnippet for Update {
         let old_lkmh = old_lkmh_alloc.read_address();
         let new_lkmh = new_lkmh_alloc.read_address();
 
+        // The promotion loop carries its whole state on the stack -- no static
+        // memory. The invariant consists of eight words:
+        //
+        //     _ *new_aocl *addition_records *index_sets [running_lower_bound] num i *promotions[i]_si
+        //
+        // Everything the body reads is either one of those or a field of the
+        // entry the cursor is on, and the body's deepest reach is `dup 14`, so
+        // the whole loop stays inside the sixteen addressable stack words.
+        let promotion_loop = "neptune_consensus_chaintx_update_promotion_loop".to_string();
+        let u64_stack_size = u32::try_from(DataType::U64.stack_size()).unwrap();
+
         let field_old_kernel = field!(UpdateWitness::old_kernel);
         let field_new_kernel = field!(UpdateWitness::new_kernel);
         let field_old_aocl = field!(UpdateWitness::old_aocl);
@@ -466,6 +512,15 @@ impl BasicSnippet for Update {
         let field_new_swbfi_bagged = field!(UpdateWitness::new_swbfi_bagged);
         let field_new_swbfa_hash = field!(UpdateWitness::new_swbfa_hash);
         let field_old_proof = field!(UpdateWitness::old_proof);
+        let field_promotions = field!(UpdateWitness::promotions);
+
+        let field_item = field!(Promotion::item);
+        let field_sender_randomness = field!(Promotion::sender_randomness);
+        let field_receiver_preimage = field!(Promotion::receiver_preimage);
+        let field_aocl_leaf_index = field!(Promotion::aocl_leaf_index);
+
+        let field_peaks = field!(MmrAccumulator::peaks);
+        let field_leaf_count = field!(MmrAccumulator::leaf_count);
 
         // A `LinkKernel` composes a legacy `TransactionKernel`, so every legacy
         // field is reached through this one extra hop.
@@ -532,47 +587,290 @@ impl BasicSnippet for Update {
                 )
             };
 
-        // The inputs are the one field re-targeting is allowed to rewrite: a
-        // removal record carries membership data relative to a mutator set, and
-        // that is precisely what moved. What may not move is the absolute index
-        // set -- that is what a double spend collides on, so letting it change
-        // would let an update spend something else.
-        let assert_input_index_sets_are_unchanged = triton_asm!(
+        // Authenticate one kernel's variable-length field against that kernel's
+        // MAST hash and leave the field pointer behind. `kernel_depth` is where
+        // the kernel pointer sits when the call is made; it changes because the
+        // pointers pile up.
+        //
+        // BEFORE: _ ...
+        // AFTER:  _ ... *field
+        let authenticate_and_keep = |kernel_depth: usize,
+                                     accessor: &[LabelledInstruction],
+                                     authenticate: &str,
+                                     mast_hash_address|
+         -> Vec<LabelledInstruction> {
+            triton_asm!(
+                // _ ...
+                dup {kernel_depth}
+                {&accessor}
+                // _ ... *field size
+
+                {&load_lkmh(mast_hash_address)}
+                dup 6 dup 6
+                call {authenticate}
+                // _ ... *field size
+
+                pop 1
+                // _ ... *field
+            )
+        };
+
+        // Read a `Digest` field of the promotion the loop is on. `depth` is
+        // where `*promotion` sits at the time of the read.
+        let read_digest_field = |depth: usize, accessor: &[LabelledInstruction]| {
+            triton_asm!(
+                dup {depth}
+                {&accessor}
+                addi {Digest::LEN - 1}
+                read_mem {Digest::LEN}
+                pop 1
+            )
+        };
+        let read_leaf_index = |depth: usize| {
+            triton_asm!(
+                dup {depth}
+                {&field_aocl_leaf_index}
+                addi 1
+                read_mem {u64_stack_size}
+                pop 1
+            )
+        };
+
+        // Promotion: a thruput confirmed since the old mutator set moves into
+        // the confirmed inputs. Two coupled equations over the witness-supplied
+        // promotion set `P`, both compared as multisets:
+        //
+        //     old.thruputs          == new.thruputs   ++ addition_records(P)
+        //     indexsets(new.inputs) == indexsets(old.inputs) ++ indexsets(P)
+        //
+        // so an addition record leaves the thruput list if and only if a
+        // removal record carrying its index set joins the input list -- the
+        // same leaves-one-side-iff-it-leaves-the-other shape as `Chain`'s
+        // cut-through. An empty `P` collapses the pair into "thruputs
+        // unchanged, index sets unchanged", which is what this branch asserted
+        // before promotion, so the old behaviour is the empty case rather than
+        // a special one.
+        //
+        // Each right-hand side is a list the loop appends to: a copy of the new
+        // thruputs, and the old inputs' hashed index sets. Appending is safe
+        // because every list gets a page of dynamic memory to itself.
+        let assert_promotion_equations = triton_asm!(
             // _ *witness *old_lk *new_lk
+            {&authenticate_and_keep(1, &inner(&field_with_size_inputs), &authenticate_inputs, old_lkmh)}
+            {&authenticate_and_keep(1, &inner(&field_with_size_inputs), &authenticate_inputs, new_lkmh)}
+            {&authenticate_and_keep(3, &field_with_size_thruputs, &authenticate_thruputs, old_lkmh)}
+            {&authenticate_and_keep(3, &field_with_size_thruputs, &authenticate_thruputs, new_lkmh)}
+            // _ *witness *old_lk *new_lk *old_in *new_in *old_thru *new_thru
+
+            /* the loop's state: the accumulator it verifies membership
+               against, the two lists it appends to, and the bound the leaf
+               indices must climb, which starts at zero so the first promotion
+               may name leaf 0 */
+            dup 6
+            {&field_new_aocl}
+            // _ *witness *old_lk *new_lk *old_in *new_in *old_thru *new_thru *new_aocl
+
             dup 1
-            {&inner(&field_with_size_inputs)}
-            // _ *witness *old_lk *new_lk *old_in size
+            call {copy_digests}
+            // _ *witness *old_lk *new_lk *old_in *new_in *old_thru *new_thru *new_aocl *addition_records
 
-            {&load_lkmh(old_lkmh)}
-            dup 6 dup 6
-            call {authenticate_inputs}
-            // _ *witness *old_lk *new_lk *old_in size
-
-            pop 1
-            // _ *witness *old_lk *new_lk *old_in
-
-            dup 1
-            {&inner(&field_with_size_inputs)}
-            // _ *witness *old_lk *new_lk *old_in *new_in size
-
-            {&load_lkmh(new_lkmh)}
-            dup 6 dup 6
-            call {authenticate_inputs}
-            // _ *witness *old_lk *new_lk *old_in *new_in size
-
-            pop 1
-            // _ *witness *old_lk *new_lk *old_in *new_in
-
+            dup 5
             call {hash_removal_record_index_sets}
-            // _ *witness *old_lk *new_lk *old_in *new_in_digests
+            // _ *witness *old_lk *new_lk *old_in *new_in *old_thru *new_thru *new_aocl *addition_records *index_sets
 
+            push 0
+            push 0
+            // _ *witness *old_lk *new_lk *old_in *new_in *old_thru *new_thru *new_aocl *addition_records *index_sets [running_lower_bound]
+
+            dup 11
+            {&field_promotions}
+            read_mem 1
+            addi 2
+            // _ *witness *old_lk *new_lk *old_in *new_in *old_thru *new_thru *new_aocl *addition_records *index_sets [running_lower_bound] num *promotions[0]_si
+
+            push 0
             swap 1
-            call {hash_removal_record_index_sets}
-            // _ *witness *old_lk *new_lk *new_in_digests *old_in_digests
+            // _ *witness .. *new_thru *new_aocl *addition_records *index_sets [running_lower_bound] num 0 *promotions[0]_si
+
+            call {promotion_loop}
+            // _ *witness .. *new_thru *new_aocl *addition_records *index_sets [running_lower_bound] num num *promotions[num]_si
+
+            pop 5
+            // _ *witness *old_lk *new_lk *old_in *new_in *old_thru *new_thru *new_aocl *addition_records *index_sets
+
+            /* The first promotion equation: the old kernel's thruputs are
+               exactly the new kernel's thruputs together with the promoted
+               ones. `*addition_records` is that right-hand side, the loop
+               having appended one canonical commitment per promotion to a copy
+               of the new thruputs. Nothing needs hashing before the
+               comparison, because an `AdditionRecord` is a single canonical
+               commitment and a list of them is therefore already a list of
+               digests. */
+            pick 4
+            pick 2
+            // _ *witness *old_lk *new_lk *old_in *new_in *new_thru *new_aocl *index_sets *old_thru *new_and_promoted
 
             call {multiset_equality}
-            assert error_id {INPUT_INDEX_SETS_ARE_NOT_UNCHANGED_ERROR}
+            assert error_id {PROMOTED_THRUPUTS_DO_NOT_MATCH_ERROR}
+            // _ *witness *old_lk *new_lk *old_in *new_in *new_thru *new_aocl *index_sets
+
+            /* The second promotion equation: the new kernel's inputs are
+               exactly the old kernel's inputs together with the promoted ones.
+               `*index_sets` is that right-hand side, the loop having appended
+               one hashed index set per promotion to the hashed index sets of
+               the old inputs. Removal records are compared by absolute index
+               set rather than byte for byte, because the index set is what a
+               double spend collides on, and re-targeting is free to rewrite
+               everything else about them. */
+            pick 3
+            call {hash_removal_record_index_sets}
+            pick 1
+            // _ *witness *old_lk *new_lk *old_in *new_thru *new_aocl *new_in_digests *old_and_promoted
+
+            call {multiset_equality}
+            assert error_id {PROMOTED_INDEX_SETS_DO_NOT_MATCH_ERROR}
+            // _ *witness *old_lk *new_lk *old_in *new_thru *new_aocl
+
+            pop 3
             // _ *witness *old_lk *new_lk
+        );
+
+        // One promoted thruput per iteration: the entry's four fields determine
+        // both sides of the move, and the loop puts each side in the list its
+        // equation compares.
+        //
+        // The entries are size-prefixed, `Promotion` being dynamically sized,
+        // so the cursor walks them; the four fields the body reads all precede
+        // the authentication path, hence sit at static offsets.
+        let promotion_loop_code = triton_asm!(
+            // INVARIANT: _ *new_aocl *addition_records *index_sets [running_lower_bound] num i *promotions[i]_si
+            {promotion_loop}:
+                dup 2 dup 2 eq
+                skiz return
+                // _ *new_aocl *addition_records *index_sets [running_lower_bound] num i *promotions[i]_si
+
+                dup 0 addi 1
+                // _ *new_aocl *addition_records *index_sets [running_lower_bound] num i *promotions[i]_si *promotion
+
+                /* the addition record leaving the thruputs:
+                   commit(item, sender_randomness, H(receiver_preimage)).
+                   Inflation-critical: it is what stops a promoted input from
+                   spending a UTXO other than the one `Forge` proved. */
+                push 0 push 0 push 0 push 0 push 0
+                {&read_digest_field(5, &field_receiver_preimage)}
+                hash
+                // _ ... *promotion [receiver_digest]
+
+                {&read_digest_field(5, &field_sender_randomness)}
+                {&read_digest_field(10, &field_item)}
+                // _ ... *promotion [receiver_digest] [sender_randomness] [item]
+
+                call {ms_commit}
+                // _ *new_aocl *addition_records *index_sets [running_lower_bound] num i *promotions[i]_si *promotion [cc]
+
+                /* it joins the copy of the new thruputs */
+                dup 12
+                dup 5 dup 5 dup 5 dup 5 dup 5
+                // _ *new_aocl *addition_records *index_sets [running_lower_bound] num i *promotions[i]_si *promotion [cc] *addition_records [cc]
+
+                call {list_push_digest}
+                // _ *new_aocl *addition_records *index_sets [running_lower_bound] num i *promotions[i]_si *promotion [cc]
+
+                /* "Confirmed since" is membership in the *new* AOCL, the one
+                   the new kernel names. Nothing needs to say the record was
+                   absent from the old AOCL, and nothing could: MMR
+                   non-membership is not cheap. Nor does it matter. The old
+                   AOCL is a leaf-index-preserving prefix of the new one, so a
+                   commitment already confirmed at the old mutator set is
+                   confirmed at the same leaf index in the new one, and its
+                   promotion pins the same index set a later confirmation would
+                   have. */
+                dup 13
+                {&field_peaks}
+                place {Digest::LEN}
+                // _ *new_aocl *addition_records *index_sets [running_lower_bound] num i *promotions[i]_si *promotion *peaks [cc]
+
+                dup 14
+                {&field_leaf_count}
+                addi 1
+                read_mem {u64_stack_size}
+                pop 1
+                // _ *new_aocl .. *promotions[i]_si *promotion *peaks [cc] [num_leafs]
+
+                {&read_leaf_index(8)}
+                // _ *new_aocl .. *promotion *peaks [cc] [num_leafs] [aocl_leaf_index]
+
+                call {mmr_verify}
+                // _ *new_aocl *addition_records *index_sets [running_lower_bound] num i *promotions[i]_si *promotion
+
+                /* The promotions must be listed in strictly ascending order
+                   of AOCL leaf index. This iteration asserts that its own index
+                   is not below the running lower bound, and then raises that
+                   bound to its own index plus one, so the next iteration has to
+                   name a strictly larger leaf. The `+ 1` cannot wrap, because
+                   the membership check above bounds the index below the AOCL's
+                   leaf count.
+
+                   The ordering is a means, not an end. What this assertion
+                   forbids, at the cost of one u64 comparison per iteration, is
+                   two promotions naming the same AOCL leaf.
+
+                   Nothing forbids the production of a `LinkKernel` with two
+                   identical thruputs. When promoted, they must name
+                   *different* AOCL leaf indices, because otherwise they
+                   generate identical absolute index sets. That feature makes
+                   the `LinkTx` into a transaction that double-spends itself.
+                   Self-double-spending transactions cannot be confirmed into
+                   a block, so that non-path is a road to failure anyway -- it
+                   just fails faster (and with more defense in depth) here.
+
+                   Distinct thruputs that name the same AOCL leaf index cannot
+                   both pass the MMR membership test. */
+                dup 5 dup 5
+                {&read_leaf_index(2)}
+                // _ *new_aocl .. *promotions[i]_si *promotion [running_lower_bound] [aocl_leaf_index]
+
+                call {lt_u64}
+                push 0 eq
+                assert error_id {PROMOTIONS_ARE_NOT_ASCENDING_ERROR}
+                // _ *new_aocl *addition_records *index_sets [running_lower_bound] num i *promotions[i]_si *promotion
+
+                {&read_leaf_index(0)}
+                call {increment_u64}
+                // _ *new_aocl *addition_records *index_sets [running_lower_bound] num i *promotions[i]_si *promotion [aocl_leaf_index + 1]
+
+                swap 6 pop 1
+                swap 6 pop 1
+                // _ *new_aocl *addition_records *index_sets [running_lower_bound'] num i *promotions[i]_si *promotion
+
+                /* the absolute index set joining the inputs */
+                {&read_leaf_index(0)}
+                {&read_digest_field(2, &field_receiver_preimage)}
+                {&read_digest_field(7, &field_sender_randomness)}
+                {&read_digest_field(12, &field_item)}
+                // _ ... *promotion [aocl_leaf_index] [rp] [sr] [item]
+
+                call {compute_absolute_indices}
+                call {hash_absolute_indices}
+                pop 1
+                // _ *new_aocl *addition_records *index_sets [running_lower_bound'] num i *promotions[i]_si *promotion [index_set_digest]
+
+                dup 11
+                place {Digest::LEN}
+                call {list_push_digest}
+                // _ *new_aocl *addition_records *index_sets [running_lower_bound'] num i *promotions[i]_si *promotion
+
+                /* advance */
+                pop 1
+                swap 1 addi 1 swap 1
+                // _ *new_aocl *addition_records *index_sets [running_lower_bound'] num (i+1) *promotions[i]_si
+
+                read_mem 1
+                addi 2
+                add
+                // _ *new_aocl *addition_records *index_sets [running_lower_bound'] num (i+1) *promotions[i+1]_si
+
+                recurse
         );
 
         // Authenticate one kernel's mutator set accumulator against that
@@ -695,7 +993,6 @@ impl BasicSnippet for Update {
                 // _
             )
         };
-
         triton_asm!(
             {self.entrypoint()}:
             // _ [own_program_digest] [new_lkmh] *link_proof_witness disc
@@ -735,12 +1032,11 @@ impl BasicSnippet for Update {
             // _ [own_program_digest] disc *witness *old_lk *new_lk
 
             {&assert_mutator_set_moved_forward}
-            {&assert_input_index_sets_are_unchanged}
+            {&assert_promotion_equations}
             {&assert_field_is_unchanged(
                 &inner(&field_with_size_outputs),
                 &authenticate_outputs,
             )}
-            {&assert_field_is_unchanged(&field_with_size_thruputs, &authenticate_thruputs)}
             {&assert_field_is_unchanged(
                 &inner(&field_with_size_announcements),
                 &authenticate_announcements,
@@ -792,6 +1088,8 @@ impl BasicSnippet for Update {
             // _ [own_program_digest] [new_lkmh] *witness -1
 
             return
+
+            {&promotion_loop_code}
         )
     }
 }
@@ -800,6 +1098,7 @@ impl BasicSnippet for Update {
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
     use neptune_mutator_set::addition_record::AdditionRecord;
+    use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
     use proptest::strategy::Strategy;
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
@@ -873,8 +1172,10 @@ pub(crate) mod tests {
         /* ... and the new AOCL only ever grew */
         tasm::verify_mmr_successor_proof(&old_aocl, &new_aocl, &witness.aocl_successor_proof);
 
-        /* inputs may be rewritten, but not the index sets a double spend
-        collides on */
+        /* Inputs and thruputs may both move, but only by promotion. A thruput
+        that was confirmed since the old mutator set leaves the thruput list
+        if and only if a removal record carrying its index set joins the
+        input list. */
         authenticate(
             old_lkmh,
             LinkKernelField::Inputs,
@@ -885,16 +1186,81 @@ pub(crate) mod tests {
             LinkKernelField::Inputs,
             Tip5::hash(&new.kernel.inputs),
         );
-        let index_sets = |kernel: &LinkKernel| {
-            kernel
-                .kernel
-                .inputs
-                .iter()
-                .map(|rr| Tip5::hash(&rr.absolute_indices.to_vec()))
-                .sorted()
-                .collect_vec()
-        };
-        assert_eq!(index_sets(old), index_sets(new));
+        authenticate(
+            old_lkmh,
+            LinkKernelField::Thruputs,
+            Tip5::hash(&old.thruputs),
+        );
+        authenticate(lkmh, LinkKernelField::Thruputs, Tip5::hash(&new.thruputs));
+
+        let mut new_and_promoted_thruputs: Vec<Digest> = new
+            .thruputs
+            .iter()
+            .map(|ar| ar.canonical_commitment)
+            .collect_vec();
+        let mut old_and_promoted_index_sets: Vec<Digest> = old
+            .kernel
+            .inputs
+            .iter()
+            .map(|rr| Tip5::hash(&rr.absolute_indices))
+            .collect_vec();
+        let mut previous_leaf_index: u64 = 0;
+        let mut i: usize = 0;
+        while i < witness.promotions.len() {
+            let promotion: &Promotion = &witness.promotions[i];
+
+            /* what leaves the thruputs. Inflation-critical: without it a
+            promoted input could spend a UTXO other than the one `Forge`
+            proved. */
+            let addition_record = commit(
+                promotion.item,
+                promotion.sender_randomness,
+                promotion.receiver_preimage.hash(),
+            );
+
+            /* "confirmed since" is membership in the *new* AOCL */
+            assert!(tasm::mmr_verify_from_secret_in_leaf_index_on_stack(
+                &new_aocl.peaks(),
+                new_aocl.num_leafs(),
+                promotion.aocl_leaf_index,
+                addition_record.canonical_commitment,
+            ));
+
+            /* leaf indices climb strictly, which is pairwise distinctness */
+            assert!(previous_leaf_index <= promotion.aocl_leaf_index);
+            previous_leaf_index = promotion.aocl_leaf_index + 1;
+
+            new_and_promoted_thruputs.push(addition_record.canonical_commitment);
+            old_and_promoted_index_sets.push(Tip5::hash(&AbsoluteIndexSet::compute(
+                promotion.item,
+                promotion.sender_randomness,
+                promotion.receiver_preimage,
+                promotion.aocl_leaf_index,
+            )));
+
+            i += 1;
+        }
+
+        let sorted = |digests: Vec<Digest>| digests.into_iter().sorted().collect_vec();
+        assert_eq!(
+            sorted(
+                old.thruputs
+                    .iter()
+                    .map(|ar| ar.canonical_commitment)
+                    .collect_vec()
+            ),
+            sorted(new_and_promoted_thruputs)
+        );
+        assert_eq!(
+            sorted(
+                new.kernel
+                    .inputs
+                    .iter()
+                    .map(|rr| Tip5::hash(&rr.absolute_indices))
+                    .collect_vec()
+            ),
+            sorted(old_and_promoted_index_sets)
+        );
 
         /* everything else is carried over verbatim: one set of bytes, two
         roots */
@@ -903,7 +1269,6 @@ pub(crate) mod tests {
             authenticate(lkmh, field, leaf);
         };
         unchanged(LinkKernelField::Outputs, Tip5::hash(&old.kernel.outputs));
-        unchanged(LinkKernelField::Thruputs, Tip5::hash(&old.thruputs));
         unchanged(
             LinkKernelField::Announcements,
             Tip5::hash(&old.kernel.announcements),
@@ -992,6 +1357,98 @@ pub(crate) mod tests {
         (lpw, old_msa, new_kernel, new_msa, successor_proof)
     }
 
+    /// The pieces of an update that promotes every thruput: an old kernel with
+    /// `num_thruputs` of them, a mutator set grown by `num_additions` leafs, and
+    /// a new kernel with no thruputs left and a removal record for each.
+    ///
+    /// The thruputs a [`LinkPrimitiveWitness`] is built with are *reclassified
+    /// as confirmed inputs*, so the primitive witness still holds everything a
+    /// promotion needs: the UTXO, its membership proof's commitment randomness
+    /// and AOCL leaf index, and the very removal record the reclassification
+    /// dropped from the kernel. Promotion here is thus the reclassification run
+    /// backwards, which is what makes the index sets agree by construction
+    /// rather than by fixture arithmetic.
+    ///
+    /// The promoted records are already in the *old* AOCL, where a real
+    /// promotion's would only have landed in the new one. `Update` cannot tell
+    /// the difference and deliberately does not try -- membership in the new
+    /// AOCL is the whole check -- so the shortcut costs the fixture nothing.
+    /// The membership proofs are carried across the appends, since the new
+    /// kernel names the grown accumulator and the branch verifies against it.
+    pub(super) fn promotable(
+        pw: PrimitiveWitness,
+        num_thruputs: usize,
+        num_additions: usize,
+    ) -> (
+        LinkPrimitiveWitness,
+        MutatorSetAccumulator,
+        LinkKernel,
+        MutatorSetAccumulator,
+        MmrSuccessorProof,
+        Vec<Promotion>,
+    ) {
+        let num_confirmed = pw.input_membership_proofs.len() - num_thruputs;
+        let items = pw.input_utxos.utxos[num_confirmed..]
+            .iter()
+            .map(Tip5::hash)
+            .collect_vec();
+        let mut membership_proofs = pw.input_membership_proofs[num_confirmed..].to_vec();
+        let promoted_removal_records = pw.kernel.inputs[num_confirmed..].to_vec();
+
+        let lpw = LinkPrimitiveWitness::from_primitive_witness(pw, num_thruputs);
+        let old_msa = lpw.mutator_set_accumulator.clone();
+
+        let mut new_msa = old_msa.clone();
+        let newly_confirmed = (0..num_additions)
+            .map(|i| Digest::new([BFieldElement::new(i as u64 + 1); Digest::LEN]))
+            .collect_vec();
+        for canonical_commitment in newly_confirmed.iter().copied() {
+            let addition_record = AdditionRecord::new(canonical_commitment);
+            MsMembershipProof::batch_update_from_addition(
+                &mut membership_proofs.iter_mut().collect_vec(),
+                &items,
+                &new_msa,
+                &addition_record,
+            )
+            .unwrap();
+            new_msa.add(&addition_record);
+        }
+
+        let promotions = membership_proofs
+            .iter()
+            .zip_eq(&items)
+            .map(|(mp, &item)| Promotion {
+                item,
+                sender_randomness: mp.sender_randomness,
+                receiver_preimage: mp.receiver_preimage,
+                aocl_leaf_index: mp.aocl_leaf_index,
+                aocl_auth_path: mp.auth_path_aocl.clone(),
+            })
+            .sorted_by_key(|promotion| promotion.aocl_leaf_index)
+            .collect_vec();
+
+        let new_kernel = LinkKernel {
+            kernel: TransactionKernelModifier::default()
+                .mutator_set_hash(new_msa.hash())
+                .timestamp(lpw.kernel.kernel.timestamp + Timestamp::days(1))
+                .inputs([lpw.kernel.kernel.inputs.clone(), promoted_removal_records].concat())
+                .clone_modify(&lpw.kernel.kernel),
+            thruputs: vec![],
+        };
+
+        let successor_proof =
+            MmrSuccessorProof::new_from_batch_append(&old_msa.aocl, &newly_confirmed);
+
+        (
+            lpw,
+            old_msa,
+            new_kernel,
+            new_msa,
+            successor_proof,
+            promotions,
+        )
+    }
+
     /// [`updatable`] over the fixed fixture the proof-bearing tests share.
     ///
     /// Deterministic on purpose: same witness and same `D` means the same claim,
@@ -1041,6 +1498,26 @@ pub(crate) mod tests {
         }
     }
 
+    /// Verify that a thruput is promoted if the matching addition record was
+    /// confirmed.
+    ///
+    /// This test involves producing proofs and might take a while to complete
+    /// if there is no proof cache.
+    #[tokio::test]
+    async fn update_promotes_a_confirmed_thruput() {
+        for num_thruputs in 1..=2 {
+            let witness = deterministic_promotion_witness(num_thruputs).await;
+            assert_eq!(
+                num_thruputs,
+                witness.promotions.len(),
+                "the fixture must promote every thruput for this test to be the one it claims"
+            );
+            assert!(witness.new_kernel.thruputs.is_empty());
+
+            prop_positive(witness);
+        }
+    }
+
     /// A link transaction with *no confirmed inputs at all* can be updated.
     ///
     /// This is the shape §Governing invariants commits to. An all-thruputs link
@@ -1071,9 +1548,37 @@ pub(crate) mod tests {
         prop_positive(witness);
     }
 
-    /// `Forge` the deterministic fixture and build the update witness that
-    /// re-targets it. Shared by the positive tests, which is what keeps them on
-    /// one cached proof per shape.
+    /// `Forge` a deterministic `LinkTx` and build an `UpdateWitness` that
+    /// re-targets it.
+    ///
+    /// Shared by the positive tests, so: cached once + reused often.
+    ///
+    /// A witness that promotes every one of its `num_thruputs` thruputs.
+    ///
+    /// Shares [`deterministic_updatable`]'s primitive witness, hence its
+    /// `Forge` claim, hence its cached proof: promotion changes the *new*
+    /// kernel, and the old link proof is what the proving time goes into.
+    async fn deterministic_promotion_witness(num_thruputs: usize) -> UpdateWitness {
+        let mut test_runner = TestRunner::deterministic();
+        let pw = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 1)
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let (lpw, old_msa, new_kernel, new_msa, successor_proof, promotions) =
+            promotable(pw, num_thruputs, 3);
+        let d = mock_single_proof_digest(0);
+
+        UpdateWitness::update(
+            forge(&lpw, d).await,
+            &old_msa,
+            new_kernel,
+            &new_msa,
+            successor_proof,
+            promotions,
+            d,
+        )
+    }
+
     async fn deterministic_update_witness(num_thruputs: usize) -> UpdateWitness {
         let (lpw, old_msa, new_kernel, new_msa, successor_proof) =
             deterministic_updatable(num_thruputs);
@@ -1175,10 +1680,12 @@ mod negative_tests {
         expect_failure(witness, &[NEW_TIMESTAMP_IS_OLDER_THAN_OLD_ERROR]).unwrap();
     }
 
-    /// The absolute index sets are what a double spend collides on, so an
-    /// update that moves one is an update that spends something else. Tampered
-    /// both ways the multiset comparison can see: one index changed, and one
-    /// index dropped.
+    /// Tamper with the inputs and verify that it fails.
+    ///
+    /// With no promotions, an update that touches the removal records is an
+    /// update that spends something else. In this test, the inputs are tampered
+    /// all three ways the multiset comparison can see: one index changed, one
+    /// record dropped, and one record too many.
     #[proptest(cases = 4)]
     fn tampered_absolute_index_set_is_rejected(
         #[strategy(pokeable_witness())] original: UpdateWitness,
@@ -1189,7 +1696,7 @@ mod negative_tests {
         witness.new_kernel.kernel = TransactionKernelModifier::default()
             .inputs(inputs)
             .modify(witness.new_kernel.kernel);
-        expect_failure(witness, &[INPUT_INDEX_SETS_ARE_NOT_UNCHANGED_ERROR]).unwrap();
+        expect_failure(witness, &[PROMOTED_INDEX_SETS_DO_NOT_MATCH_ERROR]).unwrap();
 
         let mut witness = original.clone();
         let mut inputs = witness.new_kernel.kernel.inputs.clone();
@@ -1197,7 +1704,15 @@ mod negative_tests {
         witness.new_kernel.kernel = TransactionKernelModifier::default()
             .inputs(inputs)
             .modify(witness.new_kernel.kernel);
-        expect_failure(witness, &[INPUT_INDEX_SETS_ARE_NOT_UNCHANGED_ERROR]).unwrap();
+        expect_failure(witness, &[PROMOTED_INDEX_SETS_DO_NOT_MATCH_ERROR]).unwrap();
+
+        let mut witness = original.clone();
+        let mut inputs = witness.new_kernel.kernel.inputs.clone();
+        inputs.push(inputs[0].clone());
+        witness.new_kernel.kernel = TransactionKernelModifier::default()
+            .inputs(inputs)
+            .modify(witness.new_kernel.kernel);
+        expect_failure(witness, &[PROMOTED_INDEX_SETS_DO_NOT_MATCH_ERROR]).unwrap();
     }
 
     /// The accumulators on the witness are the ones the kernels name. A poked
@@ -1222,7 +1737,12 @@ mod negative_tests {
 
     /// Every field that must not change is authenticated with the *old*
     /// kernel's bytes against *both* roots, so any change at all fails the new
-    /// kernel's leaf. One poke per field: outputs, thruputs, announcements, fee.
+    /// kernel's leaf. One poke per field: outputs, announcements, fee.
+    ///
+    /// Inputs-and-thruputs are the exception, promotion having replaced their
+    /// byte equality with a multiset equation: each kernel's list is
+    /// authenticated against its own root, so a poked list is a
+    /// well-authenticated list that the equation then refuses.
     #[proptest(cases = 4)]
     fn changing_a_carried_over_field_is_rejected(
         #[strategy(pokeable_witness())] original: UpdateWitness,
@@ -1238,7 +1758,7 @@ mod negative_tests {
 
         let mut witness = original.clone();
         witness.new_kernel.thruputs.push(record);
-        expect_failure(witness, &[MerkleVerify::ROOT_MISMATCH_ERROR_ID]).unwrap();
+        expect_failure(witness, &[PROMOTED_THRUPUTS_DO_NOT_MATCH_ERROR]).unwrap();
 
         let mut witness = original.clone();
         let mut announcements = witness.new_kernel.kernel.announcements.clone();

@@ -100,11 +100,13 @@ places:
 - **Two thruputs may not be promoted at one AOCL leaf.** They would put two
   removal records with the same absolute index set in one kernel — one confirmed
   UTXO spent twice, while `Forge` counted it twice on the type-script-facing
-  input side, which is an inflation path rather than a mere double spend.
-  `Advance` forbids it directly (§Tasm > `Advance`). The neighbouring case, a
-  promoted index set colliding with one already in `old.kernel.inputs`, is *not*
-  visible to `Advance` — a removal record does not reveal which AOCL leaf it
-  spends — and is left to block rule 2.c (`block/mod.rs:866`,
+  input side. `Advance` forbids it directly (§Tasm > `Advance`), which keeps a
+  `LinkProof` from ever attesting to such a kernel; the block rule named next
+  would reject it at block time regardless, so the supply is never at risk.
+  The neighbouring case, a promoted index set colliding with one already in
+  `old.kernel.inputs`, is *not* visible to `Advance` — a removal record does not
+  reveal which AOCL leaf it spends — and is left to block rule 2.c
+  (`block/mod.rs:866`,
   `BlockValidationError::RemovalRecordsUniqueness`), which sorts and dedups the
   block transaction's index sets unconditionally and therefore covers a `Fix`ed
   `LinkTx`. That is the same reliance `Merge` already has.
@@ -204,6 +206,21 @@ verified", i.e. universal forgery. Covered by §Negative tests for `D`.
 - [ ] Glossary: `thruput` = an `AdditionRecord` that is simultaneously (a) an
       unconfirmed input to this tx and (b) an output of a predecessor in the
       chain of transactions.
+- [ ] Glossary: the **promotion equations** = the coupled pair `Advance`
+      enforces over the witness-supplied promotion set `P`, both compared as
+      multisets:
+
+          multiset(old.thruputs) == multiset(new.thruputs) ⊎ records(P)
+          indexsets(new.inputs)  == indexsets(old.inputs) ⊎ indexsets(P)
+
+      Name them in `transaction.md` and write them out there verbatim. The
+      term already earns its keep in the code -- `assert_promotion_equations`
+      is the tasm subroutine that checks exactly this pair -- so the spec
+      should use the same words. Say why they are one thing and not two: an
+      addition record leaves the thruput list if and only if a removal record
+      carrying its index set joins the input list. Say what `P = []` means:
+      thruputs and index sets both unchanged, which is the update that
+      promotes nothing.
 - [ ] Write §Breaking the `Fix`/`Cast` cycle into `transaction.md` too — the
       claim shape `[lkmh, D]` is consensus-visible, so it belongs in the spec,
       not only in this tracker.
@@ -435,7 +452,7 @@ would bind that check to the wrong tree without crashing.
         than divined so the loop count is the list length rather than a
         length difference, and so the loop re-reads its operands instead of
         stashing them.
-  - [ ] per promoted entry, read out of `P`:
+  - [x] per promoted entry, read out of `P`:
 
             commit(item, sr, hash(rp))                  == the retired thruput
             aocl_verify(new_aocl, idx, that commitment)
@@ -445,18 +462,22 @@ would bind that check to the wrong tree without crashing.
         could spend a *different* UTXO than the one whose lock script `Forge`
         proved. The second is what "confirmed in the meantime" means, and it is
         against the *new* AOCL -- the one the new kernel names.
-  - [ ] promoted `aocl_leaf_index`es are pairwise distinct, encoded as strictly
+  - [x] promoted `aocl_leaf_index`es are pairwise distinct, encoded as strictly
         ascending: one u64 comparison per iteration against a `previous + 1`
-        held in a `kmalloc` slot, rather than a set or a sort. The `+ 1` cannot
-        wrap, since the AOCL membership check above already bounds each index
-        below `num_leafs`. Rationale and the neighbouring case that is *not*
-        checked here: §Governing invariants.
-  - [ ] no scratch `kmalloc`s: the four values `Forge`'s loop stashes are
-        fields of the entry, so the loop re-reads them from memory. If a drift
-        guard against RRI (§Mirror Tests > onto `Advance`) turns out to need
-        `Forge`'s stack shape after all, the slots come back -- contiguous and
-        ahead of `StarkVerify`'s imports, the discipline `forge.rs:719-731`
-        documents.
+        carried in the loop's stack invariant, rather than a set or a sort. The
+        `+ 1` cannot wrap, since the AOCL membership check above already bounds
+        each index below `num_leafs`. Rationale and the neighbouring case that
+        is *not* checked here: §Governing invariants.
+  - [x] no static memory at all, unlike `Forge`'s loop: the whole state is an
+        eight-word stack invariant,
+
+            _ *new_aocl *records *indexes [previous + 1] num i *promotions[i]_si
+
+        and everything else the body touches is a field of the entry the cursor
+        is on. The deepest reach is `dup 14`, one word inside the sixteen
+        addressable. This is what makes the loop `kmalloc`-free: `Forge` stashes
+        its four divined values because it has nowhere else to put them, and a
+        memory-resident `P` has the entry to read back instead.
   - [x] nondeterminism: only the AOCL authentication paths, in promotion order,
         appended to the digest stream after the field authentications and
         before `StarkVerify`'s -- the promotion loop sits between them. 
@@ -760,10 +781,14 @@ unmatched thruput is un-`Fix`able (see §Motivation).
 - [x] `advance_accepts_a_forged_link_transaction` /
       `advance_accepts_an_all_thruputs_link_transaction`: `Advance` re-targets a
       forged link transaction, with or without confirmed inputs.
-- [ ] `advance_promotes_none`: `P = []` is the pre-promotion behaviour,
-      unchanged -- the existing positives re-run.
-- [ ] `advance_promotes_a_confirmed_thruput`: a thruput whose addition record
+- [x] `advance_promotes_none`: `P = []` is the pre-promotion behaviour,
+      unchanged -- the existing positives re-run. (Every test but the one below
+      promotes nothing, so this is what they all assert.)
+- [x] `advance_promotes_a_confirmed_thruput`: a thruput whose addition record
       landed in the new AOCL moves into the confirmed inputs.
+      (`update_promotes_a_confirmed_thruput`, one and two promotions, on the
+      `promotable` fixture: promotion is the thruput reclassification
+      `LinkPrimitiveWitness::from_primitive_witness` performs, run backwards.)
 - [ ] `advance_promotes_every_thruput`: promotion alone empties the thruput list
       and the result `Fix`es -- the stranded-successor rescue, end to end.
 - [ ] `promoted_thruput_absent_from_the_old_thruputs_is_rejected`.
@@ -785,13 +810,13 @@ unmatched thruput is un-`Fix`able (see §Motivation).
       thruput rather than hashed out of a salted list -- so the guard would
       have to compare a sub-block rather than the loop body. Decide when the loop is
       written; `Forge`'s guard is the model.
-- [ ] the `advanceable` fixture (`updatable`, `update.rs:838`, before the
-      rename) currently grows the AOCL with dummy leafs
-      (`Digest::new([i + 1; 5])`). Promotion needs real canonical commitments,
-      so the fixture has to reach the thruputs' `(item, sr, rp)` -- and
-      `LinkPrimitiveWitness` stores `thruput_receiver_digests`, not preimages.
-      Either generate thruputs with known preimages or add a test-only preimage
-      field.
+- [x] the promotion fixture. Resolved without touching `LinkPrimitiveWitness`:
+      its thruputs *are* reclassified confirmed inputs, so the primitive witness
+      still holds the `(item, sr, rp)`, the AOCL leaf index and the very removal
+      record the reclassification dropped. `promotable` reads them off it and
+      carries the membership proofs across the AOCL's growth. The promoted
+      records are then already in the *old* AOCL, which `Update` neither checks
+      nor can check -- membership in the new one is the whole test.
 - Not applicable: merge-bit-unchanged (`update_branch` divines the bit and
   carries it across; a `LinkTx` never has it set, so the constant leaf is
   stronger)
