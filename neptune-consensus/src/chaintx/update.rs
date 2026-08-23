@@ -1375,6 +1375,12 @@ pub(crate) mod tests {
     /// AOCL is the whole check -- so the shortcut costs the fixture nothing.
     /// The membership proofs are carried across the appends, since the new
     /// kernel names the grown accumulator and the branch verifies against it.
+    ///
+    /// The last returned value is the *decoys*: the same `Promotion` tuples
+    /// built for the inputs that stay confirmed. Each one names a genuine leaf
+    /// of the new AOCL and carries a valid membership proof for it, but no
+    /// thruput retires when it is promoted, so a decoy is what a promotion
+    /// spending a UTXO other than the one it claims to retire looks like.
     pub(super) fn promotable(
         pw: PrimitiveWitness,
         num_thruputs: usize,
@@ -1386,13 +1392,11 @@ pub(crate) mod tests {
         MutatorSetAccumulator,
         MmrSuccessorProof,
         Vec<Promotion>,
+        Vec<Promotion>,
     ) {
         let num_confirmed = pw.input_membership_proofs.len() - num_thruputs;
-        let items = pw.input_utxos.utxos[num_confirmed..]
-            .iter()
-            .map(Tip5::hash)
-            .collect_vec();
-        let mut membership_proofs = pw.input_membership_proofs[num_confirmed..].to_vec();
+        let items = pw.input_utxos.utxos.iter().map(Tip5::hash).collect_vec();
+        let mut membership_proofs = pw.input_membership_proofs.clone();
         let promoted_removal_records = pw.kernel.inputs[num_confirmed..].to_vec();
 
         let lpw = LinkPrimitiveWitness::from_primitive_witness(pw, num_thruputs);
@@ -1414,7 +1418,7 @@ pub(crate) mod tests {
             new_msa.add(&addition_record);
         }
 
-        let promotions = membership_proofs
+        let mut decoys = membership_proofs
             .iter()
             .zip_eq(&items)
             .map(|(mp, &item)| Promotion {
@@ -1424,6 +1428,10 @@ pub(crate) mod tests {
                 aocl_leaf_index: mp.aocl_leaf_index,
                 aocl_auth_path: mp.auth_path_aocl.clone(),
             })
+            .collect_vec();
+        let promotions = decoys
+            .split_off(num_confirmed)
+            .into_iter()
             .sorted_by_key(|promotion| promotion.aocl_leaf_index)
             .collect_vec();
 
@@ -1446,6 +1454,7 @@ pub(crate) mod tests {
             new_msa,
             successor_proof,
             promotions,
+            decoys,
         )
     }
 
@@ -1518,6 +1527,34 @@ pub(crate) mod tests {
         }
     }
 
+    /// Promotion alone empties the thruput list.
+    ///
+    /// The stranded-successor rescue: a link transaction funded entirely by its
+    /// predecessors has no confirmed inputs, so nothing about it can be
+    /// re-targeted except the mutator set it names -- and while its thruputs
+    /// remain it can never reach `thruputs == []`, hence never `Fix` into a
+    /// block-borne transaction. Once its predecessors' outputs confirm, one
+    /// advance moves every thruput into the confirmed inputs and the link
+    /// transaction becomes `Fix`able. That last step is not asserted here
+    /// because `Fix` does not exist yet.
+    ///
+    /// This test involves producing proofs and might take a while to complete
+    /// if there is no proof cache.
+    #[tokio::test]
+    async fn update_promotes_every_thruput() {
+        let witness = deterministic_promotion_witness(2).await;
+        assert!(
+            witness.old_kernel.kernel.inputs.is_empty(),
+            "the fixture must have no confirmed inputs for this test to be the one it claims"
+        );
+        assert_eq!(2, witness.old_kernel.thruputs.len());
+        assert_eq!(2, witness.promotions.len());
+        assert!(witness.new_kernel.thruputs.is_empty());
+        assert_eq!(2, witness.new_kernel.kernel.inputs.len());
+
+        prop_positive(witness);
+    }
+
     /// A link transaction with *no confirmed inputs at all* can be updated.
     ///
     /// This is the shape §Governing invariants commits to. An all-thruputs link
@@ -1564,7 +1601,7 @@ pub(crate) mod tests {
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
-        let (lpw, old_msa, new_kernel, new_msa, successor_proof, promotions) =
+        let (lpw, old_msa, new_kernel, new_msa, successor_proof, promotions, _decoys) =
             promotable(pw, num_thruputs, 3);
         let d = mock_single_proof_digest(0);
 
@@ -1607,6 +1644,7 @@ mod negative_tests {
 
     use super::tests::deterministic_updatable;
     use super::tests::forge;
+    use super::tests::promotable;
     use super::tests::updatable;
     use super::*;
     use crate::chaintx::mock_single_proof_digest;
@@ -1915,5 +1953,193 @@ mod negative_tests {
                 &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
             )
             .unwrap();
+    }
+
+    /// `MmrVerifyFromSecretInLeafIndexOnStack`'s root mismatch. The snippet
+    /// spells it as a bare `assert_vector error_id 10`, so there is no constant
+    /// to import.
+    const MMR_ROOT_MISMATCH_ERROR_ID: i128 = 10;
+
+    /// A witness that promotes every one of its `num_thruputs` thruputs, with a
+    /// mock old link proof, plus the decoys [`promotable`] builds alongside it.
+    ///
+    /// Deterministic rather than a strategy, unlike [`pokeable_witness`]: these
+    /// negatives poke a named entry of `P`, or the removal record a named
+    /// promotion put in the new kernel, so they have to know the shape they are
+    /// poking. The mock proof is sound here for the same reason it is there --
+    /// the recursion is the last thing the branch does, so every assertion
+    /// below fires before a proof is looked at.
+    fn promotion_witness(num_thruputs: usize) -> (UpdateWitness, Vec<Promotion>) {
+        use proptest::strategy::Strategy;
+        use proptest::strategy::ValueTree;
+        use proptest::test_runner::TestRunner;
+
+        let mut test_runner = TestRunner::deterministic();
+        let pw = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 1)
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let (lpw, old_msa, new_kernel, new_msa, successor_proof, promotions, decoys) =
+            promotable(pw, num_thruputs, 3);
+
+        let witness = UpdateWitness::update(
+            LinkTx {
+                kernel: lpw.kernel.clone(),
+                proof: LinkTxProof::Proof(Proof::invalid_mock()),
+            },
+            &old_msa,
+            new_kernel,
+            &new_msa,
+            successor_proof,
+            promotions,
+            mock_single_proof_digest(0),
+        );
+
+        (witness, decoys)
+    }
+
+    /// A promotion has to retire a thruput the old kernel actually lists.
+    ///
+    /// The old kernel keeps one of its two thruputs and both promotions stay,
+    /// so the left side of the first promotion equation is one addition record
+    /// short of the right.
+    #[test]
+    fn promoted_thruput_absent_from_the_old_thruputs_is_rejected() {
+        let (mut witness, _) = promotion_witness(2);
+        witness.old_kernel.thruputs.pop().unwrap();
+
+        expect_failure(witness, &[PROMOTED_THRUPUTS_DO_NOT_MATCH_ERROR]).unwrap();
+    }
+
+    /// The removal record a promotion puts in the new kernel must carry the
+    /// index set derived from that promotion's own four operands.
+    ///
+    /// `Advance` recomputes the index set rather than trusting the one the
+    /// kernel names, so any other value fails the second promotion equation --
+    /// which is what stops a promoted input from claiming to spend a UTXO it
+    /// has no membership proof for.
+    #[test]
+    fn promoted_input_index_set_other_than_the_computed_one_is_rejected() {
+        let (mut witness, _) = promotion_witness(2);
+        let mut inputs = witness.new_kernel.kernel.inputs.clone();
+        inputs
+            .last_mut()
+            .unwrap()
+            .absolute_indices
+            .increment_bloom_filter_index(0);
+        witness.new_kernel.kernel = TransactionKernelModifier::default()
+            .inputs(inputs)
+            .modify(witness.new_kernel.kernel);
+
+        expect_failure(witness, &[PROMOTED_INDEX_SETS_DO_NOT_MATCH_ERROR]).unwrap();
+    }
+
+    /// A thruput that is still unconfirmed cannot be promoted.
+    ///
+    /// Poking the sender randomness moves the addition record the promotion
+    /// commits to off the new AOCL entirely, which is what "still unconfirmed"
+    /// means to `Advance`: the leaf index still names a leaf, but no leaf of
+    /// that accumulator hashes to this commitment.
+    #[test]
+    fn promoted_thruput_not_in_the_new_aocl_is_rejected() {
+        let (mut witness, _) = promotion_witness(2);
+        witness.promotions[0].sender_randomness = Digest::default();
+
+        expect_failure(witness, &[MMR_ROOT_MISMATCH_ERROR_ID]).unwrap();
+    }
+
+    /// The membership proof must be the one for the leaf the promotion names.
+    ///
+    /// The path is corrupted in place, so the nondeterministic digest stream
+    /// stays the length the loop expects and the failure is a root mismatch
+    /// rather than a desynchronised stream.
+    #[test]
+    fn promotion_bound_to_the_wrong_aocl_leaf_is_rejected() {
+        let (mut witness, _) = promotion_witness(2);
+        let promotion = witness
+            .promotions
+            .iter_mut()
+            .find(|promotion| !promotion.aocl_auth_path.authentication_path.is_empty())
+            .expect("the fixture must have a promotion whose AOCL leaf is not a lone peak");
+        promotion.aocl_auth_path.authentication_path[0] = Digest::default();
+
+        expect_failure(witness, &[MMR_ROOT_MISMATCH_ERROR_ID]).unwrap();
+    }
+
+    /// AOCL membership is not enough: the promoted commitment must also be a
+    /// thruput the old kernel gives up.
+    ///
+    /// A decoy is a promotion built from an input that stays confirmed. It
+    /// names a real leaf of the new AOCL and carries a valid membership proof,
+    /// so it passes every per-entry check; what it cannot do is retire a
+    /// thruput, because no thruput commits to that UTXO. Without the first
+    /// promotion equation this is the shape that would let a promoted input
+    /// spend a UTXO other than the one `Forge` weighed.
+    #[test]
+    fn promoted_input_spending_a_different_utxo_is_rejected() {
+        let (mut witness, decoys) = promotion_witness(1);
+        let decoy = decoys
+            .first()
+            .expect("the fixture must have a decoy")
+            .clone();
+        assert!(
+            !witness
+                .old_kernel
+                .thruputs
+                .contains(&decoy.addition_record()),
+            "a decoy must not be one of the thruputs, or it is not a decoy"
+        );
+        witness.promotions = vec![decoy];
+
+        expect_failure(witness, &[PROMOTED_THRUPUTS_DO_NOT_MATCH_ERROR]).unwrap();
+    }
+
+    /// The two promotion equations are coupled: neither side may move alone.
+    ///
+    /// First a thruput retires with no removal record joining the inputs, which
+    /// the second equation refuses; then the reverse, a removal record joining
+    /// while the thruput stays put, which the first one refuses.
+    #[test]
+    fn one_sided_promotion_is_rejected() {
+        let (original, _) = promotion_witness(2);
+
+        let mut witness = original.clone();
+        let mut inputs = witness.new_kernel.kernel.inputs.clone();
+        inputs.pop().unwrap();
+        witness.new_kernel.kernel = TransactionKernelModifier::default()
+            .inputs(inputs)
+            .modify(witness.new_kernel.kernel);
+        expect_failure(witness, &[PROMOTED_INDEX_SETS_DO_NOT_MATCH_ERROR]).unwrap();
+
+        let mut witness = original.clone();
+        witness.new_kernel.thruputs = witness.old_kernel.thruputs.clone();
+        expect_failure(witness, &[PROMOTED_THRUPUTS_DO_NOT_MATCH_ERROR]).unwrap();
+    }
+
+    /// Two promotions may not name one AOCL leaf.
+    ///
+    /// They would put two removal records with the same absolute index set in
+    /// one kernel, and the promotion equations do not see it: they are equations
+    /// between multisets, which carry the duplicate happily on both sides.
+    #[test]
+    fn duplicate_promoted_aocl_leaf_index_is_rejected() {
+        let (mut witness, _) = promotion_witness(2);
+        witness.promotions[1] = witness.promotions[0].clone();
+
+        expect_failure(witness, &[PROMOTIONS_ARE_NOT_ASCENDING_ERROR]).unwrap();
+    }
+
+    /// The promotions must arrive in strictly ascending order of leaf index.
+    ///
+    /// Both entries are valid promotions and the multisets they build are the
+    /// same either way round, so the swap is rejected by the ordering check
+    /// alone -- which is what makes the encoding of pairwise distinctness as an
+    /// ordering something the branch can rely on.
+    #[test]
+    fn unordered_promotions_are_rejected() {
+        let (mut witness, _) = promotion_witness(2);
+        witness.promotions.swap(0, 1);
+
+        expect_failure(witness, &[PROMOTIONS_ARE_NOT_ASCENDING_ERROR]).unwrap();
     }
 }
