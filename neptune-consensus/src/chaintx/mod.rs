@@ -3,6 +3,7 @@
 //! Data structures and consensus programs for the transaction-chaining
 //! (`LinkTx`) pipeline that runs parallel to the single-proof `Transaction` pipeline.
 
+pub mod advance;
 mod authenticate_link_kernel_field;
 pub mod cast;
 pub mod chain;
@@ -15,7 +16,6 @@ pub mod link_proof_witness;
 pub mod link_tx;
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod test_helpers;
-pub mod update;
 
 /// A stand-in for the `SingleProof` program digest `D` that a `LinkProof` claim
 /// carries.
