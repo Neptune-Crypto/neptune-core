@@ -49,7 +49,7 @@ use super::link_proof::no_coinbase_leaf;
 use super::link_proof::LinkProof;
 use super::link_proof_witness::LinkProofWitness;
 use super::link_proof_witness::LinkProofWitnessMemory;
-use super::link_proof_witness::DISCRIMINANT_FOR_UPDATE;
+use super::link_proof_witness::DISCRIMINANT_FOR_ADVANCE;
 use super::link_tx::LinkTx;
 use super::link_tx::LinkTxProof;
 use crate::block::mutator_set_update::MutatorSetUpdate;
@@ -68,7 +68,12 @@ const NEW_TIMESTAMP_IS_OLDER_THAN_OLD_ERROR: i128 = 1_000_561;
 const PROMOTED_THRUPUTS_DO_NOT_MATCH_ERROR: i128 = 1_000_562;
 const PROMOTED_INDEX_SETS_DO_NOT_MATCH_ERROR: i128 = 1_000_563;
 const PROMOTIONS_ARE_NOT_ASCENDING_ERROR: i128 = 1_000_564;
-const UPDATED_LINK_HAS_NO_INPUTS_AND_NO_THRUPUTS_ERROR: i128 = 1_000_565;
+const ADVANCED_LINK_HAS_NO_INPUTS_AND_NO_THRUPUTS_ERROR: i128 = 1_000_565;
+const TOO_BIG_PROMOTION_SIZE: i128 = 1_000_566;
+
+/// Max size of a dynamically-sized element living in memory. Enforced whenever
+/// a loop iterates to the next element in a list of dynamically-size elements.
+const MAX_JUMP_LENGTH: usize = 2_000_000;
 
 /// One promoted thruput.
 ///
@@ -115,11 +120,10 @@ impl Promotion {
     }
 }
 
-
-/// The witness consumed by [`Update`].
+/// The witness used by [`Advance`].
 ///
-/// Holds the out-of-date [`LinkKernel`] and its link proof, the re-targeted
-/// kernel, both mutator set accumulators in the pre-reduced form
+/// Holds the unsynced [`LinkKernel`] and its link proof, the new kernel, both
+/// mutator set accumulators in the pre-reduced form
 /// [`AuthenticateMsaAgainstTxk`] eats, and the proof that the new AOCL extends
 /// the old one.
 ///
@@ -128,7 +132,7 @@ impl Promotion {
 /// and -- like [`ChainWitness`](super::chain::ChainWitness) -- its own memory
 /// image: everything it carries is read from RAM.
 #[derive(Clone, Debug, BFieldCodec, TasmObject)]
-pub struct UpdateWitness {
+pub struct AdvanceWitness {
     pub(super) old_kernel: LinkKernel,
     pub(super) new_kernel: LinkKernel,
 
@@ -149,12 +153,12 @@ pub struct UpdateWitness {
 
     pub(super) old_proof: Proof,
 
-    /// The `SingleProof` program digest `D` this update is claimed under, and
+    /// The `SingleProof` program digest `D` this advance is claimed under, and
     /// which the old link proof must have been made under too.
     ///
     /// Rust-side only, exactly as in [`ChainWitness`](super::chain::ChainWitness):
     /// it is here to build the public input and the operand claim, while the
-    /// tasm branch reads `D` off the public input. `Update` re-targets the
+    /// tasm branch reads `D` off the public input. `Advance` re-targets the
     /// *mutator set*; `D` it only passes through.
     pub(super) single_proof_digest: Digest,
 }
@@ -168,7 +172,7 @@ impl LinkTx {
     ///  1. Verify the old link proof (recursively, inside the branch)
     ///  2. Update the confirmed inputs' removal records; thruputs are carried
     ///     over byte-for-byte
-    ///  3. Prove correctness under the `Update` branch of [`LinkProof`].
+    ///  3. Prove correctness under the `Advance` branch of [`LinkProof`].
     ///
     /// `single_proof_digest` is the `D` the old proof was made under, and
     /// which the new claim names again.
@@ -187,7 +191,7 @@ impl LinkTx {
         );
         anyhow::ensure!(
             self.proof.is_proof(),
-            "Can only update a proof-backed link transaction."
+            "Can only advance a proof-backed link transaction."
         );
 
         // apply mutator set update to get new mutator set accumulator
@@ -220,13 +224,16 @@ impl LinkTx {
         };
 
         anyhow::ensure!(
-            self.kernel.thruputs.iter().all(|tp| !addition_records.contains(tp)),
+            self.kernel
+                .thruputs
+                .iter()
+                .all(|tp| !addition_records.contains(tp)),
             "This function does not have the witness data to promote thruputs to confirmed inputs"
         );
         let promotions = vec![];
 
-        // compute updated proof through recursion
-        let update_witness = UpdateWitness::update(
+        // compute new proof through recursion
+        let witness = AdvanceWitness::advance(
             self,
             previous_mutator_set_accumulator,
             new_kernel.clone(),
@@ -236,8 +243,8 @@ impl LinkTx {
             single_proof_digest,
         );
 
-        tracing::info!("starting link proof via update ...");
-        let witness = LinkProofWitness::from_update(update_witness);
+        tracing::info!("starting link proof via advance ...");
+        let witness = LinkProofWitness::from_advance(witness);
         let proof = LinkProof
             .prove(
                 witness.claim(),
@@ -255,8 +262,8 @@ impl LinkTx {
     }
 }
 
-impl UpdateWitness {
-    /// Re-target an out-of-date [`LinkTx`] at a newer mutator set.
+impl AdvanceWitness {
+    /// Sync an unsynced [`LinkTx`] to a new mutator set.
     ///
     /// The new kernel must be identical to the old except for:
     ///  - mutator set hash
@@ -269,7 +276,7 @@ impl UpdateWitness {
     /// The `old` kernel must be backed by a `LinkProof` relative to SingleProof
     /// digest D. That digest goes into the claim that is being verified. It is
     /// also what the resulting `LinkProof` is relative to.
-    pub fn update(
+    pub fn advance(
         old: LinkTx,
         old_msa: &MutatorSetAccumulator,
         new_kernel: LinkKernel,
@@ -279,7 +286,7 @@ impl UpdateWitness {
         single_proof_digest: Digest,
     ) -> Self {
         let LinkTxProof::Proof(old_proof) = old.proof else {
-            panic!("cannot update a link transaction that is not backed by a link proof");
+            panic!("cannot advance a link transaction that is not backed by a link proof");
         };
         assert_eq!(
             old.kernel.kernel.mutator_set_hash,
@@ -293,11 +300,11 @@ impl UpdateWitness {
         );
         assert!(
             !new_kernel.kernel.inputs.is_empty() || !new_kernel.thruputs.is_empty(),
-            "cannot update a link transaction with no inputs and no thruputs"
+            "cannot advance a link transaction with no inputs and no thruputs"
         );
 
         // The two promotion equations, up to order, plus the per-entry AOCL
-        // membership: exactly what `Update` asserts, checked here so a bad
+        // membership: exactly what `Advance` asserts, checked here so a bad
         // witness fails in milliseconds instead of after a proof.
         let sorted = |digests: Vec<Digest>| digests.into_iter().sorted().collect_vec();
         let commitments = |ars: &[AdditionRecord]| -> Vec<Digest> {
@@ -378,7 +385,7 @@ impl UpdateWitness {
     }
 }
 
-impl SecretWitness for UpdateWitness {
+impl SecretWitness for AdvanceWitness {
     fn standard_input(&self) -> PublicInput {
         link_proof_public_input(self.kernel_mast_hash(), self.single_proof_digest)
     }
@@ -392,13 +399,13 @@ impl SecretWitness for UpdateWitness {
     }
 
     fn nondeterminism(&self) -> NonDeterminism {
-        // `Update` is a branch of `LinkProof`, so the memory image is that of
+        // `Advance` is a branch of `LinkProof`, so the memory image is that of
         // the enum variant's associated data: field size, then the payload.
         let mut memory = HashMap::default();
         encode_to_memory(
             &mut memory,
             FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
-            &LinkProofWitnessMemory::Update(Box::new(self.clone())),
+            &LinkProofWitnessMemory::Advance(Box::new(self.clone())),
         );
 
         // The old kernel's MAST hash is divined -- bound to the old link proof
@@ -478,11 +485,11 @@ impl SecretWitness for UpdateWitness {
     }
 }
 
-/// `Update: LinkTx -> LinkTx`: re-target a link transaction at a newer mutator
+/// `Advance: LinkTx -> LinkTx`: re-target a link transaction at a newer mutator
 /// set without re-forging it.
 ///
-/// `Update` recursively verifies the old link proof -- against a claim that
-/// names `LinkProof` itself, taken from the dispatcher's copy of the own program
+/// `Advance` erifies the old link proof -- against a claim that names
+/// `LinkProof` itself, taken from the dispatcher's copy of the own program
 /// digest -- and then establishes that the new kernel is the old one moved
 /// forward, and nothing else:
 ///
@@ -491,7 +498,7 @@ impl SecretWitness for UpdateWitness {
 /// - the inputs' absolute index sets are unchanged -- the removal records
 ///   themselves may differ, since re-targeting rewrites their membership data,
 ///   but what a double spend collides on may not move;
-/// - outputs, thruputs, announcements and the fee are byte-for-byte the same in
+/// - outputs, thruputs, announcements and the fee are bfe-for-bfe the same in
 ///   both kernels (so a non-negative fee stays non-negative);
 /// - the inputs and the thruputs are not both empty;
 /// - the timestamp does not go backwards;
@@ -502,29 +509,28 @@ impl SecretWitness for UpdateWitness {
 /// it produces, so an operand that verifies has them by induction.
 ///
 /// Thruputs are either a) carried across unchanged, or b) promoted into inputs.
-/// (Right now (b) is not supported yet.)
 ///
-/// Unlike its single-proof sibling, `Update` does *not* require a non-empty
+/// Unlike its single-proof sibling, `Advance` does *not* require a non-empty
 /// input set. A `LinkTx` may legitimately have zero confirmed inputs -- an
 /// all-thruputs link, funded entirely by its predecessors -- and such a link
 /// still has to follow the mutator set, because `Chain` requires all three of
-/// its kernels to agree on the mutator set hash. Refusing to update it would
+/// its kernels to agree on the mutator set hash. Refusing to advance it would
 /// strand it the moment any chain partner moved.
 ///
-/// A link with no inputs *and* no thruputs, however, may not be updated: it
+/// A link with no inputs *and* no thruputs, however, may not be advanced: it
 /// commits to nothing the mutator set moves, and updating one is a shortcut to
 /// a block composition. A composer's fastest route to a composition must be
 /// picking a transaction up from the mempool -- the same reason the
 /// single-proof `Update` bans updates of transactions without inputs.
 #[derive(Debug, Copy, Clone)]
-pub struct Update {
-    /// Where the dispatcher stashed the `SingleProof` program digest `D` it read
-    /// off the public input. `Update` copies it verbatim into the old kernel's
+pub struct Advance {
+    /// Where the dispatcher stored the `SingleProof` program digest `D` it read
+    /// off the public input. `Advance` copies it verbatim into the old kernel's
     /// claim; see [`LinkProof`].
     pub(super) single_proof_digest_address: BFieldElement,
 }
 
-impl BasicSnippet for Update {
+impl BasicSnippet for Advance {
     fn parameters(&self) -> Vec<(DataType, String)> {
         vec![
             (DataType::Digest, "link_kernel_mast_hash".to_string()),
@@ -544,12 +550,12 @@ impl BasicSnippet for Update {
     }
 
     fn entrypoint(&self) -> String {
-        "neptune_consensus_chaintx_link_proof_update_branch".to_string()
+        "neptune_consensus_chaintx_link_proof_advance_branch".to_string()
     }
 
     fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
         let audit_preloaded_data =
-            library.import(Box::new(VerifyNdSiIntegrity::<UpdateWitness>::default()));
+            library.import(Box::new(VerifyNdSiIntegrity::<AdvanceWitness>::default()));
         let generate_link_proof_claim = library.import(Box::new(GenerateLinkProofClaim {
             single_proof_digest_address: self.single_proof_digest_address,
         }));
@@ -579,7 +585,7 @@ impl BasicSnippet for Update {
         // may grow, without touching the kernel's own.
         let copy_digests = library.import(Box::new(ChainMap::<1>::new(InnerFunction::RawCode(
             RawCode::new(
-                triton_asm!(neptune_consensus_chaintx_update_copy_digest: return),
+                triton_asm!(neptune_consensus_chaintx_advance_copy_digest: return),
                 DataType::Digest,
                 DataType::Digest,
             ),
@@ -617,19 +623,19 @@ impl BasicSnippet for Update {
         // Everything the body reads is either one of those or a field of the
         // entry the cursor is on, and the body's deepest reach is `dup 14`, so
         // the whole loop stays inside the sixteen addressable stack words.
-        let promotion_loop = "neptune_consensus_chaintx_update_promotion_loop".to_string();
+        let promotion_loop = "neptune_consensus_chaintx_advance_promotion_loop".to_string();
         let u64_stack_size = u32::try_from(DataType::U64.stack_size()).unwrap();
 
-        let field_old_kernel = field!(UpdateWitness::old_kernel);
-        let field_new_kernel = field!(UpdateWitness::new_kernel);
-        let field_old_aocl = field!(UpdateWitness::old_aocl);
-        let field_old_swbfi_bagged = field!(UpdateWitness::old_swbfi_bagged);
-        let field_old_swbfa_hash = field!(UpdateWitness::old_swbfa_hash);
-        let field_new_aocl = field!(UpdateWitness::new_aocl);
-        let field_new_swbfi_bagged = field!(UpdateWitness::new_swbfi_bagged);
-        let field_new_swbfa_hash = field!(UpdateWitness::new_swbfa_hash);
-        let field_old_proof = field!(UpdateWitness::old_proof);
-        let field_promotions = field!(UpdateWitness::promotions);
+        let field_old_kernel = field!(AdvanceWitness::old_kernel);
+        let field_new_kernel = field!(AdvanceWitness::new_kernel);
+        let field_old_aocl = field!(AdvanceWitness::old_aocl);
+        let field_old_swbfi_bagged = field!(AdvanceWitness::old_swbfi_bagged);
+        let field_old_swbfa_hash = field!(AdvanceWitness::old_swbfa_hash);
+        let field_new_aocl = field!(AdvanceWitness::new_aocl);
+        let field_new_swbfi_bagged = field!(AdvanceWitness::new_swbfi_bagged);
+        let field_new_swbfa_hash = field!(AdvanceWitness::new_swbfa_hash);
+        let field_old_proof = field!(AdvanceWitness::old_proof);
+        let field_promotions = field!(AdvanceWitness::promotions);
 
         let field_item = field!(Promotion::item);
         let field_sender_randomness = field!(Promotion::sender_randomness);
@@ -766,9 +772,7 @@ impl BasicSnippet for Update {
         // removal record carrying its index set joins the input list -- the
         // same leaves-one-side-iff-it-leaves-the-other shape as `Chain`'s
         // cut-through. An empty `P` collapses the pair into "thruputs
-        // unchanged, index sets unchanged", which is what this branch asserted
-        // before promotion, so the old behaviour is the empty case rather than
-        // a special one.
+        // unchanged, index sets unchanged".
         //
         // Each right-hand side is a list the loop appends to: a copy of the new
         // thruputs, and the old inputs' hashed index sets. Appending is safe
@@ -979,12 +983,22 @@ impl BasicSnippet for Update {
                 call {list_push_digest}
                 // _ *new_aocl *addition_records *index_sets [running_lower_bound'] num i *promotions[i]_si *promotion
 
-                /* advance */
+                /* advance, with bound-check */
                 pop 1
                 swap 1 addi 1 swap 1
                 // _ *new_aocl *addition_records *index_sets [running_lower_bound'] num (i+1) *promotions[i]_si
 
                 read_mem 1
+                // _ ... (*promotions[i]_si-1) promotion_witness_size
+
+                push {MAX_JUMP_LENGTH}
+                dup 1
+                lt
+                // _ ... (*promotions[i]_si-1) promotion_witness_size (MAX > promotion_witness_size)
+
+                assert error_id {TOO_BIG_PROMOTION_SIZE}
+                // _ ... (*promotions[i]_si-1) promotion_witness_size
+
                 addi 2
                 add
                 // _ *new_aocl *addition_records *index_sets [running_lower_bound'] num (i+1) *promotions[i+1]_si
@@ -1017,10 +1031,10 @@ impl BasicSnippet for Update {
             )
         };
 
-        // Both kernels name the accumulator they were built against, and the
-        // new AOCL only ever grew. The append-only check is what makes an
-        // update a move *forward*: without it a transaction could be re-targeted
-        // at a mutator set in which its inputs were never spent.
+        // Both kernels name the accumulator they are synced to, and the new
+        // AOCL only ever grew. The append-only check is what makes an advance
+        // a move *forward*: without it a transaction could be re-targeted to a
+        // mutator set in which its inputs were never spent.
         let assert_mutator_set_moved_forward = triton_asm!(
             // _ *witness *old_lk *new_lk
             {&authenticate_msa_of(
@@ -1098,7 +1112,7 @@ impl BasicSnippet for Update {
 
             push 0
             eq
-            assert error_id {UPDATED_LINK_HAS_NO_INPUTS_AND_NO_THRUPUTS_ERROR}
+            assert error_id {ADVANCED_LINK_HAS_NO_INPUTS_AND_NO_THRUPUTS_ERROR}
             // _ *witness *old_lk *new_lk
         );
 
@@ -1126,10 +1140,8 @@ impl BasicSnippet for Update {
             // _ *witness *old_lk *new_lk
         );
 
-        // An updated transaction is no more a coinbase transaction, and no more
-        // merged, than a forged one: the constant leaf is authenticated
-        // directly, which asserts the field's value at the same time (only one
-        // preimage hashes to it).
+        // An advanced transaction never has a coinbase field set, and never has
+        // the merge bit set.
         let authenticate_constant_leaf = |leaf_index: LinkKernelField, leaf: Digest| {
             triton_asm!(
                 // _
@@ -1205,8 +1217,7 @@ impl BasicSnippet for Update {
             {&authenticate_constant_leaf(LinkKernelField::MergeBit, merge_bit_false_leaf())}
             // _ [own_program_digest] disc *witness
 
-            /* Last: the recursion. The old kernel is bound to the witness data
-               by now; this claim binds it to its link proof. */
+            // Bind the old kernel by verifying its proof
             {&load_lkmh(old_lkmh)}
             // _ [own_program_digest] disc *witness [old_lkmh]
 
@@ -1237,7 +1248,7 @@ impl BasicSnippet for Update {
             pick 6 pick 6
             // _ [own_program_digest] [new_lkmh] *witness disc
 
-            addi {-(DISCRIMINANT_FOR_UPDATE as isize) - 1}
+            addi {-(DISCRIMINANT_FOR_ADVANCE as isize) - 1}
             // _ [own_program_digest] [new_lkmh] *witness -1
 
             return
@@ -1266,7 +1277,7 @@ pub(crate) mod tests {
     use crate::transaction::primitive_witness::PrimitiveWitness;
     use crate::transaction::transaction_kernel::TransactionKernelModifier;
 
-    /// The `Update` branch of the `LinkProof` rust shadow, called by
+    /// The `Advance` branch of the `LinkProof` rust shadow, called by
     /// [`LinkProof::source`](super::super::link_proof::LinkProof) once it has
     /// read the own program digest, `lkmh` and `D`, and matched the witness
     /// discriminant -- mirroring the tasm, where the dispatcher does exactly
@@ -1275,11 +1286,11 @@ pub(crate) mod tests {
     /// `single_proof_digest` comes from the dispatcher, i.e. from the public
     /// input. Never from `witness.single_proof_digest`, which is present in the
     /// memory image and must stay unread!
-    pub(in crate::chaintx) fn update_branch_source(
+    pub(in crate::chaintx) fn advance_branch_source(
         own_program_digest: Digest,
         lkmh: Digest,
         single_proof_digest: Digest,
-        witness: UpdateWitness,
+        witness: AdvanceWitness,
     ) {
         /* the old kernel's MAST hash. The field authentications below tie it
         to the old kernel in the witness -- but root, leafs and paths are all
@@ -1428,7 +1439,7 @@ pub(crate) mod tests {
         );
         unchanged(LinkKernelField::Fee, Tip5::hash(&old.kernel.fee));
 
-        /* a link with no inputs and no thruputs may not be updated */
+        /* a link with no inputs and no thruputs may not be advanced */
         assert!(!old.kernel.inputs.is_empty() || !old.thruputs.is_empty());
 
         /* the timestamp may stand still or move forward, never backwards */
@@ -1444,12 +1455,11 @@ pub(crate) mod tests {
         );
         assert!(new.kernel.timestamp >= old.kernel.timestamp);
 
-        /* an updated transaction is no more a coinbase transaction, and no more
-        merged, than a forged one */
+        /* Disallow set coinbase field, or set merge-bit */
         authenticate(lkmh, LinkKernelField::Coinbase, no_coinbase_leaf());
         authenticate(lkmh, LinkKernelField::MergeBit, merge_bit_false_leaf());
 
-        /* last: recursively verify the old link proof */
+        /* verify the old link proof */
         let input = link_proof_public_input(old_lkmh, single_proof_digest);
         let claim = Claim::new(own_program_digest)
             .with_input(input.individual_tokens)
@@ -1467,14 +1477,14 @@ pub(crate) mod tests {
     /// the window advancing with the AOCL and not with removals: the branch
     /// requires the absolute index sets to match, not the removal records to
     /// have been re-derived. (A real updater would re-derive them. Neither
-    /// `Update` nor `update_branch` compels it; a removal record is only made
+    /// `Advance` nor `advance_branch` compels it; a removal record is only made
     /// to answer for itself against a mutator set when the block applies it.)
     ///
-    /// The smallest fixture that is still a real update -- the mutator-set hash
-    /// moves and the successor proof is a genuine one -- and it leaves the
+    /// The smallest fixture that is still a real advance -- the mutator-set
+    /// hash moves and the successor proof is a genuine one -- and it leaves the
     /// index-set equation to be broken deliberately, by the negatives below,
     /// rather than incidentally.
-    pub(super) fn updatable(
+    pub(super) fn advanceable(
         pw: PrimitiveWitness,
         num_thruputs: usize,
         num_additions: usize,
@@ -1498,7 +1508,7 @@ pub(crate) mod tests {
         assert_ne!(
             old_msa.aocl.num_leafs(),
             new_msa.aocl.num_leafs(),
-            "the mutator set must actually move for the update to be a real one"
+            "the mutator set must actually move for the advance to be a real one"
         );
 
         let new_kernel = LinkKernel {
@@ -1515,7 +1525,7 @@ pub(crate) mod tests {
         (lpw, old_msa, new_kernel, new_msa, successor_proof)
     }
 
-    /// The pieces of an update that promotes every thruput: an old kernel with
+    /// The pieces of an advance that promotes every thruput: an old kernel with
     /// `num_thruputs` of them, a mutator set grown by `num_additions` leafs, and
     /// a new kernel with no thruputs left and a removal record for each.
     ///
@@ -1528,7 +1538,7 @@ pub(crate) mod tests {
     /// rather than by fixture arithmetic.
     ///
     /// The promoted records are already in the *old* AOCL, where a real
-    /// promotion's would only have landed in the new one. `Update` cannot tell
+    /// promotion's would only have landed in the new one. `Advance` cannot tell
     /// the difference and deliberately does not try -- membership in the new
     /// AOCL is the whole check -- so the shortcut costs the fixture nothing.
     /// The membership proofs are carried across the appends, since the new
@@ -1616,13 +1626,13 @@ pub(crate) mod tests {
         )
     }
 
-    /// [`updatable`] over the fixed fixture the proof-bearing tests share.
+    /// [`advanceable`] over the fixed fixture the proof-bearing tests share.
     ///
     /// Deterministic on purpose: same witness and same `D` means the same claim,
     /// hence a proof-cache hit rather than a fresh `Forge`. The mock-proof
     /// negatives draw their fixture at random instead -- they pay no proving
     /// cost, so there is nothing to amortize and everything to gain.
-    pub(super) fn deterministic_updatable(
+    pub(super) fn deterministic_advanceable(
         num_thruputs: usize,
     ) -> (
         LinkPrimitiveWitness,
@@ -1636,12 +1646,12 @@ pub(crate) mod tests {
             .new_tree(&mut test_runner)
             .unwrap()
             .current();
-        updatable(pw, num_thruputs, 3)
+        advanceable(pw, num_thruputs, 3)
     }
 
-    /// `Update` writes nothing to stdout, so the assertion is that both the Rust
+    /// `Advance` writes nothing to stdout, so the assertion is that both the Rust
     /// shadow and the tasm run to completion: every `assert` in either one held.
-    fn prop_positive(witness: UpdateWitness) {
+    fn prop_positive(witness: AdvanceWitness) {
         LinkProof
             .run_rust(&witness.standard_input(), witness.nondeterminism())
             .unwrap();
@@ -1659,9 +1669,9 @@ pub(crate) mod tests {
     /// This test involves producing proofs and might take a while to complete
     /// if there is no proof cache.
     #[tokio::test]
-    async fn update_accepts_a_forged_link_transaction() {
+    async fn advance_accepts_a_forged_link_transaction() {
         for num_thruputs in 0..=1 {
-            prop_positive(deterministic_update_witness(num_thruputs).await);
+            prop_positive(deterministic_advance_witness(num_thruputs).await);
         }
     }
 
@@ -1671,7 +1681,7 @@ pub(crate) mod tests {
     /// This test involves producing proofs and might take a while to complete
     /// if there is no proof cache.
     #[tokio::test]
-    async fn update_promotes_a_confirmed_thruput() {
+    async fn advance_promotes_a_confirmed_thruput() {
         for num_thruputs in 1..=2 {
             let witness = deterministic_promotion_witness(num_thruputs).await;
             assert_eq!(
@@ -1699,7 +1709,7 @@ pub(crate) mod tests {
     /// This test involves producing proofs and might take a while to complete
     /// if there is no proof cache.
     #[tokio::test]
-    async fn update_promotes_every_thruput() {
+    async fn advance_promotes_every_thruput() {
         let witness = deterministic_promotion_witness(2).await;
         assert!(
             witness.old_kernel.kernel.inputs.is_empty(),
@@ -1713,11 +1723,11 @@ pub(crate) mod tests {
         prop_positive(witness);
     }
 
-    /// A link transaction with *no confirmed inputs at all* can be updated.
+    /// A link transaction with *no confirmed inputs at all* can be advanced.
     ///
     /// This is the shape §Governing invariants commits to. An all-thruputs link
     /// -- one funded entirely by its predecessors -- has no removal records of
-    /// its own to re-target, so `update_branch`'s non-empty-input-set
+    /// its own to re-target, so `advance_branch`'s non-empty-input-set
     /// requirement would reject it outright. It still has to follow the mutator
     /// set, because `Chain` requires all three of its kernels to agree on the
     /// mutator set hash, so rejecting it would strand it the moment a chain
@@ -1733,8 +1743,8 @@ pub(crate) mod tests {
     /// This test involves producing proofs and might take a while to complete
     /// if there is no proof cache.
     #[tokio::test]
-    async fn update_accepts_an_all_thruputs_link_transaction() {
-        let witness = deterministic_update_witness(2).await;
+    async fn advance_accepts_an_all_thruputs_link_transaction() {
+        let witness = deterministic_advance_witness(2).await;
         assert!(
             witness.old_kernel.kernel.inputs.is_empty(),
             "the fixture must have no confirmed inputs for this test to be the one it claims"
@@ -1743,7 +1753,7 @@ pub(crate) mod tests {
         prop_positive(witness);
     }
 
-    /// `Forge` a deterministic `LinkTx` and build an `UpdateWitness` that
+    /// `Forge` a deterministic `LinkTx` and build an `AdvanceWitness` that
     /// re-targets it.
     ///
     /// Shared by the positive tests, so: cached once + reused often.
@@ -1753,7 +1763,7 @@ pub(crate) mod tests {
     /// Shares [`deterministic_updatable`]'s primitive witness, hence its
     /// `Forge` claim, hence its cached proof: promotion changes the *new*
     /// kernel, and the old link proof is what the proving time goes into.
-    async fn deterministic_promotion_witness(num_thruputs: usize) -> UpdateWitness {
+    async fn deterministic_promotion_witness(num_thruputs: usize) -> AdvanceWitness {
         let mut test_runner = TestRunner::deterministic();
         let pw = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 1)
             .new_tree(&mut test_runner)
@@ -1763,7 +1773,7 @@ pub(crate) mod tests {
             promotable(pw, num_thruputs, 3);
         let d = mock_single_proof_digest(0);
 
-        UpdateWitness::update(
+        AdvanceWitness::advance(
             forge(&lpw, d).await,
             &old_msa,
             new_kernel,
@@ -1774,12 +1784,12 @@ pub(crate) mod tests {
         )
     }
 
-    async fn deterministic_update_witness(num_thruputs: usize) -> UpdateWitness {
+    async fn deterministic_advance_witness(num_thruputs: usize) -> AdvanceWitness {
         let (lpw, old_msa, new_kernel, new_msa, successor_proof) =
-            deterministic_updatable(num_thruputs);
+            deterministic_advanceable(num_thruputs);
         let d = mock_single_proof_digest(0);
 
-        UpdateWitness::update(
+        AdvanceWitness::advance(
             forge(&lpw, d).await,
             &old_msa,
             new_kernel,
@@ -1799,10 +1809,10 @@ mod negative_tests {
     use tasm_lib::hashing::merkle_verify::MerkleVerify;
     use test_strategy::proptest;
 
-    use super::tests::deterministic_updatable;
+    use super::tests::advanceable;
+    use super::tests::deterministic_advanceable;
     use super::tests::forge;
     use super::tests::promotable;
-    use super::tests::updatable;
     use super::*;
     use crate::chaintx::mock_single_proof_digest;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
@@ -1814,7 +1824,7 @@ mod negative_tests {
     /// A witness of random contents whose old link proof is a mock.
     ///
     /// Sound for every negative below because the recursion is the *last* thing
-    /// the `Update` branch does, so any other assertion fires before a proof is
+    /// the `Advance` branch does, so any other assertion fires before a proof is
     /// ever looked at. A positive test cannot use this -- which is also why this
     /// one can afford to be a strategy: no proving cost to amortize, so there is
     /// no reason to hold the fixture still.
@@ -1822,9 +1832,9 @@ mod negative_tests {
     /// The shape varies over the two the fixture's two inputs allow while
     /// keeping at least one confirmed input, since the index-set negatives need
     /// a record to tamper with. (The zero-confirmed shape is a *positive* case;
-    /// it is covered by `update_accepts_a_forged_link_transaction`, which has to
+    /// it is covered by `advance_accepts_a_forged_link_transaction`, which has to
     /// pay for a proof to reach it.)
-    fn pokeable_witness() -> proptest::strategy::BoxedStrategy<UpdateWitness> {
+    fn pokeable_witness() -> proptest::strategy::BoxedStrategy<AdvanceWitness> {
         use proptest::strategy::Strategy;
 
         (
@@ -1833,8 +1843,8 @@ mod negative_tests {
         )
             .prop_map(|(pw, num_thruputs)| {
                 let (lpw, old_msa, new_kernel, new_msa, successor_proof) =
-                    updatable(pw, num_thruputs, 3);
-                UpdateWitness::update(
+                    advanceable(pw, num_thruputs, 3);
+                AdvanceWitness::advance(
                     LinkTx {
                         kernel: lpw.kernel.clone(),
                         proof: LinkTxProof::Proof(Proof::invalid_mock()),
@@ -1851,7 +1861,7 @@ mod negative_tests {
     }
 
     fn expect_failure(
-        witness: UpdateWitness,
+        witness: AdvanceWitness,
         error_ids: &[i128],
     ) -> Result<(), proptest::test_runner::TestCaseError> {
         LinkProof.test_assertion_failure(
@@ -1865,7 +1875,7 @@ mod negative_tests {
     /// re-targeting a way past a time lock.
     #[proptest(cases = 4)]
     fn new_timestamp_older_than_old_is_rejected(
-        #[strategy(pokeable_witness())] mut witness: UpdateWitness,
+        #[strategy(pokeable_witness())] mut witness: AdvanceWitness,
     ) {
         let timestamp = witness.old_kernel.kernel.timestamp - Timestamp::seconds(1);
         witness.new_kernel.kernel = TransactionKernelModifier::default()
@@ -1877,13 +1887,13 @@ mod negative_tests {
 
     /// Tamper with the inputs and verify that it fails.
     ///
-    /// With no promotions, an update that touches the removal records is an
-    /// update that spends something else. In this test, the inputs are tampered
+    /// With no promotions, an advance that touches the removal records is an
+    /// advance that spends something else. In this test, the inputs are tampered
     /// all three ways the multiset comparison can see: one index changed, one
     /// record dropped, and one record too many.
     #[proptest(cases = 4)]
     fn tampered_absolute_index_set_is_rejected(
-        #[strategy(pokeable_witness())] original: UpdateWitness,
+        #[strategy(pokeable_witness())] original: AdvanceWitness,
     ) {
         let mut witness = original.clone();
         let mut inputs = witness.new_kernel.kernel.inputs.clone();
@@ -1915,7 +1925,7 @@ mod negative_tests {
     /// authenticated against.
     #[proptest(cases = 4)]
     fn mutator_set_accumulator_must_be_the_one_the_kernel_names(
-        #[strategy(pokeable_witness())] witness: UpdateWitness,
+        #[strategy(pokeable_witness())] witness: AdvanceWitness,
     ) {
         for poke_old in [true, false] {
             let mut witness = witness.clone();
@@ -1940,7 +1950,7 @@ mod negative_tests {
     /// well-authenticated list that the equation then refuses.
     #[proptest(cases = 4)]
     fn changing_a_carried_over_field_is_rejected(
-        #[strategy(pokeable_witness())] original: UpdateWitness,
+        #[strategy(pokeable_witness())] original: AdvanceWitness,
     ) {
         let record = AdditionRecord::new(Digest::default());
 
@@ -1971,13 +1981,13 @@ mod negative_tests {
         expect_failure(witness, &[MerkleVerify::ROOT_MISMATCH_ERROR_ID]).unwrap();
     }
 
-    /// An updated transaction is never a coinbase transaction and never carries
+    /// An advanced transaction is never a coinbase transaction and never carries
     /// the merge bit. Both leafs are constants the branch authenticates
     /// directly, so a kernel holding anything else has the wrong leaf, not
     /// merely the wrong value.
     #[proptest(cases = 4)]
     fn coinbase_or_merge_bit_on_the_new_kernel_is_rejected(
-        #[strategy(pokeable_witness())] original: UpdateWitness,
+        #[strategy(pokeable_witness())] original: AdvanceWitness,
     ) {
         let mut witness = original.clone();
         witness.new_kernel.kernel = TransactionKernelModifier::default()
@@ -2002,7 +2012,7 @@ mod negative_tests {
     /// from the operand claim, and a branch that took it from the witness
     /// instead of the public input, would each verify the operand happily.
     ///
-    /// This is also what says `Update` cannot *re-target* `D`. There is only one
+    /// This is also what says `Advance` cannot *re-target* `D`. There is only one
     /// `D` in the program -- the one the dispatcher read -- and it goes into the
     /// operand claim verbatim, so "the new `D`" is not a value the branch could
     /// name even if it wanted to. Re-targeting it would have to look like this
@@ -2012,9 +2022,9 @@ mod negative_tests {
     /// if there is no proof cache.
     #[tokio::test]
     async fn old_proof_forged_under_another_single_proof_digest_is_rejected() {
-        let (lpw, old_msa, new_kernel, new_msa, successor_proof) = deterministic_updatable(1);
+        let (lpw, old_msa, new_kernel, new_msa, successor_proof) = deterministic_advanceable(1);
         let other_d = mock_single_proof_digest(1);
-        let witness = UpdateWitness::update(
+        let witness = AdvanceWitness::advance(
             forge(&lpw, other_d).await,
             &old_msa,
             new_kernel,
@@ -2037,7 +2047,7 @@ mod negative_tests {
         let Err(TritonError::TritonVMPanic(vm_state, _)) =
             LinkProof.run_tasm(&input, nondeterminism)
         else {
-            panic!("`Update` must reject an operand proven under another `D`");
+            panic!("`Advance` must reject an operand proven under another `D`");
         };
         assert!(
             vm_state.contains("stark_verify"),
@@ -2057,7 +2067,7 @@ mod negative_tests {
     /// deliberately so: the route from the dispatcher's slot into the operand
     /// claim is `GenerateLinkProofClaim`, shared with `Chain` and pinned there
     /// (including by mutation, per that test's note). What is pinned *here* is
-    /// only the thing that is `Update`'s own -- that this branch does not
+    /// only the thing that is `Advance`'s own -- that this branch does not
     /// additionally read `witness.single_proof_digest` somewhere along the way.
     /// Keep the witness's `D` distinct from the claim's, or that goes away
     /// silently.
@@ -2066,9 +2076,9 @@ mod negative_tests {
     /// same `D`, hence the same claim -- so it costs a cache hit, not a proof.
     #[tokio::test]
     async fn witness_supplied_single_proof_digest_is_ignored() {
-        let (lpw, old_msa, new_kernel, new_msa, successor_proof) = deterministic_updatable(1);
+        let (lpw, old_msa, new_kernel, new_msa, successor_proof) = deterministic_advanceable(1);
         let d = mock_single_proof_digest(0);
-        let mut witness = UpdateWitness::update(
+        let mut witness = AdvanceWitness::advance(
             forge(&lpw, d).await,
             &old_msa,
             new_kernel,
@@ -2087,19 +2097,19 @@ mod negative_tests {
         encode_to_memory(
             &mut nondeterminism.ram,
             FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
-            &LinkProofWitnessMemory::Update(Box::new(witness)),
+            &LinkProofWitnessMemory::Advance(Box::new(witness)),
         );
 
         LinkProof.run_rust(&input, nondeterminism.clone()).unwrap();
         LinkProof.run_tasm(&input, nondeterminism).unwrap();
     }
 
-    /// The new kernel is bound to the claim: `Update` authenticates its fields
+    /// The new kernel is bound to the claim: `Advance` authenticates its fields
     /// against `lkmh` straight off the public input, so a witness proven against
     /// some *other* transaction's kernel fails at the first field.
     #[proptest(cases = 4)]
     fn new_kernel_must_be_the_one_in_the_claim(
-        #[strategy(pokeable_witness())] witness: UpdateWitness,
+        #[strategy(pokeable_witness())] witness: AdvanceWitness,
     ) {
         let other_lkmh = witness.old_kernel.mast_hash();
 
@@ -2126,7 +2136,7 @@ mod negative_tests {
     /// poking. The mock proof is sound here for the same reason it is there --
     /// the recursion is the last thing the branch does, so every assertion
     /// below fires before a proof is looked at.
-    fn promotion_witness(num_thruputs: usize) -> (UpdateWitness, Vec<Promotion>) {
+    fn promotion_witness(num_thruputs: usize) -> (AdvanceWitness, Vec<Promotion>) {
         use proptest::strategy::Strategy;
         use proptest::strategy::ValueTree;
         use proptest::test_runner::TestRunner;
@@ -2139,7 +2149,7 @@ mod negative_tests {
         let (lpw, old_msa, new_kernel, new_msa, successor_proof, promotions, decoys) =
             promotable(pw, num_thruputs, 3);
 
-        let witness = UpdateWitness::update(
+        let witness = AdvanceWitness::advance(
             LinkTx {
                 kernel: lpw.kernel.clone(),
                 proof: LinkTxProof::Proof(Proof::invalid_mock()),

@@ -10,12 +10,12 @@ use tasm_lib::twenty_first::error::BFieldCodecError;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 
+use super::advance::AdvanceWitness;
 use super::cast::CastWitness;
 use super::chain::ChainWitness;
 use super::forge::ForgeWitness;
 use super::forge::ForgeWitnessMemory;
 use super::link_proof::LinkProof;
-use super::update::UpdateWitness;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::proof_abstractions::SecretWitness;
 
@@ -25,7 +25,7 @@ use crate::proof_abstractions::SecretWitness;
 /// pinned here and must never be reassigned.
 pub(crate) const DISCRIMINANT_FOR_FORGE: u64 = 0;
 pub(crate) const DISCRIMINANT_FOR_CHAIN: u64 = 1;
-pub(crate) const DISCRIMINANT_FOR_UPDATE: u64 = 2;
+pub(crate) const DISCRIMINANT_FOR_ADVANCE: u64 = 2;
 pub(crate) const DISCRIMINANT_FOR_CAST: u64 = 3;
 
 /// The witness for a link proof: which of the `LinkProof` branches produced this
@@ -46,8 +46,8 @@ pub enum LinkProofWitness {
     /// through the thruputs that the other operand's outputs resolve.
     Chain(Box<ChainWitness>),
 
-    /// `LinkTx -> LinkTx`: re-target a link transaction at a newer mutator set.
-    Update(Box<UpdateWitness>),
+    /// `LinkTx -> LinkTx`: sync a link transaction to a newer mutator set.
+    Advance(Box<AdvanceWitness>),
 
     /// `Transaction -> LinkTx`: pull a `SingleProof`-backed transaction
     /// into the chain pipeline.
@@ -72,7 +72,7 @@ pub(super) enum LinkProofWitnessMemory {
     Chain(Box<ChainWitness>),
 
     /// Likewise its own projection.
-    Update(Box<UpdateWitness>),
+    Advance(Box<AdvanceWitness>),
 
     /// Likewise its own projection -- of which the branch reads only the proof;
     /// see [`CastWitness`].
@@ -109,8 +109,8 @@ impl TasmObject for LinkProofWitnessMemory {
         match discriminant.value() {
             DISCRIMINANT_FOR_FORGE => Ok(Box::new(Self::Forge(BFieldCodec::decode(&field_data)?))),
             DISCRIMINANT_FOR_CHAIN => Ok(Box::new(Self::Chain(BFieldCodec::decode(&field_data)?))),
-            DISCRIMINANT_FOR_UPDATE => {
-                Ok(Box::new(Self::Update(BFieldCodec::decode(&field_data)?)))
+            DISCRIMINANT_FOR_ADVANCE => {
+                Ok(Box::new(Self::Advance(BFieldCodec::decode(&field_data)?)))
             }
             DISCRIMINANT_FOR_CAST => Ok(Box::new(Self::Cast(BFieldCodec::decode(&field_data)?))),
             _ => Err(Box::new(BFieldCodecError::ElementOutOfRange)),
@@ -127,8 +127,8 @@ impl LinkProofWitness {
         Self::Chain(Box::new(witness))
     }
 
-    pub fn from_update(witness: UpdateWitness) -> Self {
-        Self::Update(Box::new(witness))
+    pub fn from_advance(witness: AdvanceWitness) -> Self {
+        Self::Advance(Box::new(witness))
     }
 
     pub fn from_cast(witness: CastWitness) -> Self {
@@ -141,7 +141,7 @@ impl LinkProofWitness {
         match self {
             Self::Forge(witness) => witness.kernel_mast_hash(),
             Self::Chain(witness) => witness.kernel_mast_hash(),
-            Self::Update(witness) => witness.kernel_mast_hash(),
+            Self::Advance(witness) => witness.kernel_mast_hash(),
             Self::Cast(witness) => witness.kernel_mast_hash(),
         }
     }
@@ -153,7 +153,7 @@ impl SecretWitness for LinkProofWitness {
         match self {
             Self::Forge(witness) => witness.standard_input(),
             Self::Chain(witness) => witness.standard_input(),
-            Self::Update(witness) => witness.standard_input(),
+            Self::Advance(witness) => witness.standard_input(),
             Self::Cast(witness) => witness.standard_input(),
         }
     }
@@ -162,7 +162,7 @@ impl SecretWitness for LinkProofWitness {
         match self {
             Self::Forge(witness) => witness.output(),
             Self::Chain(witness) => witness.output(),
-            Self::Update(witness) => witness.output(),
+            Self::Advance(witness) => witness.output(),
             Self::Cast(witness) => witness.output(),
         }
     }
@@ -175,7 +175,7 @@ impl SecretWitness for LinkProofWitness {
         match self {
             Self::Forge(witness) => witness.nondeterminism(),
             Self::Chain(witness) => witness.nondeterminism(),
-            Self::Update(witness) => witness.nondeterminism(),
+            Self::Advance(witness) => witness.nondeterminism(),
             Self::Cast(witness) => witness.nondeterminism(),
         }
     }

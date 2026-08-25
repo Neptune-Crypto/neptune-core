@@ -4,14 +4,14 @@ use tasm_lib::library::Library;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::triton_vm::prelude::*;
 
+use super::advance::Advance;
 use super::cast::Cast;
 use super::chain::Chain;
 use super::forge::Forge;
+use super::link_proof_witness::DISCRIMINANT_FOR_ADVANCE;
 use super::link_proof_witness::DISCRIMINANT_FOR_CAST;
 use super::link_proof_witness::DISCRIMINANT_FOR_CHAIN;
 use super::link_proof_witness::DISCRIMINANT_FOR_FORGE;
-use super::link_proof_witness::DISCRIMINANT_FOR_UPDATE;
-use super::update::Update;
 use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -101,7 +101,7 @@ pub(super) fn merge_bit_false_leaf() -> Digest {
 /// [`LinkProofWitness`](super::link_proof_witness::LinkProofWitness), each of
 /// which is a [`BasicSnippet`](tasm_lib::prelude::BasicSnippet) that
 /// establishes the same claim by a different route. `Forge` is the entry point,
-/// `Chain` combines two link transactions, `Update` re-syncs one to a newer
+/// `Chain` combines two link transactions, `Advance` re-syncs one to a newer
 /// mutator set, and `Cast` pulls a non-chaining transaction into this pipeline.
 ///
 /// The jump table hands each branch `[own_program_digest] [lkmh] *witness disc`
@@ -133,7 +133,7 @@ impl TritonProgram for LinkProof {
         let chain_branch = library.import(Box::new(Chain {
             single_proof_digest_address: single_proof_digest_alloc.read_address(),
         }));
-        let update_branch = library.import(Box::new(Update {
+        let advance_branch = library.import(Box::new(Advance {
             single_proof_digest_address: single_proof_digest_alloc.read_address(),
         }));
         let cast_branch = library.import(Box::new(Cast {
@@ -154,19 +154,19 @@ impl TritonProgram for LinkProof {
             // _ disc (disc == forge) (disc == chain)
 
             dup 2
-            push {DISCRIMINANT_FOR_UPDATE}
+            push {DISCRIMINANT_FOR_ADVANCE}
             eq
-            // _ disc (disc == forge) (disc == chain) (disc == update)
+            // _ disc (disc == forge) (disc == chain) (disc == advance)
 
             dup 3
             push {DISCRIMINANT_FOR_CAST}
             eq
-            // _ disc (disc == forge) (disc == chain) (disc == update) (disc == cast)
+            // _ disc (disc == forge) (disc == chain) (disc == advance) (disc == cast)
 
             add
             add
             add
-            // _ disc (disc == forge || disc == chain || disc == update || disc == cast)
+            // _ disc (disc == forge || disc == chain || disc == advance || disc == cast)
 
             assert error_id {INVALID_WITNESS_DISCRIMINANT_ERROR}
             // _ disc
@@ -209,8 +209,8 @@ impl TritonProgram for LinkProof {
             dup 0 push {DISCRIMINANT_FOR_CHAIN} eq
             skiz call {chain_branch}
 
-            dup 0 push {DISCRIMINANT_FOR_UPDATE} eq
-            skiz call {update_branch}
+            dup 0 push {DISCRIMINANT_FOR_ADVANCE} eq
+            skiz call {advance_branch}
 
             dup 0 push {DISCRIMINANT_FOR_CAST} eq
             skiz call {cast_branch}
@@ -265,6 +265,7 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
+    use crate::chaintx::advance::tests::advance_branch_source;
     use crate::chaintx::cast::tests::cast_branch_source;
     use crate::chaintx::chain::tests::chain_branch_source;
     use crate::chaintx::forge::tests::forge_branch_source;
@@ -272,7 +273,6 @@ mod tests {
     use crate::chaintx::link_primitive_witness::LinkPrimitiveWitness;
     use crate::chaintx::link_proof_witness::LinkProofWitnessMemory;
     use crate::chaintx::mock_single_proof_digest;
-    use crate::chaintx::update::tests::update_branch_source;
     use crate::proof_abstractions::tasm::builtins as tasm;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::proof_abstractions::tasm::program::tests::test_program_snapshot;
@@ -291,8 +291,8 @@ mod tests {
                 LinkProofWitnessMemory::Chain(witness) => {
                     chain_branch_source(own_program_digest, lkmh, single_proof_digest, *witness)
                 }
-                LinkProofWitnessMemory::Update(witness) => {
-                    update_branch_source(own_program_digest, lkmh, single_proof_digest, *witness)
+                LinkProofWitnessMemory::Advance(witness) => {
+                    advance_branch_source(own_program_digest, lkmh, single_proof_digest, *witness)
                 }
                 LinkProofWitnessMemory::Cast(witness) => {
                     cast_branch_source(lkmh, single_proof_digest, *witness)
@@ -356,6 +356,6 @@ mod tests {
 
     test_program_snapshot!(
         LinkProof,
-        "f8f73e1b90ed4099af94e933d6f84127f18adcd30259013271711dd75399df472b2b133a1740fdbd"
+        "d76a4e5ffc3074769016c3d370380bf173cc4a89a989c1b1c479f3522dac99efa2b954274a15ccb5"
     );
 }

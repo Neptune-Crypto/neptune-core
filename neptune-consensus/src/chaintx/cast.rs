@@ -665,10 +665,6 @@ mod negative_tests {
         )
     }
 
-    /// The cast kernel is bound to the claim by a single hash, so a witness
-    /// built around some *other* transaction fails it -- as does a claim whose
-    /// link kernel carries thruputs, which is the same failure: the constant the
-    /// branch hashes with is the empty thruput list's subtree, and nothing else.
     #[proptest(cases = 4)]
     fn link_kernel_must_be_the_transaction_kernel_without_thruputs(
         #[strategy(pokeable_witness())] witness: CastWitness,
@@ -696,10 +692,6 @@ mod negative_tests {
         expect_kernel_mismatch(with_thruput.mast_hash()).unwrap();
     }
 
-    /// A coinbase transaction, or one that has been through `Merge`, cannot be
-    /// cast. Both leafs are constants the branch authenticates directly, so a
-    /// kernel holding anything else has the wrong leaf, not merely the wrong
-    /// value.
     #[proptest(cases = 4)]
     fn coinbase_or_merge_bit_on_the_cast_kernel_is_rejected(
         #[strategy(pokeable_witness())] original: CastWitness,
