@@ -1558,7 +1558,7 @@ pub(crate) mod tests {
 
         test_program_snapshot!(
             SingleProof::new(ConsensusRuleSet::HardforkDelta),
-            "5b2a205d042b5f6d5fddc600037e2dc0d0521260f6762b918391ace0aedc34d4c4df2346ed038157"
+            "11260cfb66723f6dc4e88e1696af2b3178f41ad089375564b490fd0d90550685abbebc5b2e6b7dd8"
         );
     }
 }

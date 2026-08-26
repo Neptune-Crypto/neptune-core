@@ -732,6 +732,8 @@ impl BasicSnippet for Advance {
 
                 {&load_lkmh(mast_hash_address)}
                 dup 6 dup 6
+                // _ .. *field size [lkmh] *field size
+
                 call {authenticate}
                 // _ ... *field size
 
@@ -1083,10 +1085,9 @@ impl BasicSnippet for Advance {
             )
         };
 
-        // A link with no inputs and no thruputs commits to nothing the mutator
-        // set moves; updating one is a composition shortcut, not a
-        // re-targeting. Read off the old kernel, whose fields the asserts
-        // above bound to both roots.
+        // A link with no inputs and no thruputs would be a composition
+        // shortcut. So we ban it. Assumes that old inputs, and old thruputs
+        // have already been verified.
         let assert_link_is_not_empty = triton_asm!(
             // _ *witness *old_lk *new_lk
             dup 1
