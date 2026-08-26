@@ -659,12 +659,12 @@ impl SecretWitness for ForgeWitness {
         .concat();
 
         // Inner-root authentication data, read after the input/output-integrity
-        // divines: the inner (height-3) `TransactionKernel` root and its right
-        // sibling. `hash`ing the two reconstructs `lkmh`, authenticating the
-        // inner root the lock/type scripts were proven against.
-        let (inner_root, right_sibling) = self.inner_root_and_right_sibling();
+        // divines: the inner (height-3) `TransactionKernel` root. The program
+        // computes its right sibling from the (already authenticated) thruputs
+        // and `hash`es the two to reconstruct `lkmh`, authenticating the inner
+        // root the lock/type scripts were proven against.
+        let (inner_root, _) = self.inner_root_and_right_sibling();
         nd_stream.extend(inner_root.reversed().values());
-        nd_stream.extend(right_sibling.reversed().values());
 
         let mut nondeterminism = NonDeterminism::new(nd_stream)
             .with_ram(memory)
@@ -878,6 +878,43 @@ impl BasicSnippet for Forge {
         // is always present (fees are paid in native currency), so `Forge`
         // pushes it first, matching `CollectTypeScripts`.
         let push_native_currency_hash = push_digest(NativeCurrency.hash());
+
+        let d1 = Digest::default();
+        let d2 = Tip5::hash_pair(d1, d1);
+        let d4 = Tip5::hash_pair(d2, d2);
+        let right_lkmh_node_from_thruputs = triton_asm!(
+            // _ *thruputs
+
+            {&push_digest(d4)}
+            {&push_digest(d2)}
+            {&push_digest(d1)}
+            // _ *thruputs [d4] [d2] [d1]
+
+            pick 15
+            read_mem 1
+            // _ [d4] [d2] [d1] len (*thruputs - 1)
+
+            addi 1
+            swap 1
+            // _ [d4] [d2] [d1] *thruputs len
+
+            push {Digest::LEN}
+            mul
+            addi 1
+            // _ [d4] [d2] [d1] *thruputs size
+
+            call {hash_varlen}
+            // _ [d4] [d2] [d1] [thruput_leaf: Digest]
+
+            hash
+            // _ [d4] [d2] [n1: Digest]
+
+            hash
+            // _ [d4] [n2: Digest]
+
+            hash
+            // _ [root_right_child: Digest]
+        );
 
         // Authenticate the mutator-set accumulator against the link-kernel MAST
         // hash via the shared `AuthenticateMsaAgainstTxk` snippet (instantiated
@@ -1171,7 +1208,8 @@ impl BasicSnippet for Forge {
             divine {Digest::LEN}
             // _ [lkmh] *witness [inner_root]
 
-            divine {Digest::LEN}
+            dup 5 {&field_thruputs}
+            {&right_lkmh_node_from_thruputs}
             // _ [lkmh] *witness [inner_root] [right_sibling]
 
             dup 9 dup 9 dup 9 dup 9 dup 9
@@ -2116,13 +2154,21 @@ pub(crate) mod tests {
 
         // Divine the inner (height-3) TransactionKernel root and bind it to
         // lkmh: it is the left child of the LinkKernel root, so hashing it
-        // with the divined right sibling must reconstruct lkmh. Preimage
+        // with the right child must reconstruct lkmh. The right child is
+        // computed, not divined: its subtree holds only the `Thruputs` leaf
+        // (already authenticated above) and default-digest padding. Preimage
         // resistance then pins `inner_root` to the genuine left child -- but
         // only the *retained* value is authenticated, so the tasm must keep
         // this exact digest (not re-divine) and feed it to the claims below.
         let inner_root: Digest = tasm::tasmlib_io_read_secin___digest();
-        let right_sibling: Digest = tasm::tasmlib_io_read_secin___digest();
-        assert_eq!(lkmh, Tip5::hash_pair(inner_root, right_sibling));
+        let d1 = Digest::default();
+        let d2 = Tip5::hash_pair(d1, d1);
+        let d4 = Tip5::hash_pair(d2, d2);
+        let thruputs_leaf = Tip5::hash_varlen(&witness.thruputs.encode());
+        let n1 = Tip5::hash_pair(thruputs_leaf, d1);
+        let n2 = Tip5::hash_pair(n1, d2);
+        let right_child = Tip5::hash_pair(n2, d4);
+        assert_eq!(lkmh, Tip5::hash_pair(inner_root, right_child));
 
         // Verify the scripts in the same order the tasm does: type scripts
         // first, then lock scripts. The order is immaterial to what is
