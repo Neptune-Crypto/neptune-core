@@ -88,7 +88,9 @@ impl BasicSnippet for AuthenticateMsaAgainstTxk {
                 // _ *aocl_mmr *swbfi_bagged *swbfa_digest [txk_mast_hash] h i [swbfi_bagged]
 
                 dup 14
+                // _ *aocl_mmr *swbfi_bagged *swbfa_digest [txk_mast_hash] h i [swbfi_bagged] *aocl_mmr
                 call {bag_mmr_peaks}
+
                 hint aocl_bagged: Digest = stack[0..5]
                 // _ *aocl_mmr *swbfi_bagged *swbfa_digest [txk_mast_hash] h i [swbfi_bagged] [aocl_mmr_bagged]
 

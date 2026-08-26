@@ -983,11 +983,23 @@ impl BasicSnippet for Forge {
             pop 1
             // _ [lkmh] *witness [fee; 4]
 
+            /* Ensure fee not-negative, and in-range */
             {&push_max_amount}
             call {lt_u128}
             push 0 eq
+            // _ [lkmh] *witness (!(fee > max))
+
             assert error_id {FORGE_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT_ERROR}
             // _ [lkmh] *witness
+        );
+
+        let crash_if_not_u32 = triton_asm!(
+            // _ value
+
+            dup 0
+            pop_count
+            pop 1
+            // _ (value: u32)
         );
 
         // The type scripts see `input_utxos` as one flat list and contain all
@@ -999,10 +1011,19 @@ impl BasicSnippet for Forge {
             dup 0 {&field_input_utxos} {&field_utxos} read_mem 1 pop 1
             // _ [lkmh] *witness num_utxos
 
+            {&crash_if_not_u32}
+            // _ [lkmh] *witness num_utxos
+
             dup 1 {&field_confirmed_inputs} read_mem 1 pop 1
             // _ [lkmh] *witness num_utxos num_confirmed
 
+            {&crash_if_not_u32}
+            // _ [lkmh] *witness num_utxos num_confirmed
+
             dup 2 {&field_thruputs} read_mem 1 pop 1
+            // _ [lkmh] *witness num_utxos num_confirmed num_thruputs
+
+            {&crash_if_not_u32}
             // _ [lkmh] *witness num_utxos num_confirmed num_thruputs
 
             add
@@ -1015,6 +1036,9 @@ impl BasicSnippet for Forge {
                record, so the balance the type scripts compute over
                `output_utxos` is the balance the mutator set will receive. */
             dup 0 {&field_output_utxos} {&field_utxos} read_mem 1 pop 1
+            // _ [lkmh] *witness num_output_utxos
+
+            {&crash_if_not_u32}
             // _ [lkmh] *witness num_output_utxos
 
             dup 1 {&field_outputs} read_mem 1 pop 1
@@ -1032,7 +1056,15 @@ impl BasicSnippet for Forge {
                 dup 1 {&field_salted_utxos} {&field_utxos_with_size}
                 // _ [lkmh] *witness *utxos[N]_si *utxos utxos_size
 
+                {&crash_if_not_u32}
+                // _ [lkmh] *witness *utxos[N]_si *utxos utxos_size
+
                 add
+                // _ [lkmh] *witness *utxos[N]_si (*utxos + utxos_size)
+
+                /* Require that witness is fully contained on the 1st memory
+                   page */
+                {&crash_if_not_u32}
                 // _ [lkmh] *witness *utxos[N]_si (*utxos + utxos_size)
 
                 eq assert error_id {UTXOS_SIZE_MANIPULATION_ERROR}
@@ -1363,7 +1395,7 @@ impl BasicSnippet for Forge {
                 addi 1 read_mem {u64_stack_size} pop 1
                 push {aocl_leaf_index_alloc.read_address()}
                 read_mem {u64_stack_size} pop 1
-                // _ ... *aocl_peaks [canonical_commitment] [num_leafs] [aocl_leaf_index]
+                // _ ... *aocl_peaks [canonical_commitment] [num_leafs; 2] [aocl_leaf_index; 2]
 
                 call {mmr_verify}
                 // _ *rrs[i]_si num_confirmed i *utxos[i]_si *aocl
@@ -1442,6 +1474,8 @@ impl BasicSnippet for Forge {
                 /* utxo hash on top; *utxos[i]_si now sits under the two divined
                    digests, hence `dup {2 * Digest::LEN + 1}`. */
                 dup {2 * Digest::LEN + 1} read_mem 1 addi 2 swap 1
+                // _ .. [receiver_digest] [sender_randomness] *utxos[i] size
+
                 call {hash_varlen}
                 hint utxo_hash = stack[0..5]
                 // _ ... [receiver_digest] [sender_randomness] [utxo_hash]
@@ -1466,6 +1500,7 @@ impl BasicSnippet for Forge {
 
                 push {MAX_JUMP_LENGTH} dup 2 lt
                 assert error_id {JUMP_OUT_OF_BOUNDS_ERROR}
+                // _ num_thruputs i *thruputs[i+1] utxos[i]_si (*utxos[i]_si-1)
 
                 addi 2 add
                 // _ num_thruputs i *thruputs[i+1] *utxos[i+1]_si
