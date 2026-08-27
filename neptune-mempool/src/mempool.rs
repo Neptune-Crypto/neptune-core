@@ -78,6 +78,24 @@ use crate::upgrade_priority::UpgradePriority;
 /// Transactions with a timestamp older than this are removed from the mempool.
 pub const MEMPOOL_TX_THRESHOLD_AGE: Timestamp = Timestamp::hours(10);
 
+/// How long a transaction that carries a retirement announcement must still
+/// have left before it retires, for this node to hold it and to compose with
+/// it.
+///
+/// Policy, not consensus logic.
+pub const MEMPOOL_RETIREMENT_MARGIN: Timestamp = Timestamp::minutes(100);
+
+/// How long a transaction that carries a retirement announcement must still
+/// have left before it retires, for this node to merge it into another
+/// transaction.
+///
+/// Deliberately longer than [`MEMPOOL_RETIREMENT_MARGIN`] since it takes some
+/// time before a merged transaction is picked up by composers: proving time,
+/// tx-propagation, the finding of the next block.
+///
+/// Policy, not consensus logic.
+pub const MERGE_RETIREMENT_MARGIN: Timestamp = Timestamp::minutes(150);
+
 pub const TRANSACTION_NOTIFICATION_AGE_LIMIT_IN_SECS: u64 = 60 * 60 * 24;
 
 type LookupItem<'a> = (TransactionKernelId, &'a AnyTx);
@@ -446,6 +464,10 @@ impl Mempool {
     /// 2. Be synced to the same mutator set
     /// 3. Pay at least the specified fee
     /// 4. Not exceed allowed sizes after being merged with the specified
+    /// 5. Not retire within [`MERGE_RETIREMENT_MARGIN`]
+    ///
+    /// Returns `None` if the specified transaction itself retires within
+    /// [`MERGE_RETIREMENT_MARGIN`].
     ///
     /// Note that the returned a returned transaction is not guaranteed to be
     /// synced to the tip. If the input transaction is not synced to the tip,
@@ -465,6 +487,12 @@ impl Mempool {
         let max_num_inputs = consensus_rule_set.max_num_inputs();
         let max_num_outputs = consensus_rule_set.max_num_outputs();
         let max_num_announcements = consensus_rule_set.max_num_announcements();
+
+        // Prevent the spread of too early retirement to other transactions.
+        let now = Timestamp::now();
+        if kernel.retires_before(now + MERGE_RETIREMENT_MARGIN) {
+            return None;
+        }
 
         let tx_index_sets: HashSet<_> = kernel.inputs.iter().map(|x| x.absolute_indices).collect();
 
@@ -491,6 +519,10 @@ impl Mempool {
             }
 
             if candidate.mutator_set_hash != kernel.mutator_set_hash {
+                continue;
+            }
+
+            if candidate.retires_before(now + MERGE_RETIREMENT_MARGIN) {
                 continue;
             }
 
@@ -693,7 +725,8 @@ impl Mempool {
     ///   a) have a positive upgrader priority, or
     ///   b) pay a positive transaction fee.
     ///
-    /// Will only return transactions that are synced to the latest tip.
+    /// Will only return transactions that are synced to the latest tip, and
+    /// none that retire within [`MERGE_RETIREMENT_MARGIN`].
     ///
     /// Returns the pair of transaction along with their sum of priorities.
     pub fn preferred_single_proof_pair(
@@ -703,6 +736,7 @@ impl Mempool {
         let mut ret = vec![];
         let mut filter_mismatches = vec![];
         let mut priority = UpgradePriority::Irrelevant;
+        let now = Timestamp::now();
         for candidate_txid in self
             .upgrade_priority_iter()
             .map(|(txid, _)| txid)
@@ -725,6 +759,16 @@ impl Mempool {
             let TransactionProof::SingleProof(_) = &candidate_tx.proof else {
                 continue;
             };
+
+            // The merged transaction inherits this one's retirement, so a
+            // candidate this close to retiring makes for a transaction that no
+            // composer will pick.
+            if candidate_tx
+                .kernel
+                .retires_before(now + MERGE_RETIREMENT_MARGIN)
+            {
+                continue;
+            }
 
             // Do not attempt to merge transactions that neither have a value to
             // us nor pay a fee.
@@ -1504,6 +1548,8 @@ impl Mempool {
 
         let mut transactions = vec![];
 
+        let now = Timestamp::now();
+
         for (txkid, _fee_density) in self.fee_density_iter() {
             if max_num_txs.is_some_and(|max| transactions.len() == max) {
                 break;
@@ -1516,6 +1562,13 @@ impl Mempool {
                 }
 
                 if !matches!(transaction_ptr.proof, TransactionProof::SingleProof(_)) {
+                    continue;
+                }
+
+                if transaction_ptr
+                    .kernel
+                    .retires_before(now + MEMPOOL_RETIREMENT_MARGIN)
+                {
                     continue;
                 }
 
@@ -1614,14 +1667,19 @@ impl Mempool {
     }
 
     /// Remove transactions from mempool that are older than the specified
-    /// timestamp. Prunes base on the transaction's timestamp.
+    /// timestamp, or that retire so soon that they will not be composed with
+    /// again. Prunes based on the transaction's timestamp and on its
+    /// retirement announcements, if any.
     ///
     /// Computes in O(n)
     pub fn prune_stale_transactions(&mut self) -> Vec<MempoolEvent> {
-        let cutoff = Timestamp::now() - MEMPOOL_TX_THRESHOLD_AGE;
+        let now = Timestamp::now();
+        let cutoff = now - MEMPOOL_TX_THRESHOLD_AGE;
 
         let keep = |(_transaction_id, transaction): LookupItem| -> bool {
-            cutoff < transaction.kernel().timestamp
+            let kernel = transaction.kernel();
+
+            cutoff < kernel.timestamp && !kernel.retires_before(now + MEMPOOL_RETIREMENT_MARGIN)
         };
 
         self.retain(keep)
@@ -2008,6 +2066,7 @@ mod tests {
     use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
     use neptune_consensus::transaction::Transaction;
     use neptune_consensus::transaction::TransactionProof;
+    use neptune_consensus::transaction::announcement::Announcement;
     use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
     use neptune_consensus::transaction::test_helpers::make_mock_txs_with_primitive_witness_with_timestamp;
     use neptune_consensus::transaction::test_helpers::make_plenty_mock_transaction_supported_by_invalid_single_proofs;
@@ -2036,6 +2095,8 @@ mod tests {
     use tasm_lib::twenty_first::prelude::BFieldCodec;
     use tracing_test::traced_test;
 
+    use crate::mempool::MEMPOOL_RETIREMENT_MARGIN;
+    use crate::mempool::MERGE_RETIREMENT_MARGIN;
     use crate::mempool::Mempool;
     use crate::mempool_event::MempoolEvent;
     use crate::test_utils::shared_tokio_runtime;
@@ -2359,6 +2420,118 @@ mod tests {
                 "Must return {i}/{i} transaction when mutator set hashes do match"
             );
         }
+    }
+
+    #[test]
+    fn transactions_retiring_within_the_margin_are_not_selected_for_block_composition() {
+        let network = Network::Main;
+        let genesis_block = Block::genesis(network);
+        let mutator_set_hash = genesis_block
+            .mutator_set_accumulator_after()
+            .unwrap()
+            .hash();
+        let mut mempool = Mempool::new(
+            ByteSize::gb(1),
+            TxProvingCapability::ProofCollection,
+            &genesis_block,
+        );
+
+        let now = Timestamp::now();
+        let retirements = [
+            now - Timestamp::hours(1),
+            now + MEMPOOL_RETIREMENT_MARGIN - Timestamp::minutes(1),
+            now + MEMPOOL_RETIREMENT_MARGIN + Timestamp::minutes(1),
+        ];
+        let txs = make_plenty_mock_transaction_supported_by_invalid_single_proofs(3);
+        let txs = txs
+            .into_iter()
+            .zip(retirements)
+            .map(|(mut tx, retirement)| {
+                tx.kernel = TransactionKernelModifier::default()
+                    .mutator_set_hash(mutator_set_hash)
+                    .announcements(vec![Announcement::retirement(retirement)])
+                    .modify(tx.kernel);
+                tx
+            })
+            .collect_vec();
+        for tx in &txs {
+            mempool.insert(tx.to_owned(), UpgradePriority::Irrelevant);
+        }
+        assert_eq!(3, mempool.len());
+
+        let selected = mempool.get_transactions_for_block_composition(
+            ConsensusRuleSet::default(),
+            SIZE_20MB_IN_BYTES,
+            None,
+        );
+
+        assert_eq!(
+            vec![txs[2].kernel.txid()],
+            selected.iter().map(|tx| tx.kernel.txid()).collect_vec()
+        );
+    }
+
+    #[test]
+    fn transactions_without_retirement_announcements_are_selected_for_block_composition() {
+        let network = Network::Main;
+        let genesis_block = Block::genesis(network);
+        let mempool = mock_mempool_singleproofs(3, &genesis_block);
+
+        assert_eq!(
+            3,
+            mempool
+                .get_transactions_for_block_composition(
+                    ConsensusRuleSet::default(),
+                    SIZE_20MB_IN_BYTES,
+                    None,
+                )
+                .len()
+        );
+    }
+
+    #[test]
+    fn transactions_retiring_within_the_margin_are_pruned() {
+        let network = Network::Main;
+        let genesis_block = Block::genesis(network);
+        let mut mempool = Mempool::new(
+            ByteSize::gb(1),
+            TxProvingCapability::ProofCollection,
+            &genesis_block,
+        );
+
+        let now = Timestamp::now();
+        let announcements = [
+            vec![Announcement::retirement(now - Timestamp::hours(1))],
+            vec![Announcement::retirement(
+                now + MEMPOOL_RETIREMENT_MARGIN - Timestamp::minutes(1),
+            )],
+            vec![Announcement::retirement(
+                now + MEMPOOL_RETIREMENT_MARGIN + Timestamp::minutes(1),
+            )],
+            vec![],
+        ];
+        let txs = make_mock_txs_with_primitive_witness_with_timestamp(4, now);
+        let txs = txs
+            .into_iter()
+            .zip(announcements)
+            .map(|(mut tx, announcements)| {
+                tx.kernel = TransactionKernelModifier::default()
+                    .announcements(announcements)
+                    .modify(tx.kernel);
+                tx
+            })
+            .collect_vec();
+        for tx in &txs {
+            mempool.insert(tx.to_owned(), UpgradePriority::Irrelevant);
+        }
+        assert_eq!(4, mempool.len());
+
+        mempool.prune_stale_transactions();
+
+        assert!(!mempool.contains(txs[0].kernel.txid()));
+        assert!(!mempool.contains(txs[1].kernel.txid()));
+        assert!(mempool.contains(txs[2].kernel.txid()));
+        assert!(mempool.contains(txs[3].kernel.txid()));
     }
 
     #[traced_test]
@@ -2858,6 +3031,182 @@ mod tests {
             } else {
                 panic!("Must return either tx_a or tx_b");
             }
+        }
+
+        #[test]
+        fn merge_partner_is_never_a_transaction_retiring_within_the_margin() {
+            use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+
+            let network = Network::Main;
+            let genesis_block = Block::genesis(network);
+            let mutator_set_hash = genesis_block
+                .mutator_set_accumulator_after()
+                .unwrap()
+                .hash();
+            let mut mempool = Mempool::new(
+                ByteSize::gb(1),
+                TxProvingCapability::ProofCollection,
+                &genesis_block,
+            );
+
+            // The first transaction is the one seeking a partner. The second
+            // retires within the margin, the third beyond it.
+            let now = Timestamp::now();
+            let txs = mock_txs_with_announcements(
+                vec![
+                    vec![],
+                    vec![Announcement::retirement(
+                        now + MERGE_RETIREMENT_MARGIN - Timestamp::minutes(1),
+                    )],
+                    vec![Announcement::retirement(
+                        now + MERGE_RETIREMENT_MARGIN + Timestamp::minutes(1),
+                    )],
+                ],
+                mutator_set_hash,
+            );
+
+            // Sole candidate retires within the margin, so there is no partner to
+            // be had, however attractive it is on every other count.
+            mempool.insert(txs[1].to_owned(), UpgradePriority::Irrelevant);
+            let merge_partner = |mempool: &Mempool| {
+                mempool.merge_partner(
+                    &txs[0].kernel,
+                    ConsensusRuleSet::default(),
+                    NativeCurrencyAmount::zero(),
+                )
+            };
+            assert!(merge_partner(&mempool).is_none());
+
+            // Adding one that retires beyond the margin, that one is picked.
+            mempool.insert(txs[2].to_owned(), UpgradePriority::Irrelevant);
+            let (partner, _, _) = merge_partner(&mempool)
+                .expect("transaction retiring beyond the margin is eligible");
+            assert_eq!(txs[2].kernel.txid(), partner.txid());
+        }
+
+        #[test]
+        fn preferred_single_proof_pair_skips_transactions_retiring_within_the_margin() {
+            let network = Network::Main;
+            let genesis_block = Block::genesis(network);
+            let mutator_set_hash = genesis_block
+                .mutator_set_accumulator_after()
+                .unwrap()
+                .hash();
+            let mut mempool = Mempool::new(
+                ByteSize::gb(1),
+                TxProvingCapability::ProofCollection,
+                &genesis_block,
+            );
+
+            // Only the last two are worth merging.
+            let now = Timestamp::now();
+            let txs = mock_txs_with_announcements(
+                vec![
+                    vec![Announcement::retirement(
+                        now + MERGE_RETIREMENT_MARGIN - Timestamp::minutes(1),
+                    )],
+                    vec![Announcement::retirement(
+                        now + MERGE_RETIREMENT_MARGIN + Timestamp::minutes(1),
+                    )],
+                    vec![],
+                ],
+                mutator_set_hash,
+            );
+
+            // With only one eligible transaction there is no pair to be had, the
+            // transaction retiring within the margin notwithstanding.
+            for tx in &txs[..2] {
+                mempool.insert(tx.to_owned(), UpgradePriority::Irrelevant);
+            }
+            assert!(
+                mempool
+                    .preferred_single_proof_pair(TxUpgradeFilter::match_all())
+                    .is_none()
+            );
+
+            // A second eligible transaction completes the pair.
+            mempool.insert(txs[2].to_owned(), UpgradePriority::Irrelevant);
+            let ([(left, _), (right, _)], _) = mempool
+                .preferred_single_proof_pair(TxUpgradeFilter::match_all())
+                .expect("two transactions retiring beyond the margin make a pair");
+
+            assert_eq!(
+                [txs[1].kernel.txid(), txs[2].kernel.txid()]
+                    .into_iter()
+                    .collect::<HashSet<_>>(),
+                [left.txid(), right.txid()]
+                    .into_iter()
+                    .collect::<HashSet<_>>(),
+            );
+        }
+
+        #[test]
+        fn transaction_retiring_within_the_margin_gets_no_merge_partner() {
+            use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+
+            let network = Network::Main;
+            let genesis_block = Block::genesis(network);
+            let mutator_set_hash = genesis_block
+                .mutator_set_accumulator_after()
+                .unwrap()
+                .hash();
+            let mut mempool = Mempool::new(
+                ByteSize::gb(1),
+                TxProvingCapability::ProofCollection,
+                &genesis_block,
+            );
+
+            let now = Timestamp::now();
+            let txs = mock_txs_with_announcements(
+                vec![
+                    vec![Announcement::retirement(
+                        now + MERGE_RETIREMENT_MARGIN - Timestamp::minutes(1),
+                    )],
+                    vec![],
+                    vec![],
+                ],
+                mutator_set_hash,
+            );
+            mempool.insert(txs[2].to_owned(), UpgradePriority::Irrelevant);
+
+            let merge_partner = |kernel| {
+                mempool.merge_partner(
+                    kernel,
+                    ConsensusRuleSet::default(),
+                    NativeCurrencyAmount::zero(),
+                )
+            };
+
+            assert!(
+                merge_partner(&txs[0].kernel).is_none(),
+                "transaction retiring within the margin must not be merged at all"
+            );
+            assert!(
+                merge_partner(&txs[1].kernel).is_some(),
+                "and the same mempool must serve a partner to a transaction that does not retire"
+            );
+        }
+
+        /// One single-proof transaction per announcement list, all synced to the
+        /// same mutator set and all paying a fee that clears any minimum.
+        fn mock_txs_with_announcements(
+            announcements: Vec<Vec<Announcement>>,
+            mutator_set_hash: Digest,
+        ) -> Vec<Transaction> {
+            use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+
+            make_plenty_mock_transaction_supported_by_invalid_single_proofs(announcements.len())
+                .into_iter()
+                .zip(announcements)
+                .map(|(mut tx, announcements)| {
+                    tx.kernel = TransactionKernelModifier::default()
+                        .mutator_set_hash(mutator_set_hash)
+                        .announcements(announcements)
+                        .fee(NativeCurrencyAmount::coins(1))
+                        .modify(tx.kernel);
+                    tx
+                })
+                .collect_vec()
         }
     }
 

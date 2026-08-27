@@ -234,6 +234,27 @@ impl ConsensusRuleSet {
         }
     }
 
+    /// Whether the consensus rule set allows transactions to become retired,
+    /// i.e. unmineable after a specified timestamp.
+    ///
+    /// If true, then the consensus rule set disallows transactions that carry
+    /// announcements of the type
+    /// `[[RETIREMENT_FLAGS; 2], retirement_timestamp]` from being
+    /// mined after `retirement_timestamp`. Enforced through the transaction
+    /// timestamp: if the tranasction timestamp *exceeds* the
+    /// `retirement_timestamp`, the block containing the transaction is
+    /// invalid.
+    pub fn enforce_transaction_retirement(&self) -> bool {
+        match self {
+            ConsensusRuleSet::Reboot => false,
+            ConsensusRuleSet::HardforkAlpha => false,
+            ConsensusRuleSet::TvmProofVersion1 => false,
+            ConsensusRuleSet::HardforkBeta => false,
+            ConsensusRuleSet::HardforkGamma => false,
+            ConsensusRuleSet::HardforkDelta => true,
+        }
+    }
+
     /// Whether the `SingleProof` program carries the
     /// [`Fix`](crate::transaction::validity::tasm::single_proof::fix_branch::FixBranch)
     /// branch, which recursively verifies a `LinkProof` -- i.e. whether a

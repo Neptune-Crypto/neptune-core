@@ -4,6 +4,7 @@ use std::num::ParseIntError;
 
 use get_size2::GetSize;
 use itertools::Itertools;
+use neptune_primitives::timestamp::Timestamp;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::TasmObject;
@@ -14,6 +15,15 @@ use tracing::debug;
 use crate::block::pow::LustrationStatus;
 use crate::transaction::transaction_kernel::LUSTRATION_FLAG;
 use crate::transaction::transparent_input::TransparentInput;
+
+/// Flag to indicate that an announcement marks the associated transaction
+/// as retired (i.e. unmineable) after a certain timestamp.
+///
+/// Ignored prior to the activation of hardfork-delta.
+pub const RETIREMENT_FLAG: [BFieldElement; 2] = [
+    BFieldElement::new(0x4D434D58585856u64),
+    BFieldElement::new(15725664001572566400u64),
+];
 
 /// Represents arbitrary data that can be stored in a transaction on the public
 /// blockchain.
@@ -43,6 +53,32 @@ pub struct Announcement {
 impl Announcement {
     pub fn new(message: Vec<BFieldElement>) -> Self {
         Self { message }
+    }
+
+    /// An announcement retiring the transaction that holds it after the given
+    /// timestamp.
+    ///
+    /// Retirement is only enforced once hardfork delta has activated; under
+    /// every earlier rule set the announcement carries no weight and the
+    /// transaction can be mined whenever. See
+    /// [`ConsensusRuleSet::enforce_transaction_retirement`](crate::consensus_rule_set::ConsensusRuleSet::enforce_transaction_retirement).
+    pub fn retirement(retirement: Timestamp) -> Self {
+        Self::new(vec![RETIREMENT_FLAG[0], RETIREMENT_FLAG[1], retirement.0])
+    }
+
+    /// Return Some(timestamp) if the transaction holding this announcement is
+    /// set to be retired after a specific timestamp.
+    ///
+    /// Return `None` for all announcements that do not indicate retirement.
+    pub fn retirement_value(&self) -> Option<Timestamp> {
+        if self.message.len() == 3
+            && self.message[0] == RETIREMENT_FLAG[0]
+            && self.message[1] == RETIREMENT_FLAG[1]
+        {
+            Some(Timestamp(self.message[2]))
+        } else {
+            None
+        }
     }
 
     /// Returns true iff the announcement carries the lustration flag.
@@ -201,5 +237,53 @@ mod tests {
     #[proptest]
     fn try_from_string_cannot_crash(s: String) {
         let _announcement = Announcement::try_from(s); // no crash
+    }
+
+    #[test]
+    fn retirement_value_is_the_third_element_of_a_flagged_announcement() {
+        let retirement = Timestamp::now();
+        assert_eq!(
+            Some(retirement),
+            Announcement::retirement(retirement).retirement_value()
+        );
+    }
+
+    #[test]
+    fn retirement_value_reading_cannot_crash() {
+        let announcements = [
+            vec![],
+            vec![RETIREMENT_FLAG[0]],
+            vec![RETIREMENT_FLAG[0], RETIREMENT_FLAG[1]],
+            vec![
+                RETIREMENT_FLAG[0],
+                RETIREMENT_FLAG[0],
+                BFieldElement::new(0),
+            ],
+        ];
+
+        for announcement in announcements {
+            assert_eq!(None, Announcement::new(announcement).retirement_value());
+        }
+    }
+
+    #[test]
+    fn retirement_value_is_none_for_flags_without_a_timestamp() {
+        let announcement = Announcement::new(RETIREMENT_FLAG.to_vec());
+
+        assert_eq!(None, announcement.retirement_value());
+    }
+
+    #[test]
+    fn retirement_value_is_none_when_the_flags_do_not_match() {
+        let retirement = Timestamp::now();
+        let announcements = [
+            vec![RETIREMENT_FLAG[1], RETIREMENT_FLAG[0], retirement.0],
+            vec![RETIREMENT_FLAG[0], BFieldElement::new(0), retirement.0],
+            vec![BFieldElement::new(0), RETIREMENT_FLAG[1], retirement.0],
+        ];
+
+        for announcement in announcements {
+            assert_eq!(None, Announcement::new(announcement).retirement_value());
+        }
     }
 }
