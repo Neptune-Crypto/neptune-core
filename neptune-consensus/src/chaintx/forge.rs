@@ -1156,6 +1156,9 @@ impl BasicSnippet for Forge {
             pop 1 swap 3 pop 3
             // _ [lkmh] *witness *utxos[num_confirmed]_si
 
+            /* Ensure pointer is still in ND-region */
+            {&crash_if_not_u32}
+
             /* Thruputs: each commits to the matching tail input UTXO. */
             dup 1 {&field_thruputs} read_mem 1 pop 1
             // _ [lkmh] *witness *utxos[nc]_si num_thruputs
@@ -1203,8 +1206,8 @@ impl BasicSnippet for Forge {
 
             // Divine the inner (transaction kernel MAST) root and
             // authenticate it against lkmh: it is the left child of the
-            // LinkKernel root, so hashing it with the divined right sibling
-            // must reconstruct lkmh.
+            // LinkKernel root, so hashing it with the right sibling calculated
+            // from the thruputs field must reconstruct it.
             divine {Digest::LEN}
             // _ [lkmh] *witness [inner_root]
 
@@ -1227,10 +1230,11 @@ impl BasicSnippet for Forge {
             pop {Digest::LEN}
             // _ [lkmh] *witness [inner_root]
 
-            // lkmh is dead now (its last use was the authentication above), so
-            // sink `inner_root` into its slot: both script-claim templates read
-            // `inner_root` from the bottom of the stack, kept there for the rest
-            // of the program rather than in static memory.
+            // lkmh is no longer needed. Its last use was the authentication
+            // above. So overwrite it with `inner_root`.
+            // Both script-claim templates read
+            // `inner_root` from the bottom of the stack, kept there for the
+            // rest of the program rather than in static memory.
             pick 5
             pick 10 pop 1 pick 9 pop 1 pick 8 pop 1 pick 7 pop 1 pick 6 pop 1
             // _ [inner_root] *witness
@@ -1312,6 +1316,9 @@ impl BasicSnippet for Forge {
             call {verify_type_scripts}
             // _ [inner_root] *witness *tsh *claim *program_digest num_ts num_ts *tsh[N] *proofs[N]_si
 
+            /* Ensure pointer is in ND region */
+            pop_count
+
             pop 5 pop 2
             // _ [inner_root] *witness
 
@@ -1352,6 +1359,9 @@ impl BasicSnippet for Forge {
 
             call {verify_lock_scripts}
             // _ disc [inner_root] *witness *claim *program_digest num_utxos num_utxos *utxos[N]_si *proofs[N]_si
+
+            /* Ensure pointer is in ND region */
+            pop_count
 
             pop 5 pop 1
             // _ disc [inner_root] *witness
