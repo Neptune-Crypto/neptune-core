@@ -54,6 +54,9 @@ pub enum SubmitTransactionError {
     #[error("Transaction timestamp is too old")]
     TooOld,
 
+    #[error("Transaction retires too soon to be worth relaying")]
+    Retired,
+
     #[error("Transaction not confirmable relative to the mutator set")]
     NotConfirmable,
 

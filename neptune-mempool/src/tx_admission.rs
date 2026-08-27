@@ -32,6 +32,7 @@ use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 
 use crate::any_tx::AnyTxRef;
+use crate::mempool::MEMPOOL_RETIREMENT_MARGIN;
 use crate::mempool::MEMPOOL_TX_THRESHOLD_AGE;
 
 /// Why a transaction was refused admission to the mempool.
@@ -67,6 +68,9 @@ pub enum TxAdmissionError {
 
     /// Older than the mempool is willing to hold.
     TooOld,
+
+    /// Retires too soon to be worth holding.
+    Retired,
 
     /// Dated too far into the future.
     FutureDated,
@@ -164,6 +168,13 @@ pub async fn admissible(
         return Err(TxAdmissionError::FutureDated);
     }
 
+    // Policy, and so applied under every rule set: a transaction that retires
+    // too soon to be worth composing with is not worth storing and relaying
+    // either.
+    if kernel.retires_before(MEMPOOL_RETIREMENT_MARGIN + now) {
+        return Err(TxAdmissionError::Retired);
+    }
+
     if already_known {
         return Err(TxAdmissionError::AlreadyKnown);
     }
@@ -224,6 +235,7 @@ pub async fn admissible(
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use macro_rules_attr::apply;
     use neptune_consensus::chaintx::link_kernel::LinkKernel;
     use neptune_consensus::chaintx::link_tx::LinkTx;
     use neptune_consensus::transaction::Transaction;
@@ -243,11 +255,83 @@ mod tests {
     use neptune_mutator_set::shared::WINDOW_SIZE;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
+    use proptest::strategy::Strategy;
+    use proptest::strategy::ValueTree;
+    use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
     use tasm_lib::prelude::Digest;
     use test_strategy::proptest;
 
     use super::*;
+    use crate::test_utils::shared_tokio_runtime;
+
+    fn transaction_retiring_at(retirement: Timestamp, timestamp: Timestamp) -> Transaction {
+        let mut test_runner = TestRunner::deterministic();
+        let kernel = txkernel::with_lengths(0..1, 0..1, 0..1, true)
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let kernel = TransactionKernelModifier::default()
+            .announcements(vec![Announcement::retirement(retirement)])
+            .coinbase(None)
+            .fee(NativeCurrencyAmount::coins(1))
+            .timestamp(timestamp)
+            .modify(kernel);
+
+        Transaction {
+            kernel,
+            proof: TransactionProof::invalid(),
+        }
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn transaction_retiring_within_the_margin_is_not_admitted() {
+        let now = Timestamp::now();
+        let retirements = [
+            now - Timestamp::hours(1),
+            now,
+            now + MEMPOOL_RETIREMENT_MARGIN - Timestamp::minutes(1),
+        ];
+
+        for retirement in retirements {
+            let transaction = transaction_retiring_at(retirement, now);
+
+            assert_eq!(
+                Err(TxAdmissionError::Retired),
+                admissible(
+                    (&transaction).into(),
+                    &MutatorSetAccumulator::default(),
+                    None,
+                    false,
+                    now,
+                    Network::Main,
+                    ConsensusRuleSet::default(),
+                )
+                .await
+            );
+        }
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn transaction_retiring_beyond_the_margin_is_not_refused_for_retirement() {
+        let now = Timestamp::now();
+        let retirement = now + MEMPOOL_RETIREMENT_MARGIN + Timestamp::minutes(1);
+        let transaction = transaction_retiring_at(retirement, now);
+
+        let rejection = admissible(
+            (&transaction).into(),
+            &MutatorSetAccumulator::default(),
+            None,
+            false,
+            now,
+            Network::Main,
+            ConsensusRuleSet::default(),
+        )
+        .await
+        .expect_err("transaction with an invalid proof is never admitted");
+
+        assert_ne!(TxAdmissionError::Retired, rejection);
+    }
 
     /// A transaction whose counts exceed what a block may hold can never be
     /// mined, so the mempool must not store and relay it. Counts at the limit
