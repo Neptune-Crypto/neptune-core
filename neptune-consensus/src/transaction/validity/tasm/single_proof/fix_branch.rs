@@ -178,8 +178,7 @@ impl BasicSnippet for FixBranch {
             library.import(Box::new(VerifyNdSiIntegrity::<FixWitness>::default()));
 
         // `D`, from the `LinkProof` claim's point of view, is this program's own
-        // digest -- so the slot the claim generator reads it from is one this
-        // branch writes, not one a dispatcher fills from the public input.
+        // digest. So it is read in this branch.
         let single_proof_digest_alloc = library.kmalloc(u32::try_from(Digest::LEN).unwrap());
         let generate_link_proof_claim = library.import(Box::new(GenerateLinkProofClaim {
             single_proof_digest_address: single_proof_digest_alloc.read_address(),
@@ -211,15 +210,10 @@ impl BasicSnippet for FixBranch {
             addi 2
             hint witness = stack[0]
             // _ [own_program_digest] disc [txk_digest] *witness
-            // (`disc` stays buried below the frame until the epilogue.)
 
             dup 0 call {audit_preloaded_data} pop 1
             // _ [own_program_digest] disc [txk_digest] *witness
 
-            /* Stash the own program digest where the claim generator reads `D`.
-               This is the one tie between `SingleProof` and `LinkProof` that
-               runs in this direction, and it must be the *own* digest: naming
-               anything else would verify a link proof from another family. */
             dup 11 dup 11 dup 11 dup 11 dup 11
             // _ [own_program_digest] disc [txk_digest] *witness [own_program_digest]
 
@@ -228,12 +222,8 @@ impl BasicSnippet for FixBranch {
             pop 1
             // _ [own_program_digest] disc [txk_digest] *witness
 
-            /* The link kernel this transaction came from: its kernel, with no
-               thruputs. One hash, because the transaction kernel's eight leafs are
-               the left half of the `LinkKernel`'s sixteen and, thruputs being
-               empty, the right child is a constant. A link transaction that
-               still carries thruputs has a different `lkmh`, hence a claim its
-               proof does not answer. */
+            /* Construct the link kernel MAST hash this transaction must have
+               had for it to be eligible for fix, namely: no thruputs. */
             {&push_digest(no_thruputs_subtree_root())}
             // _ .. [txk_digest] *witness [no_thruputs]
 
@@ -242,8 +232,7 @@ impl BasicSnippet for FixBranch {
 
             hash
             // _ [own_program_digest] disc [txk_digest] *witness [lkmh]
-            // (lkmh = hash_pair(txkmh, no_thruputs): tasm `hash` takes the top
-            // operand as the first argument, so txkmh sits on top.)
+            // (lkmh = hash_pair(txkmh, no_thruputs)
 
             {&push_digest(LinkProof.hash())}
             // _ .. *witness [lkmh] [link_proof_digest]
