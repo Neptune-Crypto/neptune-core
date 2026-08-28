@@ -61,9 +61,6 @@ use crate::transaction::validity::neptune_proof::Proof;
 use crate::transaction::validity::tasm::hash_removal_record_index_sets::HashRemovalRecordIndexSets;
 use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
-// 1_000_540 and 1_000_541 were the per-operand fee bounds; the two asserts on
-// the sum imply them. Not reused: error IDs are how a failed proof is diagnosed
-// in the field, and a recycled one reads as the old check.
 const NEW_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT_ERROR: i128 = 1_000_542;
 const NEW_FEE_IS_NOT_SUM_OF_OPERAND_FEES_ERROR: i128 = 1_000_543;
 const INPUTS_ARE_NOT_THE_OPERANDS_INPUTS_ERROR: i128 = 1_000_544;
@@ -556,6 +553,7 @@ impl BasicSnippet for Chain {
             DataType::Digest,
             DataType::Bool,
         );
+
         let no_thruput_is_a_chained_output = library.import(Box::new(All::new(
             InnerFunction::RawCode(thruput_is_not_a_chained_output),
         )));
@@ -677,6 +675,9 @@ impl BasicSnippet for Chain {
         let assert_cut_through =
             |accessor: &[LabelledInstruction], authenticate: &str, error_id: i128| {
                 triton_asm!(
+                    /* x_field below is always a list of addition records,
+                        either thruputs or outputs. */
+
                     // _ *witness *l_lk *r_lk *n_lk
                     {&authenticate_in_all_three(accessor, authenticate)}
                     // _ *witness *l_lk *r_lk *n_lk *l_field *r_field *n_field
@@ -691,6 +692,12 @@ impl BasicSnippet for Chain {
                     place 2
                     call {hash_2_lists_of_addition_records}
                     // _ *witness *l_lk *r_lk *n_lk *n_and_cut_digests *lr_digests
+
+                    /* Enforces cut-throughs ++ new == left ++ right
+                       Either:
+                         a) cut-throughs ++ n_outputs  == l_outputs  ++ r_outputs, or
+                         b) cut-throughs ++ n_thruputs == l_thruputs ++ r_thruputs
+                    */
 
                     call {multiset_equality}
                     assert error_id {error_id}
@@ -725,6 +732,10 @@ impl BasicSnippet for Chain {
             {&field_thruputs}
             // _ *witness *l_lk *r_lk *n_lk *n_thru
 
+            /* Ensure that no output in the new transaction matches a thruput
+               in the new transaction. That would imply an incomplete
+               cut-through, as that output could have been canceled by the
+               thruput. */
             call {no_thruput_is_a_chained_output}
             assert error_id {CUT_THROUGH_IS_NOT_MAXIMAL_ERROR}
             // _ *witness *l_lk *r_lk *n_lk
@@ -926,18 +937,15 @@ impl BasicSnippet for Chain {
             dup 9 dup 9 dup 9 dup 9 dup 9
             {&compare_digests}
             assert error_id {MUTATOR_SET_HASH_MISMATCH_ERROR}
-            // _ *witness *l_lk *r_lk *n_lk [left_msh]
+            // _ *witness *l_lk *r_lk *n_lk [old_msh]
 
-            // only `[left_msh]` survived the comparison above, so `*n_lk` is
-            // back at the depth it had for the left operand's read, plus one
-            // digest
             {&read_and_authenticate_mutator_set_hash(5, new_lkmh)}
-            // _ *witness *l_lk *r_lk *n_lk [left_msh] [new_msh]
+            // _ *witness *l_lk *r_lk *n_lk [old_msh] [new_msh]
 
             dup 9 dup 9 dup 9 dup 9 dup 9
             {&compare_digests}
             assert error_id {MUTATOR_SET_HASH_MISMATCH_ERROR}
-            // _ *witness *l_lk *r_lk *n_lk [left_msh]
+            // _ *witness *l_lk *r_lk *n_lk [old_msh]
 
             pop {Digest::LEN}
             // _ *witness *l_lk *r_lk *n_lk
@@ -1004,10 +1012,9 @@ impl BasicSnippet for Chain {
                 dup 11 dup 11 dup 11 dup 11 dup 11
                 // _ [own_program_digest] disc *witness [operand_lkmh] [own_program_digest]
 
-                // The claim generator appends `D` itself, reading it from where
-                // the dispatcher put the public input. Audit-critical: never
-                // divined, never taken from the witness -- a gap there is
-                // universal forgery.
+                /* Generate claim, using the address where the dispatcher put
+                   the single-proof program hash (`D`) it read from public
+                   input. */
                 call {generate_link_proof_claim}
                 // _ [own_program_digest] disc *witness *claim
 
@@ -1076,8 +1083,7 @@ impl BasicSnippet for Chain {
             {&authenticate_constant_leaf(LinkKernelField::MergeBit, merge_bit_false_leaf())}
             // _ [own_program_digest] disc *witness
 
-            /* Last: the recursion. Both operand kernels are bound to the witness
-               data by now; these two claims bind them to their link proofs. */
+            /* Verify link-kernel proofs for both operands, left and right tx */
             {&verify_operand(left_lkmh, &field_left_proof)}
             {&verify_operand(right_lkmh, &field_right_proof)}
             // _ [own_program_digest] disc *witness
