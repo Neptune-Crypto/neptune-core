@@ -221,6 +221,9 @@ pub struct Mempool {
     /// on account of upgrade failures.
     #[get_size(ignore)]
     upgrade_failures: HashSet<TransactionKernelId>,
+
+    #[cfg(any(test, feature = "test-helpers"))]
+    mock_now: Option<Timestamp>,
 }
 
 /// The quality a mempool member or arrival occupies in the mempool's
@@ -345,6 +348,8 @@ impl Mempool {
             tx_proving_capability,
             merge_input_cache,
             upgrade_failures: HashSet::default(),
+            #[cfg(any(test, feature = "test-helpers"))]
+            mock_now: None,
         }
     }
 
@@ -356,6 +361,18 @@ impl Mempool {
     /// an upgrade by one block.
     pub fn record_upgrade_failure(&mut self, txids: impl IntoIterator<Item = TransactionKernelId>) {
         self.upgrade_failures.extend(txids);
+    }
+
+    fn now(&self) -> Timestamp {
+        #[cfg(any(test, feature = "test-helpers"))]
+        {
+            self.mock_now.unwrap_or_else(|| Timestamp::now())
+        }
+
+        #[cfg(not(any(test, feature = "test-helpers")))]
+        {
+            Timestamp::now()
+        }
     }
 
     /// Update mempool with chain information.
@@ -1673,7 +1690,7 @@ impl Mempool {
     ///
     /// Computes in O(n)
     pub fn prune_stale_transactions(&mut self) -> Vec<MempoolEvent> {
-        let now = Timestamp::now();
+        let now = self.now();
         let cutoff = now - MEMPOOL_TX_THRESHOLD_AGE;
 
         let keep = |(_transaction_id, transaction): LookupItem| -> bool {
@@ -2048,6 +2065,11 @@ impl Mempool {
         bincode::serialize(&self.tx_dictionary)
             .expect("serializing tx_dictionary must succeed")
             .len()
+    }
+
+    /// Mock the timestamp seen by the mempool.
+    pub fn with_mocked_now(&mut self, mock_now: Timestamp) {
+        self.mock_now = Some(mock_now)
     }
 }
 
