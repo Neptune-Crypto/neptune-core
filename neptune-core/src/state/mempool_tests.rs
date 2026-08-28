@@ -13,6 +13,7 @@ mod tests {
     use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
     use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
     use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
+    use neptune_consensus::transaction::announcement::Announcement;
     use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
     use neptune_consensus::transaction::test_helpers::make_plenty_mock_transaction_supported_by_invalid_single_proofs;
     use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier;
@@ -22,6 +23,7 @@ mod tests {
     use neptune_consensus::transaction::TransactionProof;
     use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use neptune_mempool::mempool::Mempool;
+    use neptune_mempool::mempool::MEMPOOL_RETIREMENT_MARGIN;
     use neptune_mempool::mempool_event::MempoolEvent;
     use neptune_mempool::mempool_update_job::MempoolUpdateJob;
     use neptune_mempool::transaction_kernel_id::Txid;
@@ -1698,5 +1700,72 @@ mod tests {
                 TransactionProof::ProofCollection(_)
             ));
         }
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn new_tip_prunes_retiring_transactions_and_their_update_jobs() {
+        let network = Network::Main;
+        let cli_args = cli_args::Args {
+            network,
+            tx_proving_capability: Some(TxProvingCapability::SingleProof),
+            ..Default::default()
+        };
+        let mut alice =
+            mock_genesis_global_state(2, WalletEntropy::devnet_wallet(), cli_args).await;
+
+        let genesis_block = Block::genesis(network);
+        let mutator_set_hash = genesis_block
+            .mutator_set_accumulator_after()
+            .unwrap()
+            .hash();
+
+        // Both transactions are synced to genesis, so the new tip leaves both
+        // in need of an update. Only the second is worth updating.
+        let now = Timestamp::now();
+        let retirements = [
+            now + MEMPOOL_RETIREMENT_MARGIN - Timestamp::minutes(1),
+            now + MEMPOOL_RETIREMENT_MARGIN + Timestamp::minutes(1),
+        ];
+        let txs = make_plenty_mock_transaction_supported_by_invalid_single_proofs(2)
+            .into_iter()
+            .zip(retirements)
+            .map(|(mut tx, retirement)| {
+                tx.kernel = TransactionKernelModifier::default()
+                    .mutator_set_hash(mutator_set_hash)
+                    .timestamp(now)
+                    .announcements(vec![Announcement::retirement(retirement)])
+                    .modify(tx.kernel);
+                tx
+            })
+            .collect_vec();
+        for tx in &txs {
+            alice
+                .lock_guard_mut()
+                .await
+                .mempool
+                .insert(tx.to_owned(), UpgradePriority::Critical);
+        }
+        assert_eq!(2, alice.lock_guard().await.mempool.len());
+
+        let mut rng = StdRng::seed_from_u64(5512345);
+        let bob_key =
+            WalletEntropy::new_pseudorandom(rng.random()).nth_generation_spending_key_for_tests(0);
+        let (block_1, _) = make_mock_block(&genesis_block, None, bob_key, rng.random(), network);
+        let update_jobs = alice.set_new_tip(block_1).await.unwrap();
+
+        let alice_state = alice.lock_guard().await;
+        assert!(
+            !alice_state.mempool.contains(txs[0].kernel.txid()),
+            "transaction retiring within the margin must be pruned by the new tip"
+        );
+        assert!(
+            alice_state.mempool.contains(txs[1].kernel.txid()),
+            "transaction retiring beyond the margin must survive the new tip"
+        );
+        assert_eq!(
+            vec![txs[1].kernel.txid()],
+            update_jobs.iter().map(|job| job.txid()).collect_vec(),
+            "no update job may be handed out for a pruned transaction"
+        );
     }
 }

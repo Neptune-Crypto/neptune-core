@@ -3108,6 +3108,7 @@ mod tests {
                 let tx = genesis_tx_with_proof_type(tx_proving_capability, network, fee).await;
                 let update_jobs = {
                     let mut gsl = main_loop_handler.global_state_lock.lock_guard_mut().await;
+                    gsl.mock_mempool_time(tx.kernel.timestamp);
                     gsl.mempool_insert(pw_tx.into(), UpgradePriority::Critical)
                         .await;
                     gsl.mempool_insert(tx.clone().into(), UpgradePriority::Critical)
