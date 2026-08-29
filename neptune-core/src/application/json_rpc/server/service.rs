@@ -764,6 +764,7 @@ impl RpcApi for RpcServer {
                 TxAdmissionError::HasCoinbase => SubmitTransactionError::CoinbaseTransaction,
                 TxAdmissionError::NegativeFee => SubmitTransactionError::FeeNegative,
                 TxAdmissionError::TooOld => SubmitTransactionError::TooOld,
+                TxAdmissionError::Retired => SubmitTransactionError::Retired,
                 TxAdmissionError::FutureDated => SubmitTransactionError::FutureDated,
                 TxAdmissionError::NotConfirmable(_) | TxAdmissionError::CannotApplyToMutatorSet => {
                     SubmitTransactionError::NotConfirmable

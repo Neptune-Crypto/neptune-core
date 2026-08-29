@@ -127,6 +127,23 @@ impl From<RemovalRecordListUnpackError> for TransactionConfirmabilityError {
 }
 
 impl TransactionKernel {
+    /// Return the earliest retirement of the transaction. If any.
+    pub fn earliest_retirement(&self) -> Option<Timestamp> {
+        self.announcements
+            .iter()
+            .filter_map(|x| x.retirement_value())
+            .min()
+    }
+
+    /// Whether the transaction's earliest retirement falls before the given
+    /// timestamp.
+    ///
+    /// False for transactions that carry no retirement announcement.
+    pub fn retires_before(&self, threshold: Timestamp) -> bool {
+        self.earliest_retirement()
+            .is_some_and(|retirement| retirement < threshold)
+    }
+
     /// Check if transaction is confirmable. Inputs must be unpacked before this
     /// check is performed.
     pub fn is_confirmable_relative_to(
@@ -657,6 +674,7 @@ pub mod tests {
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
+    use rand::Rng;
     use test_strategy::proptest;
 
     use super::*;
@@ -742,6 +760,31 @@ pub mod tests {
             "{:?}",
             repeated_input.is_confirmable_relative_to(&msa)
         );
+    }
+
+    #[test]
+    fn first_retirement_is_the_earliest_of_the_retirement_announcements() {
+        let now = Timestamp::now();
+        let retirements = [now + Timestamp::hours(3), now, now + Timestamp::hours(1)];
+        let announcements = retirements
+            .into_iter()
+            .map(Announcement::retirement)
+            .chain([Announcement::new(vec![])])
+            .collect_vec();
+        let kernel = TransactionKernelModifier::default()
+            .announcements(announcements)
+            .modify(rand::rng().random::<TransactionKernel>());
+
+        assert_eq!(Some(now), kernel.earliest_retirement());
+    }
+
+    #[test]
+    fn first_retirement_is_none_without_retirement_announcements() {
+        let kernel = TransactionKernelModifier::default()
+            .announcements(vec![Announcement::new(vec![]); 3])
+            .modify(rand::rng().random::<TransactionKernel>());
+
+        assert_eq!(None, kernel.earliest_retirement());
     }
 
     #[proptest]

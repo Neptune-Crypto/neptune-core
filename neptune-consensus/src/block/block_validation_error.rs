@@ -133,6 +133,16 @@ pub enum BlockValidationError {
     /// 2.t
     #[error("Transaction mutator set must match parent block")]
     TransactionMutatorSetMismatch,
+
+    /// 2.u
+    ///
+    /// Compared against block timestamp which is a more reliable metric for
+    /// real world time than that of the timestamp in the transaction kernel.
+    ///
+    /// Block timestamps are monotonically increasing. Transaction timestamps
+    /// do not have that guarantee.
+    #[error("Block timestamp must not exceed transaction-retirement value")]
+    TransactionRetired,
 }
 
 impl From<RemovalRecordListUnpackError> for BlockValidationError {

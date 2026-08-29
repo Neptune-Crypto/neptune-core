@@ -471,6 +471,13 @@ impl PeerLoopHandler {
                 warn!("Received too old tx");
                 None
             }
+            TxAdmissionError::Retired => {
+                // Not held against the peer: the transaction may have been
+                // worth relaying when it was sent, and the margin this node
+                // applies is its own policy.
+                warn!("Received tx that retires too soon to be held.");
+                None
+            }
             TxAdmissionError::FutureDated => {
                 // TODO: Consider punishing here
                 warn!(

@@ -770,9 +770,22 @@ impl Block {
     /// Intended for judging a block before its predecessor is known.
     ///
     /// The block's proof is verified last, as that costs orders of magnitude
-    /// more than everything else here put together, and the block comes from a
-    /// peer who chooses when we do it.
+    /// more than everything else here put together.
     pub async fn solo_validate(
+        &self,
+        now: Timestamp,
+        network: Network,
+    ) -> Result<(), BlockValidationError> {
+        self.solo_validate_without_proof(now, network)?;
+
+        // 1.a) 1.b) 1.c) 1.d)
+        self.validate_block_proof(network).await
+    }
+
+    /// Every rule of [`Self::solo_validate`] except the block's proof.
+    ///
+    // Split out for tests reasons.
+    fn solo_validate_without_proof(
         &self,
         now: Timestamp,
         network: Network,
@@ -878,8 +891,14 @@ impl Block {
             return Err(BlockValidationError::BadLustrationCounterEncoding);
         }
 
-        // 1.a) 1.b) 1.c) 1.d)
-        self.validate_block_proof(network).await?;
+        // 2.u)
+        if consensus_rule_set.enforce_transaction_retirement() {
+            if let Some(retirement) = self.body().transaction_kernel.earliest_retirement() {
+                if retirement < self.header().timestamp {
+                    return Err(BlockValidationError::TransactionRetired);
+                }
+            }
+        }
 
         Ok(())
     }
@@ -1508,8 +1527,10 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::block::test_helpers::invalid_empty_block;
+    use crate::consensus_rule_set::TX_BACKDATING_LIMIT;
     use crate::proof_abstractions::test_runtime::shared_tokio_runtime;
     use crate::transaction::announcement::Announcement;
+    use crate::transaction::announcement::RETIREMENT_FLAG;
     use crate::transaction::transaction_kernel::TransactionKernel;
     use crate::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::transaction::validity::neptune_proof::NeptuneProof;
@@ -1605,6 +1626,145 @@ pub(crate) mod tests {
             Err(BlockValidationError::FutureDating),
             block1.solo_validate(now, network).await
         );
+    }
+
+    fn block_with_announcements(block: &Block, announcements: Vec<Announcement>) -> Block {
+        let transaction_kernel = TransactionKernelModifier::default()
+            .announcements(announcements)
+            .modify(block.body().transaction_kernel.clone());
+        let body = BlockBody::new(
+            transaction_kernel,
+            block.body().mutator_set_accumulator.clone(),
+            block.body().lock_free_mmr_accumulator.clone(),
+            block.body().block_mmr_accumulator.clone(),
+        );
+
+        Block::new(
+            *block.header(),
+            body,
+            block.appendix().clone(),
+            block.proof.clone(),
+        )
+    }
+
+    fn with_header_timestamp(block: &Block, timestamp: Timestamp) -> Block {
+        let mut header = *block.header();
+        header.timestamp = timestamp;
+
+        Block::new(
+            header,
+            block.body().to_owned(),
+            block.appendix().clone(),
+            block.proof.clone(),
+        )
+    }
+
+    #[test]
+    fn solo_validate_rejects_block_whose_transaction_retired_before_the_block_timestamp() {
+        let network = Network::Testnet(42);
+        let block1 = invalid_empty_block(&Block::genesis(network), network);
+        let now = block1.header().timestamp;
+        let retired = block1.header().timestamp - Timestamp::millis(1);
+        let block1 = block_with_announcements(&block1, vec![Announcement::retirement(retired)]);
+
+        assert_eq!(
+            Err(BlockValidationError::TransactionRetired),
+            block1.solo_validate_without_proof(now, network)
+        );
+    }
+
+    #[test]
+    fn solo_validate_rejects_retirement_passed_by_the_block_but_not_by_its_transaction() {
+        let network = Network::Testnet(42);
+        let block1 = invalid_empty_block(&Block::genesis(network), network);
+
+        // The transaction predates its retirement, so the rule read against
+        // the transaction's own timestamp would accept.
+        let tx_timestamp = block1.body().transaction_kernel.timestamp;
+        let retirement = tx_timestamp + Timestamp::minutes(1);
+        let block_timestamp = tx_timestamp + Timestamp::hours(1);
+
+        // Within the backdating limit, so the block is not rejected by 2.f
+        // before 2.u is ever reached.
+        assert!(block_timestamp - tx_timestamp < TX_BACKDATING_LIMIT);
+
+        let block1 = block_with_announcements(&block1, vec![Announcement::retirement(retirement)]);
+        let block1 = with_header_timestamp(&block1, block_timestamp);
+
+        assert_eq!(
+            Err(BlockValidationError::TransactionRetired),
+            block1.solo_validate_without_proof(block_timestamp, network)
+        );
+    }
+
+    #[test]
+    fn solo_validate_accepts_block_whose_transaction_retires_exactly_at_the_block_timestamp() {
+        let network = Network::Testnet(42);
+        let block1 = invalid_empty_block(&Block::genesis(network), network);
+        let now = block1.header().timestamp;
+        let retirement = block1.header().timestamp;
+        let block1 = block_with_announcements(&block1, vec![Announcement::retirement(retirement)]);
+
+        assert!(block1.solo_validate_without_proof(now, network).is_ok());
+    }
+
+    #[test]
+    fn solo_validate_accepts_block_whose_transaction_retires_after_the_block_timestamp() {
+        let network = Network::Testnet(42);
+        let block1 = invalid_empty_block(&Block::genesis(network), network);
+        let now = block1.header().timestamp;
+        let retirement = block1.header().timestamp + Timestamp::millis(1);
+        let block1 = block_with_announcements(&block1, vec![Announcement::retirement(retirement)]);
+
+        assert!(block1.solo_validate_without_proof(now, network).is_ok());
+    }
+
+    #[test]
+    fn solo_validate_rejects_block_where_only_the_earliest_of_many_retirements_has_passed() {
+        let network = Network::Testnet(42);
+        let block1 = invalid_empty_block(&Block::genesis(network), network);
+        let now = block1.header().timestamp;
+        let block_timestamp = block1.header().timestamp;
+        let announcements = vec![
+            Announcement::retirement(block_timestamp + Timestamp::hours(1)),
+            Announcement::retirement(block_timestamp - Timestamp::millis(1)),
+            Announcement::retirement(block_timestamp + Timestamp::days(1)),
+        ];
+        let block1 = block_with_announcements(&block1, announcements);
+
+        assert_eq!(
+            Err(BlockValidationError::TransactionRetired),
+            block1.solo_validate_without_proof(now, network)
+        );
+    }
+
+    #[test]
+    fn solo_validate_accepts_passed_retirement_timestamp_in_announcement_lacking_the_flags() {
+        let network = Network::Testnet(42);
+        let block1 = invalid_empty_block(&Block::genesis(network), network);
+        let now = block1.header().timestamp;
+        let retired = block1.header().timestamp - Timestamp::millis(1);
+        let not_a_retirement =
+            Announcement::new(vec![RETIREMENT_FLAG[1], RETIREMENT_FLAG[0], retired.0]);
+        let block1 = block_with_announcements(&block1, vec![not_a_retirement]);
+
+        assert!(block1.solo_validate_without_proof(now, network).is_ok());
+    }
+
+    #[test]
+    fn solo_validate_ignores_passed_retirement_in_block_predating_hardfork_delta() {
+        let network = Network::Main;
+        let block1 = invalid_empty_block(&Block::genesis(network), network);
+        assert_ne!(
+            ConsensusRuleSet::HardforkDelta,
+            ConsensusRuleSet::infer_from(network, block1.header().height)
+        );
+
+        let now = block1.header().timestamp;
+        let retired = block1.header().timestamp - Timestamp::millis(1);
+        let block1 = block_with_announcements(&block1, vec![Announcement::retirement(retired)]);
+
+        assert!(block1.solo_validate_without_proof(now, network).is_ok());
     }
 
     /// Negative tests for [`Block::solo_validate`]: one per rule by which it

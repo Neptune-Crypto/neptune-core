@@ -3091,7 +3091,13 @@ impl GlobalState {
         // block. Also returns the list of update-jobs that should be
         // performed by this client.
         debug!("Applying block to mempool.");
-        let (mut mempool_events, mut update_jobs) = self.mempool.update_with_block(tip)?;
+
+        // Prune based on timestamps, before block update. Ensures that retired
+        // transactions are not upgraded on this machine.
+        let mut mempool_events = self.mempool.prune_stale_transactions();
+
+        let (update_events, mut update_jobs) = self.mempool.update_with_block(tip)?;
+        mempool_events.extend(update_events);
 
         // Do not attempt to maintain the mempool across a fork
         let network = self.cli().network;
@@ -3661,6 +3667,11 @@ mod state_test_helpers {
             }
 
             entries
+        }
+
+        /// Mock the timestamp seen by the mempool.
+        pub fn mock_mempool_time(&mut self, mock_now: Timestamp) {
+            self.mempool.with_mocked_now(mock_now);
         }
     }
 }
