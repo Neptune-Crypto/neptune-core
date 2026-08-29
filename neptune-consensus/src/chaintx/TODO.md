@@ -34,6 +34,33 @@ places:
   total. It is that the chained route recursively verifies three fewer proofs.
   Recursive verification is the dominant cost in all of these programs.
 
+### Why `Weld`
+
+`Weld` is a shortcut across the seam between the two pipelines. Given a
+`SingleProof`-backed transaction A and a link transaction B whose thruputs A's
+outputs resolve, it computes in one program what `Fix(Chain(Cast(A), B))`
+computes in three. This is the join the chain pipeline performs whenever a
+`LinkTx` finds its predecessor already in the single-proof pipeline -- what
+§Mempool calls cast-on-demand -- so it is worth having as an operation rather
+than as a routine. It pays off twice.
+
+- **Cheaper joining**, by the same arithmetic as *Cheaper initiation* above. The
+  decomposition costs three proofs and four recursive verifications: `Cast`
+  verifies A, `Chain` verifies both operands, `Fix` verifies the result. `Weld`
+  costs one proof and two, verifying A's `SingleProof` and B's `LinkProof`
+  directly. Recursive verification being the dominant cost, that is half the
+  work, in one STARK rather than three.
+- **Joining *after* the merge.** This one is not an optimization; the
+  decomposition cannot express it. `Cast` refuses a transaction carrying the
+  merge bit, and the merge bit is exactly what makes a kernel a
+  `BlockTransactionKernel` -- eligible to *be* a block's transaction. So the
+  three-step route has to run before the block transaction is assembled: a chain
+  that resolves afterwards can only be included by redoing the merge. `Weld`
+  carries A's merge bit through, so a resolved chain welds into a block
+  transaction that is already merged and already block-eligible. That is what
+  lets a composer keep admitting chained fee-payers while it holds a candidate,
+  instead of freezing the set at merge time.
+
 ## Governing invariants
 
 - **Block *format* unchanged.** Every block still contains exactly one
@@ -250,50 +277,55 @@ verified", i.e. universal forgery. Covered by §Negative tests for `D`.
       leafs
 - [x] `LinkTx { kernel: LinkKernel, proof: LinkProof }`
 - [x] `LinkPrimitiveWitness` — primitive-witness analog consumed by `Forge`
-  - [x] an arbitrary strategy obtained by lifting its `PrimitiveWitness` analog
-  - [x] `validate` -- analogous to `PrimitiveWitness::validate`
+- [x] an arbitrary strategy obtained by lifting its `PrimitiveWitness` analog
+- [x] `validate` -- analogous to `PrimitiveWitness::validate`
 - [x] `LinkProofWitness` enum: `Forge | Chain | Advance | Cast`
-      (mirror `SingleProofWitness`; note `Fix` is NOT here)
-  - [x] `Forge(Box<ForgeWitness>)` — the variant holds what the branch consumes,
-        mirroring `SingleProofWitness::Collection(ProofCollection)`.
-        `LinkPrimitiveWitness` is the `PrimitiveWitness` analog and, like it, is
-        deliberately not a variant.
-  - [x] `Chain(Box<ChainWitness>)` — holds the two operand kernels, the chained
-        kernel, the cut-through set, and the two operand link proofs. It needs
-        no memory projection.
-  - [x] `Advance(Box<AdvanceWitness>)` — holds both kernels, both mutator set
-        accumulators (pre-reduced, as `AuthenticateMsaAgainstTxk` eats them),
-        the AOCL successor proof, and the old link proof. Its own memory
-        projection, like `Chain`'s.
- - [x] `AdvanceWitness::advance` gains a promotions argument, and mirrors every
-       assertion the branch makes so that a bad witness
-       fails in milliseconds instead of after a proof. Ascent is asserted
-       rather than imposed by sorting: order carries no information -- an entry
-       names neither the thruput nor the input it moves -- so sorting would be a
-       safe repair, but the constructor refuses a mis-ordered set rather than
-       silently rewriting what it was handed. Callers therefore do see the
-       branch's ordering requirement.
-  - [x] `Cast(Box<CastWitness>)` (3) — holds the singleproof transaction's kernel and
-        its `SingleProof`. Its own memory projection, like `Chain`'s, though the
-        branch reads only the proof out of it: the kernel is bound through its
-        MAST hash, which is divined rather than recomputed, so the copy in memory
-        is for the prover's sake (the hash, and the two authentication paths).
-  - [x] `SecretWitness` impl — dispatches to the branch witness.
-  - [x] `standard_input()` gains `|| D.reversed()`, `D` = the `SingleProof`
-        program digest (§Breaking the `Fix`/`Cast` cycle). Landed ahead of
-        `Cast`: the claim shape is consensus-visible and every later branch has
-        to agree on it, so it is cheaper to establish -- and to test -- on two
-        branches than on four. `Forge` carries `D` without reading it; `Chain`
-        passes it through.
+    (mirror `SingleProofWitness`; note `Fix` is NOT here)
+- [x] `Forge(Box<ForgeWitness>)` — the variant holds what the branch consumes,
+      mirroring `SingleProofWitness::Collection(ProofCollection)`.
+      `LinkPrimitiveWitness` is the `PrimitiveWitness` analog and, like it, is
+      deliberately not a variant.
+- [x] `Chain(Box<ChainWitness>)` — holds the two operand kernels, the chained
+      kernel, the cut-through set, and the two operand link proofs. It needs
+      no memory projection.
+- [x] `Advance(Box<AdvanceWitness>)` — holds both kernels, both mutator set
+      accumulators (pre-reduced, as `AuthenticateMsaAgainstTxk` eats them),
+      the AOCL successor proof, and the old link proof. Its own memory
+      projection, like `Chain`'s.
+- [x] `AdvanceWitness::advance` gains a promotions argument, and mirrors every
+      assertion the branch makes so that a bad witness
+      fails in milliseconds instead of after a proof. Ascent is asserted
+      rather than imposed by sorting: order carries no information -- an entry
+      names neither the thruput nor the input it moves -- so sorting would be a
+      safe repair, but the constructor refuses a mis-ordered set rather than
+      silently rewriting what it was handed. Callers therefore do see the
+      branch's ordering requirement.
+- [x] `Cast(Box<CastWitness>)` (3) — holds the singleproof transaction's kernel and
+      its `SingleProof`. Its own memory projection, like `Chain`'s, though the
+      branch reads only the proof out of it: the kernel is bound through its
+      MAST hash, which is divined rather than recomputed, so the copy in memory
+      is for the prover's sake (the hash, and the two authentication paths).
+- [x] `SecretWitness` impl — dispatches to the branch witness.
+- [x] `standard_input()` gains `|| D.reversed()`, `D` = the `SingleProof`
+      program digest (§Breaking the `Fix`/`Cast` cycle). Landed ahead of
+      `Cast`: the claim shape is consensus-visible and every later branch has
+      to agree on it, so it is cheaper to establish -- and to test -- on two
+      branches than on four. `Forge` carries `D` without reading it; `Chain`
+      passes it through.
 - [x] `SingleProofWitness::Fix(FixWitness)` — new variant on the *existing*
       enum (discriminant 3); recursively verifies a `LinkProof`. It holds the
       transaction kernel and the link proof, and nothing else: `thruputs == []`
       is not a field and not an assertion but the shape of the derived `lkmh`.
-  - [x] `SingleProofWitness` loses its `SecretWitness` impl in the process.
-        `program`/`claim`/`nondeterminism`/`produce` take a `ConsensusRuleSet`,
-        because from delta onwards a witness cannot say by itself which of the
-        two `SingleProof` programs it is being proven under, and the branches
-        that recurse have to name the right digest.
+- [ ] `SingleProofWitness::Weld(WeldWitness)` — second new variant on the same
+      enum (discriminant 4). Holds A's kernel and `SingleProof`, B's
+      `LinkKernel` and `LinkProof`, and the welded kernel. Its own memory
+      image, like `ChainWitness`; the cut-through set is *not* a field, see
+      §Tasm.
+- [x] `SingleProofWitness` loses its `SecretWitness` impl in the process.
+      `program`/`claim`/`nondeterminism`/`produce` take a `ConsensusRuleSet`,
+      because from delta onwards a witness cannot say by itself which of the
+      two `SingleProof` programs it is being proven under, and the branches
+      that recurse have to name the right digest.
 
 ## Tasm
 Four produce a `LinkProof`; `Fix` produces a `SingleProof`.
@@ -527,6 +559,67 @@ would bind that check to the wrong tree without crashing.
   - [x] the branch asserts nothing of its own, so it declares no error IDs:
         every way of getting it wrong is a claim no link proof answers, and the
         negatives all land inside `stark_verify`.
+- [ ] **Weld** `Transaction * LinkTx -> Transaction` = second new `SingleProof`
+      branch (`transaction/validity/tasm/single_proof/weld_branch.rs`): the
+      direct route to what `Fix(Chain(Cast(A), B))` computes in three proofs and
+      four recursive verifications. `Weld` does it in one proof and two, against
+      `{ program: own_program_digest(), input: [txkmh_A] }` and
+      `{ program: <hardcoded LinkProof digest>,
+      input: [lkmh_B, own_program_digest()] }`. One digest, read once, named in
+      both claims -- `Fix`'s trick applied twice. Lands *with* `Fix`, in the same
+      program and the same rule set: added afterwards it would cost a second
+      hardfork and a second `D` migration (§Consensus change).
+  - [ ] **not** `Fix ∘ Chain ∘ Cast`. The contract diverges in both directions,
+        and says so:
+        - *more permissive*: `Cast` refuses a merge-bit-bearing transaction,
+          so the decomposition never accepts one. `Weld` does, and ignores the
+          bit, using the `Transaction`'s merge-bit instead.
+        - *more restrictive*: `Chain` cancels a thruput against its own
+          operand's output as readily as against the other's (`chain.rs:222`).
+          `Weld` cuts B's thruputs against A's outputs only.
+  - [ ] cut-through, with no witness-supplied cut multiset and no maximality
+        check -- both fall out of the restriction above and of the output type:
+```
+            A.outputs     ≡ leftover ⊎ B.thruputs
+            weld.outputs  ≡ leftover ⊎ B.outputs
+```
+        A `TransactionKernel` has no thruputs field, so an unresolved thruput is
+        not representable; it is *unprovable*. A thruput of B absent from A's
+        outputs fails the first equation, and that is the whole of "the thruputs
+        must be empty after cut-through", in one multiset split. The machinery is
+        `Chain`'s -- `ChainMap` and the multiset-equality snippets -- minus the
+        cut set and minus the maximality check.
+  - [ ] no coinbase on A. Neither operand's proof gives it: the `LinkProof`
+        induction covers B, and a `SingleProof`-backed transaction is entitled to
+        a coinbase. On the decomposition path `Cast` is what refuses one
+        (`cast.rs:391`), and `Weld` deletes `Cast` from the path. Without the
+        assertion a coinbase-bearing A welds into a kernel declaring no coinbase
+        while its outputs still carry the subsidy, and nothing re-runs a type
+        script over the welded kernel to catch it.
+  - [ ] the merge bit is *carried*, not asserted: `weld.merge_bit ==
+        A.merge_bit`. B's is false by induction over the `LinkProof` branches, so
+        "A's" and "either operand's" coincide; "A's" is the one to state. The bit
+        is what makes a kernel a `BlockTransactionKernel`
+        (`block_transaction.rs:37`), i.e. eligible to *be* a block's
+        transaction, so carrying it is what lets a resolved chain weld into an
+        already-merged block transaction without re-merging -- one weld where the
+        decomposition needs a cast, a chain, a fix and a second merge.
+    - [ ] consequence: `Merge` stops being the only producer of a set merge bit,
+          and `have_merge_relationship` (`transaction_kernel.rs:176`) infers from
+          it, assuming a merge output has no fewer outputs than either input.
+          Cut-through can leave `Weld`'s with fewer than A's. Its one caller is
+          the mempool's merge-input cache (`mempool.rs:1051`), so this degrades
+          bookkeeping rather than consensus -- but it wants a look before
+          release.
+  - [ ] fee: the sum, in `[0, MAX_NAU]` with no carry. `Chain`'s argument
+        verbatim (`chain.rs:1297`), and it bounds *both* operands at once -- raw
+        `u128` addition makes a negative amount enormous, so a negative A or B
+        either carries or lands out of range. No separate assertion on A's fee.
+  - [ ] timestamp is the later of the two; A, B and the weld share one
+        mutator-set hash; inputs and announcements are the concatenations.
+        `Chain`'s rules, unchanged.
+  - [ ] discriminant 4. The pre-delta program counts 3 *and* 4 as out of range
+        (`single_proof.rs::invalid_discriminant_crashes_execution`).
 - [x] claim generators for each; the `LinkProof` claim generator takes
       `(lkmh, D)` — `chaintx/generate_link_proof_claim.rs`, mirroring
       `GenerateSingleProofClaim`, whose second parameter is already a
@@ -536,7 +629,7 @@ would bind that check to the wrong tree without crashing.
       order: `Chain` has to `dup` the program digest off its frame before `D`
       goes on, or it lands past `dup 15`.
 
-## Consensus change (because SingleProof gains `Fix`)
+## Consensus change (because SingleProof gains `Fix` and `Weld`)
 - [x] New `ConsensusRuleSet` variant + per-network activation `BlockHeight`s
       (`consensus_rule_set.rs::infer_from`): `HardforkDelta`, at
       `BLOCK_HEIGHT_HARDFORK_DELTA_{MAIN_NET,TESTNET}`. **The heights are
@@ -558,14 +651,17 @@ would bind that check to the wrong tree without crashing.
         activation.
 - [x] Pin the new `SingleProof` program hash + the `LinkProof` program hash.
       Both `SingleProof` programs are pinned -- `tests::gamma_program` is the
-      guard that adding `Fix` left the pre-delta program untouched, down to the
-      static-memory addresses (which is why `FixBranch` is imported last).
+      guard that adding `Fix` and `Weld` left the pre-delta program untouched,
+      down to the static-memory addresses (which is why `FixBranch` and
+      `WeldBranch` are imported last).
 - [ ] soundness audit: `SingleProof` `Fix` branch, and `Forge`'s inlined RRI
       + the recursion in `Chain`/`Advance`/`Cast`, including the verbatim `D`
       pass-through
 - [ ] Regenerate/store proof artifacts for the new program versions
-- [x] Upgrade coupling at the activation height: a new `SingleProof` hash changes
-      `D`
+- [x] Arrival-side `D` binding at a rule-set change: `link_tx_claim` pins `D` to
+      the active rule set's `SingleProof` digest, so a link carrying a stale one
+      is inadmissible (§Peer). Vacuous at delta's own activation -- no `LinkTx`
+      can be in the mempool under gamma, `has_fix_branch()` being false there.
 
 ## Integration
 ### Transaction-Initiation
@@ -894,6 +990,45 @@ unmatched thruput is un-`Fix`able (see §Motivation).
       `SingleProofWitness` discriminant crashes both programs, `Fix`'s counting
       as out of range for the pre-delta one.
 
+### onto `Weld`
+
+The union of `Cast`'s, `Chain`'s and `Fix`'s negatives, minus what the contract
+deliberately changes. Mechanical except for the first three.
+
+- [ ] `coinbase_on_the_transaction_is_rejected`: a coinbase-bearing A is
+      refused. No analog anywhere else -- `Cast` used to own this check, and
+      `Weld` deletes `Cast` from the path.
+- [ ] `unresolved_thruput_is_rejected`: a thruput of B absent from A's outputs.
+      `Fix`'s `link_transaction_with_thruputs_is_rejected` is enforced by
+      arithmetic; here it is a multiset equation, so it earns its own test and
+      its own error ID.
+- [ ] `weld_equals_the_decomposition`: for A with the merge bit clear and no
+      self-cancelling pair available, `Weld(A, B)` and `Fix(Chain(Cast(A), B))`
+      agree field by field as multisets. *Not* by MAST hash: `Chain` shuffles
+      its concatenations by a seed (`chain.rs:214`), so the two kernels are
+      equal only up to order. Copy `chain_is_associative`'s comparison.
+- [ ] `merge_bit_is_carried_from_the_transaction`: set and clear, B's false in
+      both cases -- the welded kernel's bit is A's either way.
+- [ ] `self_cut_through_is_rejected`: a thruput of B matching an output of B
+      rather than of A. Accepted by the decomposition, refused here.
+- [ ] `negative_operand_fee_is_rejected_even_when_the_sum_is_valid` /
+      `fee_sum_outside_the_valid_range_is_rejected`: `Chain`'s two, on A and B.
+- [ ] `welded_timestamp_must_be_the_later_of_the_two`.
+- [ ] `mismatched_mutator_set_hash_is_rejected`: A, B or the weld naming a
+      mutator set the others do not.
+- [ ] `welded_inputs_must_be_the_operands_inputs` /
+      `..._announcements_...` / `..._outputs_...`: a field that is not the
+      concatenation, respectively not the two equations' `leftover ⊎ B.outputs`.
+- [ ] `bad_authentication_path_is_rejected`: an A or B field absent from its
+      kernel's MAST.
+- [ ] `welded_kernel_must_be_the_one_in_the_claim`.
+- [ ] `each_operand_proof_must_attest_to_its_own_operand`: A's `SingleProof`
+      verified against B's kernel, and B's `LinkProof` against A's -- the
+      operands being differently typed, this is two tamperings rather than
+      `Chain`'s one swap.
+- [ ] `weld_accepts_a_chain_produced_link_transaction`: B from `Chain` rather
+      than `Forge`, so the positive is not vacuous on single-link Bs.
+
 ## Negative tests for `D` (the `SingleProof` digest in the `LinkProof` claim)
 
 These guard §Breaking the `Fix`/`Cast` cycle. The invariant they defend — `D` is
@@ -962,6 +1097,18 @@ Claim / plumbing:
 - [x] `link_proof_must_attest_to_the_claimed_transaction`: a link proof about a
       transaction other than the claimed one is rejected.
 
+`Weld` (it touches `D` twice, once per operand claim):
+- [ ] `transaction_proven_under_another_program_digest_is_rejected`: A proven
+      under `D' != own_program_digest()`.
+- [ ] `link_proof_forged_under_another_single_proof_digest_is_rejected`: B
+      forged under `D' != own_program_digest()`.
+- [ ] `witness_supplied_single_proof_digest_is_ignored`: a `single_proof_digest`
+      poked into the witness's memory image, public input untouched, still
+      verifies.
+- [ ] Naming two different digests is unrepresentable rather than rejected: the
+      branch reads `own_program_digest()` once and names it in both claims, so A
+      and B cannot be verified under different `D`s.
+
 Positive counterparts (so the negatives cannot pass vacuously):
 - [x] `fix_accepts_a_resolved_link_transaction`: `Fix` accepts a `Forge`'d link
       transaction with no thruputs, under the real `SingleProof` digest.
@@ -974,6 +1121,10 @@ Positive counterparts (so the negatives cannot pass vacuously):
       resulting `SingleProof` verifies.
 - [ ] `Cast → Chain → Fix` with the real `D` throughout accepts and the
       resulting `SingleProof` verifies.
+- [ ] `Forge → Weld` with the real `D` throughout accepts and the resulting
+      `SingleProof` verifies against the claim `single_proof_claim` builds.
+- [ ] `Forge → Chain → Weld`: the same, with B carrying thruputs from more than
+      one predecessor.
 
 
 ## New Tests
