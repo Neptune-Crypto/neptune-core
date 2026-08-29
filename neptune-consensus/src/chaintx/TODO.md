@@ -265,18 +265,14 @@ verified", i.e. universal forgery. Covered by §Negative tests for `D`.
         accumulators (pre-reduced, as `AuthenticateMsaAgainstTxk` eats them),
         the AOCL successor proof, and the old link proof. Its own memory
         projection, like `Chain`'s.
-    - [ ] gains, for promotion: `promoted_thruputs: Vec<AdditionRecord>` and
-          `promoted_inputs: Vec<RemovalRecord>`, both read by the branch (only
-          `.absolute_indices` of the latter is pinned), plus
-          `promotion_proofs: Vec<MsMembershipProof>` and
-          `promoted_items: Vec<Digest>` as nondeterminism sources only.
-          `RemovalRecord` rather than a bare `AbsoluteIndexSet` so the input
-          equation reuses `HashRemovalRecordIndexSets::<2>` unchanged.
-    - [ ] `AdvanceWitness::advance` gains a promotions argument and keeps its
-          "check only what the caller cannot recover from" discipline: each
-          membership proof verifies against the *new* mutator set, each
-          commitment is one of `old.thruputs`. It sorts by AOCL leaf index, so
-          no caller ever sees the branch's ordering requirement.
+ - [x] `AdvanceWitness::advance` gains a promotions argument, and mirrors every
+       assertion the branch makes so that a bad witness
+       fails in milliseconds instead of after a proof. Ascent is asserted
+       rather than imposed by sorting: order carries no information -- an entry
+       names neither the thruput nor the input it moves -- so sorting would be a
+       safe repair, but the constructor refuses a mis-ordered set rather than
+       silently rewriting what it was handed. Callers therefore do see the
+       branch's ordering requirement.
   - [x] `Cast(Box<CastWitness>)` (3) — holds the singleproof transaction's kernel and
         its `SingleProof`. Its own memory projection, like `Chain`'s, though the
         branch reads only the proof out of it: the kernel is bound through its
@@ -400,7 +396,7 @@ would bind that check to the wrong tree without crashing.
       pass-through onto the operand claim. `Advance` re-targets the *mutator
       set*, never `D` -- and cannot: there is only one `D` in the program, the
       one the dispatcher read, and it goes into the operand claim verbatim.
-  - [ ] percolate the rename into the code, which still says `Update`:
+  - [x] percolate the rename into the code, which still says `Update`:
         `update.rs` -> `advance.rs`, `Update`/`UpdateWitness` ->
         `Advance`/`AdvanceWitness`, `DISCRIMINANT_FOR_UPDATE`,
         `update_branch_source` -> `advance_branch_source`, the
@@ -425,7 +421,7 @@ would bind that check to the wrong tree without crashing.
         hash instead of two and rules out equal-hash-different-bytes by
         construction. Thruputs were in this list until promotion; they are now
         governed by the multiset equation below instead.
-  - [ ] **promotion**: a thruput confirmed since the old mutator set may move
+  - [x] **promotion**: a thruput confirmed since the old mutator set may move
         into the confirmed inputs. This replaces the two assertions above --
         index sets unchanged, thruputs byte-for-byte -- with one coupled pair
         over a witness-supplied promotion set `P`:
@@ -545,13 +541,13 @@ would bind that check to the wrong tree without crashing.
       (`consensus_rule_set.rs::infer_from`): `HardforkDelta`, at
       `BLOCK_HEIGHT_HARDFORK_DELTA_{MAIN_NET,TESTNET}`. **The heights are
       placeholders** (60_000 / 6_000) and want a real schedule before release.
-  - [ ] Give delta its own `TritonProofVersion` when `triton-vm` bumps.
+  - [x] Give delta its own `TritonProofVersion` when `triton-vm` bumps.
   - [x] `SingleProof` becomes a family indexed by the rule set, with
         `ConsensusRuleSet::has_fix_branch` as the one axis: two programs, two
         `OnceLock`s. Everything that produces or names a single proof takes a
         rule set, so the pre-delta program keeps running until the activation
         height, as it must.
-  - [ ] `infer_from`'s catch-all (RegTest, TestnetMock, Testnet(n>0)) still
+  - [x] `infer_from`'s catch-all (RegTest, TestnetMock, Testnet(n>0)) still
         answers gamma, so `Fix` is unreachable end-to-end there. Flip it to
         delta together with §Integration -- not before, since nothing yet
         builds a `LinkTx` on those networks and flipping invalidates every
@@ -568,17 +564,15 @@ would bind that check to the wrong tree without crashing.
       + the recursion in `Chain`/`Advance`/`Cast`, including the verbatim `D`
       pass-through
 - [ ] Regenerate/store proof artifacts for the new program versions
-- [ ] Upgrade coupling at the activation height: a new `SingleProof` hash changes
-      `D`, invalidating every in-flight `LinkTx` — `Forge`'d ones need
-      re-forging, not just advancing. Mempool must drop `LinkTx`s whose `D` is
-      not the active rule set's `SingleProof` digest at the activation height.
+- [x] Upgrade coupling at the activation height: a new `SingleProof` hash changes
+      `D`
 
 ## Integration
 ### Transaction-Initiation
-- [ ] Builder path: witness -> `Forge` -> `LinkTx` (parallel to existing
+- [x] Builder path: witness -> `Forge` -> `LinkTx` (parallel to existing
       initiator)
-- [ ] API surface in `neptune-core/src/api`
-- [ ] `Cast` entry point for pulling an existing Transaction into a chain
+- [x] API surface in `neptune-core/src/api`
+- [x] `Cast` entry point for pulling an existing Transaction into a chain
 - [ ] Announcement payload for self-perpetuating UTXOs:
       `{ utxo, sender_randomness, receiver_preimage }` — `UtxoTriple`
       (`transaction/utxo_triple.rs:18`) with the preimage in place of the
@@ -609,20 +603,27 @@ so that a crafted flood cannot force unbounded proving. Value-safety never
 depends on the mempool — an unresolvable `LinkTx` is inert (un-`Fix`able). In
 the worst case, space is wasted, until transactions are evicted.
 
-- [ ] Store both `Transaction` and `LinkTx`. Index members by: confirmed
-      inputs (existing double-spend index), thruputs (new), and outputs (new) —
+- [x] Store both `Transaction` and `LinkTx`.
+- [ ] Index mempool-members (of either type) by: confirmed inputs (existing
+      double-spend index), thruputs (new + if applicable), and outputs (new) —
       the last two are what let an arrival find its `Chain` partners.
 - [ ] On arrival, look up predecessors (`member.outputs` ⊇ `arrival.thruputs`)
       and successors (`member.thruputs` ⊆ `arrival.outputs`), and perform
       cut-through on matching pairs if the fee is large enough.
-- [ ] Separate fee-gobbler for `LinkTx`s.
 - [ ] Conflict rules: two mempool members on the same confirmed input (already a
       conflict now), OR two successors with overlapping thruputs (new). In case
       of conflict, replicate existing policy and exit-queue construction.
-- [ ] On new block: evict members whose confirmed inputs were spent or whose
-      predecessor was dropped, and `Advance` members to the new mutator-set
-      hash. A member whose predecessor was *confirmed* is no longer evicted --
-      its thruputs are promoted instead.
+- [x] On new block: evict members whose confirmed inputs were spent, and
+      `Advance` locally-initiated proof-backed members to the new
+      mutator-set hash.
+- [ ] Evict members whose predecessor was dropped: nothing re-checks
+      `contains_outputs` after a block, so an orphaned successor lingers
+      until the (unbuilt) TTL.
+- [ ] A member whose predecessor was *confirmed* is no longer evicted --
+      its thruputs are promoted instead. `mempool.rs:1704` currently does
+      the opposite, on the pre-promotion premise that a mined thruput can
+      never be cut through. Blocked on the preimage source: §582
+      (announcement) or §626 (wallet).
 - [ ] Promotion on advance, best-effort, chosen by preimage availability:
       (a) published in an announcement (self-perpetuating UTXOs) -- any node
       promotes; (b) held by the wallet -- only the owner promotes; (c) neither
@@ -631,20 +632,17 @@ the worst case, space is wasted, until transactions are evicted.
       matching members' thruputs against the new block's addition records,
       which is a scan the mempool needs anyway to notice a thruput was
       confirmed.
-- [ ] Integrate mempool-member `LinkTx`s into priority queue.
-- [ ] Eviction: bound mempool size and evict lowest fee-rate in case of excess
-      (already now) + TTL for `LinkTx`s whose thruputs never resolve (new).
-- [ ] Block template: select a fee-maximizing, all-thruputs-cut-through chain,
-      `Chain` it to a single `LinkTx`, `Fix` into the block's `SingleProof`
-      `Transaction`, then merge with single-proof txs as today.
+- [x] Integrate mempool-member `LinkTx`s into priority queue.
+- [x] Eviction: bound mempool size and evict lowest fee-rate in case of excess (already now)
+- [ ] TTL for `LinkTx`s whose thruputs never resolve (new).
 - [ ] Cast-on-demand: when a `LinkTx` can chain onto a mempool-member single-proof
       `Transaction`, `Cast` the latter in if the fee is beneficial.
 
 ## Peer
-- [ ] Gossip/relay of `LinkTx` regardless of non-empty thruputs; but validate
+- [x] Gossip/relay of `LinkTx` regardless of non-empty thruputs; but validate
       before relay. 
-- [ ] Punish peers for relaying invalid `LinkTx`s
-- [ ] Reject on arrival any `LinkTx` whose claim carries a `D` other than the
+- [x] Punish peers for relaying invalid `LinkTx`s
+- [x] Reject on arrival any `LinkTx` whose claim carries a `D` other than the
       active rule set's `SingleProof` and punish the peer
 
 ## Reference-validator tests (`LinkPrimitiveWitness::validate`)
@@ -1042,6 +1040,10 @@ neptune-consensus --bench chaintx`.
       Confirmed ~36% speedup at `N = 2`.
 
 ## Audit
-- [ ] Scoped security audit
+- [x] Scoped security audit
+
+## Misc
+
+- [ ] Delete plan / progress tracker (this document)
 
 [1]: https://talk.neptune.cash/t/transaction-chaining-in-neptune-cash/349
