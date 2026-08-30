@@ -1112,20 +1112,7 @@ pub(crate) mod tests {
             proof: LinkTxProof::Proof(Proof::valid_mock()),
         };
 
-        let witness =
-            SingleProofWitness::from_weld(WeldWitness::weld(transaction, link_tx, [0u8; 32]));
-        let single_proof = SingleProof::new(CONSENSUS_RULE_SET);
-
-        let Err(TritonError::TritonVMPanic(vm_state, _)) = single_proof.run_tasm(
-            &witness.standard_input(),
-            witness.nondeterminism(CONSENSUS_RULE_SET),
-        ) else {
-            panic!("mock operand proofs cannot pass the recursive verification");
-        };
-        assert!(
-            vm_state.contains("stark_verify"),
-            "`Weld` must reach the recursion, failing there and nowhere earlier:\n{vm_state}"
-        );
+        expect_recursion_reached(WeldWitness::weld(transaction, link_tx, [0u8; 32]));
     }
 
     impl WeldWitness {
@@ -1400,6 +1387,25 @@ pub(crate) mod tests {
             .boxed()
     }
 
+    /// Run a witness whose operand proofs are mocks and require that it reaches
+    /// the recursion: mock proofs cannot pass `stark_verify`, so arriving there
+    /// means every assertion before it held.
+    fn expect_recursion_reached(witness: WeldWitness) {
+        let witness = SingleProofWitness::from_weld(witness);
+        let Err(TritonError::TritonVMPanic(vm_state, _)) = SingleProof::new(CONSENSUS_RULE_SET)
+            .run_tasm(
+                &witness.standard_input(),
+                witness.nondeterminism(CONSENSUS_RULE_SET),
+            )
+        else {
+            panic!("mock operand proofs cannot pass the recursive verification");
+        };
+        assert!(
+            vm_state.contains("stark_verify"),
+            "`Weld` must reach the recursion, failing there and nowhere earlier:\n{vm_state}"
+        );
+    }
+
     /// Run a poked witness and require that it fails with one of `error_ids`.
     ///
     /// The operands' MAST hashes are re-derived first. They are witness fields
@@ -1668,6 +1674,38 @@ pub(crate) mod tests {
         expect_failure(witness, &[MerkleVerify::ROOT_MISMATCH_ERROR_ID]).unwrap();
     }
 
+    /// A transaction whose merge bit is *set* welds into a kernel that carries
+    /// it, and a weld that clears it is rejected.
+    ///
+    /// The other half of [`merge_bit_must_be_carried_from_the_transaction`],
+    /// which pokes the bit the other way. Every fixture here has A's bit clear,
+    /// so without this the carried-true case never runs -- and true is the
+    /// direction that matters: the bit is what makes a kernel a
+    /// `BlockTransactionKernel`, so carrying it is what lets a resolved chain
+    /// weld into an already-merged block transaction without re-merging. B's
+    /// bit is false either way, by induction over the `LinkProof` branches.
+    #[proptest(cases = 4)]
+    fn a_set_merge_bit_is_carried_into_the_weld(
+        #[strategy(pokeable_pair())] pair: (LinkPrimitiveWitness, LinkPrimitiveWitness),
+    ) {
+        let (predecessor, successor) = pair;
+        let merged = TransactionKernelModifier::default()
+            .merge_bit(true)
+            .modify(predecessor.kernel.kernel);
+        let witness = WeldWitness::without_proofs(&merged, &successor.kernel, [0u8; 32]);
+
+        prop_assert!(witness.new_kernel.merge_bit);
+        prop_assert!(!witness.link_kernel.kernel.merge_bit);
+        expect_recursion_reached(witness.clone());
+
+        let mut witness = witness;
+        witness.new_kernel = TransactionKernelModifier::default()
+            .merge_bit(false)
+            .modify(witness.new_kernel);
+
+        expect_failure(witness, &[MerkleVerify::ROOT_MISMATCH_ERROR_ID]).unwrap();
+    }
+
     /// Every field the branch reads is bound to the kernel it was read from: a
     /// bad authentication path fails before any of the equations above get a
     /// chance to hold.
@@ -1776,20 +1814,7 @@ pub(crate) mod tests {
         prop_assert_eq!(1, witness.surviving_outputs.len());
         prop_assert_eq!(1, witness.link_kernel.thruputs.len());
 
-        let witness = SingleProofWitness::from_weld(witness);
-        let Err(TritonError::TritonVMPanic(vm_state, _)) = SingleProof::new(CONSENSUS_RULE_SET)
-            .run_tasm(
-                &witness.standard_input(),
-                witness.nondeterminism(CONSENSUS_RULE_SET),
-            )
-        else {
-            panic!("mock operand proofs cannot pass the recursive verification");
-        };
-        prop_assert!(
-            vm_state.contains("stark_verify"),
-            "`Weld` must reach the recursion, failing there and nowhere earlier:\n{}",
-            vm_state
-        );
+        expect_recursion_reached(witness);
     }
 
     /// A survivor dropped from the witness is an output of A that the weld
@@ -1943,9 +1968,18 @@ pub(crate) mod tests {
         let (transaction, link_tx) = proof_backed_operands(d).await;
 
         let honest = WeldWitness::weld(transaction, link_tx, [0u8; 32]);
-        let mut doctored = honest.clone();
-        std::mem::swap(&mut doctored.single_proof, &mut doctored.link_proof);
 
+        // the link proof where the single proof belongs. The transaction's
+        // recursion is the first of the two, so this one fails at the first.
+        let mut doctored = honest.clone();
+        doctored.single_proof = honest.link_proof.clone();
+        expect_rejection_in_stark_verify(honest.clone(), doctored);
+
+        // and the single proof where the link proof belongs, which is the case
+        // worth having separately: A's proof still answers A's claim, so the
+        // first recursion passes and only B's mis-binding is left to reject it.
+        let mut doctored = honest.clone();
+        doctored.link_proof = honest.single_proof.clone();
         expect_rejection_in_stark_verify(honest, doctored);
     }
 
