@@ -1009,7 +1009,7 @@ deliberately changes. Mechanical except for the first three.
       agree field by field as multisets. *Not* by MAST hash: `Chain` shuffles
       its concatenations by a seed (`chain.rs:214`), so the two kernels are
       equal only up to order. Copy `chain_is_associative`'s comparison.
-- [ ] `merge_bit_is_carried_from_the_transaction`: set and clear, B's false in
+- [x] `merge_bit_is_carried_from_the_transaction`: set and clear, B's false in
       both cases -- the welded kernel's bit is A's either way.
 - [ ] `self_cut_through_is_rejected`: a thruput of B matching an output of B
       rather than of A. Accepted by the decomposition, refused here.
@@ -1024,7 +1024,7 @@ deliberately changes. Mechanical except for the first three.
 - [x] `bad_authentication_path_is_rejected`: an A or B field absent from its
       kernel's MAST.
 - [x] `welded_kernel_must_be_the_one_in_the_claim`.
-- [ ] `each_operand_proof_must_attest_to_its_own_operand`: A's `SingleProof`
+- [x] `each_operand_proof_must_attest_to_its_own_operand`: A's `SingleProof`
       verified against B's kernel, and B's `LinkProof` against A's -- the
       operands being differently typed, this is two tamperings rather than
       `Chain`'s one swap.
