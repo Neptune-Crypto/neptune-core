@@ -1054,15 +1054,29 @@ pub(crate) mod tests {
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
 
+    use std::collections::HashMap;
+
+    use macro_rules_attr::apply;
+    use tasm_lib::memory::encode_to_memory;
+    use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
+
     use super::*;
     use crate::chaintx::link_primitive_witness::LinkPrimitiveWitness;
+    use crate::chaintx::mock_single_proof_digest;
     use crate::chaintx::test_helpers::chainable_link_primitive_witnesses;
     use crate::chaintx::test_helpers::deterministic_chainable_link_primitive_witnesses;
+    use crate::chaintx::test_helpers::deterministic_primitive_witness;
+    use crate::chaintx::test_helpers::forge;
+    use crate::chaintx::test_helpers::predecessor_resolving_pw;
     use crate::proof_abstractions::tasm::builtins as tasm;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::proof_abstractions::tasm::program::TritonError;
+    use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+    use crate::proof_abstractions::test_runtime::shared_tokio_runtime;
+    use crate::proof_abstractions::triton_vm_job_queue::vm_job_queue;
     use crate::transaction::primitive_witness::PrimitiveWitness;
     use crate::transaction::transaction_kernel::TransactionKernelModifier;
+    use crate::transaction::validity::single_proof::produce_single_proof;
     use crate::transaction::validity::single_proof::SingleProof;
     use crate::transaction::validity::single_proof::SingleProofWitness;
 
@@ -1844,5 +1858,170 @@ pub(crate) mod tests {
             &[OUTPUTS_ARE_NOT_THE_SURVIVORS_PLUS_THE_LINK_OUTPUTS_ERROR],
         )
         .unwrap();
+    }
+
+    /// The operands of a real weld: a `SingleProof`-backed transaction and a
+    /// link transaction forged under `d`, over one mutator set, the link
+    /// transaction's single thruput resolved by the transaction's only output.
+    ///
+    /// The same pair every fixture here uses, built one step lower down so that
+    /// operand A keeps the [`PrimitiveWitness`] its `SingleProof` is produced
+    /// from.
+    ///
+    /// This produces proofs and takes a while with a cold cache.
+    async fn proof_backed_operands(d: Digest) -> (Transaction, LinkTx) {
+        let successor_pw = deterministic_primitive_witness(2);
+        let transaction_pw = predecessor_resolving_pw(&successor_pw, 1..2);
+        let successor = LinkPrimitiveWitness::from_primitive_witness(successor_pw, 1);
+
+        let proof = produce_single_proof(
+            &transaction_pw,
+            vm_job_queue(),
+            TritonVmProofJobOptions::default(),
+            CONSENSUS_RULE_SET,
+        )
+        .await
+        .unwrap();
+
+        let transaction = Transaction {
+            kernel: transaction_pw.kernel.clone(),
+            proof: TransactionProof::SingleProof(proof),
+        };
+
+        (transaction, forge(&successor, d).await)
+    }
+
+    /// A weld of two genuinely proof-backed operands is accepted: the branch
+    /// runs to the end and both recursive verifications pass.
+    ///
+    /// The only test here that reaches past the recursion, and so the only one
+    /// that pins the operands' MAST hashes -- witness fields, prover-supplied,
+    /// and excluded by nothing else -- to the kernels the operand proofs
+    /// actually attest to. Every mock-proof negative above re-derives them.
+    ///
+    /// This test involves producing proofs and might take a while to complete
+    /// if there is no proof cache.
+    #[apply(shared_tokio_runtime)]
+    async fn weld_accepts_proof_backed_operands() {
+        let d = SingleProof::new(CONSENSUS_RULE_SET).hash();
+        let (transaction, link_tx) = proof_backed_operands(d).await;
+        assert_eq!(1, link_tx.kernel.thruputs.len());
+
+        // every output of the transaction is spent by the link transaction's
+        // one thruput, so nothing survives the cut-through; and the welded
+        // kernel is a `TransactionKernel`, which has no thruputs field to carry
+        // an unresolved one even if there were one
+        let witness = WeldWitness::weld(transaction, link_tx, [0u8; 32]);
+        assert!(witness.surviving_outputs.is_empty());
+
+        let witness = SingleProofWitness::from_weld(witness);
+        let single_proof = SingleProof::new(CONSENSUS_RULE_SET);
+        single_proof
+            .run_rust(
+                &witness.standard_input(),
+                witness.nondeterminism(CONSENSUS_RULE_SET),
+            )
+            .unwrap();
+        single_proof
+            .run_tasm(
+                &witness.standard_input(),
+                witness.nondeterminism(CONSENSUS_RULE_SET),
+            )
+            .unwrap();
+    }
+
+    /// Each operand proof is verified against its own claim: the transaction's
+    /// against `{ program: D, input: [txkmh_A] }` and the link transaction's
+    /// against `{ program: LinkProof, input: [lkmh_B, D] }`. Handing each the
+    /// other's proof satisfies neither.
+    ///
+    /// This test involves producing proofs and might take a while to complete
+    /// if there is no proof cache.
+    #[apply(shared_tokio_runtime)]
+    async fn operand_proofs_must_answer_their_own_claims() {
+        let d = SingleProof::new(CONSENSUS_RULE_SET).hash();
+        let (transaction, link_tx) = proof_backed_operands(d).await;
+
+        let honest = WeldWitness::weld(transaction, link_tx, [0u8; 32]);
+        let mut doctored = honest.clone();
+        std::mem::swap(&mut doctored.single_proof, &mut doctored.link_proof);
+
+        expect_rejection_in_stark_verify(honest, doctored);
+    }
+
+    /// A link transaction forged under some other `SingleProof` digest is not
+    /// weldable here. `D` indexes the whole `LinkProof` family, and the branch
+    /// names its own program digest in the claim, so a link proof answering a
+    /// different `D` answers a different claim.
+    ///
+    /// The other half of the `Fix`/`Cast` cycle break, from `Weld`'s side: were
+    /// this not checked, a link transaction whose derivation was verified
+    /// against some attacker-chosen program could become block-borne.
+    ///
+    /// This test involves producing proofs and might take a while to complete
+    /// if there is no proof cache.
+    #[apply(shared_tokio_runtime)]
+    async fn link_transaction_forged_under_another_single_proof_digest_is_rejected() {
+        let d = SingleProof::new(CONSENSUS_RULE_SET).hash();
+        let (transaction, link_tx) = proof_backed_operands(d).await;
+        let (_, forged_under_another_d) = proof_backed_operands(mock_single_proof_digest(0)).await;
+        assert_eq!(link_tx.kernel, forged_under_another_d.kernel);
+
+        let honest = WeldWitness::weld(transaction.clone(), link_tx, [0u8; 32]);
+        let doctored = WeldWitness::weld(transaction, forged_under_another_d, [0u8; 32]);
+
+        expect_rejection_in_stark_verify(honest, doctored);
+    }
+
+    /// Run `doctored` against nondeterminism built from `honest`, and require
+    /// that it fails inside the recursive verification rather than before it.
+    ///
+    /// The two witnesses differ only in their operand *proofs*, so the kernels,
+    /// the authentication paths and the public input are shared, and every
+    /// assertion the branch makes about the kernels still holds. The proofs are
+    /// the only thing left to reject it.
+    ///
+    /// The nondeterminism has to be built this way round because
+    /// [`WeldWitness::populate_nd_streams`] verifies each operand proof against
+    /// the claim the branch will build, and refuses to extract a stream from one
+    /// that answers a different claim. That guard is the point -- an honest
+    /// prover cannot construct these witnesses at all -- but it also means the
+    /// only way to ask what the *program* does with one is to submit what a
+    /// dishonest prover would: the streams of the proofs they were entitled to,
+    /// and a memory image holding the proofs they actually want verified.
+    fn expect_rejection_in_stark_verify(honest: WeldWitness, doctored: WeldWitness) {
+        assert_eq!(honest.new_kernel, doctored.new_kernel);
+
+        let honest = SingleProofWitness::from_weld(honest);
+        let doctored = SingleProofWitness::from_weld(doctored);
+        let public_input = honest.standard_input();
+
+        let nondeterminism = || {
+            let mut nondeterminism = honest.nondeterminism(CONSENSUS_RULE_SET);
+            let mut memory = HashMap::default();
+            encode_to_memory(
+                &mut memory,
+                FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+                &doctored,
+            );
+            nondeterminism.ram = memory;
+
+            nondeterminism
+        };
+
+        let single_proof = SingleProof::new(CONSENSUS_RULE_SET);
+        single_proof
+            .run_rust(&public_input, nondeterminism())
+            .unwrap_err();
+
+        let Err(TritonError::TritonVMPanic(vm_state, _)) =
+            single_proof.run_tasm(&public_input, nondeterminism())
+        else {
+            panic!("an operand proof that answers another claim must be rejected");
+        };
+        assert!(
+            vm_state.contains("stark_verify"),
+            "must fail in the recursive verification, not before it:\n{vm_state}"
+        );
     }
 }
