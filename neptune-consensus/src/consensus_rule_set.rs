@@ -94,12 +94,13 @@ pub enum ConsensusRuleSet {
     #[default]
     HardforkGamma,
 
-    /// Activate transaction chaining: `SingleProof` gains the `Fix` branch,
-    /// which recursively verifies a `LinkProof` and so lets a chained
+    /// Activate transaction chaining: `SingleProof` gains the `Fix` and `Weld`
+    /// branches, which recursively verify a `LinkProof` and so let a chained
     /// transaction (`LinkTx`) become a block-borne `Transaction`.
     ///
-    /// A new branch is a new program, hence a new program digest, hence a
-    /// different claim about every transaction. See [`Self::has_fix_branch`].
+    /// New branches are a new program, hence a new program digest, hence a
+    /// different claim about every transaction. See
+    /// [`Self::has_chain_branches`].
     ///
     /// Also bumps the Triton VM version.
     HardforkDelta,
@@ -236,16 +237,18 @@ impl ConsensusRuleSet {
         }
     }
 
-    /// Whether the `SingleProof` program carries the
+    /// Whether the `SingleProof` program carries the chaining branches
     /// [`Fix`](crate::transaction::validity::tasm::single_proof::fix_branch::FixBranch)
-    /// branch, which recursively verifies a `LinkProof` -- i.e. whether a
-    /// chained transaction can become block-borne.
+    /// and
+    /// [`Weld`](crate::transaction::validity::tasm::single_proof::weld_branch::WeldBranch),
+    /// which recursively verify a `LinkProof` -- i.e. whether a chained
+    /// transaction can become block-borne.
     ///
-    /// This is the one difference between the gamma and delta `SingleProof`
-    /// programs, and hence the reason there are two of them: a branch more is a
-    /// program hash more, and a claim about a transaction is about whichever
-    /// program the block height selects.
-    pub fn has_fix_branch(&self) -> bool {
+    /// These two branches are the one difference between the gamma and delta
+    /// `SingleProof` programs, and hence the reason there are two of them: two
+    /// branches more is a program hash more, and a claim about a transaction is
+    /// about whichever program the block height selects.
+    pub fn has_chain_branches(&self) -> bool {
         match self {
             ConsensusRuleSet::Reboot
             | ConsensusRuleSet::HardforkAlpha

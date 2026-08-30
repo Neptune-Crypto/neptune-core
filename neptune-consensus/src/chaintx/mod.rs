@@ -4,7 +4,7 @@
 //! (`LinkTx`) pipeline that runs parallel to the single-proof `Transaction` pipeline.
 
 pub mod advance;
-mod authenticate_link_kernel_field;
+pub(crate) mod authenticate_link_kernel_field;
 pub mod cast;
 pub mod chain;
 pub mod forge;

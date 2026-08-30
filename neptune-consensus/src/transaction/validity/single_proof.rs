@@ -43,6 +43,8 @@ use crate::transaction::validity::tasm::claims::generate_rri_claim::GenerateRriC
 use crate::transaction::validity::tasm::claims::generate_type_script_claim_template::GenerateTypeScriptClaimTemplate;
 use crate::transaction::validity::tasm::single_proof::merge_branch::MergeBranch;
 use crate::transaction::validity::tasm::single_proof::update_branch::UpdateBranch;
+use crate::transaction::validity::tasm::single_proof::weld_branch::WeldBranch;
+use crate::transaction::validity::tasm::single_proof::weld_branch::WeldWitness;
 use crate::transaction::Claim;
 use crate::transaction::Transaction;
 
@@ -51,8 +53,12 @@ pub(crate) const DISCRIMINANT_FOR_UPDATE: u64 = 1;
 pub(crate) const DISCRIMINANT_FOR_MERGE: u64 = 2;
 
 /// Only a legal discriminant from hardfork delta onwards; see
-/// [`ConsensusRuleSet::has_fix_branch`].
+/// [`ConsensusRuleSet::has_chain_branches`].
 pub(crate) const DISCRIMINANT_FOR_FIX: u64 = 3;
+
+/// Only a legal discriminant from hardfork delta onwards; see
+/// [`ConsensusRuleSet::has_chain_branches`].
+pub(crate) const DISCRIMINANT_FOR_WELD: u64 = 4;
 
 /// One `SingleProof` program per [`ConsensusRuleSet`], and hence one cache cell
 /// per rule set. Grows with the enum, so a new rule set cannot silently share a
@@ -74,6 +80,14 @@ pub enum SingleProofWitness {
     /// Only the delta `SingleProof` program has this branch; the gamma program
     /// rejects the discriminant outright.
     Fix(FixWitness),
+    /// `Transaction * LinkTx -> Transaction`: fold a link transaction into a
+    /// `SingleProof`-backed one, cutting every thruput through against that
+    /// transaction's outputs. What `Fix(Chain(Cast(A), B))` computes in three
+    /// proofs, in one.
+    ///
+    /// Only the delta `SingleProof` program has this branch; the gamma program
+    /// rejects the discriminant outright.
+    Weld(Box<WeldWitness>),
     // Wait for Hard Fork One:
     // IntegralMempool(IntegralMempoolMembershipWitness)
 }
@@ -95,6 +109,10 @@ impl SingleProofWitness {
         Self::Fix(witness)
     }
 
+    pub fn from_weld(witness: WeldWitness) -> Self {
+        Self::Weld(Box::new(witness))
+    }
+
     /// MAST hash of the transaction kernel this witness attests to -- the public
     /// input of the `SingleProof` claim.
     pub fn kernel_mast_hash(&self) -> Digest {
@@ -103,6 +121,7 @@ impl SingleProofWitness {
             Self::Update(witness) => witness.new_kernel_mast_hash,
             Self::Merger(witness) => witness.new_kernel.mast_hash(),
             Self::Fix(witness) => witness.kernel_mast_hash(),
+            Self::Weld(witness) => witness.kernel_mast_hash(),
         }
     }
 
@@ -184,6 +203,9 @@ impl TasmObject for SingleProofWitness {
                 Ok(Box::new(Self::Merger(*BFieldCodec::decode(&field_data)?)))
             }
             DISCRIMINANT_FOR_FIX => Ok(Box::new(Self::Fix(*BFieldCodec::decode(&field_data)?))),
+            DISCRIMINANT_FOR_WELD => Ok(Box::new(Self::Weld(Box::new(*BFieldCodec::decode(
+                &field_data,
+            )?)))),
             _ => Err(Box::new(BFieldCodecError::ElementOutOfRange)),
         }
     }
@@ -192,9 +214,10 @@ impl TasmObject for SingleProofWitness {
 impl SingleProofWitness {
     /// The non-determinism for the VM that this witness corresponds to.
     ///
-    /// The rule set is needed because the `Update`, `Merger` and `Fix` branches
-    /// recurse into a claim naming the `SingleProof` program itself, and the
-    /// digest they name has to be the one of the program actually running.
+    /// The rule set is needed because the `Update`, `Merge`, `Fix`, and `Weld`
+    /// branches recurse into a claim naming the `SingleProof` program itself,
+    /// and the digest they name has to be the one of the program actually
+    /// running.
     pub fn nondeterminism(&self, consensus_rule_set: ConsensusRuleSet) -> NonDeterminism {
         // populate nondeterministic memory with witness
         let mut memory = HashMap::default();
@@ -285,6 +308,9 @@ impl SingleProofWitness {
             SingleProofWitness::Fix(witness) => {
                 witness.populate_nd_streams(&mut nondeterminism, single_proof_program_hash);
             }
+            SingleProofWitness::Weld(witness) => {
+                witness.populate_nd_streams(&mut nondeterminism, single_proof_program_hash);
+            }
         }
 
         nondeterminism
@@ -295,9 +321,9 @@ impl SingleProofWitness {
 /// [`Transaction`].
 ///
 /// A *family* of programs, one per [`ConsensusRuleSet`], rather than a single
-/// one: hardfork delta adds the [`FixBranch`] and a branch more is a program
-/// hash more. Two rule sets that agree on [`ConsensusRuleSet::has_fix_branch`]
-/// share a program.
+/// one: hardfork delta adds the [`FixBranch`] and the [`WeldBranch`], and a
+/// different set of branches means a different program hash. Two rule sets that
+/// agree on [`ConsensusRuleSet::has_chain_branches`] share a program.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct SingleProof {
     consensus_rule_set: ConsensusRuleSet,
@@ -439,7 +465,7 @@ pub async fn fix_link_tx(
         Proof::valid_mock()
     } else {
         assert!(
-            consensus_rule_set.has_fix_branch(),
+            consensus_rule_set.has_chain_branches(),
             "cannot fix a link transaction under a rule set without the Fix branch"
         );
         SingleProofWitness::from_fix(witness)
@@ -509,10 +535,16 @@ impl TritonProgram for SingleProof {
         // pre-delta program is unchanged down to the byte: an import both emits
         // code and hands out static-memory addresses, and every earlier
         // allocation has to keep the address it had.
-        let fix_branch = self
-            .consensus_rule_set
-            .has_fix_branch()
-            .then(|| library.import(Box::new(FixBranch)));
+        //
+        // `Fix` and `Weld` share one slot for `D`, this program's own digest:
+        // both instantiate the `LinkProof` family at it, neither runs in the
+        // same execution as the other, and one slot is one `kmalloc` less.
+        let delta_branches = self.consensus_rule_set.has_chain_branches().then(|| {
+            let single_proof_digest_alloc = library.kmalloc(u32::try_from(Digest::LEN).unwrap());
+            let fix = library.import(Box::new(FixBranch::new(single_proof_digest_alloc)));
+            let weld = library.import(Box::new(WeldBranch::new(single_proof_digest_alloc)));
+            (fix, weld)
+        });
 
         let verify_scripts_loop_label = "neptune_transaction_verify_lock_scripts_loop";
         let verify_scripts_loop_body = triton_asm! {
@@ -818,13 +850,19 @@ impl TritonProgram for SingleProof {
                 return
         };
 
-        // The `Fix` discriminat is only legal when the branch is active. A
-        // pre-delta program must reject a `Fix` witness.
-        let (accept_fix_discriminant, dispatch_fix) = match fix_branch {
+        // The `Fix` and `Weld` discriminants are only legal when their branches
+        // are active. A pre-delta program must reject either witness.
+        let (accept_delta_discriminants, dispatch_delta_branches) = match delta_branches {
             None => (triton_asm!(), triton_asm!()),
-            Some(fix_branch) => (
-                triton_asm!(dup 1 push {DISCRIMINANT_FOR_FIX} eq add),
-                triton_asm!(dup 0 push {DISCRIMINANT_FOR_FIX} eq skiz call {fix_branch}),
+            Some((fix_branch, weld_branch)) => (
+                triton_asm!(
+                    dup 1 push {DISCRIMINANT_FOR_FIX} eq add
+                    dup 1 push {DISCRIMINANT_FOR_WELD} eq add
+                ),
+                triton_asm!(
+                    dup 0 push {DISCRIMINANT_FOR_FIX} eq skiz call {fix_branch}
+                    dup 0 push {DISCRIMINANT_FOR_WELD} eq skiz call {weld_branch}
+                ),
             ),
         };
 
@@ -848,8 +886,8 @@ impl TritonProgram for SingleProof {
             add
             // _ discr (discr == proof_coll || discr == update || discr == merge)
 
-            {&accept_fix_discriminant}
-            // _ discr (.. [|| discr == fix])
+            {&accept_delta_discriminants}
+            // _ discr (.. [|| discr == fix || discr == weld])
 
             assert error_id {INVALID_WITNESS_DISCRIMINANT_ERROR}
             // _ discr
@@ -883,7 +921,7 @@ impl TritonProgram for SingleProof {
             dup 0 push {DISCRIMINANT_FOR_MERGE} eq
             skiz call {merge_branch}
 
-            {&dispatch_fix}
+            {&dispatch_delta_branches}
 
             // _ [own_digest] [txk_digest] *single_proof_witness discriminant
 
@@ -916,17 +954,11 @@ impl TritonProgram for SingleProof {
     }
 
     fn program(&self) -> Program {
-        // Overwrite trait-implementation since this leads to much faster code.
-        // Throughout the lifetime of a client, the `SingleProof` program for a
-        // given rule set never changes, so this is OK.
+        // Overwrite trait-implementation with caching because faster.
         //
-        // One cell per rule set, and the cell is chosen on every call: what a
-        // rule set assembles is more than which branches it has -- the STARK
-        // verifier is the legacy one through proof version 5, and every claim
-        // generator stamps the rule set's own proof version -- so any cache
-        // shared by two rule sets would hand one of them a program it never
-        // built. Which rule set is in force is cheap to answer and is answered
-        // live; only the assembling is cached.
+        // One cell per rule set. Which cell is chosen on every call. Which rule
+        // set is in force is cheap to answer and is answered live; only the
+        // assembling is cached.
         static PROGRAMS: [OnceLock<Program>; RULE_SET_COUNT] =
             [const { OnceLock::new() }; RULE_SET_COUNT];
 
@@ -1048,48 +1080,48 @@ pub(crate) mod tests {
                 SingleProofWitness::Fix(witness) => {
                     witness.branch_source(own_program_digest, txk_digest)
                 }
+                SingleProofWitness::Weld(witness) => {
+                    witness.branch_source(own_program_digest, txk_digest)
+                }
             }
         }
     }
 
-    /// The rule sets that have a `SingleProof` program of their own.
+    /// The two rule sets whose `SingleProof` program a node still assembles and
+    /// proves against: the one in force until delta activates, and the one
+    /// after. They differ by the chaining branches, *i.e.*, by
+    /// [`ConsensusRuleSet::has_chain_branches`].
     ///
-    /// Two, and only two: the `Fix` branch is the whole of the difference, so
-    /// [`ConsensusRuleSet::has_fix_branch`] partitions every rule set past and
-    /// future into these classes. Tests that do not depend on which program they
-    /// run go through both -- the three pre-delta branches are the same code
-    /// either side of the fork, but the dispatcher reaching them is not.
+    /// Tests that do not depend on which program they run go through both --
+    /// the three pre-delta branches are the same code either side of the fork,
+    /// but the dispatcher reaching them is not.
     const PROGRAM_VERSIONS: [ConsensusRuleSet; 2] = [
         ConsensusRuleSet::HardforkGamma,
         ConsensusRuleSet::HardforkDelta,
     ];
 
-    /// Every rule set gets the program it assembles, from a cache and fresh
-    /// alike.
+    /// For consensus rule set cache agrees with fresh assembly.
     ///
-    /// Guards the cache's key. A `SingleProof` program is not determined by its
-    /// branches alone: the STARK verifier is the legacy one through proof
-    /// version 5, and every claim generator stamps the rule set's own proof
-    /// version, so the four proof versions give at least four distinct
-    /// programs. Cache them in fewer cells than there are rule sets -- as two
-    /// cells keyed on [`ConsensusRuleSet::has_fix_branch`] did -- and the first
-    /// rule set to reach a cell answers for every rule set sharing it, silently
-    /// and for the life of the process.
+    /// This test guards against stale caches, where the value held in cache
+    /// (or more narrowly, returned from it) holds for a consensus rule set that
+    /// is no longer active.
     #[test]
     fn cached_program_is_the_one_the_rule_set_assembles() {
         for consensus_rule_set in ConsensusRuleSet::iter() {
             let single_proof = SingleProof::new(consensus_rule_set);
             let (_, code) = single_proof.library_and_code();
-            let assembled = Program::new(&code);
+            let assembled_program = Program::new(&code);
+            let cached_program = single_proof.program();
 
             assert_eq!(
-                assembled,
-                single_proof.program(),
+                assembled_program, cached_program,
                 "cached program must be {consensus_rule_set}'s own"
             );
+
+            let cached_hash = single_proof.hash();
             assert_eq!(
-                assembled.hash(),
-                single_proof.hash(),
+                assembled_program.hash(),
+                cached_hash,
                 "cached digest must be {consensus_rule_set}'s own"
             );
         }
@@ -1098,15 +1130,16 @@ pub(crate) mod tests {
     /// A discriminant not claimed by any branch of the running program must
     /// halt it, not fall through it.
     ///
-    /// Includes [`DISCRIMINANT_FOR_FIX`] on the pre-delta program: a `Fix`
-    /// witness handed to it is exactly a witness naming a branch that is not
-    /// there, and it has to be rejected rather than ignored.
+    /// Includes [`DISCRIMINANT_FOR_FIX`] and [`DISCRIMINANT_FOR_WELD`] on the
+    /// pre-delta program: either witness handed to it is exactly a witness
+    /// naming a branch that is not there, and it has to be rejected rather than
+    /// ignored.
     #[apply(shared_tokio_runtime)]
     async fn invalid_discriminant_crashes_execution() {
         let pub_input = PublicInput::new(bfe_vec![0, 0, 0, 0, 0]);
         for consensus_rule_set in PROGRAM_VERSIONS {
-            let illegal_discriminant_values = if consensus_rule_set.has_fix_branch() {
-                bfe_array![-1, 4, 5, 1u64 << 40]
+            let illegal_discriminant_values = if consensus_rule_set.has_chain_branches() {
+                bfe_array![-1, 5, 6, 1u64 << 40]
             } else {
                 bfe_array![-1, 3, 4, 1u64 << 40]
             };
@@ -1571,9 +1604,9 @@ pub(crate) mod tests {
         }
     }
 
-    /// The pre-delta program, pinned. Adding the `Fix` branch must leave it
-    /// untouched: it is the program every block up to the activation height is
-    /// validated against.
+    /// The pre-delta program, pinned. Adding the `Fix` and `Weld` branches must
+    /// leave it untouched: it is the program every block up to the activation
+    /// height is validated against.
     mod gamma_program {
         use super::*;
 
@@ -1584,13 +1617,13 @@ pub(crate) mod tests {
     }
 
     /// The program from hardfork delta onwards: the same three branches plus
-    /// `Fix`.
+    /// `Fix` and `Weld`.
     mod delta_program {
         use super::*;
 
         test_program_snapshot!(
             SingleProof::new(ConsensusRuleSet::HardforkDelta),
-            "11260cfb66723f6dc4e88e1696af2b3178f41ad089375564b490fd0d90550685abbebc5b2e6b7dd8"
+            "de4edfee9352d4a80649f8041c67c36a4485ac25ba93633295671f2307602bee03da660ce7181430"
         );
     }
 }

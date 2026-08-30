@@ -77,7 +77,7 @@ pub fn link_proof_claim(
 /// Lives here, not on any one branch: *every* branch owes this assertion on the
 /// kernel it produces, and branches that recurse rely on it holding for their
 /// operands by induction rather than re-checking it.
-pub(super) fn no_coinbase_leaf() -> Digest {
+pub(crate) fn no_coinbase_leaf() -> Digest {
     Tip5::hash(&Option::<NativeCurrencyAmount>::None)
 }
 
