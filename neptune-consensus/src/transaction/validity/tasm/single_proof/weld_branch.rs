@@ -1357,6 +1357,35 @@ pub(crate) mod tests {
             .boxed()
     }
 
+    /// [`pokeable_witness`] with a survivor: one more output on A than B has
+    /// thruputs to resolve, so cut-through is *partial* -- one of A's outputs
+    /// cancels against a thruput and one lives on into the weld.
+    ///
+    /// Needed because the base fixture cannot produce this. Its predecessor is
+    /// built by `predecessor_resolving`, whose outputs are exactly the UTXOs the
+    /// successor's thruputs spend, so A's output count always equals B's thruput
+    /// count and the survivor list is always empty. Every other test here
+    /// therefore exercises cut-through only at that degenerate end, where the
+    /// survivors are a zero-length list and both equations compare against
+    /// nothing.
+    ///
+    /// The extra output is fabricated, which no proof would attest to -- fine
+    /// for a witness whose proofs are mocks, and the reason this fixture cannot
+    /// carry a positive test that reaches past the recursion.
+    fn mixed_cut_through_witness() -> BoxedStrategy<WeldWitness> {
+        (pokeable_pair(), arb::<AdditionRecord>())
+            .prop_map(|((predecessor, successor), survivor)| {
+                let kernel = predecessor.kernel.kernel;
+                let outputs = [kernel.outputs.clone(), vec![survivor]].concat();
+                let kernel = TransactionKernelModifier::default()
+                    .outputs(outputs)
+                    .modify(kernel);
+
+                WeldWitness::without_proofs(&kernel, &successor.kernel, [0u8; 32])
+            })
+            .boxed()
+    }
+
     /// Run a poked witness and require that it fails with one of `error_ids`.
     ///
     /// The operands' MAST hashes are re-derived first. They are witness fields
@@ -1716,5 +1745,104 @@ pub(crate) mod tests {
         prop_assert_eq!(a.mutator_set_hash, w.mutator_set_hash);
         prop_assert_eq!(a.merge_bit, w.merge_bit);
         prop_assert!(w.coinbase.is_none());
+    }
+
+    /// Partial cut-through is accepted: a weld in which one of A's outputs
+    /// cancels against a thruput and another survives runs every assertion and
+    /// reaches the recursion.
+    ///
+    /// The counterpart of
+    /// [`weld_runs_to_the_recursion_on_a_well_formed_witness`], which cuts
+    /// through everything. Between them the cut-through arithmetic is exercised
+    /// at both ends: an empty survivor list and a non-empty one.
+    #[proptest(cases = 4)]
+    fn weld_runs_to_the_recursion_with_partial_cut_through(
+        #[strategy(mixed_cut_through_witness())] witness: WeldWitness,
+    ) {
+        prop_assert_eq!(1, witness.surviving_outputs.len());
+        prop_assert_eq!(1, witness.link_kernel.thruputs.len());
+
+        let witness = SingleProofWitness::from_weld(witness);
+        let Err(TritonError::TritonVMPanic(vm_state, _)) = SingleProof::new(CONSENSUS_RULE_SET)
+            .run_tasm(
+                &witness.standard_input(),
+                witness.nondeterminism(CONSENSUS_RULE_SET),
+            )
+        else {
+            panic!("mock operand proofs cannot pass the recursive verification");
+        };
+        prop_assert!(
+            vm_state.contains("stark_verify"),
+            "`Weld` must reach the recursion, failing there and nowhere earlier:\n{}",
+            vm_state
+        );
+    }
+
+    /// A survivor dropped from the witness is an output of A that the weld
+    /// silently destroys: it neither cancels against a thruput nor appears in
+    /// the welded outputs, so its funds are gone while A's proof still says they
+    /// were paid out.
+    ///
+    /// The direction the all-cut-through fixture cannot poke, there being no
+    /// survivor to drop.
+    #[proptest(cases = 4)]
+    fn a_dropped_survivor_is_rejected(
+        #[strategy(mixed_cut_through_witness())] mut witness: WeldWitness,
+    ) {
+        witness.surviving_outputs.pop().unwrap();
+
+        expect_failure(
+            witness,
+            &[THRUPUTS_ARE_NOT_A_SUBSET_OF_THE_TRANSACTION_OUTPUTS_ERROR],
+        )
+        .unwrap();
+    }
+
+    /// The welded outputs are the survivors plus B's, checked here where the
+    /// survivors are non-empty: dropping one is value destroyed, and keeping the
+    /// cut-through output instead of the surviving one is value moved between
+    /// the two sides.
+    #[proptest(cases = 4)]
+    fn welded_outputs_must_carry_the_survivors_through(
+        #[strategy(mixed_cut_through_witness())] original: WeldWitness,
+    ) {
+        let mut witness = original.clone();
+        let mut outputs = witness.new_kernel.outputs.clone();
+        outputs.pop().unwrap();
+        witness.new_kernel = TransactionKernelModifier::default()
+            .outputs(outputs)
+            .modify(witness.new_kernel);
+        expect_failure(
+            witness,
+            &[OUTPUTS_ARE_NOT_THE_SURVIVORS_PLUS_THE_LINK_OUTPUTS_ERROR],
+        )
+        .unwrap();
+
+        // the surviving output swapped for the one that was cut through: the
+        // welded kernel still holds the right *number* of outputs, and the
+        // thruput equation still holds, but the weld now pays out a record that
+        // was already spent
+        let mut witness = original.clone();
+        let cut_through = witness.link_kernel.thruputs[0];
+        let outputs = witness
+            .new_kernel
+            .outputs
+            .iter()
+            .map(|&output| {
+                if output == witness.surviving_outputs[0] {
+                    cut_through
+                } else {
+                    output
+                }
+            })
+            .collect_vec();
+        witness.new_kernel = TransactionKernelModifier::default()
+            .outputs(outputs)
+            .modify(witness.new_kernel);
+        expect_failure(
+            witness,
+            &[OUTPUTS_ARE_NOT_THE_SURVIVORS_PLUS_THE_LINK_OUTPUTS_ERROR],
+        )
+        .unwrap();
     }
 }
