@@ -50,6 +50,10 @@ pub struct FixWitness {
 impl FixWitness {
     /// Send a fully resolved chained transaction back to the single-proof pipeline.
     ///
+    /// The link proof is not checked here: the claim it answers names `D`, the
+    /// running `SingleProof` program's digest, which is not known at this point.
+    /// It is checked in `populate_nd_streams`, which receives it.
+    ///
     /// # Panics
     ///
     /// - if `link_tx` still carries thruputs, which is to say it is not yet
@@ -104,12 +108,20 @@ impl FixWitness {
     ) {
         let claim = self.link_proof_claim(single_proof_program_hash);
 
-        // this check is needed for regtest mode, to prevent a panic
-        // because regtest mode uses mock (empty) proofs.
-        if !triton_vm::verify(Stark::default(), &claim, &self.link_proof) {
-            tracing::warn!("attempting to fix invalid link transaction ...");
+        // A mock proof, which is what regtest mode runs on, has no proof stream
+        // to extract nondeterminism from, and never reaches a real
+        // `StarkVerify` either.
+        if self.link_proof.is_mock() {
             return;
         }
+
+        // Any other proof that does not answer its claim is a witness that
+        // cannot be proven, and the branch would only discover it inside the
+        // recursive verification, an expensive way to learn it.
+        assert!(
+            triton_vm::verify(Stark::default(), &claim, &self.link_proof),
+            "link proof must answer its claim"
+        );
 
         StarkVerify::new_with_dynamic_layout(Stark::default()).update_nondeterminism(
             nondeterminism,
