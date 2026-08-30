@@ -636,7 +636,7 @@ would bind that check to the wrong tree without crashing.
       placeholders** (60_000 / 6_000) and want a real schedule before release.
   - [x] Give delta its own `TritonProofVersion` when `triton-vm` bumps.
   - [x] `SingleProof` becomes a family indexed by the rule set, with
-        `ConsensusRuleSet::has_fix_branch` as the one axis: two programs, two
+        `ConsensusRuleSet::has_chain_branches` as the one axis: two programs, two
         `OnceLock`s. Everything that produces or names a single proof takes a
         rule set, so the pre-delta program keeps running until the activation
         height, as it must.
@@ -661,7 +661,7 @@ would bind that check to the wrong tree without crashing.
 - [x] Arrival-side `D` binding at a rule-set change: `link_tx_claim` pins `D` to
       the active rule set's `SingleProof` digest, so a link carrying a stale one
       is inadmissible (§Peer). Vacuous at delta's own activation -- no `LinkTx`
-      can be in the mempool under gamma, `has_fix_branch()` being false there.
+      can be in the mempool under gamma, `has_chain_branches()` being false there.
 
 ## Integration
 ### Transaction-Initiation

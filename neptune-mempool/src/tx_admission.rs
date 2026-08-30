@@ -127,7 +127,7 @@ pub async fn admissible(
 ) -> Result<(), TxAdmissionError> {
     // Link-pipeline gates, cheaper than anything below.
     if let AnyTxRef::Link(link_tx) = tx {
-        if !consensus_rule_set.has_fix_branch() {
+        if !consensus_rule_set.has_chain_branches() {
             return Err(TxAdmissionError::NotYetActive);
         }
 

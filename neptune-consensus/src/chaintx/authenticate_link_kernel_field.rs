@@ -33,7 +33,7 @@ use super::link_kernel::LinkKernelField;
 /// which asserts the field's *value* at the same time and so is strictly
 /// stronger.
 #[derive(Debug, Clone, Copy)]
-pub(super) struct AuthenticateLinkKernelField(pub(super) LinkKernelField);
+pub(crate) struct AuthenticateLinkKernelField(pub(crate) LinkKernelField);
 
 impl BasicSnippet for AuthenticateLinkKernelField {
     fn parameters(&self) -> Vec<(DataType, String)> {

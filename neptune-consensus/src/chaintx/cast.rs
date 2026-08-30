@@ -55,7 +55,7 @@ const CAST_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT_ERROR: i128 = 1_000_571;
 /// kernel and the `SingleProof` backing it.
 ///
 /// Like [`ChainWitness`](super::chain::ChainWitness) and
-/// [`UpdateWitness`](super::update::UpdateWitness) it is its own memory image.
+/// [`AdvanceWitness`](super::advance::AdvanceWitness) it is its own memory image.
 /// The branch reads only the proof out of it: the kernel is bound to the claim
 /// through its MAST hash, which is divined rather than recomputed, so the copy
 /// in memory is there for the *prover*'s sake -- to derive that hash and the two

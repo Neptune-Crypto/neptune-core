@@ -2,6 +2,7 @@ use itertools::Itertools;
 use neptune_primitives::mast_hash::MastHash;
 use tasm_lib::data_type::DataType;
 use tasm_lib::field;
+use tasm_lib::library::StaticAllocation;
 use tasm_lib::prelude::BasicSnippet;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Library;
@@ -160,9 +161,28 @@ impl FixWitness {
 /// `TransactionKernel` it wraps.
 ///
 /// This branch exists only from hardfork delta onwards; see
-/// [`ConsensusRuleSet::has_fix_branch`](crate::consensus_rule_set::ConsensusRuleSet::has_fix_branch).
+/// [`ConsensusRuleSet::has_chain_branches`](crate::consensus_rule_set::ConsensusRuleSet::has_chain_branches).
 #[derive(Debug, Copy, Clone)]
-pub struct FixBranch;
+pub struct FixBranch {
+    /// Where the `SingleProof` program keeps `D`, this program's own digest.
+    /// Shared with [`WeldBranch`](super::weld_branch::WeldBranch): both branches
+    /// instantiate the `LinkProof` family at the same digest, and neither runs
+    /// in the same execution as the other.
+    ///
+    /// The whole allocation, not one of its ends: `write_mem` fills it upwards
+    /// from the low word and `read_mem` empties it downwards from the high one,
+    /// so a slot this size has two addresses and every use has to pick the
+    /// right one.
+    single_proof_digest_alloc: StaticAllocation,
+}
+
+impl FixBranch {
+    pub(crate) fn new(single_proof_digest_alloc: StaticAllocation) -> Self {
+        Self {
+            single_proof_digest_alloc,
+        }
+    }
+}
 
 impl BasicSnippet for FixBranch {
     fn parameters(&self) -> Vec<(DataType, String)> {
@@ -191,9 +211,8 @@ impl BasicSnippet for FixBranch {
 
         // `D`, from the `LinkProof` claim's point of view, is this program's own
         // digest. So it is read in this branch.
-        let single_proof_digest_alloc = library.kmalloc(u32::try_from(Digest::LEN).unwrap());
         let generate_link_proof_claim = library.import(Box::new(GenerateLinkProofClaim {
-            single_proof_digest_address: single_proof_digest_alloc.read_address(),
+            single_proof_digest_address: self.single_proof_digest_alloc.read_address(),
         }));
         let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
             Stark::default(),
@@ -229,7 +248,7 @@ impl BasicSnippet for FixBranch {
             dup 11 dup 11 dup 11 dup 11 dup 11
             // _ [own_program_digest] disc [txk_digest] *witness [own_program_digest]
 
-            push {single_proof_digest_alloc.write_address()}
+            push {self.single_proof_digest_alloc.write_address()}
             write_mem {Digest::LEN}
             pop 1
             // _ [own_program_digest] disc [txk_digest] *witness
