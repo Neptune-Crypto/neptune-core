@@ -118,7 +118,7 @@ pub fn predecessor_resolving_pw(
             .expect("type script hash should be known")
         })
         .collect_vec();
-    let predecessor_pw = PrimitiveWitness {
+    PrimitiveWitness {
         input_utxos: salted_utxos.clone(),
         input_membership_proofs: membership_proofs,
         lock_scripts_and_witnesses: successor_pw.lock_scripts_and_witnesses[range].to_vec(),
@@ -128,9 +128,7 @@ pub fn predecessor_resolving_pw(
         output_receiver_digests: receiver_digests,
         mutator_set_accumulator,
         kernel: predecessor_kernel,
-    };
-
-    predecessor_pw
+    }
 }
 
 /// A predecessor/successor pair over one mutator set: the successor's
