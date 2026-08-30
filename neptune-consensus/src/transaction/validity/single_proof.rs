@@ -54,6 +54,11 @@ pub(crate) const DISCRIMINANT_FOR_MERGE: u64 = 2;
 /// [`ConsensusRuleSet::has_fix_branch`].
 pub(crate) const DISCRIMINANT_FOR_FIX: u64 = 3;
 
+/// One `SingleProof` program per [`ConsensusRuleSet`], and hence one cache cell
+/// per rule set. Grows with the enum, so a new rule set cannot silently share a
+/// cell with an older one.
+const RULE_SET_COUNT: usize = <ConsensusRuleSet as strum::EnumCount>::COUNT;
+
 const INVALID_WITNESS_DISCRIMINANT_ERROR: i128 = 1_000_050;
 const NO_BRANCH_TAKEN_ERROR: i128 = 1_000_051;
 const MANIPULATED_PROOF_COLLECTION_WITNESS_ERROR: i128 = 1_000_052;
@@ -904,34 +909,28 @@ impl TritonProgram for SingleProof {
     }
 
     fn hash(&self) -> Digest {
-        static WITH_FIX: OnceLock<Digest> = OnceLock::new();
-        static WITHOUT_FIX: OnceLock<Digest> = OnceLock::new();
+        static DIGESTS: [OnceLock<Digest>; RULE_SET_COUNT] =
+            [const { OnceLock::new() }; RULE_SET_COUNT];
 
-        let cache = if self.consensus_rule_set.has_fix_branch() {
-            &WITH_FIX
-        } else {
-            &WITHOUT_FIX
-        };
-
-        *cache.get_or_init(|| self.program().hash())
+        *DIGESTS[self.consensus_rule_set as usize].get_or_init(|| self.program().hash())
     }
 
     fn program(&self) -> Program {
         // Overwrite trait-implementation since this leads to much faster code.
         // Throughout the lifetime of a client, the `SingleProof` program for a
-        // given version never changes, so this is OK. There are two versions --
-        // the `Fix` branch is the whole of the difference -- so there are two
-        // caches, not one per rule set.
-        static WITH_FIX: OnceLock<Program> = OnceLock::new();
-        static WITHOUT_FIX: OnceLock<Program> = OnceLock::new();
+        // given rule set never changes, so this is OK.
+        //
+        // One cell per rule set, and the cell is chosen on every call: what a
+        // rule set assembles is more than which branches it has -- the STARK
+        // verifier is the legacy one through proof version 5, and every claim
+        // generator stamps the rule set's own proof version -- so any cache
+        // shared by two rule sets would hand one of them a program it never
+        // built. Which rule set is in force is cheap to answer and is answered
+        // live; only the assembling is cached.
+        static PROGRAMS: [OnceLock<Program>; RULE_SET_COUNT] =
+            [const { OnceLock::new() }; RULE_SET_COUNT];
 
-        let cache = if self.consensus_rule_set.has_fix_branch() {
-            &WITH_FIX
-        } else {
-            &WITHOUT_FIX
-        };
-
-        cache
+        PROGRAMS[self.consensus_rule_set as usize]
             .get_or_init(|| {
                 let (_, code) = self.library_and_code();
                 Program::new(&code)
@@ -953,6 +952,8 @@ pub(crate) mod tests {
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
     use tracing_test::traced_test;
+
+    use strum::IntoEnumIterator;
 
     use super::*;
     use crate::proof_abstractions::tasm::builtins as tasm;
@@ -1062,6 +1063,37 @@ pub(crate) mod tests {
         ConsensusRuleSet::HardforkGamma,
         ConsensusRuleSet::HardforkDelta,
     ];
+
+    /// Every rule set gets the program it assembles, from a cache and fresh
+    /// alike.
+    ///
+    /// Guards the cache's key. A `SingleProof` program is not determined by its
+    /// branches alone: the STARK verifier is the legacy one through proof
+    /// version 5, and every claim generator stamps the rule set's own proof
+    /// version, so the four proof versions give at least four distinct
+    /// programs. Cache them in fewer cells than there are rule sets -- as two
+    /// cells keyed on [`ConsensusRuleSet::has_fix_branch`] did -- and the first
+    /// rule set to reach a cell answers for every rule set sharing it, silently
+    /// and for the life of the process.
+    #[test]
+    fn cached_program_is_the_one_the_rule_set_assembles() {
+        for consensus_rule_set in ConsensusRuleSet::iter() {
+            let single_proof = SingleProof::new(consensus_rule_set);
+            let (_, code) = single_proof.library_and_code();
+            let assembled = Program::new(&code);
+
+            assert_eq!(
+                assembled,
+                single_proof.program(),
+                "cached program must be {consensus_rule_set}'s own"
+            );
+            assert_eq!(
+                assembled.hash(),
+                single_proof.hash(),
+                "cached digest must be {consensus_rule_set}'s own"
+            );
+        }
+    }
 
     /// A discriminant not claimed by any branch of the running program must
     /// halt it, not fall through it.
