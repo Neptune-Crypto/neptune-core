@@ -66,7 +66,9 @@ pub const TX_BACKDATING_LIMIT: Timestamp = Timestamp::days(3);
 /// across
 ///  - networks, and
 ///  - hard and soft forks triggered by blocks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::EnumIter, Default, strum::Display)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, strum::EnumIter, strum::EnumCount, Default, strum::Display,
+)]
 pub enum ConsensusRuleSet {
     /// First rule set after reboot
     Reboot,
