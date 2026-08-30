@@ -53,6 +53,19 @@ pub fn predecessor_resolving(
     successor_pw: &PrimitiveWitness,
     range: Range<usize>,
 ) -> LinkPrimitiveWitness {
+    LinkPrimitiveWitness::from_primitive_witness(predecessor_resolving_pw(successor_pw, range), 0)
+}
+
+/// [`predecessor_resolving`], stopping one step short.
+///
+/// The predecessor as a plain [`PrimitiveWitness`], which is what it takes to
+/// prove it into a `SingleProof`-backed transaction -- the shape `Weld` takes
+/// as its first operand, and the one thing the `LinkPrimitiveWitness` it is
+/// otherwise wrapped in cannot be proven into.
+pub fn predecessor_resolving_pw(
+    successor_pw: &PrimitiveWitness,
+    range: Range<usize>,
+) -> PrimitiveWitness {
     // The UTXOs the successor will hold as thruputs, together with the
     // randomness that commits them.
     let utxos = successor_pw.input_utxos.utxos[range.clone()].to_vec();
@@ -117,7 +130,7 @@ pub fn predecessor_resolving(
         kernel: predecessor_kernel,
     };
 
-    LinkPrimitiveWitness::from_primitive_witness(predecessor_pw, 0)
+    predecessor_pw
 }
 
 /// A predecessor/successor pair over one mutator set: the successor's
