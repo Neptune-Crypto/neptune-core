@@ -1047,11 +1047,22 @@ impl BasicSnippet for WeldBranch {
 pub(crate) mod tests {
     use tasm_lib::prelude::Tip5;
 
+    use proptest::prop_assert;
+    use proptest::prop_assert_eq;
+    use proptest::strategy::BoxedStrategy;
+    use proptest::strategy::Strategy;
+    use proptest_arbitrary_interop::arb;
+    use test_strategy::proptest;
+
     use super::*;
+    use crate::chaintx::link_primitive_witness::LinkPrimitiveWitness;
+    use crate::chaintx::test_helpers::chainable_link_primitive_witnesses;
     use crate::chaintx::test_helpers::deterministic_chainable_link_primitive_witnesses;
     use crate::proof_abstractions::tasm::builtins as tasm;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::proof_abstractions::tasm::program::TritonError;
+    use crate::transaction::primitive_witness::PrimitiveWitness;
+    use crate::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::transaction::validity::single_proof::SingleProof;
     use crate::transaction::validity::single_proof::SingleProofWitness;
 
@@ -1288,5 +1299,422 @@ pub(crate) mod tests {
                 .with_output(link_proof_public_output(single_proof_program_digest));
             tasm::verify_stark(Stark::default(), &link_proof_claim, &self.link_proof);
         }
+    }
+
+    impl WeldWitness {
+        /// Cheap test-only constructor: a [`WeldWitness`] whose operand proofs
+        /// are mocks.
+        ///
+        /// Sound for every negative below because the recursion is the *last*
+        /// thing the branch does, so any other assertion fires before a proof is
+        /// looked at. A positive test cannot use this.
+        fn without_proofs(
+            singleproof_kernel: &TransactionKernel,
+            link_kernel: &LinkKernel,
+            shuffle_seed: [u8; 32],
+        ) -> Self {
+            let (new_kernel, surviving_outputs) =
+                Self::welded_kernel(singleproof_kernel, link_kernel, shuffle_seed);
+
+            Self {
+                transaction_kernel_mast_hash: singleproof_kernel.mast_hash(),
+                link_kernel_mast_hash: link_kernel.mast_hash(),
+                singleproof_kernel: singleproof_kernel.clone(),
+                link_kernel: link_kernel.clone(),
+                new_kernel,
+                surviving_outputs,
+                single_proof: Proof::invalid_mock(),
+                link_proof: Proof::invalid_mock(),
+            }
+        }
+    }
+
+    /// A weldable pair of random contents: a transaction with two outputs, and a
+    /// link transaction with one thruput that one of those outputs resolves --
+    /// so there is a cut-through to tamper with, an input on either side, and a
+    /// non-empty everything.
+    ///
+    /// The *shape* is held fixed so that every index the negatives poke exists;
+    /// only the contents vary. `Chain`'s `pokeable_pair`, whose operands weld as
+    /// readily as they chain.
+    fn pokeable_pair() -> BoxedStrategy<(LinkPrimitiveWitness, LinkPrimitiveWitness)> {
+        PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 1)
+            .prop_map(|pw| chainable_link_primitive_witnesses(pw, 1))
+            .boxed()
+    }
+
+    /// [`pokeable_pair`] welded: the predecessor is operand A, a plain
+    /// transaction carrying no thruputs, and the successor is operand B.
+    fn pokeable_witness() -> BoxedStrategy<WeldWitness> {
+        pokeable_pair()
+            .prop_map(|(predecessor, successor)| {
+                WeldWitness::without_proofs(
+                    &predecessor.kernel.kernel,
+                    &successor.kernel,
+                    [0u8; 32],
+                )
+            })
+            .boxed()
+    }
+
+    /// Run a poked witness and require that it fails with one of `error_ids`.
+    ///
+    /// The operands' MAST hashes are re-derived first. They are witness fields
+    /// here -- unlike `Chain`, which divines them -- so a poked operand kernel
+    /// would otherwise disagree with the root the branch authenticates against,
+    /// and every negative would fail as a bad authentication path instead of as
+    /// the assertion it is about. Nothing pins those fields to the operands
+    /// except the recursive verification, which mock proofs never reach; that is
+    /// the one property these negatives cannot test.
+    fn expect_failure(
+        mut witness: WeldWitness,
+        error_ids: &[i128],
+    ) -> Result<(), proptest::test_runner::TestCaseError> {
+        witness.transaction_kernel_mast_hash = witness.singleproof_kernel.mast_hash();
+        witness.link_kernel_mast_hash = witness.link_kernel.mast_hash();
+
+        let witness = SingleProofWitness::from_weld(witness);
+        SingleProof::new(CONSENSUS_RULE_SET).test_assertion_failure(
+            witness.standard_input(),
+            witness.nondeterminism(CONSENSUS_RULE_SET),
+            error_ids,
+        )
+    }
+
+    /// Dropping one of the operands' removal records from the welded kernel is
+    /// value creation: an input vanishes without its funds being accounted for.
+    #[proptest(cases = 4)]
+    fn welded_inputs_must_be_the_operands_inputs(
+        #[strategy(pokeable_witness())] mut witness: WeldWitness,
+    ) {
+        let mut inputs = witness.new_kernel.inputs.clone();
+        inputs.pop().unwrap();
+        witness.new_kernel = TransactionKernelModifier::default()
+            .inputs(inputs)
+            .modify(witness.new_kernel);
+
+        expect_failure(witness, &[INPUTS_ARE_NOT_THE_OPERANDS_INPUTS_ERROR]).unwrap();
+    }
+
+    /// Announcements carry over wholesale, from both operands.
+    #[proptest(cases = 4)]
+    fn welded_announcements_must_be_the_operands_announcements(
+        #[strategy(pokeable_witness())] mut witness: WeldWitness,
+    ) {
+        let mut announcements = witness.new_kernel.announcements.clone();
+        announcements.pop().unwrap();
+        witness.new_kernel = TransactionKernelModifier::default()
+            .announcements(announcements)
+            .modify(witness.new_kernel);
+
+        expect_failure(
+            witness,
+            &[ANNOUNCEMENTS_ARE_NOT_THE_OPERANDS_ANNOUNCEMENTS_ERROR],
+        )
+        .unwrap();
+    }
+
+    /// A thruput that no output of A resolves is the whole thing `Weld` exists
+    /// to refuse: a thruput is an input no mutator set knows about, so one that
+    /// survives into a block-borne transaction is an input from nowhere.
+    ///
+    /// Fabricating one breaks the first cut-through equation, A's outputs being
+    /// no longer the survivors plus B's thruputs.
+    #[proptest(cases = 4)]
+    fn every_thruput_must_be_cut_against_a_transaction_output(
+        #[strategy(pokeable_witness())] mut witness: WeldWitness,
+        #[strategy(arb())] fabricated: AdditionRecord,
+    ) {
+        witness.link_kernel.thruputs.push(fabricated);
+
+        expect_failure(
+            witness,
+            &[THRUPUTS_ARE_NOT_A_SUBSET_OF_THE_TRANSACTION_OUTPUTS_ERROR],
+        )
+        .unwrap();
+    }
+
+    /// The survivors are pinned from both sides: they are what is left of A's
+    /// outputs once B's thruputs are taken out, and they are the welded outputs
+    /// once B's outputs are taken out. A prover who lies about them fails one
+    /// equation or the other -- here the first, which is checked first.
+    ///
+    /// The lie is an added survivor rather than a dropped one because in this
+    /// fixture there is nothing to drop: A holds exactly one output and B one
+    /// thruput, so everything cuts through and the survivor list is empty. That
+    /// makes this the case worth having either way -- a multiset comparison
+    /// against an empty list is where a vacuous pass would hide.
+    #[proptest(cases = 4)]
+    fn surviving_outputs_must_be_what_the_thruputs_leave(
+        #[strategy(pokeable_witness())] mut witness: WeldWitness,
+        #[strategy(arb())] phantom: AdditionRecord,
+    ) {
+        witness.surviving_outputs.push(phantom);
+
+        expect_failure(
+            witness,
+            &[THRUPUTS_ARE_NOT_A_SUBSET_OF_THE_TRANSACTION_OUTPUTS_ERROR],
+        )
+        .unwrap();
+    }
+
+    /// And the second equation catches the welded outputs themselves: dropping
+    /// one destroys value that the operands' balances still account for.
+    #[proptest(cases = 4)]
+    fn welded_outputs_must_be_the_survivors_plus_the_link_outputs(
+        #[strategy(pokeable_witness())] mut witness: WeldWitness,
+    ) {
+        let mut outputs = witness.new_kernel.outputs.clone();
+        outputs.pop().unwrap();
+        witness.new_kernel = TransactionKernelModifier::default()
+            .outputs(outputs)
+            .modify(witness.new_kernel);
+
+        expect_failure(
+            witness,
+            &[OUTPUTS_ARE_NOT_THE_SURVIVORS_PLUS_THE_LINK_OUTPUTS_ERROR],
+        )
+        .unwrap();
+    }
+
+    /// Set both operand fees and the welded fee, all in nau, and expect the
+    /// combination to be rejected. `sum` is stated rather than computed: what
+    /// each caller is about is which side of `[0, MAX_NAU]` it falls on, so it
+    /// should be readable off the call.
+    fn expect_fee_failure(mut witness: WeldWitness, a: i128, b: i128, sum: i128) {
+        let set_fee = |kernel: TransactionKernel, nau: i128| {
+            TransactionKernelModifier::default()
+                .fee(NativeCurrencyAmount::from_nau(nau))
+                .modify(kernel)
+        };
+        witness.singleproof_kernel = set_fee(witness.singleproof_kernel.clone(), a);
+        witness.link_kernel.kernel = set_fee(witness.link_kernel.kernel.clone(), b);
+        witness.new_kernel = set_fee(witness.new_kernel.clone(), sum);
+
+        expect_failure(witness, &[FEE_IS_NEGATIVE_OR_INVALID_AMOUNT_ERROR]).unwrap();
+    }
+
+    /// A fee sum outside `[0, MAX_NAU]` is rejected, over the top and under the
+    /// bottom, and on either operand.
+    ///
+    /// The over-the-top cases use operands that are each individually a valid
+    /// amount, so what is rejected is the sum and nothing else. A negative sum
+    /// cannot be reached that way, so those cases put the negative on one
+    /// operand and leave the other at zero.
+    #[proptest(cases = 4)]
+    fn fee_sum_outside_the_valid_range_is_rejected(
+        #[strategy(pokeable_witness())] witness: WeldWitness,
+    ) {
+        let max = NativeCurrencyAmount::MAX_NAU;
+
+        expect_fee_failure(witness.clone(), max, 1, max + 1);
+        expect_fee_failure(witness.clone(), 1, max, max + 1);
+        expect_fee_failure(witness.clone(), -1, 0, -1);
+        expect_fee_failure(witness.clone(), 0, -1, -1);
+    }
+
+    /// A negative operand fee is rejected even when the sum it produces is a
+    /// valid amount -- the case the range check cannot reach, caught only by the
+    /// assert that the `u128` addition did not carry. `Chain`'s rule, and for
+    /// the same reason: a negative-fee operand can never enter the pipeline.
+    #[proptest(cases = 4)]
+    fn negative_operand_fee_is_rejected_even_when_the_sum_is_valid(
+        #[strategy(pokeable_witness())] witness: WeldWitness,
+    ) {
+        expect_fee_failure(witness.clone(), -1, 2, 1);
+        expect_fee_failure(witness.clone(), 2, -1, 1);
+    }
+
+    /// The welded fee is the operands' fees added up -- no more, which mints a
+    /// fee the operands never paid, and no less, which short-changes the miner
+    /// while the operands' balances still say otherwise.
+    #[proptest(cases = 4)]
+    fn welded_fee_must_be_the_sum_of_the_operand_fees(
+        #[strategy(pokeable_witness())] original: WeldWitness,
+    ) {
+        for delta in [-1, 1] {
+            let mut witness = original.clone();
+            let fee = witness.new_kernel.fee.to_nau() + delta;
+            witness.new_kernel = TransactionKernelModifier::default()
+                .fee(NativeCurrencyAmount::from_nau(fee))
+                .modify(witness.new_kernel);
+
+            expect_failure(witness, &[FEE_IS_NOT_SUM_OF_OPERAND_FEES_ERROR]).unwrap();
+        }
+    }
+
+    /// The welded timestamp is the later of the two. Earlier would let a weld
+    /// backdate its operand; later is simply not what the rule says.
+    #[proptest(cases = 4)]
+    fn welded_timestamp_must_be_the_later_of_the_operand_timestamps(
+        #[strategy(pokeable_witness())] original: WeldWitness,
+    ) {
+        for delta in [-1, 1] {
+            let mut witness = original.clone();
+            let timestamp = Timestamp(witness.new_kernel.timestamp.0 + bfe!(delta));
+            witness.new_kernel = TransactionKernelModifier::default()
+                .timestamp(timestamp)
+                .modify(witness.new_kernel);
+
+            expect_failure(witness, &[TIMESTAMP_IS_NOT_MAX_OF_OPERAND_TIMESTAMPS_ERROR]).unwrap();
+        }
+    }
+
+    /// All three kernels name one mutator set. Operands over different mutator
+    /// sets have no common notion of which outputs exist, so cutting one
+    /// through the other is meaningless.
+    #[proptest(cases = 4)]
+    fn mismatched_mutator_set_hash_is_rejected(
+        #[strategy(pokeable_witness())] original: WeldWitness,
+    ) {
+        for poke in 0..3 {
+            let mut witness = original.clone();
+            let msh = Digest::default();
+            let modifier = || TransactionKernelModifier::default().mutator_set_hash(msh);
+            match poke {
+                0 => witness.singleproof_kernel = modifier().modify(witness.singleproof_kernel),
+                1 => witness.link_kernel.kernel = modifier().modify(witness.link_kernel.kernel),
+                _ => witness.new_kernel = modifier().modify(witness.new_kernel),
+            }
+
+            expect_failure(witness, &[MUTATOR_SET_HASH_MISMATCH_ERROR]).unwrap();
+        }
+    }
+
+    /// Neither A nor the weld may carry a coinbase. B's absence of one holds by
+    /// induction over the `LinkProof` branches, but A is a `SingleProof`-backed
+    /// transaction and is entitled to one -- on the decomposition path `Cast`
+    /// is what refuses it, and `Weld` deletes `Cast` from the path. Without this
+    /// check a coinbase-bearing A would weld into a kernel declaring no coinbase
+    /// while its outputs still carry the subsidy.
+    ///
+    /// The leaf is a constant the branch authenticates directly, so a kernel
+    /// holding anything else has the wrong leaf, not merely the wrong value.
+    #[proptest(cases = 4)]
+    fn coinbase_on_the_transaction_or_on_the_weld_is_rejected(
+        #[strategy(pokeable_witness())] original: WeldWitness,
+    ) {
+        let coinbase =
+            || TransactionKernelModifier::default().coinbase(Some(NativeCurrencyAmount::coins(1)));
+
+        let mut witness = original.clone();
+        witness.singleproof_kernel = coinbase().modify(witness.singleproof_kernel);
+        expect_failure(witness, &[MerkleVerify::ROOT_MISMATCH_ERROR_ID]).unwrap();
+
+        let mut witness = original.clone();
+        witness.new_kernel = coinbase().modify(witness.new_kernel);
+        expect_failure(witness, &[MerkleVerify::ROOT_MISMATCH_ERROR_ID]).unwrap();
+    }
+
+    /// The welded merge bit is A's, whatever A's is. One leaf is authenticated
+    /// into both trees, so a weld that flips the bit has a leaf that one of the
+    /// two trees does not commit to.
+    ///
+    /// The bit matters: it is what makes a kernel a `BlockTransactionKernel`, so
+    /// setting it where A did not would promote a transaction that was never
+    /// merged, and clearing it where A did would strand one that was.
+    #[proptest(cases = 4)]
+    fn merge_bit_must_be_carried_from_the_transaction(
+        #[strategy(pokeable_witness())] mut witness: WeldWitness,
+    ) {
+        let flipped = !witness.new_kernel.merge_bit;
+        witness.new_kernel = TransactionKernelModifier::default()
+            .merge_bit(flipped)
+            .modify(witness.new_kernel);
+
+        expect_failure(witness, &[MerkleVerify::ROOT_MISMATCH_ERROR_ID]).unwrap();
+    }
+
+    /// Every field the branch reads is bound to the kernel it was read from: a
+    /// bad authentication path fails before any of the equations above get a
+    /// chance to hold.
+    #[proptest(cases = 4)]
+    fn bad_authentication_path_is_rejected(#[strategy(pokeable_witness())] witness: WeldWitness) {
+        let witness = SingleProofWitness::from_weld(witness);
+        let mut nondeterminism = witness.nondeterminism(CONSENSUS_RULE_SET);
+        nondeterminism.digests[0].0[0].increment();
+
+        SingleProof::new(CONSENSUS_RULE_SET)
+            .test_assertion_failure(
+                witness.standard_input(),
+                nondeterminism,
+                &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
+            )
+            .unwrap();
+    }
+
+    /// The welded kernel is bound to the claim: the branch authenticates its
+    /// fields against the MAST hash on the public input, so a witness proven
+    /// against some *other* kernel fails at the first field.
+    #[proptest(cases = 4)]
+    fn welded_kernel_must_be_the_one_in_the_claim(
+        #[strategy(pokeable_witness())] witness: WeldWitness,
+        #[strategy(pokeable_witness())] other: WeldWitness,
+    ) {
+        let claimed = SingleProofWitness::from_weld(other);
+        let witness = SingleProofWitness::from_weld(witness);
+
+        SingleProof::new(CONSENSUS_RULE_SET)
+            .test_assertion_failure(
+                claimed.standard_input(),
+                witness.nondeterminism(CONSENSUS_RULE_SET),
+                &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
+            )
+            .unwrap();
+    }
+
+    /// The welded kernel is the operands' kernels combined, which is what the
+    /// branch spends its assertions checking. Stated once here against the Rust
+    /// that builds it, so that a change to `welded_kernel` that the tasm would
+    /// reject fails in milliseconds rather than in the VM.
+    #[proptest(cases = 4)]
+    fn welded_kernel_combines_the_operands(
+        #[strategy(pokeable_pair())] pair: (LinkPrimitiveWitness, LinkPrimitiveWitness),
+    ) {
+        let (predecessor, successor) = pair;
+        let a = &predecessor.kernel.kernel;
+        let b = &successor.kernel;
+        let witness = WeldWitness::without_proofs(a, b, [0u8; 32]);
+        let w = &witness.new_kernel;
+
+        let sorted = |mut digests: Vec<Digest>| {
+            digests.sort();
+            digests
+        };
+        let hashed = |records: &[AdditionRecord]| sorted(records.iter().map(Tip5::hash).collect());
+
+        /* inputs and announcements are the concatenations */
+        prop_assert_eq!(
+            sorted(w.inputs.iter().map(Tip5::hash).collect()),
+            sorted(
+                [a.inputs.clone(), b.kernel.inputs.clone()]
+                    .concat()
+                    .iter()
+                    .map(Tip5::hash)
+                    .collect()
+            )
+        );
+        prop_assert_eq!(
+            a.announcements.len() + b.kernel.announcements.len(),
+            w.announcements.len()
+        );
+
+        /* the outputs are the survivors plus B's, and A's are the survivors
+        plus B's thruputs -- the two equations the branch checks */
+        prop_assert_eq!(
+            hashed(&w.outputs),
+            hashed(&[witness.surviving_outputs.clone(), b.kernel.outputs.clone()].concat())
+        );
+        prop_assert_eq!(
+            hashed(&a.outputs),
+            hashed(&[witness.surviving_outputs.clone(), b.thruputs.clone()].concat())
+        );
+
+        /* and the scalars */
+        prop_assert_eq!(a.fee + b.kernel.fee, w.fee);
+        prop_assert_eq!(max(a.timestamp, b.kernel.timestamp), w.timestamp);
+        prop_assert_eq!(a.mutator_set_hash, w.mutator_set_hash);
+        prop_assert_eq!(a.merge_bit, w.merge_bit);
+        prop_assert!(w.coinbase.is_none());
     }
 }
