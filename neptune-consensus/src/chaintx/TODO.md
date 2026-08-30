@@ -316,7 +316,7 @@ verified", i.e. universal forgery. Covered by §Negative tests for `D`.
       enum (discriminant 3); recursively verifies a `LinkProof`. It holds the
       transaction kernel and the link proof, and nothing else: `thruputs == []`
       is not a field and not an assertion but the shape of the derived `lkmh`.
-- [ ] `SingleProofWitness::Weld(WeldWitness)` — second new variant on the same
+- [x] `SingleProofWitness::Weld(WeldWitness)` — second new variant on the same
       enum (discriminant 4). Holds A's kernel and `SingleProof`, B's
       `LinkKernel` and `LinkProof`, and the welded kernel. Its own memory
       image, like `ChainWitness`; the cut-through set is *not* a field, see
@@ -559,7 +559,7 @@ would bind that check to the wrong tree without crashing.
   - [x] the branch asserts nothing of its own, so it declares no error IDs:
         every way of getting it wrong is a claim no link proof answers, and the
         negatives all land inside `stark_verify`.
-- [ ] **Weld** `Transaction * LinkTx -> Transaction` = second new `SingleProof`
+- [x] **Weld** `Transaction * LinkTx -> Transaction` = second new `SingleProof`
       branch (`transaction/validity/tasm/single_proof/weld_branch.rs`): the
       direct route to what `Fix(Chain(Cast(A), B))` computes in three proofs and
       four recursive verifications. `Weld` does it in one proof and two, against
@@ -569,7 +569,7 @@ would bind that check to the wrong tree without crashing.
       both claims -- `Fix`'s trick applied twice. Lands *with* `Fix`, in the same
       program and the same rule set: added afterwards it would cost a second
       hardfork and a second `D` migration (§Consensus change).
-  - [ ] **not** `Fix ∘ Chain ∘ Cast`. The contract diverges in both directions,
+  - [x] **not** `Fix ∘ Chain ∘ Cast`. The contract diverges in both directions,
         and says so:
         - *more permissive*: `Cast` refuses a merge-bit-bearing transaction,
           so the decomposition never accepts one. `Weld` does, and ignores the
@@ -577,7 +577,7 @@ would bind that check to the wrong tree without crashing.
         - *more restrictive*: `Chain` cancels a thruput against its own
           operand's output as readily as against the other's (`chain.rs:222`).
           `Weld` cuts B's thruputs against A's outputs only.
-  - [ ] cut-through, with no witness-supplied cut multiset and no maximality
+  - [x] cut-through, with no witness-supplied cut multiset and no maximality
         check -- both fall out of the restriction above and of the output type:
 ```
             A.outputs     ≡ leftover ⊎ B.thruputs
@@ -589,14 +589,14 @@ would bind that check to the wrong tree without crashing.
         must be empty after cut-through", in one multiset split. The machinery is
         `Chain`'s -- `ChainMap` and the multiset-equality snippets -- minus the
         cut set and minus the maximality check.
-  - [ ] no coinbase on A. Neither operand's proof gives it: the `LinkProof`
+  - [x] no coinbase on A. Neither operand's proof gives it: the `LinkProof`
         induction covers B, and a `SingleProof`-backed transaction is entitled to
         a coinbase. On the decomposition path `Cast` is what refuses one
         (`cast.rs:391`), and `Weld` deletes `Cast` from the path. Without the
         assertion a coinbase-bearing A welds into a kernel declaring no coinbase
         while its outputs still carry the subsidy, and nothing re-runs a type
         script over the welded kernel to catch it.
-  - [ ] the merge bit is *carried*, not asserted: `weld.merge_bit ==
+  - [x] the merge bit is *carried*, not asserted: `weld.merge_bit ==
         A.merge_bit`. B's is false by induction over the `LinkProof` branches, so
         "A's" and "either operand's" coincide; "A's" is the one to state. The bit
         is what makes a kernel a `BlockTransactionKernel`
@@ -611,14 +611,14 @@ would bind that check to the wrong tree without crashing.
           the mempool's merge-input cache (`mempool.rs:1051`), so this degrades
           bookkeeping rather than consensus -- but it wants a look before
           release.
-  - [ ] fee: the sum, in `[0, MAX_NAU]` with no carry. `Chain`'s argument
+  - [x] fee: the sum, in `[0, MAX_NAU]` with no carry. `Chain`'s argument
         verbatim (`chain.rs:1297`), and it bounds *both* operands at once -- raw
         `u128` addition makes a negative amount enormous, so a negative A or B
         either carries or lands out of range. No separate assertion on A's fee.
-  - [ ] timestamp is the later of the two; A, B and the weld share one
+  - [x] timestamp is the later of the two; A, B and the weld share one
         mutator-set hash; inputs and announcements are the concatenations.
         `Chain`'s rules, unchanged.
-  - [ ] discriminant 4. The pre-delta program counts 3 *and* 4 as out of range
+  - [x] discriminant 4. The pre-delta program counts 3 *and* 4 as out of range
         (`single_proof.rs::invalid_discriminant_crashes_execution`).
 - [x] claim generators for each; the `LinkProof` claim generator takes
       `(lkmh, D)` — `chaintx/generate_link_proof_claim.rs`, mirroring
@@ -636,10 +636,12 @@ would bind that check to the wrong tree without crashing.
       placeholders** (60_000 / 6_000) and want a real schedule before release.
   - [x] Give delta its own `TritonProofVersion` when `triton-vm` bumps.
   - [x] `SingleProof` becomes a family indexed by the rule set, with
-        `ConsensusRuleSet::has_chain_branches` as the one axis: two programs, two
-        `OnceLock`s. Everything that produces or names a single proof takes a
-        rule set, so the pre-delta program keeps running until the activation
-        height, as it must.
+        `ConsensusRuleSet::has_chain_branches` as the one axis: two programs,
+        cached one `OnceLock` per rule set rather than one per program, since
+        what a rule set assembles is more than which branches it has.
+        Everything that produces or names a single proof takes a rule set, so
+        the pre-delta program keeps running until the activation height, as it
+        must.
   - [x] `infer_from`'s catch-all (RegTest, TestnetMock, Testnet(n>0)) still
         answers gamma, so `Fix` is unreachable end-to-end there. Flip it to
         delta together with §Integration -- not before, since nothing yet
@@ -995,10 +997,10 @@ unmatched thruput is un-`Fix`able (see §Motivation).
 The union of `Cast`'s, `Chain`'s and `Fix`'s negatives, minus what the contract
 deliberately changes. Mechanical except for the first three.
 
-- [ ] `coinbase_on_the_transaction_is_rejected`: a coinbase-bearing A is
+- [x] `coinbase_on_the_transaction_is_rejected`: a coinbase-bearing A is
       refused. No analog anywhere else -- `Cast` used to own this check, and
       `Weld` deletes `Cast` from the path.
-- [ ] `unresolved_thruput_is_rejected`: a thruput of B absent from A's outputs.
+- [x] `unresolved_thruput_is_rejected`: a thruput of B absent from A's outputs.
       `Fix`'s `link_transaction_with_thruputs_is_rejected` is enforced by
       arithmetic; here it is a multiset equation, so it earns its own test and
       its own error ID.
@@ -1011,17 +1013,17 @@ deliberately changes. Mechanical except for the first three.
       both cases -- the welded kernel's bit is A's either way.
 - [ ] `self_cut_through_is_rejected`: a thruput of B matching an output of B
       rather than of A. Accepted by the decomposition, refused here.
-- [ ] `negative_operand_fee_is_rejected_even_when_the_sum_is_valid` /
+- [x] `negative_operand_fee_is_rejected_even_when_the_sum_is_valid` /
       `fee_sum_outside_the_valid_range_is_rejected`: `Chain`'s two, on A and B.
-- [ ] `welded_timestamp_must_be_the_later_of_the_two`.
-- [ ] `mismatched_mutator_set_hash_is_rejected`: A, B or the weld naming a
+- [x] `welded_timestamp_must_be_the_later_of_the_two`.
+- [x] `mismatched_mutator_set_hash_is_rejected`: A, B or the weld naming a
       mutator set the others do not.
-- [ ] `welded_inputs_must_be_the_operands_inputs` /
+- [x] `welded_inputs_must_be_the_operands_inputs` /
       `..._announcements_...` / `..._outputs_...`: a field that is not the
       concatenation, respectively not the two equations' `leftover ⊎ B.outputs`.
-- [ ] `bad_authentication_path_is_rejected`: an A or B field absent from its
+- [x] `bad_authentication_path_is_rejected`: an A or B field absent from its
       kernel's MAST.
-- [ ] `welded_kernel_must_be_the_one_in_the_claim`.
+- [x] `welded_kernel_must_be_the_one_in_the_claim`.
 - [ ] `each_operand_proof_must_attest_to_its_own_operand`: A's `SingleProof`
       verified against B's kernel, and B's `LinkProof` against A's -- the
       operands being differently typed, this is two tamperings rather than
@@ -1100,12 +1102,12 @@ Claim / plumbing:
 `Weld` (it touches `D` twice, once per operand claim):
 - [ ] `transaction_proven_under_another_program_digest_is_rejected`: A proven
       under `D' != own_program_digest()`.
-- [ ] `link_proof_forged_under_another_single_proof_digest_is_rejected`: B
+- [x] `link_proof_forged_under_another_single_proof_digest_is_rejected`: B
       forged under `D' != own_program_digest()`.
 - [ ] `witness_supplied_single_proof_digest_is_ignored`: a `single_proof_digest`
       poked into the witness's memory image, public input untouched, still
       verifies.
-- [ ] Naming two different digests is unrepresentable rather than rejected: the
+- [x] Naming two different digests is unrepresentable rather than rejected: the
       branch reads `own_program_digest()` once and names it in both claims, so A
       and B cannot be verified under different `D`s.
 
