@@ -2032,6 +2032,79 @@ mod tests {
         assert_eq!(removal_records, unpacked);
     }
 
+    /// `BATCH_SIZE` removal records that all reference the same chunk, of the
+    /// given length, at chunk index 0.
+    fn removal_records_sharing_one_chunk(chunk_length: usize) -> Vec<RemovalRecord> {
+        let mut runner = TestRunner::deterministic();
+        let mut absolute_index_sets = vec(arb::<AbsoluteIndexSet>(), BATCH_SIZE as usize)
+            .new_tree(&mut runner)
+            .unwrap()
+            .current();
+        for ais in &mut absolute_index_sets {
+            // Ensure at least one index lives in 1st chunk
+            ais.set_minimum(0);
+        }
+
+        let shared_chunk = Chunk::random_of_length(chunk_length);
+        absolute_index_sets
+            .into_iter()
+            .map(|ais| RemovalRecord {
+                absolute_indices: ais,
+                target_chunks: ChunkDictionary::new(vec![(
+                    0,
+                    (
+                        MmrMembershipProof {
+                            authentication_path: vec![],
+                        },
+                        shared_chunk.clone(),
+                    ),
+                )]),
+            })
+            .collect_vec()
+    }
+
+    #[test]
+    fn pack_unpack_removal_records_with_overfull_chunk() {
+        for chunk_length in [2047, 2048, 2049, 4095, 4096, 4097, 9000, 20000] {
+            let removal_records = removal_records_sharing_one_chunk(chunk_length);
+
+            let packed = RemovalRecordList::pack(removal_records.clone());
+            let unpacked = RemovalRecordList::try_unpack(packed).unwrap_or_else(|err| {
+                panic!(
+                    "unpacking removal records sharing a chunk of {chunk_length} indices must \
+                     succeed. Got error:\n{err}"
+                )
+            });
+
+            assert_eq!(
+                removal_records, unpacked,
+                "pack-unpack must be the identity for a shared chunk of {chunk_length} indices"
+            );
+        }
+    }
+
+    #[test]
+    fn pack_unpack_removal_records_with_maximally_full_chunk() {
+        let removal_records = removal_records_sharing_one_chunk(92160);
+
+        let packed = RemovalRecordList::pack(removal_records.clone());
+        let unpacked = RemovalRecordList::try_unpack(packed).unwrap();
+
+        assert_eq!(removal_records, unpacked);
+    }
+
+    #[test]
+    fn bfieldcodec_encoding_of_overfull_chunk() {
+        let removal_records = removal_records_sharing_one_chunk(4096);
+
+        let packed = RemovalRecordList::pack(removal_records.clone());
+        let decoded = *Vec::<RemovalRecord>::decode(&packed.encode()).unwrap();
+        assert_eq!(packed, decoded);
+
+        let unpacked = RemovalRecordList::try_unpack(decoded).unwrap();
+        assert_eq!(removal_records, unpacked);
+    }
+
     #[proptest]
     fn pack_unpack_identity_from_msa_and_records_tiny(
         #[strategy(1usize..3)] _num_removals: usize,
@@ -2377,6 +2450,59 @@ mod tests {
                     // Ensure no crash, and that an error is returned.
                     assert!(RemovalRecordList::try_unpack(removal_records).is_err());
                 }
+            }
+        }
+
+        #[proptest]
+        fn no_panic_on_chunk_with_long_length_flag(
+            #[strategy(arb())] item: Digest,
+            #[strategy(arb())] sr: Digest,
+            #[strategy(arb())] rp: Digest,
+            #[strategy(arb())] leaf_index: u64,
+            #[strategy(0usize..8)] num_removal_records: usize,
+            #[strategy(collection::vec(arb::<u32>(), 1..40))] packed_chunk: Vec<u32>,
+        ) {
+            let mut packed_chunk = packed_chunk;
+            packed_chunk[0] |= 1 << 31; // set the long-length flag
+
+            let removal_record = RemovalRecord {
+                absolute_indices: AbsoluteIndexSet::compute(item, sr, rp, leaf_index),
+                target_chunks: ChunkDictionary::new(vec![(
+                    0,
+                    (
+                        MmrMembershipProof::new(vec![]),
+                        Chunk {
+                            relative_indices: packed_chunk,
+                        },
+                    ),
+                )]),
+            };
+            let removal_records = vec![removal_record; num_removal_records];
+
+            // Ensure no crash
+            let _ = RemovalRecordList::try_unpack(removal_records);
+        }
+
+        #[test]
+        fn no_panic_on_corrupted_length_indicator_of_overfull_chunk() {
+            let packed = RemovalRecordList::pack(removal_records_sharing_one_chunk(4096));
+            let (entry_index, _) = packed[0]
+                .target_chunks
+                .dictionary
+                .iter()
+                .enumerate()
+                .max_by_key(|(_, (_, (_, chunk)))| chunk.relative_indices.len())
+                .expect("packed removal records must have a chunk dictionary");
+
+            for corruption in [1 << 31, 1 << 20, 1 << 8, 1, u32::MAX] {
+                let mut corrupted = packed.clone();
+                corrupted[0].target_chunks.dictionary[entry_index]
+                    .1
+                     .1
+                    .relative_indices[0] ^= corruption;
+
+                // Ensure no crash
+                let _ = RemovalRecordList::try_unpack(corrupted);
             }
         }
 
