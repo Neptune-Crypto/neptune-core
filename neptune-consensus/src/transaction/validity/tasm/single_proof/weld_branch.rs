@@ -1,4 +1,5 @@
 use std::cmp::max;
+use std::cmp::min;
 
 use itertools::Itertools;
 use neptune_mutator_set::addition_record::AdditionRecord;
@@ -36,7 +37,6 @@ use crate::chaintx::link_kernel::LinkKernel;
 use crate::chaintx::link_kernel::LinkKernelField;
 use crate::chaintx::link_proof::link_proof_public_input;
 use crate::chaintx::link_proof::link_proof_public_output;
-use crate::chaintx::link_proof::no_coinbase_leaf;
 use crate::chaintx::link_proof::LinkProof;
 use crate::chaintx::link_tx::LinkTx;
 use crate::chaintx::link_tx::LinkTxProof;
@@ -50,6 +50,8 @@ use crate::transaction::validity::single_proof::DISCRIMINANT_FOR_WELD;
 use crate::transaction::validity::tasm::authenticate_txk_field::AuthenticateTxkField;
 use crate::transaction::validity::tasm::claims::generate_single_proof_claim::GenerateSingleProofClaim;
 use crate::transaction::validity::tasm::hash_removal_record_index_sets::HashRemovalRecordIndexSets;
+use crate::transaction::validity::tasm::single_proof::merge_branch::bound_time_diff::BoundTimeDiff;
+use crate::transaction::validity::tasm::single_proof::merge_branch::coinbase_bound_time_diff::CoinbaseTimestampDiffBounded;
 use crate::transaction::Transaction;
 use crate::transaction::TransactionProof;
 use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -120,7 +122,8 @@ impl WeldWitness {
     /// # Panics
     ///
     /// - if either operand is not proof-backed;
-    /// - if the transaction carries a coinbase;
+    /// - if the transaction carries a coinbase and the operands' timestamps lie
+    ///   more than `BoundTimeDiff::MAX_TIMESTAMP_DIFF` apart;
     /// - if a thruput of the link transaction is not among the transaction's
     ///   outputs, which is to say the weld would leave a thruput unresolved;
     /// - if the operands name different mutator sets, or their fees do not sum
@@ -168,13 +171,23 @@ impl WeldWitness {
             "attempted to weld operands with non-matching mutator set hashes"
         );
         assert!(
-            transaction_kernel.coinbase.is_none(),
-            "a coinbase transaction cannot be welded"
-        );
-        assert!(
             link_kernel.kernel.coinbase.is_none() && !link_kernel.kernel.merge_bit,
             "a link transaction is never a coinbase transaction and never carries the merge bit"
         );
+
+        // A coinbase's outputs are timelocked relative to the timestamp of the
+        // kernel that pays them out, which `NativeCurrency` checked when A was
+        // proven and nothing re-runs over the weld. So the weld may not pull the
+        // timestamp far past A's, or the subsidy comes free of its timelock.
+        // `Merge` bounds the same gap for the same reason.
+        if transaction_kernel.coinbase.is_some() {
+            let (a, b) = (transaction_kernel.timestamp, link_kernel.kernel.timestamp);
+            assert!(
+                max(a, b) - min(a, b) <= BoundTimeDiff::MAX_TIMESTAMP_DIFF,
+                "a coinbase transaction may not be welded across a timestamp gap of more than {}",
+                BoundTimeDiff::MAX_TIMESTAMP_DIFF.format_human_duration()
+            );
+        }
 
         let fee = transaction_kernel
             .fee
@@ -227,7 +240,10 @@ impl WeldWitness {
             outputs,
             announcements,
             fee,
-            coinbase: None,
+            // Carried, not refused: A is a `SingleProof`-backed transaction and
+            // is entitled to a coinbase. B's is `None` by induction over the
+            // `LinkProof` branches, so A's is the whole of it.
+            coinbase: transaction_kernel.coinbase,
             timestamp: max(transaction_kernel.timestamp, link_kernel.kernel.timestamp),
             mutator_set_hash: transaction_kernel.mutator_set_hash,
             // Carried, not cleared: the merge bit is what makes a kernel a
@@ -319,7 +335,7 @@ impl WeldWitness {
                 a(TransactionKernelField::MutatorSetHash),
                 b(LinkKernelField::MutatorSetHash),
                 w(TransactionKernelField::MutatorSetHash),
-                /* neither A nor the weld is a coinbase transaction */
+                /* the coinbase is A's, one leaf in both trees */
                 a(TransactionKernelField::Coinbase),
                 w(TransactionKernelField::Coinbase),
                 /* and the merge bit is A's, one leaf in both trees */
@@ -407,13 +423,17 @@ impl WeldWitness {
 /// because bounding it bounds the operands too, by the argument spelled out
 /// where it is asserted.
 ///
-/// The one check neither operand's proof supplies is **no coinbase on A**. The
-/// `LinkProof` induction covers B, and a `SingleProof`-backed transaction is
-/// entitled to a coinbase; on the decomposition path `Cast` is what refuses
-/// one, and `Weld` deletes `Cast` from the path. Without this artificial check,
-/// a coinbase-bearing A would weld into a kernel declaring no coinbase while
-/// its outputs still carry the block subsidy, and nothing re-runs a type script
-/// over the welded kernel.
+/// The coinbase, like the merge bit, is **carried**: `weld.coinbase ==
+/// A.coinbase`, one leaf authenticated into both trees. A `SingleProof`-backed
+/// transaction is entitled to a coinbase.
+///
+/// Carrying it costs one extra rule. `NativeCurrency` timelocks a coinbase's
+/// outputs against the timestamp of the kernel that pays them out. Since the
+/// welded timestamp is the *later* of the two, a back-dated coinbase could
+/// otherwise (without this rule) be welded forward into the present, releasing
+/// the timelock. So when A carries a coinbase, the operands' timestamps must
+/// lie within `BoundTimeDiff::MAX_TIMESTAMP_DIFF` of each other -- same as in
+/// [`Merge`](super::merge_branch::MergeBranch).
 ///
 /// B's coinbase and merge-bit leafs are *not* re-checked: they hold on the link
 /// kernel by induction over the `LinkProof` branches, exactly as
@@ -483,6 +503,7 @@ impl BasicSnippet for WeldBranch {
             Stark::default(),
         )));
         let merkle_verify = library.import(Box::new(MerkleVerify));
+        let coinbase_bound_time_diff = library.import(Box::new(CoinbaseTimestampDiffBounded));
         let hash_varlen = library.import(Box::new(HashVarlen));
         let multiset_equality = library.import(Box::new(MultisetEqualityDigests));
         let hash_1_removal_record_index_set =
@@ -591,6 +612,7 @@ impl BasicSnippet for WeldBranch {
         let field_timestamp = field!(TransactionKernel::timestamp);
         let field_mutator_set_hash = field!(TransactionKernel::mutator_set_hash);
         let field_merge_bit = field!(TransactionKernel::merge_bit);
+        let field_with_size_coinbase = field_with_size!(TransactionKernel::coinbase);
 
         let fee_size = NativeCurrencyAmount::static_length().unwrap();
         let timestamp_size = Timestamp::static_length().unwrap();
@@ -880,41 +902,57 @@ impl BasicSnippet for WeldBranch {
             // _ [own_program_digest] disc [txk_digest] *witness
         );
 
-        // Authenticate a constant leaf against one root, which asserts the
-        // field's *value* at the same time: only one preimage hashes to it.
-        let authenticate_constant_leaf =
-            |root: &[LabelledInstruction], leaf_index: usize, height: usize, leaf: Digest| {
-                triton_asm!(
-                    // _ ..
-                    {&root}
-                    // _ .. [root]
+        // The welded coinbase is A's. A `SingleProof`-backed transaction is
+        // entitled to a coinbase -- contrary to `Cast` -- and B's is `None` by
+        // induction over the `LinkProof` branches.
+        let assert_coinbase_is_carried_from_the_transaction = triton_asm!(
+            // _ [own_program_digest] disc [txk_digest] *witness
+            dup 0
+            {&a(&field_with_size_coinbase)}
+            // _ [own_program_digest] disc [txk_digest] *witness *coinbase size
 
-                    push {height}
-                    push {leaf_index as u32}
-                    {&push_digest(leaf)}
-                    // _ .. [root] height index [leaf]
+            call {hash_varlen}
+            hint coinbase_leaf = stack[0..5]
+            // _ [own_program_digest] disc [txk_digest] *witness [leaf]
 
-                    call {merkle_verify}
-                    // _ ..
-                )
-            };
+            {&root_a(Digest::LEN)}
+            push {<TransactionKernel as MastHash>::MAST_HEIGHT}
+            push {TransactionKernelField::Coinbase.discriminant() as u32}
+            dup 11 dup 11 dup 11 dup 11 dup 11
+            call {merkle_verify}
+            // _ [own_program_digest] disc [txk_digest] *witness [leaf]
 
-        // Neither operand's proof says A is not a coinbase transaction: the
-        // `LinkProof` induction covers B only, and a `SingleProof` is entitled
-        // to a coinbase. `Cast` is what refuses one on the decomposition path.
-        let assert_neither_kernel_is_a_coinbase_transaction = triton_asm!(
-            {&authenticate_constant_leaf(
-                &root_a(0),
-                TransactionKernelField::Coinbase.discriminant(),
-                <TransactionKernel as MastHash>::MAST_HEIGHT,
-                no_coinbase_leaf(),
-            )}
-            {&authenticate_constant_leaf(
-                &root_w(0),
-                TransactionKernelField::Coinbase.discriminant(),
-                <TransactionKernel as MastHash>::MAST_HEIGHT,
-                no_coinbase_leaf(),
-            )}
+            {&root_w(Digest::LEN)}
+            push {<TransactionKernel as MastHash>::MAST_HEIGHT}
+            push {TransactionKernelField::Coinbase.discriminant() as u32}
+            dup 11 dup 11 dup 11 dup 11 dup 11
+            call {merkle_verify}
+            // _ [own_program_digest] disc [txk_digest] *witness [leaf]
+
+            pop {Digest::LEN}
+            // _ [own_program_digest] disc [txk_digest] *witness
+        );
+
+        // A coinbase's outputs are timelocked relative to the timestamp of the
+        // kernel paying them out.
+        // The welded timestamp is the later of the two, so an unbounded gap
+        // would let a back-dated coinbase be welded forward into the present
+        // and release the timelock. `Merge` closes the same hole
+        // with the same snippet and the same bound.
+        let bound_the_timestamp_gap_of_a_coinbase_weld = triton_asm!(
+            // _ [own_program_digest] disc [txk_digest] *witness
+            dup 0
+            {&field_singleproof_kernel}
+            dup 1
+            {&field_link_kernel} {&field_inner_kernel}
+            dup 1
+            // _ [own_program_digest] disc [txk_digest] *witness *a *b *a
+
+            call {coinbase_bound_time_diff}
+            // _ [own_program_digest] disc [txk_digest] *witness *a *b *a
+
+            pop 3
+            // _ [own_program_digest] disc [txk_digest] *witness
         );
 
         // The welded merge bit is A's. One leaf serves both trees: it is hashed
@@ -1023,7 +1061,8 @@ impl BasicSnippet for WeldBranch {
             {&assert_fee_is_sum_of_operand_fees}
             {&assert_timestamp_is_max_of_operand_timestamps}
             {&assert_all_kernels_agree_on_mutator_set_hash}
-            {&assert_neither_kernel_is_a_coinbase_transaction}
+            {&assert_coinbase_is_carried_from_the_transaction}
+            {&bound_the_timestamp_gap_of_a_coinbase_weld}
             {&assert_merge_bit_is_carried_from_the_transaction}
             // _ [own_program_digest] disc [txk_digest] *witness
 
@@ -1273,14 +1312,19 @@ pub(crate) mod tests {
             assert_eq!(a.mutator_set_hash, b.kernel.mutator_set_hash);
             assert_eq!(a.mutator_set_hash, w.mutator_set_hash);
 
-            /* no coinbase on the transaction, nor on the weld. B's is false by
-            induction over the `LinkProof` branches. */
-            auth_txk(a_root, TransactionKernelField::Coinbase, no_coinbase_leaf());
-            auth_txk(
-                txk_digest,
-                TransactionKernelField::Coinbase,
-                no_coinbase_leaf(),
-            );
+            /* the coinbase is carried from the transaction, whatever it is:
+            one leaf, committed to by both trees. B's is `None` by induction
+            over the `LinkProof` branches. */
+            let coinbase_leaf = Tip5::hash(&a.coinbase);
+            auth_txk(a_root, TransactionKernelField::Coinbase, coinbase_leaf);
+            auth_txk(txk_digest, TransactionKernelField::Coinbase, coinbase_leaf);
+
+            /* and a coinbase weld may not move the timestamp far, or the
+            subsidy comes free of the timelock `NativeCurrency` put on it */
+            if a.coinbase.is_some() {
+                let (lts, rts) = (a.timestamp, b.kernel.timestamp);
+                assert!(max(lts, rts) - min(lts, rts) <= BoundTimeDiff::MAX_TIMESTAMP_DIFF);
+            }
 
             /* the merge bit is carried from the transaction, whatever it is: one
             leaf, committed to by both trees */
@@ -1630,29 +1674,85 @@ pub(crate) mod tests {
         }
     }
 
-    /// Neither A nor the weld may carry a coinbase. B's absence of one holds by
-    /// induction over the `LinkProof` branches, but A is a `SingleProof`-backed
-    /// transaction and is entitled to one -- on the decomposition path `Cast`
-    /// is what refuses it, and `Weld` deletes `Cast` from the path. Without this
-    /// check a coinbase-bearing A would weld into a kernel declaring no coinbase
-    /// while its outputs still carry the subsidy.
-    ///
-    /// The leaf is a constant the branch authenticates directly, so a kernel
-    /// holding anything else has the wrong leaf, not merely the wrong value.
+    /// Can't mess with the coinbase; it comes straight from the SingleProof-tx.
     #[proptest(cases = 4)]
-    fn coinbase_on_the_transaction_or_on_the_weld_is_rejected(
+    fn coinbase_must_be_carried_from_the_transaction(
         #[strategy(pokeable_witness())] original: WeldWitness,
     ) {
         let coinbase =
             || TransactionKernelModifier::default().coinbase(Some(NativeCurrencyAmount::coins(1)));
 
+        // a coinbase on A that the weld does not carry
         let mut witness = original.clone();
         witness.singleproof_kernel = coinbase().modify(witness.singleproof_kernel);
         expect_failure(witness, &[MerkleVerify::ROOT_MISMATCH_ERROR_ID]).unwrap();
 
+        // and one on the weld that A never had
         let mut witness = original.clone();
         witness.new_kernel = coinbase().modify(witness.new_kernel);
         expect_failure(witness, &[MerkleVerify::ROOT_MISMATCH_ERROR_ID]).unwrap();
+    }
+
+    /// A coinbase-bearing transaction welds, and its coinbase is carried into
+    /// the weld unchanged; a weld that drops it is rejected.
+    ///
+    /// The positive half of [`coinbase_must_be_carried_from_the_transaction`],
+    /// testing that things that should work, do.
+    #[proptest(cases = 4)]
+    fn a_coinbase_is_carried_into_the_weld(
+        #[strategy(pokeable_pair())] pair: (LinkPrimitiveWitness, LinkPrimitiveWitness),
+    ) {
+        let (predecessor, successor) = pair;
+        let coinbase = NativeCurrencyAmount::coins(1);
+        let minting = TransactionKernelModifier::default()
+            .coinbase(Some(coinbase))
+            .modify(predecessor.kernel.kernel);
+        let witness = WeldWitness::without_proofs(&minting, &successor.kernel, [0u8; 32]);
+
+        prop_assert_eq!(Some(coinbase), witness.new_kernel.coinbase);
+        prop_assert!(witness.link_kernel.kernel.coinbase.is_none());
+        expect_recursion_reached(witness.clone());
+
+        let mut witness = witness;
+        witness.new_kernel = TransactionKernelModifier::default()
+            .coinbase(None)
+            .modify(witness.new_kernel);
+
+        expect_failure(witness, &[MerkleVerify::ROOT_MISMATCH_ERROR_ID]).unwrap();
+    }
+
+    /// A coinbase weld may not move the timestamp by more than twelve hours.
+    ///
+    /// The welded timestamp is the later of the two operands'. Without this
+    /// bound a coinbase back-dated by the timelock period welds forward into
+    /// the present, releasing the time-lock. `Merge` bounds the same gap
+    /// for the same reason; a weld with no coinbase is free to span any gap.
+    #[proptest(cases = 4)]
+    fn a_coinbase_weld_across_a_wide_timestamp_gap_is_rejected(
+        #[strategy(pokeable_pair())] pair: (LinkPrimitiveWitness, LinkPrimitiveWitness),
+    ) {
+        let (predecessor, successor) = pair;
+        let minting = TransactionKernelModifier::default()
+            .coinbase(Some(NativeCurrencyAmount::coins(1)))
+            .modify(predecessor.kernel.kernel);
+        let witness = WeldWitness::without_proofs(&minting, &successor.kernel, [0u8; 32]);
+
+        // Poked after the fact rather than built with the gap: `welded_kernel`
+        // mirrors this very assertion and would panic before returning.
+        let stretched = witness.singleproof_kernel.timestamp
+            + BoundTimeDiff::MAX_TIMESTAMP_DIFF
+            + Timestamp::millis(1);
+        let bump = || TransactionKernelModifier::default().timestamp(stretched);
+
+        let mut witness = witness;
+        witness.link_kernel.kernel = bump().modify(witness.link_kernel.kernel);
+        witness.new_kernel = bump().modify(witness.new_kernel);
+
+        expect_failure(
+            witness,
+            &[BoundTimeDiff::TIMESTAMP_DIFF_EXCEEDS_MAX_ALLOWED],
+        )
+        .unwrap();
     }
 
     /// The welded merge bit is A's, whatever A's is. One leaf is authenticated
@@ -1796,7 +1896,7 @@ pub(crate) mod tests {
         prop_assert_eq!(max(a.timestamp, b.kernel.timestamp), w.timestamp);
         prop_assert_eq!(a.mutator_set_hash, w.mutator_set_hash);
         prop_assert_eq!(a.merge_bit, w.merge_bit);
-        prop_assert!(w.coinbase.is_none());
+        prop_assert_eq!(a.coinbase, w.coinbase);
     }
 
     /// Partial cut-through is accepted: a weld in which one of A's outputs
