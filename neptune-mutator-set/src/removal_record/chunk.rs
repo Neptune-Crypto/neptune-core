@@ -808,8 +808,6 @@ mod tests {
             );
         }
 
-        /// See NPT-198 in `r11.md`.
-        ///
         /// An attacker can grind to occupy more than 2^12 indices in one chunk,
         /// thus forcing more than 12 bits to be required for the length
         /// encoding in a packed chunk.
