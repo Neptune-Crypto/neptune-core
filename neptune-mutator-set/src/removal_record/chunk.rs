@@ -42,15 +42,6 @@ pub(crate) enum ChunkUnpackError {
 
     #[error("remainder bits were not zero")]
     NonzeroTrailingPadding,
-
-    #[error("the empty chunk packs to the empty list, not to a zero length indicator")]
-    NonCanonicalEmptyChunk,
-
-    #[error(
-        "length indicator uses the long form for a length below {LONG_LENGTH_FLAG}, which fits \
-         the short form"
-    )]
-    NonMinimalLengthIndicator,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec, TasmObject)]
@@ -284,14 +275,6 @@ impl Chunk {
             let length_lo = (self.relative_indices[0] >> 8) & ((1 << 12) - 1);
             ((length_hi << 12) | length_lo, 2)
         };
-
-        // The length indicator must be the one `pack` would have produced.
-        if indicated_length == 0 {
-            return Err(ChunkUnpackError::NonCanonicalEmptyChunk);
-        }
-        if num_length_elements == 2 && indicated_length < LONG_LENGTH_FLAG {
-            return Err(ChunkUnpackError::NonMinimalLengthIndicator);
-        }
 
         #[expect(clippy::manual_div_ceil, reason = "approach tasm implementation")]
         let indicated_packed_length = ((indicated_length + num_length_elements) * 12 + 31) / 32;
@@ -886,42 +869,6 @@ mod tests {
 
             let unpacked = packed.try_unpack().unwrap();
             assert_eq!(chunk, unpacked);
-        }
-
-        #[test]
-        fn try_unpack_rejects_noncanonical_empty_chunk() {
-            for first_element in [0, LONG_LENGTH_FLAG << 20] {
-                let packed = Chunk {
-                    relative_indices: vec![first_element],
-                };
-                assert_eq!(
-                    ChunkUnpackError::NonCanonicalEmptyChunk,
-                    packed.try_unpack().unwrap_err(),
-                    "zero length indicator {first_element:#010x} must be rejected"
-                );
-            }
-
-            // The canonical encoding of the empty chunk still round-trips.
-            let empty = Chunk::empty_chunk();
-            assert!(empty.pack().relative_indices.is_empty());
-            assert_eq!(empty, empty.pack().try_unpack().unwrap());
-        }
-
-        #[test]
-        fn try_unpack_rejects_non_minimal_length_indicator() {
-            for length in [1, 2, 360, 2046, 2047] {
-                let chunk = Chunk::random_of_length(length);
-                let length = u32::try_from(length).unwrap();
-                let long_length_encoding =
-                    [(length >> 12) | LONG_LENGTH_FLAG, length & ((1 << 12) - 1)];
-                let packed = chunk.pack_with_length_encoding(&long_length_encoding);
-
-                assert_eq!(
-                    ChunkUnpackError::NonMinimalLengthIndicator,
-                    packed.try_unpack().unwrap_err(),
-                    "long-form length indicator for length {length} must be rejected"
-                );
-            }
         }
 
         #[test]

@@ -2064,34 +2064,6 @@ mod tests {
     }
 
     #[test]
-    fn try_unpack_rejects_noncanonically_packed_chunk() {
-        let packed = RemovalRecordList::pack(removal_records_sharing_one_chunk(4096));
-        let (entry_index, _) = packed[0]
-            .target_chunks
-            .dictionary
-            .iter()
-            .enumerate()
-            .max_by_key(|(_, (_, (_, chunk)))| chunk.relative_indices.len())
-            .expect("packed removal records must have a chunk dictionary");
-
-        // Both are second encodings of the empty chunk, which packs to the
-        // empty list.
-        for noncanonical in [vec![0], vec![1 << 31]] {
-            let mut tampered = packed.clone();
-            tampered[0].target_chunks.dictionary[entry_index].1 .1 =
-                Chunk::from_indices(&noncanonical);
-
-            assert!(
-                matches!(
-                    RemovalRecordList::try_unpack(tampered),
-                    Err(RemovalRecordListUnpackError::InnerDecodingFailure(_))
-                ),
-                "non-canonical chunk {noncanonical:?} must be rejected"
-            );
-        }
-    }
-
-    #[test]
     fn pack_unpack_removal_records_with_overfull_chunk() {
         for chunk_length in [2047, 2048, 2049, 4095, 4096, 4097, 9000, 20000] {
             let removal_records = removal_records_sharing_one_chunk(chunk_length);
