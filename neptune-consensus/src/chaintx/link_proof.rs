@@ -356,6 +356,6 @@ mod tests {
 
     test_program_snapshot!(
         LinkProof,
-        "e0dbad11b2a02eb26c84137c7487e0c4df582106c2044bf7c6e28b9c20522aab6d9cebce4358eec3"
+        "ddbe75d990cfe81d3cba18ec37879f694a2ab280b1f49f89a21270b652eabbf02cde66414ef6d7bc"
     );
 }

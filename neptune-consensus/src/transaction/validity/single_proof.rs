@@ -983,9 +983,8 @@ pub(crate) mod tests {
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
-    use tracing_test::traced_test;
-
     use strum::IntoEnumIterator;
+    use tracing_test::traced_test;
 
     use super::*;
     use crate::proof_abstractions::tasm::builtins as tasm;
@@ -1623,7 +1622,7 @@ pub(crate) mod tests {
 
         test_program_snapshot!(
             SingleProof::new(ConsensusRuleSet::HardforkDelta),
-            "de4edfee9352d4a80649f8041c67c36a4485ac25ba93633295671f2307602bee03da660ce7181430"
+            "de13af08622357a5872a41818caec163fbb41dbf29378362aa32d2efe8a7a6372890b18a982c1790"
         );
     }
 }
