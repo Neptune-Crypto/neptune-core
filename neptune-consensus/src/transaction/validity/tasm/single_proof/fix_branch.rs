@@ -292,9 +292,13 @@ impl BasicSnippet for FixBranch {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
+    use std::collections::HashMap;
+
     use proptest::strategy::Strategy;
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
+    use tasm_lib::memory::encode_to_memory;
+    use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 
     use super::*;
     use crate::chaintx::cast::CastWitness;
@@ -379,6 +383,12 @@ pub(crate) mod tests {
             .unwrap();
     }
 
+    fn answered_link_proof_claim(lkmh: Digest, d: Digest) -> Claim {
+        Claim::new(LinkProof.hash())
+            .with_input(link_proof_public_input(lkmh, d).individual_tokens)
+            .with_output(link_proof_public_output(d))
+    }
+
     /// Run `Fix` against `input` and require that it fails, inside the recursive
     /// verification rather than before it.
     ///
@@ -386,10 +396,31 @@ pub(crate) mod tests {
     /// straight into the claim -- so *every* way of getting it wrong is a claim
     /// no link proof answers, and "did the recursion actually run" is the only
     /// thing there is to check.
-    fn expect_rejection_in_stark_verify(witness: FixWitness, input: PublicInput) {
+    fn expect_rejection_in_stark_verify(
+        witness: FixWitness,
+        input: PublicInput,
+        answered_claim: Claim,
+    ) {
         let single_proof = SingleProof::new(CONSENSUS_RULE_SET);
+        let link_proof = witness.link_proof.clone();
         let witness = SingleProofWitness::from_fix(witness);
-        let nondeterminism = || witness.nondeterminism(CONSENSUS_RULE_SET);
+
+        let nondeterminism = || {
+            let mut memory = HashMap::default();
+            encode_to_memory(
+                &mut memory,
+                FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+                &witness,
+            );
+            let mut nondeterminism = NonDeterminism::default().with_ram(memory);
+            StarkVerify::new_with_dynamic_layout(Stark::default()).update_nondeterminism(
+                &mut nondeterminism,
+                &link_proof,
+                &answered_claim,
+            );
+
+            nondeterminism
+        };
 
         single_proof.run_rust(&input, nondeterminism()).unwrap_err();
 
@@ -432,6 +463,9 @@ pub(crate) mod tests {
         let link_tx = forged_link_tx(1, 1, single_proof_digest()).await;
         assert!(!link_tx.kernel.thruputs.is_empty());
 
+        let answered_claim =
+            answered_link_proof_claim(link_tx.kernel.mast_hash(), single_proof_digest());
+
         // `FixWitness::fix` refuses to build this one, which is the Rust-side
         // half of the same rule; the branch has to refuse it too.
         let LinkTxProof::Proof(link_proof) = link_tx.proof else {
@@ -443,7 +477,7 @@ pub(crate) mod tests {
         };
 
         let input = witness.kernel_mast_hash().reversed().values().into();
-        expect_rejection_in_stark_verify(witness, input);
+        expect_rejection_in_stark_verify(witness, input, answered_claim);
     }
 
     /// `D` is `own_program_digest()`, and nothing else will do.
@@ -460,10 +494,12 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn link_proof_forged_under_another_single_proof_digest_is_rejected() {
         let link_tx = forged_link_tx(0, 0, mock_single_proof_digest(0)).await;
+        let answered_claim =
+            answered_link_proof_claim(link_tx.kernel.mast_hash(), mock_single_proof_digest(0));
         let witness = FixWitness::fix(link_tx);
 
         let input = witness.kernel_mast_hash().reversed().values().into();
-        expect_rejection_in_stark_verify(witness, input);
+        expect_rejection_in_stark_verify(witness, input, answered_claim);
     }
 
     /// A `Cast` under a bogus "`SingleProof`" program succeeds -- and is worth
@@ -530,7 +566,7 @@ pub(crate) mod tests {
         let witness = FixWitness { kernel, link_proof };
 
         let input = witness.kernel_mast_hash().reversed().values().into();
-        expect_rejection_in_stark_verify(witness, input);
+        expect_rejection_in_stark_verify(witness, input, cast.claim());
     }
 
     /// The link proof must attest to the transaction the claim is about.
@@ -547,13 +583,14 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn link_proof_must_attest_to_the_claimed_transaction() {
         let witness = FixWitness::fix(forged_link_tx(0, 0, single_proof_digest()).await);
+        let answered_claim = witness.link_proof_claim(single_proof_digest());
 
         let other_kernel = TransactionKernelModifier::default()
             .fee(witness.kernel.fee + NativeCurrencyAmount::coins(1))
             .clone_modify(&witness.kernel);
         let input = other_kernel.mast_hash().reversed().values().into();
 
-        expect_rejection_in_stark_verify(witness, input);
+        expect_rejection_in_stark_verify(witness, input, answered_claim);
     }
 
     /// Compute a `Fix`.

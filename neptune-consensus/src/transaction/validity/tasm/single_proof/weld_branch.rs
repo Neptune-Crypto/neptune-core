@@ -1084,20 +1084,18 @@ impl BasicSnippet for WeldBranch {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
-    use tasm_lib::prelude::Tip5;
+    use std::collections::HashMap;
 
+    use macro_rules_attr::apply;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
     use proptest::strategy::BoxedStrategy;
     use proptest::strategy::Strategy;
     use proptest_arbitrary_interop::arb;
-    use test_strategy::proptest;
-
-    use std::collections::HashMap;
-
-    use macro_rules_attr::apply;
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
+    use tasm_lib::prelude::Tip5;
+    use test_strategy::proptest;
 
     use super::*;
     use crate::chaintx::cast::CastWitness;
