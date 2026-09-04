@@ -13,6 +13,16 @@ A transaction kernel consists of the following fields:
 
 Note that while addition records and removal records are both commitments to UTXOs, they are different types of commitments. The removal record is an index set into the SWBF (with supporting chunk dictionary) whereas the addition record is a hash digest.
 
+From hardfork delta onwards there is a second kernel type. A `LinkKernel` consists of a `TransactionKernel` together with one more field:
+
+ - `thruputs: Vec<AdditionRecord>` The commitments to the UTXOs that are consumed by this transaction but that the mutator set has not heard of yet, each one an output of a predecessor in the transaction chain.
+
+A thruput is thus an addition record pressed into service as an input commitment, which is exactly why it works only for as long as the mutator set does not know the UTXO. Once it is confirmed, the UTXO can be spent through a removal record like any other, and the thruput is retired.
+
+The `thruputs` field is carried as one extra MAST leaf beside the transaction kernel's eight, which keep their leaf positions. A type script's view of a `LinkKernel` is exactly what it would see if it were in a single-proof transaction.
+
+Those nine leafs pad to sixteen, and the eight inherited ones are already a power of two, so nothing pads in between: the left child of a `LinkKernel`'s MAST root is the wrapped transaction kernel's MAST root exactly, and the right child depends on the thruputs alone. For an empty thruput list that right child is a constant, so the MAST hash of a `LinkKernel` with no thruputs is a fixed function of the transaction kernel's. This is what lets `Fix` derive the link kernel hash it needs instead of divining it, and it is why "the thruputs are empty" is a property of the shape rather than an assertion the branch makes: a `LinkTx` that still carries thruputs simply has no proof for the claim `Fix` builds.
+
 ## Nomenclature
 For a transaction to be mineable, it has to be "valid", "confirmable" and follow the lustration rules.
 
@@ -26,11 +36,17 @@ because of soundness bugs in previous consensus rules. Such a lustration rule is
 
 ## Validity
 
-Transaction validity is designed to check four conditions:
+From hardfork delta onwards there are two kinds of transaction. A `Transaction` is what a block contains. A `LinkTx` is a *chain* transaction: it may spend outputs that the mutator set has not heard of yet, and it is never contained in a block. Each is established by its own master program -- `SingleProof` and `LinkProof` respectively -- and so has its own notion of validity. The two are treated in turn below.
+
+Both rest on the same four conditions:
 1. The lock scripts of all input UTXOs halt gracefully
 2. All involved typescripts halt gracefully
 3. All input UTXOs are present in the mutator set's append-only commitment list
 4. All input UTXOs are *not* present in the mutator set's sliding-window Bloom filter.
+
+For the purpose of describing computations and claims, the following notation is used. The symbol `:` denotes the type of an object, whereas `::` denotes the type signature of a computation (interpreting the input and output streams as arguments and return values, respectively).
+
+### Validity of a `Transaction`
 
 A transaction is *valid* if (any of):
 
@@ -38,47 +54,83 @@ A transaction is *valid* if (any of):
  - ***b)*** *(ProofCollection)* it has valid proofs for each subprogram (subprograms establish things like the owners consent to this transaction, there is no inflation, etc.)
  - ***c)*** *(SingleProof -- Raise)* it has a single valid proof that the entire witness is valid (so, a multi-claim proof of all claims listed in (b))
  - ***d)*** *(SingleProof -- Merge)* it has a single valid proof that the transaction originates from merging two valid transactions
- - ***e)*** *(SingleProof -- Update)* it has a single valid proof that another single valid proof exists but under an older timestamp or mutator set accumulator.
+ - ***e)*** *(SingleProof -- Update)* it has a single valid proof that another single valid proof exists but under an older timestamp or mutator set accumulator
+ - ***f)*** *(SingleProof -- Fix)* it has a single valid proof that it is a chained transaction with no thruputs left
+ - ***g)*** *(SingleProof -- Weld)* it has a single valid proof that it is the fold of a valid transaction and a chained transaction, every thruput of the latter resolved by an output of the former.
 
-These forms are not independent: each is produced from an earlier one, and once a transaction is backed by a `SingleProof` it stays a `SingleProof` under `Merge` and `Update`. The possible transitions are shown below.
+Clauses (f) and (g) exist only from hardfork delta onwards; the pre-delta `SingleProof` program rejects their discriminants outright. Which of the two programs is in force follows from the block height, through the [consensus rule set](./consensus_rule_sets.md) it induces.
+
+Only a `SingleProof`-backed transaction is mineable; `Raise`, `Merge`, and `Update` are the three ways to obtain or preserve one; after hard fork delta there are two more: `Fix` and `Weld`. Note that some of these programs consume `SingleProof`s and produce a `SingleProof`, so they can be applied repeatedly.
+
+#### `Weld` is not `Fix(Chain(Cast(A), B))`
+
+Folding a chained transaction `B` into a transaction `A` can be spelled out in the other branches: `Cast` `A` into the chain pipeline, `Chain` it with `B`, and `Fix` the result. `Weld` does the same job in one proof and two recursive verifications where that route takes three proofs and four. But it is deliberately not the decomposition, and differs from it in both directions.
+
+It is *more permissive* about the merge bit. `Cast` refuses a transaction that carries one, so the three-step route can never fold into a merged transaction; `Weld` accepts it, and the welded kernel's merge bit is `A`'s. Since the bit must be set before a kernel can become a block transaction kernel, `Weld` is what applies cut-through to transactions already close to that promotion.
+
+It is *more permissive* about the coinbase, too: `weld.coinbase == A.coinbase`, one leaf authenticated into both trees, because a `SingleProof`-backed transaction is entitled to a coinbase. Carrying it costs one extra rule. `NativeCurrency` timelocks a coinbase's outputs against the timestamp of the kernel that pays them out, and the welded timestamp is the *later* of the two operands' -- so without a further constraint a back-dated coinbase could be welded forward into the present and its timelock released. When `A` carries a coinbase, the two timestamps must therefore lie within the same bound `Merge` imposes.
+
+It is *more restrictive* about cut-through. `Chain` cancels a thruput against either operand's outputs; `Weld` cancels `B`'s thruputs against `A`'s outputs only, never `B`'s own. In exchange, cut-through here needs neither a witness-supplied cut multiset nor a maximality check. Both fall out of the two equations
 
 ```text
-        PrimitiveWitness            (a)
-              │
-              │  prove each subclaim individually
-              ▼
-        ProofCollection             (b)
-              │
-              │  Raise              (c)  — prove all subclaims as one proof
-              ▼
-      ╔══┌──────────────────────┐──┐
-  (d) ║  │                      │  │ (e)
-      ╚═▶│      SingleProof     │◀─┘
-         │      (c / d / e)     │
-         └──────────────────────┘
-      Merge  (d): combine two SingleProofs into one
-      Update (e): re-target a newer mutator-set hash or timestamp
+A.outputs     ≡ surviving_outputs ⊎ B.thruputs
+weld.outputs  ≡ surviving_outputs ⊎ B.outputs
 ```
 
-Only a `SingleProof`-backed transaction is mineable; `Raise`, `Merge`, and `Update` are the three ways to obtain or preserve one. Note that `Merge` and `Update` consume `SingleProof`s and produce a `SingleProof`, so they can be applied repeatedly.
+together with the output type: a `TransactionKernel` has no thruputs field, so an unresolved thruput is not merely forbidden but unrepresentable. A thruput of `B` that no output of `A` matches fails the first equation, and that is the whole of the check that the thruputs are empty afterwards.
 
-From hardfork delta onwards, a second pipeline runs parallel to the one above: transaction chaining. A `LinkTx` can spend outputs that the mutator set has not heard of yet: its *thruputs*, each one matched by an output of another `LinkTx` it can be chained with. `Cast` and `Fix` convert between single-proof transactions and chaining transactions.
+### Validity of a `LinkTx`
+
+A `LinkTx` pairs a `LinkKernel` -- a transaction kernel together with a list of *thruputs* -- with a proof. A thruput is an addition record that is simultaneously an unconfirmed output of a predecessor in the chain and an input to this transaction. Writing `t` for the number of thruputs a `LinkTx` carries, one with `t > 0` is *unresolved*: it can never enter a block, and resolving every thruput is exactly what makes it block-eligible.
+
+A thruput retires in one of three ways: cut through against a chain partner's outputs by `Chain`, cut through against a transaction's outputs by `Weld`, or promoted to a confirmed input by `Advance` once the mutator set has confirmed the UTXO it commits to. The first two cancel the thruput against the output that funds it; the third does not need a partner at all, which is what keeps a `LinkTx` alive when its predecessor is mined without it.
+
+A `LinkTx` is *valid* if (any of):
+
+ - ***a′)*** *(LinkPrimitiveWitness)* it has a valid witness
+ - ***b′)*** *(LinkProof -- Forge)* it has one proof that its inputs are legitimate and that every lock script and type script halts gracefully. `RemovalRecordsIntegrity`, `KernelToOutputs`, `CollectLockScripts` and `CollectTypeScripts` are inlined *non-recursively*, while one proof per lock script and one per unique type script are verified recursively
+ - ***c′)*** *(LinkProof -- Chain)* it has one proof that it originates from chaining two valid `LinkTx`es, cutting through the matched output/thruput pairs
+ - ***d′)*** *(LinkProof -- Advance)* it has one proof that another valid `LinkTx` exists under an older mutator set or timestamp. Thruputs that the new mutator set has since confirmed *may* be promoted into confirmed inputs; promotion is permitted, never obliged, and none is the ordinary case
+ - ***e′)*** *(LinkProof -- Cast)* it has one proof that it is a valid `SingleProof`-backed transaction pulled into the chain pipeline. That transaction's fee must be non-negative and in range. The `SingleProof` digest `D` that `Cast` names is not checked against the real one, so a `LinkTx` cast under a bogus `D*` is inert rather than invalid: nothing downstream will ever verify against it.
+
+There is no analog of (b): the chain pipeline has no `Collect` stage, `Forge` going straight from the witness to a single proof.
+
+No branch admits a coinbase or a set merge bit on the kernel it produces: a `LinkTx` is never a coinbase transaction and never a merged one. Branches that recurse take this of their operands by induction rather than re-checking it, and any branch added later owes the same assertion.
+
+#### The claim, and the digest `D`
+
+A `LinkProof` attests to the claim
+
+ - `LinkProof :: (link_kernel_mast_hash : Digest) × (D : Digest) ⟶ (D : Digest)`
+
+where `D` is a `SingleProof` program digest. It is both an input and an output, so that the digest a derivation is indexed by can be read off either end of the claim.
+
+`D` is a *parameter* of the claim rather than a constant compiled into the program, and that is what breaks a definitional cycle. `Cast` verifies a `SingleProof` and so must name the `SingleProof` program; `Fix` verifies a `LinkProof` and so must name the `LinkProof` program. Were both digests hardcoded, each program's digest would depend on the other's and neither program would exist. Taking `D` off the public input breaks the cycle in one direction: `LinkProof` never names `SingleProof`, so `LinkProof` can be built first and `Fix` can hardcode its digest.
+
+The branches treat `D` accordingly. `Forge` carries it without reading it. `Chain` and `Advance` copy it verbatim from their operands' claims, and refuse to mix two different values. `Cast` is the only branch that uses the value, naming it as the program of the claim it verifies -- and, as noted in (e′), it cannot check that value against anything. On the other side, `Fix` and `Weld` instantiate `D` as `SingleProof`'s own program digest. Every `LinkProof` in a derivation was therefore verified against the `D` its claim carries, and anything reaching a block was `Cast` from a genuine `SingleProof` under exactly the rules then in force.
+
+### The Two Pipelines
+
+The two pipelines run parallel to one another, stage for stage: `Collect` and `Raise` against `Forge`, `Merge` against `Chain`, `Update` against `Advance`. `Cast`, `Fix` and `Weld` move transactions between them. Every transition within and between the two is shown below.
 
 ```text
   SINGLE-PROOF PIPELINE (Transaction)   CHAIN PIPELINE (LinkTx, HF delta)
 
         PrimitiveWitness                      LinkPrimitiveWitness
                 │                                       │
-                │ prove each subclaim                   │ Forge
+                │ Collect                               │ Forge
                 ▼                                       │
-         ProofCollection                                │
+         ProofCollection                                │  (no Collect stage)
                 │                                       │
                 │ Raise                                 │
                 ▼                                       ▼
-      ╔══┌─────────────┐                         ┌─────────────┐──┐
-      ║  │             │───────── Cast ─────────▶│             │  │
-      ╚═▶│ SingleProof │                         │   LinkTx    │◀─┘
-         │             │◀───────── Fix ──────────│             │
+       ╔═┌─────────────┐                         ┌─────────────┐═╗
+Merge  ║ │             │───────── Cast ─────────▶│             │ ║  Chain
+       ╚▶│ SingleProof │◀──────── Fix ───────────│   LinkTx    │◀╝
+         │             │                         │             │
+       ┌─│             │──────┐           ┌──────│             │─┐
+Update │ │             │      │           │      │             │ │  Advance
+       └▶│             │◀═════┴── Weld ───┘      │             │◀┘
          └─────────────┘                         └─────────────┘
                 │
                 │ block appendix claim
@@ -86,15 +138,20 @@ From hardfork delta onwards, a second pipeline runs parallel to the one above: t
         mineable in a block
 ```
 
-The loop on `SingleProof` is `Merge`/`Update`; the loop on `LinkTx` is `Chain`/`Update`. Writing `t` for the number of thruputs a `LinkTx` carries:
+Every branch that touches a chained transaction accounts for its thruputs. Writing `t` for that count, `k` for the number a witness asks to forge, `cut` for the addition records cancelled by a cut-through and `p` for the number of thruputs promoted:
 
- - `Forge` proves lock scripts, type scripts, and input/output integrity as one proof — the chain pipeline has no collection stage — and forges any `t = k ≥ 0`.
- - `Cast` pulls a `SingleProof`-backed transaction into the chain pipeline; no coinbase no merge bit allowed, and `t := 0`.
- - `Chain` combines two `LinkTx`es, cutting through the matched output/thruput pairs: `t := t₁ + t₂ − cut`. Only `Chain` can lower `t`.
- - `Update` (in either pipeline) re-syncs the transaction to a newer mutator set; `t` is unchanged.
- - `Fix` sends a `t = 0` `LinkTx` back to the single-proof pipeline. After this, the transaction can be included in a block.
+| branch | signature | thruputs | confirmed inputs |
+|---|---|---|---|
+| `Forge` | `LinkPrimitiveWitness ⟶ LinkTx` | `t := k ≥ 0` | established against the mutator set |
+| `Cast` | `Transaction ⟶ LinkTx` | `t := 0` | carried over unchanged |
+| `Chain` | `LinkTx × LinkTx ⟶ LinkTx` | `t := t₁ + t₂ − cut` | the two operands' concatenated |
+| `Advance` | `LinkTx ⟶ LinkTx` | `t := t − p` | gains the `p` promoted |
+| `Fix` | `LinkTx ⟶ Transaction` | requires `t = 0` | unchanged |
+| `Weld` | `Transaction × LinkTx ⟶ Transaction` | resolves all `t` of its second operand | the two operands' concatenated |
 
-For the purpose of describing computations and claims, the following notation is used. The symbol `:` denotes the type of an object, whereas `::` denotes the type signature of a computation (interpreting the input and output streams as arguments and return values, respectively).
+`Chain` and `Advance` are the only branches that lower `t`, and `Fix` and `Weld` the only two that can leave the chain pipeline — so a chained transaction becomes block-borne only once nothing is outstanding, which is what keeps a block's transaction an ordinary one.
+
+Cut-through is *maximal*: a chained kernel's outputs and its thruputs are disjoint, every matching pair being cancelled on both sides together. Without that, `cut` would be a choice the prover makes and `Chain` a relation rather than a function of its two operands. With it, a `LinkTx` never carries a thruput one of its own outputs already resolves, and what remains outstanding is a property of the transaction rather than of the route that built it.
 
 ### A: Witness Validity
 
@@ -116,7 +173,7 @@ A transaction witness consists of the following fields:
 
 Note that a (transaction, valid witness) pair cannot be broadcasted because that would undermine both soundness and privacy.
 
-### B: ProofCollection: Decomposition into Subclaims
+### B: ProofCollection: Collect
 
 The motivation for splitting transaction validity into subclaims is that the induced subprograms can be proved individually, which might be cheaper than proving the whole thing in one go. Also, it is conceivable that components of a transaction are updated and do not invalidate all subproofs but only a subset of them. The subprograms are as follows.
 
@@ -185,6 +242,12 @@ All subprograms can be proven individually given access to the transaction's wit
 
 Note that none of the subprograms require that each removal record lists one SWBF index that does not yet live in the mutator set SWBF. This absence is required for the transaction to be confirmable, but not for it to be valid. If the transaction has an input whose index set is already entirely contained by the mutator set SWBF, then this transaction can never be confirmed. Even if there is a reorganization that results in the absence criterion being satisfied, the transaction commits to the mutator set hash and this commitment cannot be undone.
 
+From hardfork delta onwards, `RemovalRecordsIntegrity` has two further homes in the chain pipeline. A soundness bug at either site is a double-spend path, and both carry the same audit bar as the `SingleProof` branches.
+ 1. `Forge` inlines it non-recursively and proves it *once*.
+ 2. `Advance`'s promotion loop is the second site: to move a confirmed thruput into the inputs it derives an absolute index set from divined preimages and an AOCL membership proof, exactly as `Forge`'s confirmed-input loop does. 
+
+`Forge` has one obligation that no single-proof branch has. The type-script-facing *salted input UTXOs* of a `LinkKernel` hold *both* the confirmed inputs *and* the thruputs, which is what lets type scripts (including `NativeCurrency` and `TimeLock`) run unchanged, unaware that any chaining is going on. `Forge` must therefore bind that combined digest to `confirmed_inputs || thruputs`, validating only the confirmed ones against the mutator set. Thruputs are validated transitively, by the predecessor whose output it is cut through against. The type script trusts the digest blindly, so a gap here would let a transaction claim input value that no UTXO backs: an inflation path.
+
 ### C: Single Proof -- Raise
 
 Where (b) generates a separate proof for every individual subclaim, (c) generates one proof for the batch of claims. The set of claims established is identical; the main benefit comes from having only one execution of the Triton VM prover. In the code this corresponds to the `SingleProofWitness::Collection` variant. This branch additionally asserts that `kernel.merge_bit == false`: the `merge_bit` may only be set by the `Merge` branch (d), so raising a `ProofCollection` cannot forge a transaction that claims to have passed through a merge.
@@ -199,7 +262,7 @@ Two transactions can be merged into one. Among other things, this operation repl
  - for each removal record `rr` in `txa.inputs`
    - verify that `rr` is not a member of `txb.inputs`
  - for each removal record `rr` in `txb.inputs`
-   - verify that `rr` is not a member of `tba.inputs`
+   - verify that `rr` is not a member of `txa.inputs`
  - verify that at most one of `txa.coinbase` and `txb.coinbase` is set
  - verify that `txa.mutator_set_hash == txb.mutator_set_hash`
  - compile a new `TransactionKernel` object `kernel`:
@@ -238,7 +301,7 @@ A transaction is valid if another transaction that is identical except for fixin
 
 **Note:** this section is included as a wishlist item. Proofs of integral mempool operation are not presently supported. It is not one of the validity variants (a)–(e) above, and correspondingly there is no `SingleProofWitness::IntegralMempool` variant yet (see the commented-out placeholder in the enum).
 
-A transaction is valid if it was ever added to an integral mempool. The motivating use case for this feature is that mempool operators can delete transaction proofs as long as they store and routinely update one
+A transaction is valid if it was ever added to an integral mempool. The motivating use case for this feature is that mempool operators can delete transaction proofs as long as they store and routinely update one proof -- a *proof of integral mempool operation*.
 
 An integral mempool is an MMR containing transactions *kernels*, along with a proof of integral history. The integral mempool can be updated in only one way: by appending a valid transaction.
  - `append : (old_mmr : Mmr<TransactionKernel>) × (old_history_proof: StarkProof) × (tx : Transaction) ⟶ (new_mmr : Mmr<TransactionKernel>) × (new_history_proof : StarkProof)`
@@ -261,9 +324,9 @@ The claim for certifying the validity of transaction based on its inclusion in a
 
 ### Putting Everything Together
 
-Clauses (c)--(e) are presented as separate computations, but in reality they are different branches of the same master program for transaction validity, `SingleProof :: (transaction_kernel_mast_hash : Digest) ⟶ ∅`. Specifically:
+Clauses (c)--(g) are presented as separate computations, but in reality they are different branches of the same master program for transaction validity, `SingleProof :: (transaction_kernel_mast_hash : Digest) ⟶ ∅`. Specifically:
  - do any of:
-   - verify all of the following claims, individually or via one multi-claim proof:
+   - verify all of the following claims:
      - `RemovalRecordsIntegrity :: (transaction_kernel_mast_hash : Digest) ⟶ (inputs_salted_utxos_hash : Digest)`
      - `CollectLockScripts :: (inputs_salted_utxos_hash : Digest) ⟶ (lock_script_hashes : [Digest])`
      - `LockScript :: (transaction_kernel_mast_hash : Digest) ⟶ ∅` for each lock script hash
@@ -271,4 +334,8 @@ Clauses (c)--(e) are presented as separate computations, but in reality they are
      - `CollectTypeScripts :: (inputs_salted_utxos_hash : Digest) × (outputs_salted_utxos_hash : Digest) ⟶ (type_script_hashes : [Digest])`
      - `TypeScript :: (transaction_kernel_mast_hash : Digest) ⟶ ∅` for each type script hash;
    - verify claim `TransactionMerger :: (transaction_kernel_mast_hash : Digest) ⟶ ∅`
-   - verify claim `TransactionDataUpdate :: (transaction_kernel_mast_hash : Digest) ⟶ ∅`.
+   - verify claim `TransactionDataUpdate :: (transaction_kernel_mast_hash : Digest) ⟶ ∅`
+   - *(after hardfork delta)* verify claim `LinkProof` claim and that the link kernel MAST hash is derived from `transaction_kernel_mast_hash` under the assumption that the thruputs are empty -- this is `Fix`
+   - *(after hardfork delta)* verify both a `SingleProof` claim transaction and a `LinkProof` claim as above, and that the thruputs of the latter are cut through against the outputs of the former -- this is `Weld`.
+
+From hardfork delta, `SingleProof` is a family of two programs indexed by the [consensus rule set](./consensus_rule_sets.md): the pre-delta program rejects the `Fix` and `Weld` discriminants outright, so adding the two branches leaves its digest -- and every proof made under it -- untouched.

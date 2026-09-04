@@ -150,7 +150,7 @@ impl FixWitness {
 ///   subtree of an empty thruput list. So the claim binds the link transaction
 ///   to this transaction and asserts its thruputs are empty.
 /// - **`D := own_program_digest()`.** Every `LinkProof` in the derivation tree
-///   was verified against the `D` its claim carries (`Chain` and `Update` copy
+///   was verified against the `D` its claim carries (`Chain` and `Advance` copy
 ///   it verbatim, `Forge` ignores it, `Cast` is the only one that lets it name
 ///   a program), so instantiating it here means: anything reaching a block was
 ///   `Cast` from a genuine `SingleProof` under these very rules.
@@ -484,7 +484,7 @@ pub(crate) mod tests {
     ///
     /// The link transaction here is forged under a junk `D`, which is what makes
     /// such a transaction *inert* rather than invalid: `Forge` and `Cast` let a
-    /// prover name any `D` at all, `Chain` and `Update` refuse to mix them, and
+    /// prover name any `D` at all, `Chain` and `Advance` refuse to mix them, and
     /// this is where that freedom is finally cashed out -- the one verifier that
     /// names a `D` names its own, so a chain indexed by anything else has
     /// nowhere to go.
@@ -515,7 +515,7 @@ pub(crate) mod tests {
     /// whatsoever about the transaction it wraps.
     ///
     /// What stops it is the far end, and only the far end. The claim its link
-    /// proof answers carries the bogus `D`; `Chain` and `Update` copy `D` along
+    /// proof answers carries the bogus `D`; `Chain` and `Advance` copy `D` along
     /// unchanged and refuse to mix two of them; and `Fix` names its own
     /// program's digest. So the whole derivation is sealed off from the block
     /// chain rather than admitted to it. The rejection landing *inside* the

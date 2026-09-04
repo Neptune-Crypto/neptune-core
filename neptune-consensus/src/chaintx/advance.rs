@@ -488,18 +488,23 @@ impl SecretWitness for AdvanceWitness {
 /// `Advance: LinkTx -> LinkTx`: re-target a link transaction at a newer mutator
 /// set without re-forging it.
 ///
-/// `Advance` erifies the old link proof -- against a claim that names
+/// `Advance` verifies the old link proof -- against a claim that names
 /// `LinkProof` itself, taken from the dispatcher's copy of the own program
 /// digest -- and then establishes that the new kernel is the old one moved
 /// forward, and nothing else:
 ///
 /// - both kernels' mutator set accumulators are authenticated against their own
 ///   MAST hashes, and the new AOCL is a successor of the old one;
-/// - the inputs' absolute index sets are unchanged -- the removal records
-///   themselves may differ, since re-targeting rewrites their membership data,
-///   but what a double spend collides on may not move;
-/// - outputs, thruputs, announcements and the fee are bfe-for-bfe the same in
-///   both kernels (so a non-negative fee stays non-negative);
+/// - the inputs' absolute index sets are unchanged, but for the promoted ones
+///   below -- the removal records themselves may differ, since re-targeting
+///   rewrites their membership data, but what a double spend collides on may
+///   not move;
+/// - outputs, announcements and the fee are bfe-for-bfe the same in both
+///   kernels (so a non-negative fee stays non-negative);
+/// - the thruputs are the same too, *except* for those promoted into inputs,
+///   which the two coupled promotion equations account for: the promoted
+///   addition records are exactly the thruputs the new kernel drops, and the
+///   promoted index sets exactly the ones the new inputs add;
 /// - the inputs and the thruputs are not both empty;
 /// - the timestamp does not go backwards;
 /// - the new kernel carries no coinbase and no merge bit.
@@ -507,8 +512,6 @@ impl SecretWitness for AdvanceWitness {
 /// The old kernel's coinbase and merge-bit leafs are deliberately *not*
 /// re-checked: every branch producing a `LinkProof` asserts both on the kernel
 /// it produces, so an operand that verifies has them by induction.
-///
-/// Thruputs are either a) carried across unchanged, or b) promoted into inputs.
 ///
 /// Unlike its single-proof sibling, `Advance` does *not* require a non-empty
 /// input set. A `LinkTx` may legitimately have zero confirmed inputs -- an
