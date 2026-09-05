@@ -90,7 +90,7 @@ A `LinkTx` is *valid* if (any of):
  - ***a′)*** *(LinkPrimitiveWitness)* it has a valid witness
  - ***b′)*** *(LinkProof -- Forge)* it has one proof that its inputs are legitimate and that every lock script and type script halts gracefully. `RemovalRecordsIntegrity`, `KernelToOutputs`, `CollectLockScripts` and `CollectTypeScripts` are inlined *non-recursively*, while one proof per lock script and one per unique type script are verified recursively
  - ***c′)*** *(LinkProof -- Chain)* it has one proof that it originates from chaining two valid `LinkTx`es, cutting through the matched output/thruput pairs
- - ***d′)*** *(LinkProof -- Advance)* it has one proof that another valid `LinkTx` exists under an older mutator set or timestamp. Thruputs that the new mutator set has since confirmed *may* be promoted into confirmed inputs; promotion is permitted, never obliged, and none is the ordinary case
+ - ***d′)*** *(LinkProof -- Advance)* it has one proof that another valid `LinkTx` exists under an older mutator set or timestamp. Thruputs that have since been confirmed *may* be promoted into confirmed inputs; promotion is permitted, never obliged, and none is the ordinary case; the *promotion equations* below are what a promotion has to satisfy
  - ***e′)*** *(LinkProof -- Cast)* it has one proof that it is a valid `SingleProof`-backed transaction pulled into the chain pipeline. That transaction's fee must be non-negative and in range. The `SingleProof` digest `D` that `Cast` names is not checked against the real one, so a `LinkTx` cast under a bogus `D*` is inert rather than invalid: nothing downstream will ever verify against it.
 
 There is no analog of (b): the chain pipeline has no `Collect` stage, `Forge` going straight from the witness to a single proof.
@@ -108,6 +108,23 @@ where `D` is a `SingleProof` program digest. It is both an input and an output, 
 `D` is a *parameter* of the claim rather than a constant compiled into the program, and that is what breaks a definitional cycle. `Cast` verifies a `SingleProof` and so must name the `SingleProof` program; `Fix` verifies a `LinkProof` and so must name the `LinkProof` program. Were both digests hardcoded, each program's digest would depend on the other's and neither program would exist. Taking `D` off the public input breaks the cycle in one direction: `LinkProof` never names `SingleProof`, so `LinkProof` can be built first and `Fix` can hardcode its digest.
 
 The branches treat `D` accordingly. `Forge` carries it without reading it. `Chain` and `Advance` copy it verbatim from their operands' claims, and refuse to mix two different values. `Cast` is the only branch that uses the value, naming it as the program of the claim it verifies -- and, as noted in (e′), it cannot check that value against anything. On the other side, `Fix` and `Weld` instantiate `D` as `SingleProof`'s own program digest. Every `LinkProof` in a derivation was therefore verified against the `D` its claim carries, and anything reaching a block was `Cast` from a genuine `SingleProof` under exactly the rules then in force.
+
+#### The promotion equations
+
+`Advance` may move thruputs that have been confirmed into the confirmed inputs. Which thruputs those are is not derived from the kernels, but from the witness. The witness supplies a *promotion set* `P`, one entry per thruput being promoted, and each entry determines both sides of the move. From the entry's `item`, `sender_randomness` and `receiver_preimage` comes the addition record `commit(item, sender_randomness, H(receiver_preimage))` that must leave the thruput list; from those same three preimages together with the entry's AOCL leaf index comes the absolute index set that the removal record joining the input list must carry.
+
+The *promotion equations* are the coupled pair `Advance` enforces over `P`, both compared as multisets:
+
+```text
+old.thruputs          ≡ new.thruputs          ⊎ records(P)
+indexsets(new.inputs) ≡ indexsets(old.inputs) ⊎ indexsets(P)
+```
+
+The second compares index sets and not removal records byte for byte, because the index set is what a double spend collides on; the rest is supporting data, and moving to a newer mutator set modifies it anyway.
+
+They are one rule and not two. Both sides are indexed by the same `P`, and every entry contributes to both, so an addition record leaves the thruput list if and only if a removal record carrying its index set joins the input list -- the same leaves-one-side-iff-it-leaves-the-other shape as the two `Weld` equations above. Either equation on its own would be unsound. Under the first alone a thruput could simply vanish: its value was counted as input value when the chain was forged, but nothing would then record the UTXO as spent, leaving it to be spent again. Under the second alone a removal record could appear that no thruput funded and no lock script ever authorized.
+
+`P = []` is the ordinary case. This case makes `Advance` equivalent to the chain pipeline's `Update`: both right-hand sides lose their second term, thruputs and index sets are alike unchanged, and what remains is a transaction carried forward to a newer mutator set and timestamp, its removal records re-targeted but spending exactly what they spent before.
 
 ### The Two Pipelines
 
