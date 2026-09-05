@@ -5,6 +5,7 @@ use tasm_lib::prelude::*;
 use tasm_lib::traits::basic_snippet::BasicSnippet;
 use tasm_lib::triton_vm::prelude::*;
 
+use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::transaction::validity::proof_collection::ProofCollection;
 use crate::transaction::validity::removal_records_integrity::RemovalRecordsIntegrity;
@@ -15,7 +16,15 @@ use crate::transaction::validity::tasm::claims::new_claim::NewClaim;
 /// Assumes the transaction kernel MAST hash is on the stack somewhere, but not
 /// necessarily immediately preceding the proof collection pointer.
 #[derive(Debug, Copy, Clone)]
-pub struct GenerateRriClaim;
+pub struct GenerateRriClaim {
+    consensus_rule_set: ConsensusRuleSet,
+}
+
+impl GenerateRriClaim {
+    pub fn new(consensus_rule_set: ConsensusRuleSet) -> Self {
+        Self { consensus_rule_set }
+    }
+}
 
 impl BasicSnippet for GenerateRriClaim {
     fn parameters(&self) -> Vec<(DataType, String)> {
@@ -67,7 +76,7 @@ impl BasicSnippet for GenerateRriClaim {
             // _ [digest]
         );
 
-        let new_claim = library.import(Box::new(NewClaim));
+        let new_claim = library.import(Box::new(NewClaim::new(self.consensus_rule_set)));
         let input_length = Digest::LEN;
         let output_length = Digest::LEN;
 
@@ -147,7 +156,8 @@ mod tests {
 
     #[test]
     fn unit_test() {
-        ShadowedFunction::new(GenerateRriClaim).test();
+        ShadowedFunction::new(GenerateRriClaim::new(ConsensusRuleSet::HardforkGamma)).test();
+        ShadowedFunction::new(GenerateRriClaim::new(ConsensusRuleSet::HardforkDelta)).test();
     }
 
     impl Function for GenerateRriClaim {
@@ -175,7 +185,7 @@ mod tests {
                 "Inconsistent initial state detected"
             );
 
-            let claim = proof_collection.removal_records_integrity_claim();
+            let claim = proof_collection.removal_records_integrity_claim(self.consensus_rule_set);
             let claim_pointer =
                 rust_shadowing_helper_functions::dyn_malloc::dynamic_allocator(memory);
             encode_to_memory(memory, claim_pointer, &claim);
@@ -209,6 +219,7 @@ mod tests {
             let proof_collection = rt
                 .block_on(ProofCollection::produce(
                     &primitive_witness,
+                    self.consensus_rule_set,
                     TritonVmJobQueue::get_instance(),
                     TritonVmProofJobOptions::default_with_network(Network::Main),
                 ))

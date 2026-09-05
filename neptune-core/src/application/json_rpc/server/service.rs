@@ -750,7 +750,7 @@ impl RpcApi for RpcServer {
         let already_known = false;
 
         tx_admission::admissible(
-            &transaction,
+            (&transaction).into(),
             &tip_mutator_set,
             lustration_status,
             already_known,
@@ -780,6 +780,9 @@ impl RpcApi for RpcServer {
                 TxAdmissionError::Lustration(_)
                 | TxAdmissionError::Invalid
                 | TxAdmissionError::AlreadyKnown => SubmitTransactionError::InvalidTransaction,
+                TxAdmissionError::NotYetActive | TxAdmissionError::NotSynced => {
+                    SubmitTransactionError::NotConfirmable
+                }
             })
         })?;
 

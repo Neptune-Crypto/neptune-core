@@ -10,10 +10,8 @@ use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::triton_vm::prelude::Program;
 use tasm_lib::triton_vm::proof::Claim;
-use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::triton_vm::vm::NonDeterminism;
 use tasm_lib::triton_vm::vm::PublicInput;
-use tasm_lib::verifier::stark_verify::StarkVerify;
 
 use super::block_primitive_witness::BlockPrimitiveWitness;
 use super::block_program::BlockProgram;
@@ -21,8 +19,8 @@ use crate::block::block_body::BlockBody;
 use crate::block::block_body::BlockBodyField;
 use crate::block::BlockAppendix;
 use crate::consensus_rule_set::ConsensusRuleSet;
+use crate::proof_abstractions::tasm::legacy_stark_verify::update_nondeterminism_for_stark_verification;
 use crate::proof_abstractions::tasm::program::TritonProgram;
-use crate::proof_abstractions::SecretWitness;
 use crate::transaction::transaction_kernel::TransactionKernelField;
 use crate::transaction::validity::neptune_proof::Proof;
 use crate::transaction::validity::single_proof::single_proof_claim;
@@ -106,20 +104,20 @@ impl BlockProofWitness {
     }
 }
 
-impl SecretWitness for BlockProofWitness {
-    fn standard_input(&self) -> PublicInput {
+impl BlockProofWitness {
+    pub fn standard_input(&self) -> PublicInput {
         self.block_body.mast_hash().reversed().values().into()
     }
 
-    fn output(&self) -> Vec<BFieldElement> {
+    pub fn output(&self) -> Vec<BFieldElement> {
         self.claims().encode()
     }
 
-    fn program(&self) -> Program {
-        BlockProgram.program()
+    pub fn program(&self, consensus_rule_set: ConsensusRuleSet) -> Program {
+        BlockProgram::new(consensus_rule_set).program()
     }
 
-    fn nondeterminism(&self) -> NonDeterminism {
+    pub fn nondeterminism(&self) -> NonDeterminism {
         // put witness into memory
         let mut nondeterminism = NonDeterminism::new([]);
         encode_to_memory(
@@ -153,9 +151,8 @@ impl SecretWitness for BlockProofWitness {
             .extend_from_slice(&merge_bit_auth_path);
 
         // modify nodeterminism in whichever way is necessary for verifying STARK proofs
-        let stark_snippet = StarkVerify::new_with_dynamic_layout(Stark::default());
         for (claim, proof) in self.claims.iter().zip_eq(&self.proofs) {
-            stark_snippet.update_nondeterminism(&mut nondeterminism, proof, claim);
+            update_nondeterminism_for_stark_verification(&mut nondeterminism, proof, claim);
         }
 
         nondeterminism

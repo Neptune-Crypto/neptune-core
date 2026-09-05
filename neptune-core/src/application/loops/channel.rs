@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use libp2p::Multiaddr;
 use neptune_consensus::block::Block;
+use neptune_consensus::chaintx::link_tx::LinkTx;
 use neptune_consensus::transaction::Transaction;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_wallet::address::KeyType;
@@ -92,6 +93,7 @@ pub(crate) struct ClaimUtxoData {
 pub(crate) enum RPCServerToMain {
     /// Broadcast own transaction, upgrade if necessary
     BroadcastOwnTx(Arc<Transaction>),
+    BroadcastOwnLinkTx(Arc<LinkTx>),
 
     PerformTxProofUpgrade(Box<UpgradeJob>),
     BroadcastMempoolTransactions,

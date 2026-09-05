@@ -100,6 +100,7 @@ impl Drop for ScopeDurationLogger<'_> {
 }
 
 pub mod block;
+pub mod chaintx;
 pub mod consensus_rule_set;
 pub mod proof_abstractions;
 pub mod transaction;
@@ -145,13 +146,17 @@ mod tests {
         }
 
         let all_consensus_critical_imports = name_and_lib![
-            block::validity::block_program::BlockProgram,
+            block::validity::block_program::BlockProgram::new(
+                crate::consensus_rule_set::ConsensusRuleSet::HardforkDelta
+            ),
             transaction::validity::collect_lock_scripts::CollectLockScripts,
             transaction::validity::collect_type_scripts::CollectTypeScripts,
             transaction::validity::kernel_to_outputs::KernelToOutputs,
             type_scripts::native_currency::NativeCurrency,
             transaction::validity::removal_records_integrity::RemovalRecordsIntegrity,
-            transaction::validity::single_proof::SingleProof,
+            transaction::validity::single_proof::SingleProof::new(
+                crate::consensus_rule_set::ConsensusRuleSet::HardforkDelta
+            ),
             type_scripts::time_lock::TimeLock,
             // todo: what about those?
             // block_validity::coinbase_is_valid::CoinbaseIsValid,

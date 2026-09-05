@@ -3,6 +3,7 @@ use std::str::FromStr;
 
 use get_size2::GetSize;
 use itertools::Itertools;
+use neptune_consensus::chaintx::link_tx::LinkTx;
 use neptune_consensus::transaction::Transaction;
 use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
 use neptune_rpc_api::model::block::transaction_kernel::RpcTransactionKernelId;
@@ -158,6 +159,16 @@ impl Txid for Transaction {
     }
 }
 
+impl Txid for LinkTx {
+    /// Return the wrapped kernel's [`txid`](Txid::txid); the thruputs do not
+    /// enter the value.
+    ///
+    /// These id are useful for referencing in the mempool.
+    fn txid(&self) -> TransactionKernelId {
+        self.kernel.kernel.txid()
+    }
+}
+
 #[cfg(any(feature = "mock-rpc", test))]
 impl rand::distr::Distribution<TransactionKernelId> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> TransactionKernelId {
@@ -168,8 +179,12 @@ impl rand::distr::Distribution<TransactionKernelId> for rand::distr::StandardUni
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use neptune_consensus::chaintx::link_kernel::LinkKernel;
+    use neptune_consensus::chaintx::link_tx::LinkTxProof;
     use neptune_consensus::transaction::Transaction;
     use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
+    use neptune_consensus::transaction::validity::neptune_proof::NeptuneProof;
+    use neptune_mutator_set::addition_record::AdditionRecord;
     use proptest::prelude::Strategy;
     use proptest::prop_assert_eq;
     use proptest::strategy::ValueTree;
@@ -219,5 +234,26 @@ mod tests {
             TransactionKernelId::combine(a, b),
             TransactionKernelId::combine(b, a)
         );
+    }
+
+    #[proptest]
+    fn link_txid_matches_wrapped_kernel_and_ignores_thruputs(
+        #[strategy(arb())] link_kernel: LinkKernel,
+        #[strategy(arb())] extra_thruput: AdditionRecord,
+    ) {
+        let link_txid = |kernel: LinkKernel| {
+            LinkTx {
+                kernel,
+                proof: LinkTxProof::Proof(NeptuneProof::invalid()),
+            }
+            .txid()
+        };
+
+        let wrapped_kernel_txid = link_kernel.kernel.txid();
+        prop_assert_eq!(wrapped_kernel_txid, link_txid(link_kernel.clone()));
+
+        let mut more_thruputs = link_kernel;
+        more_thruputs.thruputs.push(extra_thruput);
+        prop_assert_eq!(wrapped_kernel_txid, link_txid(more_thruputs));
     }
 }

@@ -13,6 +13,7 @@ pub use tasm_lib::prelude::triton_vm;
 pub use tasm_lib::prelude::twenty_first;
 
 pub mod address;
+pub mod chained_transaction_details;
 pub mod change_policy;
 pub mod coin_with_possible_timelock;
 pub mod coinbase_distribution;

@@ -20,14 +20,18 @@
 use neptune_consensus::block::FUTUREDATING_LIMIT;
 use neptune_consensus::block::mutator_set_update::MutatorSetUpdate;
 use neptune_consensus::block::pow::LustrationStatus;
+use neptune_consensus::chaintx::link_tx::LinkTxProof;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
-use neptune_consensus::transaction::Transaction;
+use neptune_consensus::proof_abstractions::verifier::verify_transaction_proof;
 use neptune_consensus::transaction::transaction_kernel::TransactionConfirmabilityError;
 use neptune_consensus::transaction::transaction_kernel::TransactionLustrationError;
+use neptune_consensus::transaction::validity::single_proof::link_tx_claim;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use neptune_primitives::mast_hash::MastHash;
 use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 
+use crate::any_tx::AnyTxRef;
 use crate::mempool::MEMPOOL_TX_THRESHOLD_AGE;
 
 /// Why a transaction was refused admission to the mempool.
@@ -74,6 +78,12 @@ pub enum TxAdmissionError {
     /// zero.
     LustrationsWouldMakeCounterNegative,
 
+    /// A link transaction under a rule set without the `Fix` branch.
+    NotYetActive,
+
+    /// A transaction not synced to the tip.
+    NotSynced,
+
     /// The transaction's proof does not attest to its kernel.
     Invalid,
 }
@@ -90,11 +100,14 @@ fn admissible_count(max_num_per_block: usize) -> usize {
     max_num_per_block.saturating_sub(MERGE_HEADROOM)
 }
 
-/// Determine whether a transaction may be admitted to the mempool.
+/// Determine whether a transaction, on either pipeline, may be admitted to
+/// the mempool.
 ///
 /// `already_known` answers whether the mempool already holds this transaction
 /// at no worse proof quality; it is supplied by the caller so that this
-/// function need not reason about how the mempool is locked.
+/// function need not reason about how the mempool is locked. For the same
+/// reason, this function does *not* check that a link transaction's thruputs
+/// are outputs of mempool members..
 ///
 /// `lustration_status` is `None` on networks and heights where lustrations do
 /// not yet apply.
@@ -104,7 +117,7 @@ fn admissible_count(max_num_per_block: usize) -> usize {
 /// proof themselves beforehand; doing so reinstates the cost this ordering
 /// exists to avoid.
 pub async fn admissible(
-    transaction: &Transaction,
+    tx: AnyTxRef<'_>,
     tip_mutator_set: &MutatorSetAccumulator,
     lustration_status: Option<LustrationStatus>,
     already_known: bool,
@@ -112,27 +125,38 @@ pub async fn admissible(
     network: Network,
     consensus_rule_set: ConsensusRuleSet,
 ) -> Result<(), TxAdmissionError> {
-    if transaction.kernel.coinbase.is_some() {
+    // Link-pipeline gates, cheaper than anything below.
+    if let AnyTxRef::Link(link_tx) = tx {
+        if !consensus_rule_set.has_chain_branches() {
+            return Err(TxAdmissionError::NotYetActive);
+        }
+
+        if link_tx.kernel.kernel.mutator_set_hash != tip_mutator_set.hash() {
+            return Err(TxAdmissionError::NotSynced);
+        }
+    }
+
+    let kernel = tx.kernel();
+
+    if kernel.coinbase.is_some() {
         return Err(TxAdmissionError::HasCoinbase);
     }
 
-    if transaction.kernel.fee.is_negative() {
+    if kernel.fee.is_negative() {
         return Err(TxAdmissionError::NegativeFee);
     }
 
-    if transaction.kernel.inputs.len() > admissible_count(consensus_rule_set.max_num_inputs()) {
+    if kernel.inputs.len() > admissible_count(consensus_rule_set.max_num_inputs()) {
         return Err(TxAdmissionError::TooManyInputs);
     }
-    if transaction.kernel.outputs.len() > admissible_count(consensus_rule_set.max_num_outputs()) {
+    if kernel.outputs.len() > admissible_count(consensus_rule_set.max_num_outputs()) {
         return Err(TxAdmissionError::TooManyOutputs);
     }
-    if transaction.kernel.announcements.len()
-        > admissible_count(consensus_rule_set.max_num_announcements())
-    {
+    if kernel.announcements.len() > admissible_count(consensus_rule_set.max_num_announcements()) {
         return Err(TxAdmissionError::TooManyAnnouncements);
     }
 
-    let timestamp = transaction.kernel.timestamp;
+    let timestamp = kernel.timestamp;
     if timestamp < now - MEMPOOL_TX_THRESHOLD_AGE {
         return Err(TxAdmissionError::TooOld);
     }
@@ -144,17 +168,13 @@ pub async fn admissible(
         return Err(TxAdmissionError::AlreadyKnown);
     }
 
-    if let Err(confirmability_error) = transaction
-        .kernel
-        .is_confirmable_relative_to(tip_mutator_set)
-    {
+    // For a link transaction this covers the confirmed inputs; thruputs are
+    // not removal records.
+    if let Err(confirmability_error) = kernel.is_confirmable_relative_to(tip_mutator_set) {
         return Err(TxAdmissionError::NotConfirmable(confirmability_error));
     }
 
-    let mutator_set_update = MutatorSetUpdate::new(
-        transaction.kernel.inputs.clone(),
-        transaction.kernel.outputs.clone(),
-    );
+    let mutator_set_update = MutatorSetUpdate::new(kernel.inputs.clone(), kernel.outputs.clone());
     if mutator_set_update
         .apply_to_accumulator(&mut tip_mutator_set.clone())
         .is_err()
@@ -164,7 +184,7 @@ pub async fn admissible(
     }
 
     if let Some(lustration_status) = lustration_status {
-        let lustrated = transaction.kernel.verified_lustration_amount(
+        let lustrated = kernel.verified_lustration_amount(
             lustration_status.max_lustrating_aocl_leaf_index,
             consensus_rule_set.fix_lustration_double_counting(),
         );
@@ -181,7 +201,20 @@ pub async fn admissible(
 
     // Verifying the proof is by far the most expensive check, so it runs once
     // every cheaper reason to reject has been ruled out.
-    if !transaction.is_valid(network, consensus_rule_set).await {
+    let valid = match tx {
+        AnyTxRef::Standard(transaction) => transaction.is_valid(network, consensus_rule_set).await,
+        AnyTxRef::Link(link_tx) => match &link_tx.proof {
+            LinkTxProof::Witness(link_primitive_witness) => {
+                link_primitive_witness.validate().await.is_ok()
+                    && link_primitive_witness.kernel.mast_hash() == link_tx.kernel.mast_hash()
+            }
+            LinkTxProof::Proof(proof) => {
+                let claim = link_tx_claim(link_tx.kernel.mast_hash(), consensus_rule_set);
+                verify_transaction_proof(claim, proof.clone(), network).await
+            }
+        },
+    };
+    if !valid {
         return Err(TxAdmissionError::Invalid);
     }
 
@@ -191,11 +224,15 @@ pub async fn admissible(
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use neptune_consensus::chaintx::link_kernel::LinkKernel;
+    use neptune_consensus::chaintx::link_tx::LinkTx;
+    use neptune_consensus::transaction::Transaction;
     use neptune_consensus::transaction::TransactionProof;
     use neptune_consensus::transaction::announcement::Announcement;
     use neptune_consensus::transaction::test_helpers::txkernel;
     use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
     use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier;
+    use neptune_consensus::transaction::validity::neptune_proof::NeptuneProof;
     use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use neptune_mutator_set::addition_record::AdditionRecord;
     use neptune_mutator_set::removal_record::RemovalRecord;
@@ -272,7 +309,7 @@ mod tests {
             };
 
             let rejection = admissible(
-                &transaction,
+                (&transaction).into(),
                 &MutatorSetAccumulator::default(),
                 None,
                 false,
@@ -358,7 +395,7 @@ mod tests {
         };
 
         let _ = admissible(
-            &transaction,
+            (&transaction).into(),
             &tip_mutator_set,
             lustration_status,
             already_known,
@@ -367,5 +404,72 @@ mod tests {
             ConsensusRuleSet::default(),
         )
         .await;
+    }
+
+    #[proptest(cases = 1, async = "tokio")]
+    async fn link_transaction_admission(
+        #[strategy(txkernel::with_lengths(0..1, 0..1, 0..1, true))] kernel: TransactionKernel,
+    ) {
+        let tip_mutator_set = MutatorSetAccumulator::default();
+        let now = Timestamp::hours(10_000);
+        let link = |kernel: TransactionKernel| LinkTx {
+            kernel: LinkKernel {
+                kernel,
+                thruputs: vec![AdditionRecord::new(Digest::default())],
+            },
+            proof: LinkTxProof::Proof(NeptuneProof::invalid()),
+        };
+        let admission = async |link_tx: &LinkTx, consensus_rule_set| {
+            admissible(
+                link_tx.into(),
+                &tip_mutator_set,
+                None,
+                false,
+                now,
+                Network::Main,
+                consensus_rule_set,
+            )
+            .await
+        };
+
+        let base_kernel = TransactionKernelModifier::default()
+            .inputs(vec![])
+            .coinbase(None)
+            .fee(NativeCurrencyAmount::coins(1))
+            .timestamp(now)
+            .mutator_set_hash(tip_mutator_set.hash())
+            .modify(kernel);
+
+        // Under a rule set without the `Fix` branch, no link is admitted.
+        prop_assert_eq!(
+            Err(TxAdmissionError::NotYetActive),
+            admission(&link(base_kernel.clone()), ConsensusRuleSet::HardforkGamma).await,
+        );
+
+        let delta = ConsensusRuleSet::HardforkDelta;
+
+        // A link not synced to the tip is not admitted.
+        let unsynced = TransactionKernelModifier::default()
+            .mutator_set_hash(Digest::default())
+            .modify(base_kernel.clone());
+        prop_assert_eq!(
+            Err(TxAdmissionError::NotSynced),
+            admission(&link(unsynced), delta).await,
+        );
+
+        let too_old = TransactionKernelModifier::default()
+            .timestamp(now - MEMPOOL_TX_THRESHOLD_AGE - Timestamp::hours(1))
+            .modify(base_kernel.clone());
+        prop_assert_eq!(
+            Err(TxAdmissionError::TooOld),
+            admission(&link(too_old), delta).await,
+        );
+
+        // With every cheaper check passed, the proof is verified last -- and
+        // this one does not attest to its kernel.
+        prop_assert_eq!(
+            Err(TxAdmissionError::Invalid),
+            admission(&link(base_kernel), delta).await,
+        );
     }
 }

@@ -34,7 +34,6 @@ use neptune_consensus::proof_abstractions::tasm::program::TritonProgram;
 use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use neptune_consensus::proof_abstractions::triton_vm_job_queue::vm_job_queue;
 use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
-use neptune_consensus::proof_abstractions::SecretWitness;
 use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
 use neptune_consensus::transaction::transaction_proof::TransactionProofType;
 use neptune_consensus::transaction::validity::neptune_proof::NeptuneProof;
@@ -279,21 +278,29 @@ impl<'a> TransactionProofBuilder<'a> {
             .proof_type()
             .is_single_proof()
         {
-            #[expect(unused_variables, reason = "anticipate future fork")]
             let consensus_rule_set =
                 consensus_rule_set.ok_or(ProofRequirement::ConsensusRuleSet)?;
 
             // claim, nondeterminism --> single proof
             if let Some((c, nd)) = claim_and_nondeterminism {
-                return gen_single(c, || nd, job_queue, proof_job_options, valid_mock).await;
+                return gen_single(
+                    c,
+                    || nd,
+                    consensus_rule_set,
+                    job_queue,
+                    proof_job_options,
+                    valid_mock,
+                )
+                .await;
             }
             // update-witness --> single proof
             else if let Some(w) = update_witness {
                 let spw = SingleProofWitness::from_update(w.clone());
-                let c = spw.claim();
+                let c = spw.claim(consensus_rule_set);
                 return gen_single(
                     c,
-                    || spw.nondeterminism(),
+                    || spw.nondeterminism(consensus_rule_set),
+                    consensus_rule_set,
                     job_queue,
                     proof_job_options,
                     valid_mock,
@@ -303,10 +310,11 @@ impl<'a> TransactionProofBuilder<'a> {
             // proof-collection --> single proof
             else if let Some(pc) = proof_collection {
                 let spw = SingleProofWitness::from_collection(pc);
-                let c = spw.claim();
+                let c = spw.claim(consensus_rule_set);
                 return gen_single(
                     c,
-                    || spw.nondeterminism(),
+                    || spw.nondeterminism(consensus_rule_set),
+                    consensus_rule_set,
                     job_queue,
                     proof_job_options,
                     valid_mock,
@@ -336,8 +344,11 @@ impl<'a> TransactionProofBuilder<'a> {
                 Ok(TransactionProof::Witness(primitive_witness.into_owned()))
             }
             TransactionProofType::ProofCollection => {
+                let consensus_rule_set =
+                    consensus_rule_set.ok_or(ProofRequirement::ConsensusRuleSet)?;
                 let pc = proof_collection_from_witness(
                     primitive_witness,
+                    consensus_rule_set,
                     job_queue,
                     proof_job_options,
                     valid_mock,
@@ -368,6 +379,7 @@ impl<'a> TransactionProofBuilder<'a> {
 async fn gen_single<'a, F>(
     claim: Claim,
     nondeterminism: F,
+    consensus_rule_set: ConsensusRuleSet,
     job_queue: Arc<TritonVmJobQueue>,
     proof_job_options: TritonVmProofJobOptions,
     valid_mock: bool,
@@ -377,7 +389,7 @@ where
 {
     Ok(TransactionProof::SingleProof(
         ProofBuilder::new()
-            .program(SingleProof.program())
+            .program(SingleProof::new(consensus_rule_set).program())
             .claim(claim)
             .nondeterminism(nondeterminism)
             .job_queue(job_queue)
@@ -398,6 +410,7 @@ where
 ///           != TransactionProofType::ProofCollection`
 async fn proof_collection_from_witness(
     witness_cow: Cow<'_, PrimitiveWitness>,
+    consensus_rule_set: ConsensusRuleSet,
     job_queue: Arc<TritonVmJobQueue>,
     proof_job_options: TritonVmProofJobOptions,
     valid_mock: bool,
@@ -420,7 +433,13 @@ async fn proof_collection_from_witness(
         });
     }
 
-    let pc = ProofCollection::produce(witness_cow.borrow(), job_queue, proof_job_options).await?;
+    let pc = ProofCollection::produce(
+        witness_cow.borrow(),
+        consensus_rule_set,
+        job_queue,
+        proof_job_options,
+    )
+    .await?;
 
     Ok(pc)
 }

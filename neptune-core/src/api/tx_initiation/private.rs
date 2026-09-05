@@ -1,6 +1,7 @@
 // private module. module docs not needed.
 use std::sync::Arc;
 
+use neptune_consensus::chaintx::link_tx::LinkTx;
 use neptune_consensus::transaction::transaction_proof::TransactionProofType;
 use neptune_consensus::transaction::Transaction;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -20,6 +21,27 @@ impl TransactionInitiatorPrivate {
 
     // note: not pub, as one should never call broadcast without
     // recording first.
+    pub(super) async fn broadcast_link_transaction(
+        &self,
+        link_tx: Arc<LinkTx>,
+    ) -> Result<(), error::SendError> {
+        let response = self
+            .global_state_lock
+            .rpc_server_to_main_tx()
+            .send(RPCServerToMain::BroadcastOwnLinkTx(link_tx))
+            .await;
+
+        if let Err(e) = response {
+            tracing::error!(
+                "Could not send link tx to main task: error: {}",
+                e.to_string()
+            );
+            return Err(error::SendError::NotBroadcast);
+        }
+
+        Ok(())
+    }
+
     pub(super) async fn broadcast_transaction(
         &self,
         transaction: Arc<Transaction>,

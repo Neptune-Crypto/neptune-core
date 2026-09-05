@@ -40,6 +40,8 @@ use neptune_wallet::change_policy::ChangePolicy;
 use super::error;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::api::tx_initiation::initiator::TransactionInitiator;
+use crate::state::transaction::chained_tx_artifacts::ChainedTxArtifacts;
+use crate::state::transaction::link_tx_artifacts::LinkTxArtifacts;
 use crate::state::transaction::tx_creation_artifacts::TxCreationArtifacts;
 use crate::GlobalStateLock;
 
@@ -70,6 +72,38 @@ impl TransactionSender {
             global_state_lock: self.global_state_lock.clone(),
         }
         .send(outputs, change_policy, fee, timestamp, accept_lustrations)
+        .await
+    }
+
+    /// Send a chained transaction, paying with unconfirmed funds. See
+    /// [`TransactionInitiator::send_chained`].
+    pub async fn send_chained(
+        &mut self,
+        outputs: impl IntoIterator<Item = impl Into<OutputFormat>>,
+        change_policy: ChangePolicy,
+        fee: NativeCurrencyAmount,
+        timestamp: Timestamp,
+    ) -> Result<ChainedTxArtifacts, error::SendError> {
+        TransactionInitiator {
+            global_state_lock: self.global_state_lock.clone(),
+        }
+        .send_chained(outputs, change_policy, fee, timestamp)
+        .await
+    }
+
+    /// Send a chained transaction that stays a link transaction. See
+    /// [`TransactionInitiator::send_chained_link`].
+    pub async fn send_chained_link(
+        &mut self,
+        outputs: impl IntoIterator<Item = impl Into<OutputFormat>>,
+        change_policy: ChangePolicy,
+        fee: NativeCurrencyAmount,
+        timestamp: Timestamp,
+    ) -> Result<LinkTxArtifacts, error::SendError> {
+        TransactionInitiator {
+            global_state_lock: self.global_state_lock.clone(),
+        }
+        .send_chained_link(outputs, change_policy, fee, timestamp)
         .await
     }
 }

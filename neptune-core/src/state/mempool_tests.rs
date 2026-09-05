@@ -98,6 +98,9 @@ mod tests {
         let mutator_set_update = new_block.mutator_set_update().unwrap();
         for job in update_jobs {
             match job {
+                MempoolUpdateJob::Link { .. } => {
+                    unimplemented!("this mock does not update link transactions")
+                }
                 MempoolUpdateJob::PrimitiveWitness(primitive_witness_update) => {
                     let new_pw = primitive_witness_update
                         .old_primitive_witness
@@ -111,10 +114,13 @@ mod tests {
                     let pc_job = PrimitiveWitnessToProofCollection {
                         primitive_witness: new_pw.clone(),
                     };
+                    let consensus_rule_set =
+                        ConsensusRuleSet::infer_from(network, new_block.header().height);
                     let upgrade_result = pc_job
                         .upgrade(
                             TritonVmJobQueue::get_instance(),
                             &TritonVmProofJobOptions::default(),
+                            consensus_rule_set,
                         )
                         .await
                         .unwrap();

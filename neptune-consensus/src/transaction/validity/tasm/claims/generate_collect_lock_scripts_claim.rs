@@ -6,12 +6,21 @@ use tasm_lib::prelude::*;
 use tasm_lib::traits::basic_snippet::BasicSnippet;
 use tasm_lib::triton_vm::prelude::*;
 
+use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::transaction::validity::collect_lock_scripts::CollectLockScripts;
 use crate::transaction::validity::proof_collection::ProofCollection;
 use crate::transaction::validity::tasm::claims::new_claim::NewClaim;
 
-pub(crate) struct GenerateCollectLockScriptsClaim;
+pub(crate) struct GenerateCollectLockScriptsClaim {
+    consensus_rule_set: ConsensusRuleSet,
+}
+
+impl GenerateCollectLockScriptsClaim {
+    pub(crate) fn new(consensus_rule_set: ConsensusRuleSet) -> Self {
+        Self { consensus_rule_set }
+    }
+}
 
 impl BasicSnippet for GenerateCollectLockScriptsClaim {
     fn parameters(&self) -> Vec<(DataType, String)> {
@@ -33,7 +42,7 @@ impl BasicSnippet for GenerateCollectLockScriptsClaim {
             triton_asm!(push {d4} push {d3} push {d2} push {d1} push {d0})
         };
 
-        let new_claim = library.import(Box::new(NewClaim));
+        let new_claim = library.import(Box::new(NewClaim::new(self.consensus_rule_set)));
         let lock_script_hashes_loop = format!("{entrypoint}_lock_script_hashes_loop");
 
         triton_asm!(
@@ -164,7 +173,14 @@ mod tests {
 
     #[test]
     fn unit_test() {
-        ShadowedFunction::new(GenerateCollectLockScriptsClaim).test();
+        ShadowedFunction::new(GenerateCollectLockScriptsClaim::new(
+            ConsensusRuleSet::HardforkGamma,
+        ))
+        .test();
+        ShadowedFunction::new(GenerateCollectLockScriptsClaim::new(
+            ConsensusRuleSet::HardforkDelta,
+        ))
+        .test();
     }
 
     impl Function for GenerateCollectLockScriptsClaim {
@@ -177,7 +193,7 @@ mod tests {
             let proof_collection =
                 *ProofCollection::decode_from_memory(memory, proof_collection_pointer).unwrap();
 
-            let claim = proof_collection.collect_lock_scripts_claim();
+            let claim = proof_collection.collect_lock_scripts_claim(self.consensus_rule_set);
             let claim_pointer =
                 rust_shadowing_helper_functions::dyn_malloc::dynamic_allocator(memory);
             encode_to_memory(memory, claim_pointer, &claim);
@@ -206,6 +222,7 @@ mod tests {
             let proof_collection = rt
                 .block_on(ProofCollection::produce(
                     &primitive_witness,
+                    self.consensus_rule_set,
                     TritonVmJobQueue::get_instance(),
                     TritonVmProofJobOptions::default_with_network(Network::Main),
                 ))

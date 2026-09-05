@@ -46,6 +46,16 @@ pub const BLOCK_HEIGHT_HARDFORK_GAMMA_MAIN_NET: BlockHeight =
 pub const BLOCK_HEIGHT_HARDFORK_GAMMA_TESTNET: BlockHeight =
     BlockHeight::new(BFieldElement::new(4_650));
 
+/// Height of the first block after hard fork delta, which activates
+/// transaction chaining, on main net.
+pub const BLOCK_HEIGHT_HARDFORK_DELTA_MAIN_NET: BlockHeight =
+    BlockHeight::new(BFieldElement::new(55_000u64));
+
+/// Height of the first block after hard fork delta, which activates
+/// transaction chaining, on test net.
+pub const BLOCK_HEIGHT_HARDFORK_DELTA_TESTNET: BlockHeight =
+    BlockHeight::new(BFieldElement::new(5_400));
+
 /// Transactions that are more than three days older than the block are
 /// disallowed. Only enforced from hardfork gamma and onwards.
 pub const TX_BACKDATING_LIMIT: Timestamp = Timestamp::days(3);
@@ -56,7 +66,9 @@ pub const TX_BACKDATING_LIMIT: Timestamp = Timestamp::days(3);
 /// across
 ///  - networks, and
 ///  - hard and soft forks triggered by blocks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::EnumIter, Default, strum::Display)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, strum::EnumIter, strum::EnumCount, Default, strum::Display,
+)]
 pub enum ConsensusRuleSet {
     /// First rule set after reboot
     Reboot,
@@ -81,6 +93,17 @@ pub enum ConsensusRuleSet {
     /// found to be unsound.
     #[default]
     HardforkGamma,
+
+    /// Activate transaction chaining: `SingleProof` gains the `Fix` and `Weld`
+    /// branches, which recursively verify a `LinkProof` and so let a chained
+    /// transaction (`LinkTx`) become a block-borne `Transaction`.
+    ///
+    /// New branches are a new program, hence a new program digest, hence a
+    /// different claim about every transaction. See
+    /// [`Self::has_chain_branches`].
+    ///
+    /// Also bumps the Triton VM version.
+    HardforkDelta,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
@@ -88,6 +111,7 @@ pub enum TritonProofVersion {
     V0,
     V1,
     V5,
+    V8,
 }
 
 impl TritonProofVersion {
@@ -97,6 +121,7 @@ impl TritonProofVersion {
             TritonProofVersion::V0 => 0,
             TritonProofVersion::V1 => 1,
             TritonProofVersion::V5 => 5,
+            TritonProofVersion::V8 => 8,
         }
     }
 }
@@ -129,8 +154,10 @@ impl ConsensusRuleSet {
                     ConsensusRuleSet::TvmProofVersion1
                 } else if block_height < BLOCK_HEIGHT_HARDFORK_GAMMA_MAIN_NET {
                     ConsensusRuleSet::HardforkBeta
-                } else {
+                } else if block_height < BLOCK_HEIGHT_HARDFORK_DELTA_MAIN_NET {
                     ConsensusRuleSet::HardforkGamma
+                } else {
+                    ConsensusRuleSet::HardforkDelta
                 }
             }
             Network::Testnet(0) => {
@@ -142,11 +169,13 @@ impl ConsensusRuleSet {
                     ConsensusRuleSet::TvmProofVersion1
                 } else if block_height < BLOCK_HEIGHT_HARDFORK_GAMMA_TESTNET {
                     ConsensusRuleSet::HardforkBeta
-                } else {
+                } else if block_height < BLOCK_HEIGHT_HARDFORK_DELTA_TESTNET {
                     ConsensusRuleSet::HardforkGamma
+                } else {
+                    ConsensusRuleSet::HardforkDelta
                 }
             }
-            _ => ConsensusRuleSet::HardforkGamma,
+            _ => ConsensusRuleSet::HardforkDelta,
         }
     }
 
@@ -157,6 +186,7 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::TvmProofVersion1 => true,
             ConsensusRuleSet::HardforkBeta => false,
             ConsensusRuleSet::HardforkGamma => false,
+            ConsensusRuleSet::HardforkDelta => false,
         }
     }
 
@@ -169,6 +199,7 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::TvmProofVersion1 => true,
             ConsensusRuleSet::HardforkBeta => false,
             ConsensusRuleSet::HardforkGamma => false,
+            ConsensusRuleSet::HardforkDelta => false,
         }
     }
 
@@ -179,6 +210,7 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::TvmProofVersion1 => false,
             ConsensusRuleSet::HardforkBeta => true,
             ConsensusRuleSet::HardforkGamma => true,
+            ConsensusRuleSet::HardforkDelta => true,
         }
     }
 
@@ -189,6 +221,7 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::TvmProofVersion1 => false,
             ConsensusRuleSet::HardforkBeta => true,
             ConsensusRuleSet::HardforkGamma => true,
+            ConsensusRuleSet::HardforkDelta => true,
         }
     }
 
@@ -198,7 +231,31 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::HardforkAlpha
             | ConsensusRuleSet::TvmProofVersion1
             | ConsensusRuleSet::HardforkBeta => None,
-            ConsensusRuleSet::HardforkGamma => Some(TX_BACKDATING_LIMIT),
+            ConsensusRuleSet::HardforkGamma | ConsensusRuleSet::HardforkDelta => {
+                Some(TX_BACKDATING_LIMIT)
+            }
+        }
+    }
+
+    /// Whether the `SingleProof` program carries the chaining branches
+    /// [`Fix`](crate::transaction::validity::tasm::single_proof::fix_branch::FixBranch)
+    /// and
+    /// [`Weld`](crate::transaction::validity::tasm::single_proof::weld_branch::WeldBranch),
+    /// which recursively verify a `LinkProof` -- i.e. whether a chained
+    /// transaction can become block-borne.
+    ///
+    /// These two branches are the one difference between the gamma and delta
+    /// `SingleProof` programs, and hence the reason there are two of them: two
+    /// branches more is a program hash more, and a claim about a transaction is
+    /// about whichever program the block height selects.
+    pub fn has_chain_branches(&self) -> bool {
+        match self {
+            ConsensusRuleSet::Reboot
+            | ConsensusRuleSet::HardforkAlpha
+            | ConsensusRuleSet::TvmProofVersion1
+            | ConsensusRuleSet::HardforkBeta
+            | ConsensusRuleSet::HardforkGamma => false,
+            ConsensusRuleSet::HardforkDelta => true,
         }
     }
 
@@ -220,6 +277,7 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::TvmProofVersion1 => unreachable!("Lustration not active"),
             ConsensusRuleSet::HardforkBeta => false,
             ConsensusRuleSet::HardforkGamma => true,
+            ConsensusRuleSet::HardforkDelta => true,
         }
     }
 
@@ -231,6 +289,7 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::TvmProofVersion1 => TritonProofVersion::V1,
             ConsensusRuleSet::HardforkBeta => TritonProofVersion::V1,
             ConsensusRuleSet::HardforkGamma => TritonProofVersion::V5,
+            ConsensusRuleSet::HardforkDelta => TritonProofVersion::V8,
         }
     }
 
@@ -241,7 +300,8 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::HardforkAlpha
             | ConsensusRuleSet::TvmProofVersion1
             | ConsensusRuleSet::HardforkBeta
-            | ConsensusRuleSet::HardforkGamma => {
+            | ConsensusRuleSet::HardforkGamma
+            | ConsensusRuleSet::HardforkDelta => {
                 // This size is 8MB which should keep it feasible to run archival nodes for
                 // many years without requiring excessive disk space.
                 1_000_000
@@ -272,7 +332,8 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::HardforkAlpha
             | ConsensusRuleSet::TvmProofVersion1
             | ConsensusRuleSet::HardforkBeta
-            | ConsensusRuleSet::HardforkGamma => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
+            | ConsensusRuleSet::HardforkGamma
+            | ConsensusRuleSet::HardforkDelta => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
         }
     }
     pub fn max_num_outputs(&self) -> usize {
@@ -281,7 +342,8 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::HardforkAlpha
             | ConsensusRuleSet::TvmProofVersion1
             | ConsensusRuleSet::HardforkBeta
-            | ConsensusRuleSet::HardforkGamma => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
+            | ConsensusRuleSet::HardforkGamma
+            | ConsensusRuleSet::HardforkDelta => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
         }
     }
     pub fn max_num_announcements(&self) -> usize {
@@ -290,7 +352,8 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::HardforkAlpha
             | ConsensusRuleSet::TvmProofVersion1
             | ConsensusRuleSet::HardforkBeta
-            | ConsensusRuleSet::HardforkGamma => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
+            | ConsensusRuleSet::HardforkGamma
+            | ConsensusRuleSet::HardforkDelta => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
         }
     }
 
@@ -491,6 +554,32 @@ pub(crate) mod tests {
                 .triton_proof_version()
                 .version(),
         );
+        assert_eq!(
+            8,
+            ConsensusRuleSet::HardforkDelta
+                .triton_proof_version()
+                .version(),
+        );
+    }
+
+    /// The newest rule set must name the version the *linked* Triton VM uses.
+    #[test]
+    fn newest_rule_set_tracks_the_linked_triton_vm() {
+        use tasm_lib::triton_vm::proof::CURRENT_VERSION;
+
+        assert_eq!(
+            CURRENT_VERSION,
+            ConsensusRuleSet::HardforkDelta
+                .triton_proof_version()
+                .version(),
+        );
+        assert_eq!(
+            5,
+            ConsensusRuleSet::HardforkGamma
+                .triton_proof_version()
+                .version(),
+            "gamma's version is history and must never move"
+        );
     }
 
     #[test]
@@ -527,7 +616,7 @@ pub(crate) mod tests {
     #[test]
     fn allow_non_zero_version() {
         // Start well into hardfork gamma
-        let init_block_heigth = BlockHeight::from(59998u64);
+        let init_block_heigth = BlockHeight::from(49998u64);
         let network = Network::Main;
         let bpw = BlockPrimitiveWitness::deterministic_with_block_height_and_difficulty(
             init_block_heigth,
