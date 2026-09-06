@@ -83,10 +83,34 @@ The book lives on-chain, the trade is atomic, and there is no escrow and no
 counterparty risk. Nothing about that description mentions time locks, mining,
 or native currency.
 
+**Standing swap order** is the name, and the code should use it rather than
+SOFuN's: the announcement flag is `STANDING_SWAP_ORDER` and the body struct is
+`StandingSwapOrderV1` (§4.3). "Standing" says the offer rests until its owner
+withdraws it, "swap" says both sides move at once, and "order" is what a book is
+made of. SOFuN is then one configuration of a standing swap order, and its own
+name belongs only to that configuration.
+
 The intent is therefore that SOFuN be a *configuration* of that primitive rather
 than a thing of its own, and that wherever the two diverge the divergence is
 **additive**: SOFuN should be a layer over a general core. The notes below flag
 where the two come apart.
+
+**Partial fills stay out, and the reason is structural.** Filling half an order
+means spending the order UTXO, paying half the reward, and returning the other
+half of the offer to the book — as a new UTXO under the same lock script. So the
+script would have to assert that an output exists whose lock script hash is its
+own, and a Triton program cannot compute its own hash: it can divine a program
+and hash it, but nothing binds what it divined to what is running. The usual way
+out is a type script, which sees inputs and outputs together and can enforce
+continuity between them, or a family of scripts each hard-coding the hash of the
+next. Both are a different mechanism, not a bigger version of this one.
+
+Against that, the cost of doing without is small and lands on the right party:
+granularity is chosen at order creation, by the proposer, who pays one
+announcement and one UTXO per piece. The mismatch it cannot express is a taker
+who wants a size no proposer offered — which for SOFuN cannot arise, since every
+order is exactly one block's slot (§4.1), and for the general case is a reason
+to revisit the primitive rather than to complicate this one.
 
 **One divergence is already known, and it is the largest.** SOFuN's demanded
 UTXO carries variable state: the release date `D` is not known when the order is
@@ -173,8 +197,9 @@ B dominates. **We choose B and reject C**; nothing below relies on C.
 |---|---|---|
 | Release date `D` | Chosen by the accepter from a **grid** `D ∈ {D₀ + k·G : 0 ≤ k < K}` named by the proposer | Makes the reward enumerable by the proposer (§2) while letting `D` track the actual fill time. Shelf life `K·G` and waiting time `≈3 years + G` are then **independent knobs**, which is what a single fixed date cannot give. |
 | Payout announcement | **None** | Not needed once the reward is enumerable. Saves a field authentication, block space, and any reliance on accepter cooperation. |
-| Partial fills | **Not supported** | One order = one UTXO = one fill. A proposer wanting granularity places several orders. Keeps the lock script's arithmetic down to `D₀ + k·G`. *Most likely of these to be reopened by generalization (§1.5).* |
-| Who may fill | **Anyone** | The lock script does not and should not care. The economics select composers on their own (§6); no restriction needs enforcing. |
+| Partial fills | **Not supported**, deliberately | One order = one UTXO = one fill; a proposer wanting granularity places several orders and chooses the granularity themselves. Moot for SOFuN, where one order is exactly one block's slot (§4.1). Deferred rather than rejected for the general case — see §1.5. |
+| Reward amount `Y` | **Fixed**: half the block subsidy | Every block mints exactly that much time-locked coin, so one order fits one block exactly. Orders then differ only in price `X`, which makes them fungible and the composer's choice among them trivial (§4.1, §4.7). |
+| Who may fill | **Anyone** | The lock script does not and should not care. Only a coinbase transaction has a mandatory time-lock for the reward to discharge (§4.6), so composers select themselves; no restriction needs enforcing. |
 
 
 ## 4. Mechanism
@@ -203,14 +228,32 @@ where `commit` is the mutator set operation, *i.e.*,
 `hash_pair(hash_pair(item, sender_randomness), receiver_digest)`.
 
 The proposer hard-codes into the lock script: `Y`, the reward lock script hash,
-`sender_randomness*`, `receiver_digest*`, and the grid `(D₀, G, K)`. The
+`sender_randomness*`, `receiver_digest*`, and the grid `(D₀, G, K)`, of which
+only `D₀` is theirs to choose — `G` and `K` are protocol constants (§4.3). The
 accepter divines only `k`, giving `D = D₀ + k·G` with `0 ≤ k < K` — it is
 nondeterministic input to the lock script, not transaction data, and never
 appears on-chain. Write `D_max = D₀ + (K−1)·G` for the last grid point.
 
+**`Y` is not a free parameter either.** Every block mints a fixed amount of
+time-locked coin: half the subsidy. It is half however the composer splits the
+subsidy with a guesser, because the guesser's share is itself half time-locked
+(`block_kernel.rs:54-73`). An order for exactly that amount is filled by one
+composer out of one block and consumes the whole of what that block has to
+redirect. An order for less makes the composer take several to fill the same
+slot, and an order for more cannot be filled at all. So a proposer always asks
+for `Y = Block::block_subsidy(h) / 2` (`block/mod.rs:430`), and a composer only
+ever fills an order whose `Y` is half of their own block's subsidy.
+
+The subsidy halves every three years (`BLOCKS_PER_GENERATION = 160815` at 588
+second blocks, `block_height.rs:44-46`), which is six times an order's shelf
+life, so `Y` is stable for the life of any order. The exception is an order
+placed shortly before a halving: after it, no composer's block mints enough for
+the reward to fit, so the order simply stops being filled and the proposer
+cancels it.
+
 There is deliberately **no lower bound beyond `D₀`**. A smaller `D` is strictly
 better for the proposer and never cheaper for the accepter — flat in cost down
-to `t + 3 years`, and a loss below it (§6.3) — so nothing needs to enforce one.
+to `t + 3 years`, and a loss below it (§4.6) — so nothing needs to enforce one.
 
 ### 4.2 The lock script
 
@@ -222,15 +265,17 @@ Sketch:
 
 ```text
 read_io 5                             // [txkmh]
-divine 1                              // path selector
-if selector == 0:
-    // (a) cancel: standard hash lock
-    divine 5; hash; assert_vector <proposer's after-image>
-else:
-    // (b) fill
+divine 5; hash                        // candidate cancel preimage, hashed
+push <post-image>                     // 5 words, hard-coded
+opened := (the two digests agree)     // 5×eq + 4×mul -> 1 or 0
+skiz_over: if not opened:
+    // fill
     divine k
-    assert k < K                      // K hard-coded
-    D    := D0 + k*G                  // D0, G hard-coded
+    assert is_u32(k)                  // explicit, not a side effect of `lt`
+    assert k < K                      // K = 26, protocol constant
+    kG   := u64::safe_mul(k, G)       // G = 1 week; asserts no overflow
+    D    := u64::add(D0, kG)          // D0 hard-coded; asserts no overflow
+    assert D0 <= D <= D_max           // D_max hard-coded
     utxo := [ NativeCurrency(Y), TimeLock(D) ]      // Y, lsh hard-coded
     ar   := commit(Hash(utxo), sr*, rd*)            // sr*, rd* hard-coded
     divine outputs list               // Vec<AdditionRecord>
@@ -239,12 +284,48 @@ else:
 halt
 ```
 
+**There is no path selector.** The preimage decides. A spender always divines
+five words; if they hash to the post-image the hash lock has opened and the
+script is done, and if they do not, the reward must be shown among the outputs.
+Nobody chooses a branch, so there is no question of what a malicious prover
+gains by choosing one, and no way to reach `halt` without having satisfied
+exactly one of the two conditions — the fill check is skipped *only* by the hash
+lock passing. A design with an explicit selector has to rule out a third
+selector value falling through to `halt`; this one has nothing to rule out.
+
+Two consequences worth knowing. Comparing digests as a *value* rather than
+asserting costs about fifteen instructions instead of `assert_vector`'s one, and
+every fill pays for one hash it does not need — both negligible. And a cancel
+attempted with the wrong preimage does not fail as a cancel; it falls through
+and fails as an unpaid fill, which is a confusing error message rather than a
+soundness problem.
+
 `authenticate_txk_field` already exists
 (`neptune-consensus/src/transaction/validity/tasm/authenticate_txk_field.rs`);
 the field is `TransactionKernelField::Outputs` (`transaction_kernel.rs:312`).
-The grid costs roughly six instructions — a range check on `k` and one
-multiply-add — and no additional field authentication. The membership check is
-a linear scan, so path (b) costs O(outputs).
+The grid needs no additional field authentication. The membership check is a
+linear scan, so path (b) costs O(outputs), which dominates everything else here.
+
+**The grid arithmetic is checked at every step, deliberately.** `k` is the only
+value a spender supplies, and everything downstream of it is a release date the
+proposer cannot renegotiate, so it is checked in u64 rather than in the field:
+`u32::is_u32` on `k`, `lt` against a hard-coded `K`, then `u64::safe_mul` and
+`u64::add` — both of which assert their own absence of overflow — and finally
+`D₀ ≤ D ≤ D_max` against hard-coded bounds
+(`tasm_lib::arithmetic::{u32::is_u32, u64::{lt, safe_mul, add}}`). Field
+wraparound is then impossible by construction rather than by an argument about
+how large a timestamp can plausibly get, and recomposing `D` into the single
+`BFieldElement` a `Timestamp` is (`neptune-primitives/src/timestamp.rs:47`) is
+safe because `D ≤ D_max < 2^63 < p`.
+
+Two of those checks are redundant against a correctly built order: Triton's
+`lt` already crashes on a non-u32 operand (`OpStackError::FailedU32Conversion`),
+and with `G` and `K` fixed only a `D₀` within half a year of the field bound
+could overflow, which no wallet constructs. They stay anyway. This is a lock
+script — the place where a spender's input meets the proposer's money — and the
+whole apparatus costs on the order of a hundred instructions against a scan that
+is already linear in the transaction's output count. The wallet-side bound is the
+belt; these are the braces.
 
 > **Generalization note (§1.5).** Read the above as the SOFuN instance of a
 > general rule: *path (b) asserts that at least one member of an admissible set
@@ -258,24 +339,108 @@ only that the reward be paid.
 
 ### 4.3 Announcement
 
-The announcement is layered: a generic standing swap order record, plus a SOFuN
-extension. The generic part carries no notion of currency or time.
+The envelope is generic; the body is not. Three elements name the market and
+the schema, and everything after them is whatever that schema says varies from
+one order to the next.
 
 ```
-element 0   flag      STANDING_SWAP_ORDER
-element 1   pair_id   truncated Hash(offered assets ‖ demanded assets)
-element 2   version
+element 0   flag      STANDING_SWAP_ORDER = 1000
+element 1   pair_id   Hash(offered type scripts ‖ demanded type scripts)[0]
+element 2   version   1
 --------------------------------------------------------------- body
-offered  { lock_script_hash, coins, sender_randomness, receiver_preimage }
-demanded { lock_script_hash, coins, sender_randomness*, receiver_digest*,
-           derivation }
+StandingSwapOrderV1 {                                          elements
+    offered_amount           NativeCurrencyAmount                    4
+    demanded_amount          NativeCurrencyAmount                    4
+    d_zero                   Timestamp                               1
+    seed                     Digest                                  5
+    cancel_post_image        Digest                                  5
+    reward_lock_script_hash  Digest                                  5
+    reward_receiver_digest   Digest                                  5
+}                                                          total     29
 ```
+
+Every field is fixed-length, so the body is the struct's `BFieldCodec`
+encoding and nothing else — no bespoke format, and the derived `decode`
+rejects a truncated record. Encoding an announcement is
+`[flag, pair_id, version]` concatenated with `body.encode()`.
+
+**The body carries only the differences.** Both sides' type scripts are fixed by
+the pair, the release date is fixed by the grid, and both offered-side digests
+are derived (below), so none of them are on the wire. What is left is two
+amounts, one grid origin, and four digests. The cost is that the body is
+only decodable by a consumer who knows the pair's schema; an indexer that does
+not can still bucket by `pair_id`, it just cannot read the terms. That is the
+right trade — the alternative is paying for two `coins` lists in every order,
+forever — but it means the version at element 2 is a *per-pair schema* version,
+and the generic core of §1.5 is a shared envelope rather than a shared body.
+
+**`G` and `K` are not negotiable, so they are not on the wire.** Version 1 fixes
+`G` = 1 week and `K` = 26. `G` sets the proposer's overshoot: at most two weeks
+on top of the three years, one step for quantization and one for §4.6's
+headroom. `K` sets shelf life, because the grid is anchored at order creation —
+the proposer takes `D₀` to be the first grid point at or after
+`placement + 3 years`, and the order is fillable only while
+`D_max ≥ t + 3 years` (§4.6), which is `(K−1)·G` ≈ six months from placement.
+Six months is generous for the purpose. An order that has gone unfilled that
+long is not waiting, it is mispriced, and re-placing it costs one transaction
+and re-anchors the grid at a price the proposer has had six months of evidence
+about. The wallet-side cost is 26 candidate addition records per open order.
+
+Nothing enforces this at the consensus layer. A lock script is an arbitrary
+program and nobody can stop a proposer from writing one on a grid of their own.
+But nothing needs to, because the constants live in the accepter's
+reconstruction of the lock script (§7.3): they rebuild the script from the
+schema, hash it, build the order UTXO around that hash, derive the addition
+record from `seed`, and look for it in the AOCL. An order built on a different
+grid hashes differently, so its addition record is not the one being looked for,
+so the order does not verify and nobody fills it. A deviant order is exactly as
+fillable as no order at all. That is the whole of the enforcement, and it is
+enough, because the only party who has to agree about the grid is the one
+deciding whether to pay. Escaping the configuration means shipping a
+`StandingSwapOrderV2` and convincing fillers to implement it — which is what
+element 2 is for, and is governance rather than a hole in it.
+
+**One seed, three public randomnesses.** The offered side's `sender_randomness`
+and `receiver_preimage` and the demanded side's `sender_randomness*` are all
+public by design, so publish one `seed` and derive them, after the pattern of
+`derive_receiver_id` (`neptune-wallet/src/address/common.rs:29`):
+
+```
+offered.sender_randomness   =  H(seed ‖ 0)
+offered.receiver_preimage   =  H(seed ‖ 1)
+demanded.sender_randomness* =  H(seed ‖ 2)
+```
+
+The reward's `receiver_digest*` cannot come from the seed and is published
+directly: the seed is public, so anything derived from it is spendable by
+anyone, and that digest's preimage is exactly the proposer's custody of the
+reward. Deriving the rest collapses §7.1's freshness requirement to a single
+invariant — **one fresh seed per order** — which is a great deal easier for a
+wallet to get right than three independent ones.
 
 **Naming the pair.** The type of a UTXO is determined by the type scripts of its
 coins, so a pair is `(offered type scripts, demanded type
 scripts)`. SOFuN's pair is `{NativeCurrency} → {NativeCurrency, TimeLock}`.
-`pair_id` is a truncated hash of the two sets: a filter, and an index.
-The full type script hashes are in the body, where they can be checked.
+`pair_id` is the first element of the hash of the two sets, the way a receiver
+id is the first element of a hash of a seed: a filter, and an index. It is not
+authenticated by the body — a consumer that knows the schema recomputes it from
+the type scripts that schema names and checks the two agree.
+
+**It commits to the type scripts and to nothing else.** The coins' `state` is
+deliberately excluded, because `state` is exactly where the varying data lives:
+`NativeCurrency`'s state is the amount and `TimeLock::until(D)`'s is the release
+date (`time_lock.rs:39-42`). A pair id over state would change with `X`, with
+`Y`, and with every grid point — one bucket per order, which is the opposite of
+a market key.
+
+The price is a coarser filter. Two assets that share a type script and differ
+only in state — a future token type parameterized that way — land in the same
+bucket, and a consumer of one sees the other's orders and discards them after
+decoding. That is a false positive in an index, never a wrong fill: the lock
+script commits to the exact demanded UTXO, state included, so an accepter who
+reconstructs it cannot pay the wrong asset. If a market ever does need to be
+finer than its type scripts, the place to say so is the schema at element 2,
+which is outside the index by design — not the pair id, which would fragment it.
 
 **Why name the pair at all, when the body already says it?** `AnnouncementFlag`
 *is* the first two elements of an announcement and a query against
@@ -302,7 +467,7 @@ that as a per-wallet limit — a wallet with incoming UTXOs in more blocks than
 that "cannot rely on the mapping". A pair id is shared by every order in its
 market, so a market reaches the cap far sooner than any single recipient
 would. It is a bootstrap and a coarse filter; anyone tracking a market
-maintains their own index either way (§9).
+maintains their own index either way (§4.8).
 
 **Preimage on one side, digest on the other.** The asymmetry is deliberate,
 and getting it backwards loses funds either way:
@@ -318,19 +483,29 @@ and getting it backwards loses funds either way:
 **What is not in it.**
  - No order id: the UTXO is already confirmed, uniquely identifying the order
    already.
- - No price: both `coins` lists are present, so any indexer computes the rate
-   itself.
+ - No price: both amounts are present, so any indexer computes the rate itself.
+ - No lock script hash, on either side. The offered one is *derived* — see
+   below — and the demanded one is the reward address, which is published.
 
-**The announcement is a hint, not an authority.** Every field is checkable:
-rebuild the lock script from the published parameters, hash it, compare against
-`offered.lock_script_hash`, and confirm that matches the UTXO actually on chain.
-An accepter that skips this can be induced to pay for nothing (§7.3).
+**The announcement is a hint, not an authority.** The record is not a claim
+about an order; it is enough material to rebuild the order and check it against
+the chain. From the body an accepter reconstructs the lock script (`Y`, the
+grid, the reward address, `sender_randomness*`, `receiver_digest*` and the
+cancel post-image are all it hard-codes), hashes it, builds
+`utxo = {that hash, [NativeCurrency(X)]}`, computes its addition record from the
+seed-derived randomnesses, and looks for it in the AOCL. Every step is
+verification against chain state, and there is no field left to take on trust.
+An accepter who skips it can be induced to pay for nothing (§7.3).
 
-**SOFuN's instantiation.** `offered.coins = [NativeCurrency(X)]`;
-`demanded.coins = [NativeCurrency(Y), TimeLock(·)]` with the release date left
-open and `derivation = grid(D₀, G, K)` closing it. A general swap leaves
-`derivation` empty and states `demanded.coins` concretely — a one-element
-admissible set (§1.5).
+Note what this requires of the announcement: the cancel post-image is in the
+body precisely because path (a) hard-codes it, and a lock script that cannot be
+rebuilt cannot be checked.
+
+**SOFuN's instantiation.** `offered_amount = X` against a demanded
+`[NativeCurrency(Y), TimeLock(D)]` whose release date the grid supplies. A
+general swap over some other pair states its demanded coins concretely and needs
+no grid — a one-element admissible set (§1.5) — which in this encoding means a
+different pair, a different schema, and a body without the three grid fields.
 
 **Filling requires no announcement at all.** This is the point of the grid.
 
@@ -342,18 +517,306 @@ addition records `AR(D₀ + k·G)` and adds them to a watch set.
 
 **Cancel.** Proposer spends the order UTXO via path (a). Costs a transaction fee.
 
-**Fill.** A composer includes, in the coinbase transaction they are building,
-the order UTXO as an input (satisfying path (b)) and `AR(D)` as an output funded
-from the coinbase, choosing a small `k` whose reward output still counts toward
-their own mandatory lock, with a margin (§6.3, §6.4). They keep `X` as liquid
-NPT.
+**Fill.** A composer looks only at orders asking for exactly the time-locked
+subsidy of the block they are building, and ignores the rest (§4.7). Among
+those, they take the one offering the most `X`. They include, in the coinbase
+transaction, the order UTXO as an input (satisfying path (b)) and `AR(D)` as an
+output funded from the coinbase, choosing a small `k` whose reward output still
+counts toward their own mandatory lock, with a margin (§4.6). They keep `X` as
+liquid NPT.
 
 **Claim.** The proposer's wallet matches a block's addition records against the
 watch set, hits one, recovers `k` and hence the full reward UTXO, and registers
-it as an `ExpectedUtxo` (`neptune-wallet/src/expected_utxo.rs`).
+it as an `ExpectedUtxo` (`neptune-wallet/src/expected_utxo.rs`). A wallet that
+has lost that state recovers the same thing from its seed (§4.5).
 
 **Expire.** There is no expiry mechanism. Orders become uneconomic as `D_max`
-approaches (§6.3) and can be cancelled at leisure.
+approaches (§4.6) and can be cancelled at leisure.
+
+### 4.5 Deriving an order, and recovering one from the seed alone
+
+`ExpectedUtxo` is a convenience that is allowed to fail. It is wallet-local
+state, and a wallet restored from its seed has none of it
+(`neptune-wallet/src/expected_utxo.rs:26-31`). What is not allowed to fail is
+recovery from the seed, which for ordinary incoming UTXOs means deterministic
+key derivation plus a scan for announcements that a *future* key decrypts, the
+counter advancing whenever one does
+(`neptune-wallet/src/scan_mode_configuration.rs:5-14`). A reward has no address
+and no encrypted notification, so that recogniser does not apply to it, and the
+question is whether anything replaces it.
+
+Something does, and it is simpler, because an order is *published*. **Everything
+per-order comes from one derivation index.** The proposer takes a key at index
+`i` the ordinary way — `Tip5::hash_varlen(secret_seed ‖ [FLAG, i])`,
+`neptune-wallet/src/wallet_entropy.rs:98-110`, with a flag of its own — and that
+one key supplies both secrets an order needs and the public seed of §4.3:
+
+```
+cancel_post_image        =  H(key_i's unlock preimage)
+reward_lock_script_hash  =  key_i's lock script hash
+reward_receiver_digest   =  H(key_i's receiver preimage)
+seed                     =  H(key_i ‖ <public-seed domain>)
+```
+
+The reward is then an ordinary payment to key `i` that happens to carry a public
+`sender_randomness*` and a published receiver digest, so nothing about holding
+or spending it is new. The direction of the last derivation is the point: the
+public seed comes from the key, never the key from the seed.
+
+Recovery is a scan over public data.
+
+1. Derive keys up to the last known index plus a lookahead and collect their
+   cancel post-images into a set.
+2. One pass over the chain's announcements — flag 1000, body decodes,
+   `cancel_post_image` in the set. Each hit is one of the wallet's own orders,
+   and advances the index counter exactly as an observed self-payment does
+   today.
+3. The announcement carries everything else, so the order UTXO can be rebuilt
+   and cancelled, and the `K` candidate addition records recomputed.
+4. One pass for those addition records: a hit gives `k`, hence `D`, hence the
+   reward UTXO in full.
+
+Step 3 is where fixing `G` and `K` in the schema (§4.3) pays a second time. A
+grid whose step and count were the proposer's private choice would be per-order
+state that the seed does not carry and the announcement does not have to state,
+and recovery would need a durable record of it — which is precisely the kind of
+state that is allowed to fail.
+
+So `K` rows of `ExpectedUtxo` per open order is the right answer to the
+watch-set question: 26 rows, written for speed, losable without consequence. No
+lighter-weight index is needed, because the mechanism that must not fail is not
+an index at all.
+
+### 4.6 Which grid point the accepter picks
+
+Let `t` be the timestamp of the filling transaction's kernel. The reward output
+counts toward the composer's mandatory time-locked half only if
+`D ≥ t + 3 years`. Below that it discharges nothing, and the composer has simply
+handed over `Y` for `X`. So a fill takes the first grid point clearing
+`t + 3 years`, and an order is fillable at all only while
+
+```
+D_max  =  D₀ + (K-1)·G  ≥  t + 3 years
+```
+
+The accepter knows `t` exactly — it is their own transaction's timestamp — but
+it is not final. A composer rebuilds or re-times the coinbase when the mempool
+changes, and a grid point sitting *just* above `t + 3 years` may fail to clear
+`t' + 3 years` afterwards, forcing them to bump `k` and re-prove path (b). So
+the accepter takes a step of headroom rather than the tightest point that
+clears: above the cliff it costs them nothing, and the proposer at most one
+extra grid step.
+
+### 4.7 One fill per block
+
+A composer filling orders is spending block money on strangers. How much, and
+how many at a time?
+
+Fixing `Y` at the block's time-locked mint (§4.1) answers both at once. One
+order consumes the whole of what one block can redirect, so a composer takes
+**at most one order per block**. There is no packing problem, no ceiling to
+tune, and no second lock-script proof to pay for.
+
+**The composer ignores every order that asks for a different amount.** Not
+prices it lower — ignores it. An order asking for less than the block's
+time-locked subsidy would leave part of the slot unused, and one asking for more
+cannot be paid out of the block at all, so neither is worth a moment's
+attention. What remains is a set of orders that are identical except in price,
+and the composer takes the one offering the largest `X`.
+
+This also makes the first step of finding an order the cheapest possible one. An
+order's `Y` is a field in its announcement (§4.3), so the filter is a single
+comparison against a number the composer already knows, applied before any
+lock script is rebuilt or any membership proof is fetched.
+
+Consensus, for its part, imposes no limit of its own. Its only rule is that at
+least half of everything the transaction pays out must be time-locked
+(`native_currency.rs:925-931`), and a reward output *is* time-locked, so a fill
+adds to the side of the ledger the rule wants larger. Filling never brings a
+transaction closer to breaking the rule.
+
+**A composer who intends to fill orders keeps the subsidy.** The guesser fee is
+a fee, not an output: it is computed as the coinbase minus the composer's share
+and handed to the transaction as its fee (`composer_parameters.rs:200-215`).
+Since `total_input + coinbase = total_output + fee`, a guesser fraction `g`
+leaves a total output of `(1-g)·C + X`, and the forced lock is half of that. The
+reward `Y = C/2` does not shrink to match. The two meet at
+
+```
+X  ≥  g·C
+```
+
+Below that line the fill is still constructible — locking more than half is
+always allowed — but part of the reward is then funded from coins the composer
+was not forced to lock. Above it the reward is covered entirely by the forced
+lock. A composer keeping the whole subsidy is always above the line; one paying
+half of it to a guesser is never above it, because that would need `X ≥ C/2`,
+which is `Y`. So order-filling is for composers who guess their own blocks.
+
+**An order carries no fee subsidy.** `X` is the whole of the compensation, paid
+as a plain output to the composer. Routing part of it through the transaction's
+fee field instead would not sweeten anything: a block's fee *is* the guesser's
+reward (`block_body.rs:204-210`), so that money goes to the guesser rather than
+to the filler. For the composers who actually fill orders, who guess their own
+blocks, it would be the same pocket under a different name; for anyone else it
+would be a leak.
+
+What a fill costs the composer is not currency in the first place. It is one
+removal record of kernel space and one more lock-script proof, and both are
+bounded by taking at most one order per block. There is nothing for a fee to
+reimburse. A proposer who wants to be filled sooner raises `X`, which is the one
+number orders differ in.
+
+**Where the policy lives: `CoinbaseDistribution`.** That struct is already the
+composer's statement of where a block's money goes, already the one place it is
+validated (`try_new`, `coinbase_distribution.rs:65-73`), and already has an
+override latch and an RPC (`set_coinbase_distribution`). The fill belongs in it
+rather than beside it, which is also what makes the validation possible:
+checking "locked is at least half of total output" requires the total output,
+and the order's incoming `X` is part of that total.
+
+### 4.8 The order index
+
+Someone has to remember which orders are open. The question is who.
+
+**The node.** Three reasons, in order of weight. The composer consults the index
+while building a block template, which happens inside the node — putting an
+external service on that path would be absurd. The two facts the index needs are
+already parsed out of every block by the node: the announcements it carries, and
+the removal records that tell you which order UTXOs have just been spent.
+And reorganizations, which are the only hard part of keeping such a thing
+correct, are handled in the node already; every consumer that built its own
+index would be rewriting that logic, each in their own way, against a chain
+whose history changes underneath them.
+
+**It is shaped like the mempool, not like the wallet.** It holds other people's
+standing offers rather than the operator's own belongings, it is kept in step
+with the tip, it is consulted when a block is built, and entries leave it when
+the underlying UTXO is spent. The mempool's structures fit directly: one row per
+open order keyed by the order UTXO's addition record, and a priority queue on
+`X`, the way the mempool keeps `upgrade_priorities` (`mempool.rs:165-170`). The
+composer's only query — the largest `X` among orders asking for this block's
+time-locked subsidy — is then reading the top of a queue.
+
+**Verify on insert, not on query.** An announcement is a hint (§4.3, §7.3), so
+admitting one to the index means rebuilding the lock script from it, computing
+the order UTXO's addition record, and finding that record in the AOCL. Done once
+when the announcement is first seen, a row in the index is a verified order, and
+the composer building a template can take the top of the queue without checking
+anything.
+
+**On a reorg, roll back the affected blocks.** The node has them. The mempool's
+answer to a reorg is to clear itself (`mempool.rs:1324-1333`), which is fine for
+transactions that will be re-broadcast, and wrong here: an order can be six
+months old, and clearing means rescanning a hundred thousand blocks to rebuild.
+Rolling back is possible because the index is derived entirely from block data —
+an order lost this way is recoverable, unlike wallet state, because its
+announcement is on the chain. A rescan remains the fallback of last resort.
+
+**Everyone else asks the node.** An RPC returning open orders keeps explorers
+and third-party wallets from reimplementing any of the above.
+
+**Indexing and filling both need archival state, and it is the same
+requirement.** Verifying an order on insert means showing that the order UTXO's
+addition record is a leaf of the AOCL, and a light node holds only the MMR's
+peaks. Filling one means building a mutator-set membership proof for a UTXO the
+composer does not own, and `restore_membership_proof`
+(`archival_mutator_set.rs:238`) — which takes the item, both randomnesses and
+the AOCL leaf index, all four public for an order — is a method on the archival
+mutator set.
+
+The alternative is for the proposer to publish a membership proof alongside the
+order. It does not help. A membership proof goes stale with every block, so
+whoever holds it must roll it forward through every subsequent mutator-set
+update, for every open order, for as long as the order stands. That trades an
+archival node for per-block work proportional to the size of the order book,
+which is a bad trade for a node that fills occasionally and no trade at all for
+one that fills often.
+
+So: a light node can place an order and cancel one, because both are ordinary
+wallet operations on its own UTXOs. It cannot fill and it cannot index. That is
+no new class of burden — a composer already carries the mempool and produces
+single proofs — but it should be said out loud.
+
+### 4.9 How a composer executes a fill
+
+This is the one part of SOFuN that reaches into the mining path. Nothing in the
+tree builds a coinbase transaction with an input, and the order UTXO has to
+become one.
+
+**Less is missing than it looks.** `TransactionDetails::new` already takes
+inputs and a coinbase in the same call (`transaction_details.rs:242`);
+`new_with_coinbase` simply passes `TxInputs::empty()` (`:202`). And an input is
+not tied to a wallet key: `UnlockedUtxo::unlock` (`unlocked_utxo.rs:26`) takes a
+`LockScriptAndWitness`, which is a program plus raw nondeterminism. A foreign
+UTXO under a custom script is already representable. What is missing is a
+coinbase constructor that accepts one:
+`prepare_coinbase_transaction_stateless` (`composer_parameters.rs:188`) builds
+outputs and nothing else.
+
+**The apparent circularity is not one.** The fill's witness must contain the
+transaction's output list and its authentication path against the kernel MAST
+hash (§4.2) — so the witness needs the kernel, and the kernel contains the input
+that the witness unlocks. But `TransactionDetails::transaction_kernel`
+(`transaction_details.rs:362-379`) builds removal records out of each input's
+UTXO and membership proof and never touches its `lock_script_and_witness`. The
+kernel is therefore independent of the thing that seems to depend on it.
+Assemble the details once with an empty witness on the fill input, take the
+kernel, build the real witness against it, and assemble again. Two cheap passes,
+no new type, and nothing mutated after construction.
+
+**The amounts.** The order contributes `X` as an input and the reward takes `Y`
+out as an output, so the pool the composer distributes among their own outputs
+shrinks by the difference. Writing `C` for the subsidy and `f` for the guesser
+fee:
+
+```
+pool  =  C - f - Y + X
+```
+
+which is exactly what the no-inflation identity `total_input + coinbase =
+total_output + fee` requires, with `total_output = pool + Y`. In code this is
+one subtraction inside `ComposerParameters::tx_outputs`
+(`composer_parameters.rs:77-119`), which already computes a total to distribute
+and then splits it by promille, plus one appended output for the reward.
+
+**What `CoinbaseDistribution::try_new` should require.** Its present invariant
+is that at least half of the distributed amount is time-locked
+(`coinbase_distribution.rs:65-73`). Consensus wants time-locked output to be at
+least half of *total* output, and the reward counts on the time-locked side, so
+what the composer's own outputs must satisfy is
+
+```
+own_timelocked  ≥  (pool - Y) / 2
+```
+
+Today's rule is the `Y = 0` case of that. Applying the present rule unchanged to
+the reduced pool would still be *valid* — locking more than required always is —
+but it would over-lock, costing the composer liquidity they were entitled to. So
+the invariant generalizes rather than breaking, and the term it needs is `Y`,
+which is why the fill belongs inside the distribution rather than beside it
+(§4.7).
+
+**Where the choosing happens.** `prepare_coinbase_transaction_stateless` stays
+stateless: the fill arrives as an argument. Picking it is a state read — the
+order index (§4.8), for the best order asking this block's time-locked subsidy —
+and belongs one level up in `create_block_transaction_from`
+(`mine_loop.rs:499`), which already holds the global state lock. A re-time
+re-enters that path, so the fill is re-selected and its witness rebuilt with no
+special handling.
+
+**What the composer checks before proving.** The index verified the order when
+it admitted it (§4.8), but a block may have arrived since, so re-check at the
+point of spending: the membership proof against the current mutator set, the
+rebuilt lock script's hash against the UTXO's own, `Y` against this block's
+time-locked subsidy, and `k` against §4.6's bound with its headroom. These are
+cheap next to proving, and they are the boundary where the composer commits
+their own money to a stranger's script.
+
+**A fill must never stop a block.** If anything fails — a check, the proof, a
+re-time that invalidates the witness — the composer drops the fill and composes
+the block without it. The block subsidy is worth more than any order, and no
+part of this may sit on the critical path in a way that can block it.
 
 
 ## 5. No consensus changes required
@@ -377,114 +840,10 @@ SOFuN is therefore entirely a wallet-, lock-script- and announcement-layer
 feature. Nothing in `neptune-consensus` needs to change.
 
 
-## 6. Economics
+## 6. Merging
 
-### 6.1 Why only a composer fills
-
-> **Generalization note (§1.5).** What follows is a specific property
-> demanded by SOFuN; not a generic property of path (b) (Fill).
-
-Two things are true here for different reasons: an outside accepter loses money
-on any fill, and a composer does not — not because the fill costs them nothing,
-but because they pay in a currency they were forced to hold.
-
-**No outsider fills.** Write the accepter's balance equation for an ordinary,
-non-coinbase transaction. Accepter brings own inputs (`Z`); the transaction
-spends the order UTXO (`X`) and must create the reward output (`Y`), and by
-construction, the reward is greater than the sacrifice (`Y > X`):
-
-```
-X + Z = Y + change      =>   change = X + Z - Y
-```
-
-The accepter started with `Z` liquid and ends with `X + Z - Y` liquid, and owns
-nothing else afterwards: the reward UTXO belongs to the *proposer*, not to them.
-The operation costs `Y - X` and buys no position. No discount-rate argument
-rescues it, because discounting prices a locked coin you *hold*, and the
-accepter holds none. A non-composer fill is a pure gift of `Y - X` at any
-premium, any release date and any time preference. Nobody rational does it.
-
-Existing time-locked UTXOs cannot supply the reward: the time-lock type
-script requires every time-locked input to have `release_date < timestamp`
-(`time_lock.rs:1076`), so a would-be accepter *cannot pay* the reward out of
-coins they already hold locked. Whoever funds `Y` funds it out of liquid coins.
-
-**The composer is different because they are *minting*.** Consensus already
-forces half of their output into a three-year time-lock, and the rule counts
-amounts, not recipients. The composer therefore funds `Y` out of coins they
-were never able to hold liquid: what they give up is not `Y` of spendable
-wealth, but a three-year position they had no choice about, and what they get
-back, `X`, is liquid today.
-
-It follows that **an order-fill pays for itself only inside the coinbase
-transaction**, because that is the only transaction the mandatory time-lock rule
-applies to (the check is guarded by `if some_coinbase.is_positive()`,
-`native_currency.rs:927`), and so the only place the reward output can discharge
-an obligation the accepter already had. Nor can the two be prised apart by
-merging: the lock script binds the order UTXO and the reward output to one
-kernel (§4.2), so the reward must be an output of whichever transaction spends
-the order, and for the fill to pay for itself that transaction must be the one
-bearing the coinbase.
-
-A fill *can* be constructed elsewhere — a non-coinbase transaction may carry a
-**negative** fee (`native_currency.rs:831`), so an accepter can build one and
-have it merged into a bundle whose positive fees restore the block-level
-requirement that the fee be non-negative (`block_program.rs:401`). But the
-reward then discharges nobody's mandatory lock: it is the same gift with a
-different payer, paid out of fee revenue the guesser would otherwise have
-received. Not forbidden, merely pointless.
-
-### 6.2 The premium
-
-`Y/X` is the price of money three years in the future, set by whatever proposers
-are willing to offer and composers willing to accept. Nothing in the protocol
-constrains it. A composer picks the best available rate among open orders whose
-reward their mandatory lock can cover.
-
-### 6.3 Which grid point the accepter picks
-
-Let `t` be the timestamp of the accepter's own transaction kernel. Their cost as
-a function of `D`:
-
-- **`D ≥ t + 3 years`** — the reward output counts toward the composer's
-  mandatory time-locked half. The fill costs them no liquid: it is a pure
-  redirection of coins they were forced to lock anyway.
-- **`D < t + 3 years`** — the reward output discharges none of the composer's
-  mandatory lock. Pure loss.
-
-So the second regime is empty of rational accepters, not merely expensive. Cost
-is flat for every `D ≥ t + 3 years` and the trade simply ceases to exist below
-it. Above the cliff the accepter is indifferent, so nothing stops them from
-picking near the bottom of that range — which is what the proposer prefers, and
-what §6.4 then qualifies with a margin. That set is non-empty exactly when
-
-```
-D_max  =  D₀ + (K-1)·G  ≥  t + 3 years
-```
-
-and the accepter's chosen `D` then lies in `[t + 3y, t + 3y + G)`.
-
-The accepter chooses `k` knowing `t` exactly — it is their own transaction's
-timestamp — so this is a decision made with full information. Merging does not
-disturb it.
-
-### 6.4 What the accepter should leave headroom for
-
-One operational caveat. A composer may rebuild or re-time the coinbase
-transaction — mempool contents change, a stale proposal gets refreshed. If they
-re-time from `t` to `t' > t`, a grid point chosen to sit *just* above
-`t + 3 years` may no longer clear `t' + 3 years`, and they must bump `k` and
-re-prove path (b).
-
-So an accepter should pick a grid point with a little headroom rather than the
-tightest one that clears. Headroom costs them nothing (cost is flat above
-`t + 3 years`, §6.3) and at most one extra grid step to the proposer.
-
-### 6.5 What merging does and does not do to the time lock
-
-The `Merge` operation is no problem. This subsection explains why. (Skippable.)
-
-Worth recording, because the naive worry is wrong in an instructive way.
+The `Merge` operation is no problem for a fill. This section records why, since
+the naive worry is wrong in an instructive way. (Skippable.)
 
 The mandatory time-lock rule is checked by the native-currency type script
 against a timestamp authenticated under *the kernel that type script is proving*.
@@ -526,10 +885,15 @@ free. The same applies to `n` orders.
 
 The grid widens this rather than narrowing it: two orders agreeing on `Y`,
 reward lock script hash, `sender_randomness*` and `receiver_digest*` collide at
-any grid point their grids share, and the accepter chooses `k`.
+any grid point their grids share, and the accepter chooses `k`. Fixing `Y`
+(§4.1), `G` and `K` (§4.3) narrows the gap further still — every order in the
+market now agrees on three of those parameters by construction, and one wallet's
+orders agree on the fourth. The seed is the only thing left keeping two of a
+proposer's own orders apart.
 
-Mitigation: every order must use fresh `sender_randomness*`, which makes the
-commitments distinct for *every* `k`. This is a hard wallet requirement, not a
+Mitigation: every order must use a fresh seed, hence fresh
+`sender_randomness*` (§4.3), which makes the commitments distinct for *every*
+`k`. This is a hard wallet requirement, not a
 convention. Cross-proposer collisions are not a concern — distinct proposers
 have distinct receiver digests — but a single wallet placing many orders is
 exactly the case where a naive implementation reuses randomness.
@@ -557,14 +921,18 @@ nothing.
 
 Orders are permissionless writes to a public index. Very small orders cost the
 proposer a fee and cost every node the indexing work. Probably fine; worth a cap
-or a minimum `X` in the indexer if it becomes a problem.
+or a minimum `X` in the indexer if it becomes a problem. Note that the fixed `Y`
+already disposes of the cheapest kind of junk: an announcement asking for
+anything other than the block's time-locked subsidy is discarded on one integer
+comparison, before any lock script is rebuilt (§4.7).
 
 ---
 
 ## 8. Privacy
 
-SOFuN is public by construction. An order reveals `X`, `Y`, the grid
-`(D₀, G, K)`, and the fact that some party wants to buy future NPT.
+SOFuN is public by construction. An order reveals `X`, its grid origin `D₀`,
+and the fact that some party wants to buy future NPT. `Y`, `G` and `K` are the
+same for every order (§4.1, §4.3), so they reveal nothing about this one.
 
 **Creation of the reward is fully public.** The grid is published, so anyone —
 not just the proposer — can enumerate the `K` candidate addition records and
@@ -593,91 +961,60 @@ elsewhere and the two are linked. Proposers should use a fresh key and fresh
 randomness per order.
 
 
-## 9. Open questions
-
-- [ ] **Announcement encoding.** Which `flag` constant, how versions are
-  numbered, how `pair_id` is truncated, and how `coins` and `derivation` are
-  serialized. Its own framing, not the address-notification one — a swap order
-  is not addressed to anybody (§4.3).
-- [ ] **Pair identity.** Is `(type script hashes, type script hashes)` the right
-  notion of a pair, or should `pair_id` also commit to something in the coins'
-  `state`? Two `NativeCurrency` amounts are the same asset; two distinct future
-  token types sharing a type script would not be.
-- [ ] **Lock script selector encoding.** How is the path selector supplied, and
-  write down explicitly why a malicious prover choosing the branch is harmless
-  (both branches are hard).
-- [ ] **Grid arithmetic in the lock script.** `Timestamp` is a single
-  `BFieldElement` of milliseconds. Confirm `D₀ + k·G` and the `k < K` range check
-  are sound over the field with no wraparound reachable by a malicious `k` —
-  this is the one place path (b) does arithmetic, so it is the one place an
-  overflow would let an accepter name a `D` the proposer never offered.
-- [ ] **Default `G` and `K`.** `G` trades the proposer's extra waiting time (up to
-  one step) against watch-set size (`K = shelf life / G`). A week gives 26
-  candidates for six months of shelf life. Is that the right default, and should
-  `K` be capped so a proposer cannot build an unbounded watch set for their own
-  wallet?
-- [ ] **Watch-set mechanism.** `ExpectedUtxo` is one row per addition record.
-  Is `K` rows per order acceptable, or does the wallet want a lighter-weight
-  "candidate addition records" index that materializes an `ExpectedUtxo` only on
-  a hit?
-- [ ] **How a composer executes a fill.** A fill needs an input placed into the
-  coinbase transaction (§6.1) and nothing today permits that. What is the
-  narrowest mechanism that would, and what must it validate? Out of scope here,
-  but the protocol is not usable without an answer.
-- [ ] **Limits on redirection.** What ceiling on `Y` per block should a composer
-  impose, and where does that policy live?
-- [ ] **Indexing.** Does the order index live in the node or in whatever
-  consumes it? Node-side avoids every consumer reimplementing reorg handling.
-- [ ] **Composer selection policy.** Greedy by `Y/X`, subject to the
-  `D ≥ t + 3 years` filter (§6.3) and to total `Y` not exceeding the
-  mandatory-locked half. Where does block space enter?
-- [ ] **Interaction with `guesser_fee_fraction`.** The mandatory locked half is
-  computed against the full subsidy; how much room is actually redirectable when
-  the guesser fraction is high?
-- [ ] **Fee.** Does the proposer's order need to carry a fee subsidy to be
-  attractive at the margin, or is `X` itself sufficient compensation?
-
----
-
-## 10. Progress
+## 9. Progress
 
 ### Phase 0 — design
 - [x] Core mechanism sketched
 - [x] Confirmed no consensus changes needed
-- [x] Economics: composer-only rationality argument
+- [x] Established that a fill pays for itself only inside a coinbase
+      transaction (§4.6)
 - [x] Discovery problem identified; design space enumerated (§2)
 - [x] All code-referenced claims verified against the tree at `28ff10f86`
 - [x] Existing `set_coinbase_distribution` latch found; only inputs are missing
 - [x] Generalization goal recorded (§1.5)
-- [ ] Name chosen for the general primitive
-- [ ] Partial fills decided deliberately for the general case
+- [x] Name chosen for the general primitive: **standing swap order** (§1.5)
+- [x] Partial fills decided deliberately for the general case: out, with the
+      structural reason and the upgrade path recorded (§1.5)
 - [x] Grid chosen over fixed `D` and over an enforced payout announcement
-- [ ] Remaining open questions in §9 resolved
+- [x] Every open question resolved and written into the body
 - [ ] Design reviewed by a second pair of eyes
 
 ### Phase 1 — lock script
 - [ ] Two-path lock script implemented
-- [ ] Unit tests: path (a) accepts proposer, rejects others
+- [ ] Unit tests: path (a) accepts the proposer's preimage
+- [ ] Unit tests: a wrong preimage with no reward output fails, and the same
+      wrong preimage with the reward present is a valid fill
 - [ ] Unit tests: path (b) accepts iff `AR(D₀ + k·G)` ∈ outputs
 - [ ] Unit tests: path (b) accepts every `k < K`, rejects `k >= K`
-- [ ] Negative test: field-overflow attempt on `D₀ + k·G` (§9)
+- [ ] Negative tests: `k` non-u32, `k >= K`, and a grid whose
+      `D₀ + (K−1)·G` reaches the field bound (§4.2)
 - [ ] Negative test: reward output present but with wrong `Y` or wrong reward
       lock script hash
 - [ ] Negative test for §7.1 — one output, two orders
-- [ ] `K = 1` degenerate case behaves as a fixed-`D` order
+- [ ] `K = 1` degenerate case behaves as a fixed-`D` order (the general case
+      of §1.5; not a reachable SOFuN configuration)
 - [ ] Proving cost measured as a function of output-list length
 
 ### Phase 2 — announcement and discovery
-- [ ] `AnnouncementFlag` value allocated
-- [ ] Announcement encode/decode plus round-trip proptest
+- [ ] `AnnouncementFlag` value 1000 allocated (§4.3)
+- [ ] `G` = 1 week and `K` = 26 defined once, and used by both the lock-script
+      builder and the order verifier (§4.3)
+- [ ] `StandingSwapOrderV1` with derived `BFieldCodec`; round-trip proptest
+      over the whole announcement, prefix included
 - [ ] Order-announcement / lock-script consistency check (§7.3) as a library
       function, usable by the accepter and by any validator of a fill
-- [ ] Order index: build, query, reorg handling
-- [ ] Index reorg test
+- [ ] Order index in the node: insert-time verification, priority queue on `X`,
+      query by `Y` (§4.8)
+- [ ] Index rollback on reorg, with a rescan fallback; test both
+- [ ] RPC exposing open orders
 
 ### Phase 3 — proposer side (wallet / `neptune-cli`)
 - [ ] Wallet API to place an order
-- [ ] Fresh-randomness-per-order enforced and tested (§7.1)
+- [ ] Order key derived at an index, with a flag of its own; freshness of the
+      seed follows from the index rather than from an RNG (§4.5, §7.1)
+- [ ] Randomnesses derived from the public seed, matching §4.3's three domains
+- [ ] Recovery test: wipe the wallet database, restore from the seed, and
+      recover both an open order and a filled one (§4.5)
 - [ ] `K` candidate addition records computed and added to the watch set
 - [ ] Watch-set hit recovers `k`, materializes the `ExpectedUtxo`, claims it
 - [ ] Watch set restored on reorg (§7.2)
