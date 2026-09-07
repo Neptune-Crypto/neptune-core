@@ -27,6 +27,7 @@ use tasm_lib::prelude::Digest;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm;
+use tasm_lib::triton_vm::isa::op_stack::NUM_OP_STACK_REGISTERS;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::verifier::stark_verify::StarkVerify;
@@ -67,15 +68,12 @@ const MUTATOR_SET_HASH_MISMATCH_ERROR: i128 = 1_000_087;
 
 /// The witness consumed by [`WeldBranch`].
 ///
-/// Holds both operands:
+/// Holds two operands:
 ///  1. a `SingleProof`-backed [`Transaction`]'s kernel and proof, and
 ///  2. a [`LinkTx`]'s kernel and proof;
 ///
 /// as well as the welded kernel they produce, and the outputs of the
 /// transaction that survive cut-through.
-///
-/// Like [`ChainWitness`](crate::chaintx::chain::ChainWitness) this witness *is*
-/// its own memory image: everything the branch reads, it reads from RAM.
 #[derive(Clone, Debug, BFieldCodec, TasmObject)]
 pub struct WeldWitness {
     /// Operand A: the kernel of the `SingleProof`-backed transaction.
@@ -98,10 +96,10 @@ pub struct WeldWitness {
     /// outputs are once B's outputs are taken out.
     pub(crate) surviving_outputs: Vec<AdditionRecord>,
 
-    /// Operand A's kernel MAST hash. See the type-level note.
+    /// Operand A's kernel MAST hash.
     pub(crate) transaction_kernel_mast_hash: Digest,
 
-    /// Operand B's link kernel MAST hash. See the type-level note.
+    /// Operand B's link kernel MAST hash.
     pub(crate) link_kernel_mast_hash: Digest,
 
     pub(crate) single_proof: Proof,
@@ -198,11 +196,14 @@ impl WeldWitness {
         // the transaction, never against an output of the link transaction
         // itself.
         //
-        // ponytail: quadratic pairing, as in `Chain::chained_kernel`. A weld
-        // carries tens of records, not millions.
+        // ponytail: quadratic pairing. A weld carries tens of records, not
+        // millions.
         let mut thruputs = link_kernel.thruputs.clone();
         let mut surviving_outputs = vec![];
         for output in &transaction_kernel.outputs {
+            // Always match on first occurrence, and nothing else, of
+            // `thruput == output`, such that repeated thruput/output pairs are
+            // handled correctly, i.e. allowed and non-inflationary.
             match thruputs.iter().position(|thruput| thruput == output) {
                 Some(i) => {
                     thruputs.swap_remove(i);
@@ -235,21 +236,19 @@ impl WeldWitness {
         outputs.shuffle(&mut rng);
         announcements.shuffle(&mut rng);
 
+        // Allowing non-empty coinbase and set merge bits, allows for welding
+        // to be done directly on block-eligible transactions. This increases
+        // transaction-throughput. These fields are inherited from the
+        // `SingleProof` transaction since they are None/false by induction
+        // in the entire chain-transaction pipeline.
         let kernel = TransactionKernelProxy {
             inputs,
             outputs,
             announcements,
             fee,
-            // Carried, not refused: A is a `SingleProof`-backed transaction and
-            // is entitled to a coinbase. B's is `None` by induction over the
-            // `LinkProof` branches, so A's is the whole of it.
             coinbase: transaction_kernel.coinbase,
             timestamp: max(transaction_kernel.timestamp, link_kernel.kernel.timestamp),
             mutator_set_hash: transaction_kernel.mutator_set_hash,
-            // Carried, not cleared: the merge bit is what makes a kernel a
-            // `BlockTransactionKernel`, so a weld into an already-merged
-            // transaction stays block-eligible. The link operand's is false by
-            // induction over the `LinkProof` branches, so A's is the whole of it.
             merge_bit: transaction_kernel.merge_bit,
         }
         .into_kernel();
@@ -266,10 +265,7 @@ impl WeldWitness {
     /// The claim operand A's single proof is verified against: this very
     /// program, on A's kernel MAST hash.
     ///
-    /// `single_proof_digest` is `own_program_digest()` at run time, exactly as
-    /// in [`Cast`](crate::chaintx::cast::Cast), which builds the mirror image of
-    /// this claim: the branch names no rule set, it names the digest the
-    /// dispatcher read.
+    /// `single_proof_digest` is `own_program_digest()` at run time.
     fn single_proof_claim(&self, single_proof_digest: Digest) -> Claim {
         Claim::new(single_proof_digest)
             .with_input(self.transaction_kernel_mast_hash.reversed().values())
@@ -277,9 +273,7 @@ impl WeldWitness {
 
     /// The claim operand B's link proof is verified against.
     ///
-    /// `D` is `own_program_digest()` at run time, exactly as in
-    /// [`FixBranch`](super::fix_branch::FixBranch): `Weld` is the second point
-    /// where the `LinkProof` family is instantiated at a concrete `SingleProof`.
+    /// `D` is `own_program_digest()` (of the SingleProof program) at run time.
     fn link_proof_claim(&self, single_proof_digest: Digest) -> Claim {
         let input = link_proof_public_input(self.link_kernel_mast_hash, single_proof_digest);
         Claim::new(LinkProof.hash())
@@ -399,7 +393,7 @@ impl WeldWitness {
 ///   [`BlockTransactionKernel`](crate::block::block_transaction::BlockTransactionKernel).
 ///   So this path applies cut-through to transactions closer to their promotion
 ///   to block transaction kernel.
-///   
+///
 /// - **more restrictive**: [`Chain`](crate::chaintx::chain::Chain) cancels a
 ///   thruput against its own operand's output as readily as against the
 ///   other's. `Weld` cuts B's thruputs against A's outputs only. No
@@ -489,16 +483,16 @@ impl BasicSnippet for WeldBranch {
     fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
         let audit_preloaded_data =
             library.import(Box::new(VerifyNdSiIntegrity::<WeldWitness>::default()));
-        // Delta, not the running program's rule set: this branch exists under
-        // no other, and the rule set picks nothing here but the proof version
-        // stamped on the claim. `Cast`, which builds the mirror image of this
-        // claim, hardcodes it the same way.
+
+        // This branch doesn't exist prior to hardfork-delta.
         let generate_single_proof_claim = library.import(Box::new(GenerateSingleProofClaim::new(
             ConsensusRuleSet::HardforkDelta,
         )));
+
         let generate_link_proof_claim = library.import(Box::new(GenerateLinkProofClaim {
             single_proof_digest_address: self.single_proof_digest_alloc.read_address(),
         }));
+
         let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
             Stark::default(),
         )));
@@ -629,12 +623,6 @@ impl BasicSnippet for WeldBranch {
                 .collect_vec()
         };
 
-        // The dispatcher's frame is untouched from entry to exit, so with `k`
-        // words pushed on top, `*witness` is at `dup k`, the welded kernel's
-        // MAST hash (which *is* `txk_digest`) has its deepest word at `dup k+5`,
-        // and the own program digest is out of reach past `k == 4`. That last
-        // one is why `D` is read from its slot rather than dup'ed: the
-        // dispatcher's copy is too deep by the time a claim is being built.
         let read_d = triton_asm!(
             push {self.single_proof_digest_alloc.read_address()}
             read_mem {Digest::LEN}
@@ -650,6 +638,10 @@ impl BasicSnippet for WeldBranch {
         let root_of_operand = |field: &[LabelledInstruction]| {
             let field = field.to_vec();
             move |k: usize| {
+                assert!(
+                    k < NUM_OP_STACK_REGISTERS,
+                    "Cannot access stack elements deeper than {NUM_OP_STACK_REGISTERS}"
+                );
                 triton_asm!(
                     dup {k}
                     {&field}
@@ -961,10 +953,6 @@ impl BasicSnippet for WeldBranch {
         // whatever its value. So this is one hash and two `merkle_verify`s, and
         // the value itself is never decoded -- nothing here needs it. B's bit is
         // false by induction over the `LinkProof` branches.
-        //
-        // The leaf is read from RAM rather than divined so that the witness
-        // stays its own memory image and `populate_nd_streams` has nothing to
-        // supply for this assertion.
         let assert_merge_bit_is_carried_from_the_transaction = triton_asm!(
             // _ [own_program_digest] disc [txk_digest] *witness
             dup 0
@@ -996,8 +984,8 @@ impl BasicSnippet for WeldBranch {
 
         // Recursively verify one operand. Deliberately the *last* thing the
         // branch does, as in `Chain`: everything above is cheap and
-        // self-contained, so running it first lets a negative test drive any of
-        // those assertions with a proofless witness.
+        // self-contained, so running it first lets a negative test trigger any
+        // of those assertions with a proofless witness.
         let verify_singleproof_transaction = triton_asm!(
             // _ [own_program_digest] disc [txk_digest] *witness
             {&root_a(0)}
