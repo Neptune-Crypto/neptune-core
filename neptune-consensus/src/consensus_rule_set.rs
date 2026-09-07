@@ -281,6 +281,27 @@ impl ConsensusRuleSet {
         }
     }
 
+    /// Whether a packed [`Chunk`](neptune_mutator_set::removal_record::chunk::Chunk)
+    /// may use the extended, 23-bit length indicator, and must encode that
+    /// indicator canonically.
+    ///
+    /// Before hardfork delta the indicator is a single `u12`, capping a chunk
+    /// at 4095 indices -- a ceiling an attacker can drive a chunk past by
+    /// grinding `sender_randomness`, freezing every UTXO with an index in that
+    /// chunk. Widening it is what fixes that, but a node that accepted the wide
+    /// form early would accept blocks its peers reject, so the attacker would
+    /// pick the moment of the split. Hence the gate.
+    pub fn allow_big_chunks(&self) -> bool {
+        match self {
+            ConsensusRuleSet::Reboot => false,
+            ConsensusRuleSet::HardforkAlpha => false,
+            ConsensusRuleSet::TvmProofVersion1 => false,
+            ConsensusRuleSet::HardforkBeta => false,
+            ConsensusRuleSet::HardforkGamma => false,
+            ConsensusRuleSet::HardforkDelta => true,
+        }
+    }
+
     /// The proof version used by this consensus rule set.
     pub fn triton_proof_version(&self) -> TritonProofVersion {
         match self {

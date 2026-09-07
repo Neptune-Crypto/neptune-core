@@ -315,8 +315,10 @@ mod test_support {
                                 lock_free_mmr_accumulator,
                                 block_mmr_accumulator,
                             )| {
-                                let inputs =
-                                    RemovalRecordList::pack(transaction_kernel.inputs.clone());
+                                let inputs = RemovalRecordList::pack(
+                                    transaction_kernel.inputs.clone(),
+                                    true,
+                                );
                                 let transaction_kernel = TransactionKernelModifier::default()
                                     .inputs(inputs)
                                     .modify(transaction_kernel);

@@ -394,7 +394,7 @@ impl ArchivalState {
         new_block: &Block,
     ) -> Result<Vec<(BlockIndexKey, BlockIndexValue)>> {
         // abort early if mutator set update is invalid.
-        if new_block.mutator_set_update().is_err() {
+        if new_block.mutator_set_update(self.network).is_err() {
             bail!("invalid block: could not get mutator set update");
         }
 
@@ -493,7 +493,7 @@ impl ArchivalState {
         let mut block_index_entries: Vec<(BlockIndexKey, BlockIndexValue)> = vec![];
         let block_record_key: BlockIndexKey = BlockIndexKey::Block(new_block.hash());
         let num_additions: u64 = new_block
-            .mutator_set_update()
+            .mutator_set_update(self.network)
             .expect("MS update for new block must exist")
             .additions
             .len()
@@ -1830,7 +1830,7 @@ impl ArchivalState {
             }
 
             let mutator_set_update = haystack
-                .mutator_set_update()
+                .mutator_set_update(self.network)
                 .expect("Block from state must have mutator set update");
             let predecessor_msa = parent
                 .as_ref()
@@ -1944,7 +1944,7 @@ impl ArchivalState {
         }
 
         // cannot get the mutator set update from new block, so abort early
-        if new_block.mutator_set_update().is_err() {
+        if new_block.mutator_set_update(self.network).is_err() {
             bail!("invalid block: could not get mutator set update");
         }
 
@@ -1985,7 +1985,7 @@ impl ArchivalState {
                 additions,
                 removals,
             } = rollback_block
-                .mutator_set_update()
+                .mutator_set_update(self.network)
                 .expect("Block from state must have mutator set update");
 
             // Roll back all removal records contained in block
@@ -2038,7 +2038,7 @@ impl ArchivalState {
                 mut additions,
                 mut removals,
             } = apply_forward_block
-                .mutator_set_update()
+                .mutator_set_update(self.network)
                 .expect("Block from state must have mutator set update");
             additions.reverse();
             removals.reverse();
@@ -3303,7 +3303,7 @@ mod tests {
 
         // genesis digest ==> matches expectation
         let genesis_block = *archival_state.genesis_block.clone();
-        let genesis_addition_records = genesis_block.mutator_set_update().unwrap().additions;
+        let genesis_addition_records = genesis_block.mutator_set_update(network).unwrap().additions;
         let genesis_addition_record_indices = genesis_addition_records
             .into_iter()
             .enumerate()
@@ -3341,7 +3341,7 @@ mod tests {
         archival_state.update_mutator_set(&block_1b).await.unwrap();
 
         // check expectations for 1a
-        let addition_records_1a = block_1a.mutator_set_update().unwrap().additions;
+        let addition_records_1a = block_1a.mutator_set_update(network).unwrap().additions;
         let addition_record_indices_1a = addition_records_1a
             .into_iter()
             .map(|ar| (ar, None))
@@ -3355,9 +3355,12 @@ mod tests {
         );
 
         // check expectations for 1b
-        let num_addition_records_before =
-            genesis_block.mutator_set_update().unwrap().additions.len();
-        let addition_records_1b = block_1b.mutator_set_update().unwrap().additions;
+        let num_addition_records_before = genesis_block
+            .mutator_set_update(network)
+            .unwrap()
+            .additions
+            .len();
+        let addition_records_1b = block_1b.mutator_set_update(network).unwrap().additions;
         let addition_record_indices_1b = addition_records_1b
             .into_iter()
             .enumerate()

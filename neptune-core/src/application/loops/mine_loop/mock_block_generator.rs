@@ -69,7 +69,6 @@ impl MockBlockGenerator {
         lhs: BlockOrRegularTransaction,
         rhs: Transaction,
         shuffle_seed: [u8; 32],
-        #[expect(unused_variables, reason = "anticipate future fork")]
         consensus_rule_set: ConsensusRuleSet,
     ) -> BlockTransaction {
         assert!(
@@ -81,7 +80,8 @@ impl MockBlockGenerator {
             "Argument2 must be single-proof-backed transaction"
         );
 
-        let merge_witness = MergeWitness::for_composition(lhs, rhs, shuffle_seed);
+        let merge_witness =
+            MergeWitness::for_composition(lhs, rhs, shuffle_seed, consensus_rule_set);
         let new_kernel = merge_witness.new_kernel.clone();
 
         BlockTransaction::new(

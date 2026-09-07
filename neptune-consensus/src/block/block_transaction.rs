@@ -206,7 +206,8 @@ impl BlockTransaction {
             diff <= BoundTimeDiff::MAX_TIMESTAMP_DIFF,
             "Time difference may not be too big when merging with coinbase transactions"
         );
-        let merge_witness = MergeWitness::for_composition(coinbase, other, shuffle_seed);
+        let merge_witness =
+            MergeWitness::for_composition(coinbase, other, shuffle_seed, consensus_rule_set);
         let tx = MergeWitness::merge(
             merge_witness,
             consensus_rule_set,
@@ -230,7 +231,7 @@ impl BlockTransaction {
 
         use crate::transaction::transaction_kernel::TransactionKernelModifier;
 
-        let packed = RemovalRecordList::pack(tx.kernel.inputs.clone());
+        let packed = RemovalRecordList::pack(tx.kernel.inputs.clone(), true);
         let kernel = TransactionKernelModifier::default()
             .merge_bit(true)
             .inputs(packed)
@@ -250,7 +251,7 @@ impl BlockTransaction {
 
         use crate::transaction::transaction_kernel::TransactionKernelModifier;
 
-        let packed = RemovalRecordList::pack(kernel.inputs.clone());
+        let packed = RemovalRecordList::pack(kernel.inputs.clone(), true);
         let kernel = TransactionKernelModifier::default()
             .merge_bit(true)
             .inputs(packed)

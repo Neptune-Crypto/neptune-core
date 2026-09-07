@@ -1539,7 +1539,10 @@ impl Mempool {
                     let mut all_inputs = selected_inputs.clone();
                     all_inputs.extend_from_slice(&kernel.inputs);
                     let packed_inputs_field_size =
-                        RemovalRecordList::pack(all_inputs).encode().len() + 1;
+                        RemovalRecordList::pack(all_inputs, consensus_rule_set.allow_big_chunks())
+                            .encode()
+                            .len()
+                            + 1;
 
                     // Current transaction is too big
                     if kernel_wo_inputs_size_acc + kernel_wo_inputs_size + packed_inputs_field_size
@@ -2479,7 +2482,10 @@ mod tests {
             .iter()
             .map(|tx| tx.kernel.encode().len() - tx.kernel.inputs.encode().len() - 1)
             .sum::<usize>();
-        let packed_inputs_field_len = RemovalRecordList::pack(removal_records).encode().len() + 1;
+        let packed_inputs_field_len = RemovalRecordList::pack(removal_records, true)
+            .encode()
+            .len()
+            + 1;
         let projected_kernel_len = non_inputs_kernel_len_sum + packed_inputs_field_len;
         assert!(
             projected_kernel_len < standalone_kernel_len_sum,

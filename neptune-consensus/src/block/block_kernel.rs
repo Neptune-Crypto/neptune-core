@@ -5,6 +5,7 @@ use neptune_mutator_set::commit;
 use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
 use neptune_primitives::mast_hash::HasDiscriminant;
 use neptune_primitives::mast_hash::MastHash;
+use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 use num_traits::CheckedSub;
 use serde::Deserialize;
@@ -20,6 +21,7 @@ use super::block_body::BlockBody;
 use super::block_header::BlockHeader;
 use crate::block::block_validation_error::BlockValidationError;
 use crate::block::mutator_set_update::MutatorSetUpdate;
+use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::transaction::utxo::Utxo;
 
 /// The kernel of a block contains all data that is not proof data
@@ -104,10 +106,15 @@ impl BlockKernel {
     pub fn mutator_set_update(
         &self,
         block_hash: Digest,
+        network: Network,
     ) -> Result<MutatorSetUpdate, BlockValidationError> {
         let outputs = self.all_addition_records(block_hash)?;
-        let inputs = RemovalRecordList::try_unpack(self.body.transaction_kernel.inputs.clone())
-            .map_err(BlockValidationError::from)?;
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, self.header.height);
+        let inputs = RemovalRecordList::try_unpack(
+            self.body.transaction_kernel.inputs.clone(),
+            consensus_rule_set.allow_big_chunks(),
+        )
+        .map_err(BlockValidationError::from)?;
 
         Ok(MutatorSetUpdate::new(inputs, outputs))
     }

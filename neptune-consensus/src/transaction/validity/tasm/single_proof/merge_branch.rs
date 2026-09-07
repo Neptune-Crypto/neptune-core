@@ -84,6 +84,7 @@ impl MergeWitness {
         left: BlockOrRegularTransaction,
         right: Transaction,
         shuffle_seed: [u8; 32],
+        consensus_rule_set: ConsensusRuleSet,
     ) -> Self {
         let left_kernel = left.kernel();
         let right_kernel = right.kernel;
@@ -100,8 +101,12 @@ impl MergeWitness {
             "Coinbase transaction must be left hand side"
         );
 
-        let new_kernel =
-            Self::new_block_transaction_kernel(&left_kernel, &right_kernel, shuffle_seed);
+        let new_kernel = Self::new_block_transaction_kernel(
+            &left_kernel,
+            &right_kernel,
+            shuffle_seed,
+            consensus_rule_set,
+        );
 
         Self {
             left_kernel: left_kernel.into(),
@@ -196,13 +201,17 @@ impl MergeWitness {
         left_kernel: &BlockOrRegularTransactionKernel,
         right_kernel: &TransactionKernel,
         shuffle_seed: [u8; 32],
+        consensus_rule_set: ConsensusRuleSet,
     ) -> BlockTransactionKernel {
         let lhs = match left_kernel {
             BlockOrRegularTransactionKernel::Regular(regular) => regular.clone(),
             BlockOrRegularTransactionKernel::Block(block_transaction_kernel) => {
                 let transaction_kernel: TransactionKernel = block_transaction_kernel.clone().into();
-                let inputs = RemovalRecordList::try_unpack(transaction_kernel.inputs.clone())
-                    .expect(
+                let inputs = RemovalRecordList::try_unpack(
+                    transaction_kernel.inputs.clone(),
+                    consensus_rule_set.allow_big_chunks(),
+                )
+                .expect(
                     "inputs must be packed for block transactions when required by merge version",
                 );
                 TransactionKernelModifier::default()
@@ -213,7 +222,10 @@ impl MergeWitness {
 
         let mut new_kernel = Self::new_kernel(&lhs, right_kernel, shuffle_seed);
 
-        let inputs = RemovalRecordList::pack(new_kernel.inputs.clone());
+        let inputs = RemovalRecordList::pack(
+            new_kernel.inputs.clone(),
+            consensus_rule_set.allow_big_chunks(),
+        );
         new_kernel = TransactionKernelModifier::default()
             .inputs(inputs)
             .modify(new_kernel);
@@ -1372,6 +1384,11 @@ pub(crate) mod tests {
         let left = Transaction::new_single_proof(coinbase_transaction.kernel, left_proof);
         let right = Transaction::new_single_proof(tx_with_inputs.kernel, right_proof);
 
-        MergeWitness::for_composition(left.into(), right, shuffle_seed)
+        MergeWitness::for_composition(
+            left.into(),
+            right,
+            shuffle_seed,
+            ConsensusRuleSet::default(),
+        )
     }
 }

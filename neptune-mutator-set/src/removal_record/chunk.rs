@@ -26,22 +26,36 @@ use super::super::shared::CHUNK_SIZE;
 const MAX_PACKED_LENGTH: usize = 34561;
 const MAX_UNPACKED_LENGTH: usize = 92160;
 
+/// The limits that applied before hardfork delta, when the length indicator
+/// was a single `u12` and no chunk could hold more than 4095 indices.
+///
+/// (4095 + 1) * 12 / 32 = 1536
+const MAX_PACKED_LENGTH_BEFORE_BIG_CHUNKS: usize = 1536;
+const MAX_UNPACKED_LENGTH_BEFORE_BIG_CHUNKS: usize = 4095;
+
 /// The 12th bit of the first `u12` of a packed [`Chunk`]. It is set iff the
 /// next `u12` is also part of the length indicator. See [`Chunk::pack`].
 const LONG_LENGTH_FLAG: u32 = 1 << 11;
 
 #[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
 pub(crate) enum ChunkUnpackError {
-    #[error(
-        "payload is too large -- packed chunk can never be more than {MAX_PACKED_LENGTH} u32s"
-    )]
-    PayloadTooBig,
+    #[error("payload is too large -- packed chunk may not exceed {max} u32s")]
+    PayloadTooBig { max: usize },
 
     #[error("actual length is inconsistent relative to length indicator")]
     InconsistentLength,
 
     #[error("remainder bits were not zero")]
     NonzeroTrailingPadding,
+
+    #[error("the empty chunk packs to the empty list, not to a zero length indicator")]
+    NonCanonicalEmptyChunk,
+
+    #[error(
+        "length indicator uses the long form for a length below {LONG_LENGTH_FLAG}, which fits \
+         the short form"
+    )]
+    NonMinimalLengthIndicator,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec, TasmObject)]
@@ -195,7 +209,11 @@ impl Chunk {
     ///
     /// That leaves 11 + 12 = 23 bits for the length, which is much more than
     /// [`MAX_UNPACKED_LENGTH`].
-    pub(crate) fn pack(&self) -> Chunk {
+    ///
+    /// The long form is only produced when `allow_big_chunks` is set.
+    /// Otherwise, the length indicator is always a single u12 and no chunk may
+    /// hold more than [`MAX_UNPACKED_LENGTH_BEFORE_BIG_CHUNKS`] indices.
+    pub(crate) fn pack(&self, allow_big_chunks: bool) -> Chunk {
         if self.relative_indices.is_empty() {
             return Self {
                 relative_indices: vec![],
@@ -205,13 +223,18 @@ impl Chunk {
         // assert that we haven't already packed. I.e. that high bits are zero.
         assert!(self.relative_indices.iter().all(|x| *x < CHUNK_SIZE));
 
+        let max_unpacked_length = if allow_big_chunks {
+            MAX_UNPACKED_LENGTH
+        } else {
+            MAX_UNPACKED_LENGTH_BEFORE_BIG_CHUNKS
+        };
         assert!(
-            self.relative_indices.len() <= MAX_UNPACKED_LENGTH,
-            "Unpacked length of a chunk may not exceed {MAX_UNPACKED_LENGTH}"
+            self.relative_indices.len() <= max_unpacked_length,
+            "Unpacked length of a chunk may not exceed {max_unpacked_length}"
         );
 
         let num_elements = self.relative_indices.len() as u32;
-        let length_encoding = if num_elements < LONG_LENGTH_FLAG {
+        let length_encoding = if !allow_big_chunks || num_elements < LONG_LENGTH_FLAG {
             vec![num_elements]
         } else {
             let length_hi = (num_elements >> 12) | LONG_LENGTH_FLAG;
@@ -257,15 +280,22 @@ impl Chunk {
     }
 
     /// Inverse of [`Self::pack`].
-    pub(crate) fn try_unpack(&self) -> Result<Self, ChunkUnpackError> {
+    pub(crate) fn try_unpack(&self, allow_big_chunks: bool) -> Result<Self, ChunkUnpackError> {
         if self.relative_indices.is_empty() {
             return Ok(Self {
                 relative_indices: vec![],
             });
         }
 
-        if self.relative_indices.len() > MAX_PACKED_LENGTH {
-            return Err(ChunkUnpackError::PayloadTooBig);
+        let max_packed_length = if allow_big_chunks {
+            MAX_PACKED_LENGTH
+        } else {
+            MAX_PACKED_LENGTH_BEFORE_BIG_CHUNKS
+        };
+        if self.relative_indices.len() > max_packed_length {
+            return Err(ChunkUnpackError::PayloadTooBig {
+                max: max_packed_length,
+            });
         }
 
         let mut unpacked = vec![];
@@ -276,13 +306,24 @@ impl Chunk {
         // The first u12 is the length, unless its 12th bit is set, in which
         // case the length spans the first two u12s. See [`Self::pack`].
         let first_length_element = (self.relative_indices[0] >> 20) & ((1 << 12) - 1);
-        let (indicated_length, num_length_elements) = if first_length_element < LONG_LENGTH_FLAG {
-            (first_length_element, 1)
-        } else {
-            let length_hi = first_length_element & (LONG_LENGTH_FLAG - 1);
-            let length_lo = (self.relative_indices[0] >> 8) & ((1 << 12) - 1);
-            ((length_hi << 12) | length_lo, 2)
-        };
+        let (indicated_length, num_length_elements) =
+            if !allow_big_chunks || first_length_element < LONG_LENGTH_FLAG {
+                (first_length_element, 1)
+            } else {
+                let length_hi = first_length_element & (LONG_LENGTH_FLAG - 1);
+                let length_lo = (self.relative_indices[0] >> 8) & ((1 << 12) - 1);
+                ((length_hi << 12) | length_lo, 2)
+            };
+
+        // The length indicator must be the one `pack` would have produced.
+        if allow_big_chunks {
+            if indicated_length == 0 {
+                return Err(ChunkUnpackError::NonCanonicalEmptyChunk);
+            }
+            if num_length_elements == 2 && indicated_length < LONG_LENGTH_FLAG {
+                return Err(ChunkUnpackError::NonMinimalLengthIndicator);
+            }
+        }
 
         #[expect(clippy::manual_div_ceil, reason = "approach tasm implementation")]
         let indicated_packed_length = ((indicated_length + num_length_elements) * 12 + 31) / 32;
@@ -737,10 +778,10 @@ mod tests {
         #[test]
         fn packing_empty_chunk() {
             let chunk = Chunk::empty_chunk();
-            assert!(chunk.pack().relative_indices.is_empty());
+            assert!(chunk.pack(true).relative_indices.is_empty());
             assert!(chunk
-                .pack()
-                .try_unpack()
+                .pack(true)
+                .try_unpack(true)
                 .unwrap()
                 .relative_indices
                 .is_empty());
@@ -751,8 +792,8 @@ mod tests {
             let chunk = Chunk {
                 relative_indices: vec![0; 6],
             };
-            let packed = chunk.pack();
-            let unpacked = packed.try_unpack().unwrap();
+            let packed = chunk.pack(true);
+            let unpacked = packed.try_unpack(true).unwrap();
             assert_eq!(chunk, unpacked);
         }
 
@@ -761,8 +802,8 @@ mod tests {
             let chunk = Chunk {
                 relative_indices: vec![0; 7],
             };
-            let packed = chunk.pack();
-            let unpacked = packed.try_unpack().unwrap();
+            let packed = chunk.pack(true);
+            let unpacked = packed.try_unpack(true).unwrap();
             assert_eq!(chunk, unpacked);
         }
         #[test]
@@ -770,8 +811,8 @@ mod tests {
             let chunk = Chunk {
                 relative_indices: vec![392, 1192, 2453, 527, 2430, 2423, 257, 290, 2807, 122],
             };
-            let packed = chunk.pack();
-            let unpacked = packed.try_unpack().unwrap();
+            let packed = chunk.pack(true);
+            let unpacked = packed.try_unpack(true).unwrap();
             assert_eq!(chunk, unpacked);
         }
 
@@ -782,8 +823,8 @@ mod tests {
                 let chunk = Chunk {
                     relative_indices: vec![rng.random_range(0..CHUNK_SIZE); i],
                 };
-                let packed = chunk.pack();
-                let unpacked = packed.try_unpack().unwrap();
+                let packed = chunk.pack(true);
+                let unpacked = packed.try_unpack(true).unwrap();
                 assert_eq!(chunk, unpacked);
             }
         }
@@ -794,8 +835,10 @@ mod tests {
                 relative_indices: vec![1; MAX_PACKED_LENGTH + 1],
             };
             assert_eq!(
-                ChunkUnpackError::PayloadTooBig,
-                packed_chunk.try_unpack().unwrap_err()
+                ChunkUnpackError::PayloadTooBig {
+                    max: MAX_PACKED_LENGTH
+                },
+                packed_chunk.try_unpack(true).unwrap_err()
             );
         }
 
@@ -804,11 +847,11 @@ mod tests {
             let chunk = Chunk {
                 relative_indices: vec![392, 1192, 2453, 527, 2430, 2423, 257, 290, 2807, 122],
             };
-            let mut packed = chunk.pack();
+            let mut packed = chunk.pack(true);
             packed.relative_indices.push(0);
             assert_eq!(
                 ChunkUnpackError::InconsistentLength,
-                packed.try_unpack().unwrap_err()
+                packed.try_unpack(true).unwrap_err()
             );
         }
 
@@ -817,11 +860,11 @@ mod tests {
             let chunk = Chunk {
                 relative_indices: vec![392, 1192, 2453, 527, 2430, 2423, 257, 290, 2807, 122],
             };
-            let mut packed = chunk.pack();
+            let mut packed = chunk.pack(true);
             *packed.relative_indices.last_mut().unwrap() |= 1;
             assert_eq!(
                 ChunkUnpackError::NonzeroTrailingPadding,
-                packed.try_unpack().unwrap_err()
+                packed.try_unpack(true).unwrap_err()
             );
         }
 
@@ -831,8 +874,8 @@ mod tests {
         #[test]
         fn pack_unpack_chunk_with_more_than_4095_indices() {
             let chunk = Chunk::random_of_length(4096);
-            let packed = chunk.pack();
-            let unpacked = packed.try_unpack().unwrap();
+            let packed = chunk.pack(true);
+            let unpacked = packed.try_unpack(true).unwrap();
             assert_eq!(chunk, unpacked);
         }
 
@@ -842,8 +885,8 @@ mod tests {
                 2046, 2047, 2048, 2049, 4094, 4095, 4096, 4097, 8191, 8192, 8193,
             ] {
                 let chunk = Chunk::random_of_length(length);
-                let packed = chunk.pack();
-                let unpacked = packed.try_unpack().unwrap_or_else(|err| {
+                let packed = chunk.pack(true);
+                let unpacked = packed.try_unpack(true).unwrap_or_else(|err| {
                     panic!("unpacking chunk of length {length} must succeed. Got error: {err}")
                 });
                 assert_eq!(
@@ -858,7 +901,7 @@ mod tests {
             // All lengths below 2^11 must be represented by *one* length
             // indicator of type `u12`.
             for length in [1, 2, 17, 360, 1000, 2046, 2047] {
-                let packed = Chunk::random_of_length(length).pack();
+                let packed = Chunk::random_of_length(length).pack(true);
                 let first_u12 = (packed.relative_indices[0] >> 20) & ((1 << 12) - 1);
                 assert_eq!(
                     u32::try_from(length).unwrap(),
@@ -876,7 +919,7 @@ mod tests {
         #[test]
         fn long_length_encoding_sets_flag() {
             for length in [2048, 2049, 4096, 10000, 92160] {
-                let packed = Chunk::random_of_length(length).pack();
+                let packed = Chunk::random_of_length(length).pack(true);
                 let first_u12 = (packed.relative_indices[0] >> 20) & ((1 << 12) - 1);
                 assert_ne!(
                     0,
@@ -894,21 +937,137 @@ mod tests {
         #[test]
         fn pack_unpack_maximally_full_chunk() {
             let chunk = Chunk::random_of_length(MAX_UNPACKED_LENGTH);
-            let packed = chunk.pack();
+            let packed = chunk.pack(true);
             assert!(
                 packed.relative_indices.len() <= MAX_PACKED_LENGTH,
                 "packed length may not exceed {MAX_PACKED_LENGTH}. Got {}",
                 packed.relative_indices.len()
             );
 
-            let unpacked = packed.try_unpack().unwrap();
+            let unpacked = packed.try_unpack(true).unwrap();
             assert_eq!(chunk, unpacked);
         }
 
         #[test]
         fn try_unpack_accepts_shortest_long_form_length() {
             let chunk = Chunk::random_of_length(LONG_LENGTH_FLAG as usize);
-            assert_eq!(chunk, chunk.pack().try_unpack().unwrap());
+            assert_eq!(chunk, chunk.pack(true).try_unpack(true).unwrap());
+        }
+
+        #[test]
+        fn length_indicator_is_read_verbatim_before_big_chunks() {
+            for length in [1, 2047, 2048, 2049, 4095] {
+                let chunk = Chunk::random_of_length(length);
+                let packed = chunk.pack(false);
+                let unpacked = packed.try_unpack(false).unwrap_or_else(|err| {
+                    panic!("chunk of length {length} must round-trip pre-delta. Error: {err}")
+                });
+
+                assert_eq!(chunk, unpacked, "pre-delta round trip, length {length}");
+            }
+        }
+
+        #[test]
+        fn the_two_rule_sets_disagree_about_long_form_chunks() {
+            let chunk = Chunk::random_of_length(4096);
+
+            // The long form only exists post-delta.
+            let packed = chunk.pack(true);
+            assert_eq!(chunk, packed.try_unpack(true).unwrap());
+            assert!(
+                packed.try_unpack(false).is_err(),
+                "a pre-delta node must reject the long form"
+            );
+
+            // A chunk that pre-delta rules can express is packed differently by
+            // each, once the top bit of the length is set.
+            let chunk = Chunk::random_of_length(3000);
+            assert_ne!(
+                chunk.pack(false).relative_indices,
+                chunk.pack(true).relative_indices,
+                "the rule sets must not produce the same bytes for length 3000"
+            );
+        }
+
+        #[test]
+        fn chunks_beyond_the_pre_delta_ceiling_need_big_chunks() {
+            let chunk = Chunk::random_of_length(MAX_UNPACKED_LENGTH_BEFORE_BIG_CHUNKS + 1);
+            assert_eq!(chunk, chunk.pack(true).try_unpack(true).unwrap());
+        }
+
+        #[test]
+        #[should_panic(expected = "Unpacked length of a chunk may not exceed 4095")]
+        fn packing_an_overfull_chunk_before_big_chunks_panics() {
+            let chunk = Chunk::random_of_length(MAX_UNPACKED_LENGTH_BEFORE_BIG_CHUNKS + 1);
+            let _ = chunk.pack(false);
+        }
+
+        #[test]
+        fn canonicity_of_the_length_indicator_is_only_required_with_big_chunks() {
+            let noncanonical_empty = Chunk {
+                relative_indices: vec![0],
+            };
+
+            assert_eq!(
+                Chunk::empty_chunk(),
+                noncanonical_empty.try_unpack(false).unwrap(),
+                "pre-delta must keep accepting the zero length indicator"
+            );
+            assert_eq!(
+                ChunkUnpackError::NonCanonicalEmptyChunk,
+                noncanonical_empty.try_unpack(true).unwrap_err(),
+                "post-delta must reject it"
+            );
+
+            // With the top bit set, pre-delta reads a literal length of 2048,
+            // which does not match a one-element payload.
+            let flagged = Chunk {
+                relative_indices: vec![LONG_LENGTH_FLAG << 20],
+            };
+            assert_eq!(
+                ChunkUnpackError::InconsistentLength,
+                flagged.try_unpack(false).unwrap_err()
+            );
+            assert_eq!(
+                ChunkUnpackError::NonCanonicalEmptyChunk,
+                flagged.try_unpack(true).unwrap_err()
+            );
+        }
+
+        #[test]
+        fn try_unpack_rejects_noncanonical_empty_chunk() {
+            for first_element in [0, LONG_LENGTH_FLAG << 20] {
+                let packed = Chunk {
+                    relative_indices: vec![first_element],
+                };
+                assert_eq!(
+                    ChunkUnpackError::NonCanonicalEmptyChunk,
+                    packed.try_unpack(true).unwrap_err(),
+                    "zero length indicator {first_element:#010x} must be rejected"
+                );
+            }
+
+            // The canonical encoding of the empty chunk still round-trips.
+            let empty = Chunk::empty_chunk();
+            assert!(empty.pack(true).relative_indices.is_empty());
+            assert_eq!(empty, empty.pack(true).try_unpack(true).unwrap());
+        }
+
+        #[test]
+        fn try_unpack_rejects_non_minimal_length_indicator() {
+            for length in [1, 2, 360, 2046, 2047] {
+                let chunk = Chunk::random_of_length(length);
+                let length = u32::try_from(length).unwrap();
+                let long_length_encoding =
+                    [(length >> 12) | LONG_LENGTH_FLAG, length & ((1 << 12) - 1)];
+                let packed = chunk.pack_with_length_encoding(&long_length_encoding);
+
+                assert_eq!(
+                    ChunkUnpackError::NonMinimalLengthIndicator,
+                    packed.try_unpack(true).unwrap_err(),
+                    "long-form length indicator for length {length} must be rejected"
+                );
+            }
         }
 
         #[proptest]
@@ -921,11 +1080,9 @@ mod tests {
                 relative_indices[0] |= LONG_LENGTH_FLAG << 20;
             }
 
-            let _ = Chunk { relative_indices }.try_unpack(); // no crash
+            let _ = Chunk { relative_indices }.try_unpack(true); // no crash
         }
 
-        /// All-ones input indicates the largest expressible length, 2^23 - 1.
-        /// Deriving the packed length from it must neither overflow nor panic.
         #[test]
         fn try_unpack_rejects_maximal_indicated_length() {
             for num_packed_elements in [1, 2, 3, 100, MAX_PACKED_LENGTH] {
@@ -934,7 +1091,7 @@ mod tests {
                 };
                 assert_eq!(
                     ChunkUnpackError::InconsistentLength,
-                    packed.try_unpack().unwrap_err(),
+                    packed.try_unpack(true).unwrap_err(),
                     "maximal indicated length must be rejected for a payload of \
                      {num_packed_elements} u32s"
                 );
@@ -943,27 +1100,27 @@ mod tests {
 
         #[proptest]
         fn pack_unpack_happy(#[strategy(arb::<Chunk>())] chunk: Chunk) {
-            let packed = chunk.pack();
-            let unpacked = packed.try_unpack().unwrap();
+            let packed = chunk.pack(true);
+            let unpacked = packed.try_unpack(true).unwrap();
             prop_assert_eq!(chunk, unpacked);
         }
 
         #[proptest]
         fn packing_must_be_minimal(#[strategy(arb::<Chunk>())] chunk: Chunk) {
-            let mut packed = chunk.pack();
+            let mut packed = chunk.pack(true);
             packed.relative_indices.push(0);
             prop_assert_eq!(
                 ChunkUnpackError::InconsistentLength,
-                packed.try_unpack().unwrap_err()
+                packed.try_unpack(true).unwrap_err()
             );
         }
 
         #[proptest]
         fn cannot_lie_about_lengths(#[strategy(arb::<Chunk>())] chunk: Chunk) {
-            let mut packed = chunk.pack();
+            let mut packed = chunk.pack(true);
             // Indicated length must be off by at least 3 to guarantee failure
             packed.relative_indices[0] ^= 0x00_30_00_00;
-            prop_assert!(packed.try_unpack().is_err());
+            prop_assert!(packed.try_unpack(true).is_err());
         }
     }
 }

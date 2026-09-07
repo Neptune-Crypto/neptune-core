@@ -110,7 +110,7 @@ async fn disallow_double_spends_across_blocks() {
     let tx = Transaction::new_with_updated_mutator_set_records_given_proof(
         tx.kernel,
         &block1.mutator_set_accumulator_after().unwrap(),
-        &block2.mutator_set_update().unwrap(),
+        &block2.mutator_set_update(network).unwrap(),
         tx.proof.into_single_proof(),
         TritonVmJobQueue::get_instance(),
         TritonVmProofJobOptions::default_with_network(network),

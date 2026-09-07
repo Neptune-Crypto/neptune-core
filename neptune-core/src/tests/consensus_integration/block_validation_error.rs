@@ -919,7 +919,7 @@ async fn block_spending_lustration_bound_inputs(
     let now = now + Timestamp::hours(1);
     let mut block = fake_valid_successor_for_tests(&parent, now, Default::default(), network).await;
     let transaction_kernel = TransactionKernelModifier::default()
-        .inputs(RemovalRecordList::pack(inputs))
+        .inputs(RemovalRecordList::pack(inputs, true))
         .announcements(announcements)
         .modify(block.body().transaction_kernel.clone());
     block.set_transaction_kernel(transaction_kernel);

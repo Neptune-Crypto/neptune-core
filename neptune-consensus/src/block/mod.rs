@@ -622,8 +622,11 @@ impl Block {
         self.solo_validate(now, network).await?;
 
         // 2.a)
-        let inputs = RemovalRecordList::try_unpack(self.body().transaction_kernel.inputs.clone())
-            .map_err(BlockValidationError::from)?;
+        let inputs = RemovalRecordList::try_unpack(
+            self.body().transaction_kernel.inputs.clone(),
+            consensus_rule_set.allow_big_chunks(),
+        )
+        .map_err(BlockValidationError::from)?;
 
         // 2.b)
         let msa_before = previous_block.mutator_set_accumulator_after()?;
@@ -851,8 +854,11 @@ impl Block {
         }
 
         // 2.a)
-        let inputs = RemovalRecordList::try_unpack(self.body().transaction_kernel.inputs.clone())
-            .map_err(BlockValidationError::from)?;
+        let inputs = RemovalRecordList::try_unpack(
+            self.body().transaction_kernel.inputs.clone(),
+            consensus_rule_set.allow_big_chunks(),
+        )
+        .map_err(BlockValidationError::from)?;
 
         // 2.j)
         if inputs.len() > consensus_rule_set.max_num_inputs() {
@@ -1139,9 +1145,12 @@ impl Block {
     /// Return the mutator set update corresponding to this block, which sends
     /// the mutator set accumulator after the predecessor to the mutator set
     /// accumulator after self.
-    pub fn mutator_set_update(&self) -> Result<MutatorSetUpdate, BlockValidationError> {
+    pub fn mutator_set_update(
+        &self,
+        network: Network,
+    ) -> Result<MutatorSetUpdate, BlockValidationError> {
         let block_hash = self.hash();
-        self.kernel.mutator_set_update(block_hash)
+        self.kernel.mutator_set_update(block_hash, network)
     }
 
     /// Compute the total supply of coins that were liquid immediately after
@@ -1635,7 +1644,7 @@ pub(crate) mod tests {
 
             // The arbitrary block's own inputs, which are not a packed list.
             let unpackable = arbitrary_block.body().transaction_kernel.inputs.clone();
-            prop_assume!(RemovalRecordList::try_unpack(unpackable.clone()).is_err());
+            prop_assume!(RemovalRecordList::try_unpack(unpackable.clone(), true).is_err());
             let block = block_with_inputs(block, unpackable);
 
             prop_assert_eq!(
@@ -1655,8 +1664,9 @@ pub(crate) mod tests {
                 absolute_indices,
                 target_chunks: ChunkDictionary::empty(),
             };
-            let duplicated = RemovalRecordList::pack(vec![removal_record.clone(), removal_record]);
-            prop_assume!(RemovalRecordList::try_unpack(duplicated.clone()).is_ok());
+            let duplicated =
+                RemovalRecordList::pack(vec![removal_record.clone(), removal_record], true);
+            prop_assume!(RemovalRecordList::try_unpack(duplicated.clone(), true).is_ok());
             let block = block_with_inputs(block, duplicated);
 
             prop_assert_eq!(
@@ -1749,8 +1759,8 @@ pub(crate) mod tests {
                 target_chunks: ChunkDictionary::empty(),
             };
             let too_many = consensus_rule_set.max_num_inputs() + 1;
-            let inputs = RemovalRecordList::pack(vec![removal_record; too_many]);
-            prop_assume!(RemovalRecordList::try_unpack(inputs.clone()).is_ok());
+            let inputs = RemovalRecordList::pack(vec![removal_record; too_many], true);
+            prop_assume!(RemovalRecordList::try_unpack(inputs.clone(), true).is_ok());
             let block = block_with_inputs(block, inputs);
 
             prop_assert_eq!(
@@ -1766,7 +1776,7 @@ pub(crate) mod tests {
             let transaction_kernel = TransactionKernelModifier::default()
                 .timestamp(header.timestamp)
                 .coinbase(None)
-                .inputs(RemovalRecordList::pack(vec![]))
+                .inputs(RemovalRecordList::pack(vec![], true))
                 .modify(block.body().transaction_kernel.clone());
             let body = BlockBody::new(
                 transaction_kernel,
