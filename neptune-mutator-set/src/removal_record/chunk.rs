@@ -86,6 +86,10 @@ impl Chunk {
         self.relative_indices.sort();
     }
 
+    /// Remove a single occurrence of the specified relative index from the
+    /// chunk, if present. If not present, this function does nothing.
+    ///
+    /// Keeps the chunk sorted.
     pub fn remove_once(&mut self, index: u32) {
         assert!(
             index < CHUNK_SIZE,
@@ -93,15 +97,19 @@ impl Chunk {
             CHUNK_SIZE,
             index
         );
-        let mut drop = None;
-        for i in 0..self.relative_indices.len() {
-            if self.relative_indices[i] == index {
-                drop = Some(i);
-            }
-        }
 
+        // Remove the last match (as opposed to the first) since this makes the
+        // following `remove` require the smallest possible reallocation.
+        let drop = self
+            .relative_indices
+            .iter()
+            .rev()
+            .find_position(|x| **x == index)
+            .map(|(i, _)| i);
+
+        let len = self.relative_indices.len();
         if let Some(d) = drop {
-            self.relative_indices.remove(d);
+            self.relative_indices.remove(len - d - 1);
         }
     }
 
@@ -447,6 +455,32 @@ mod tests {
 
         // Verify that we can remove once without index being present, without crashing
         aw.remove_once(index);
+    }
+
+    #[test]
+    fn remove_once_simple_test() {
+        let mut c = Chunk::empty_chunk();
+
+        for ri in [12, 22, 32, 42, 52, 52] {
+            c.insert(ri);
+        }
+
+        c.remove_once(12);
+        assert!(!c.contains(12));
+        for ri in [22, 32, 42, 52] {
+            assert!(c.contains(ri));
+        }
+
+        c.remove_once(52);
+        for ri in [22, 32, 42, 52] {
+            assert!(c.contains(ri));
+        }
+
+        c.remove_once(52);
+        assert!(!c.contains(52));
+        for ri in [22, 32, 42] {
+            assert!(c.contains(ri));
+        }
     }
 
     #[test]
