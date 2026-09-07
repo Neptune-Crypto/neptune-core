@@ -9,6 +9,7 @@ pub(crate) mod handshake;
 pub mod overview;
 pub(crate) mod reachability;
 pub(crate) mod stack;
+pub(crate) mod stack_event;
 
 #[cfg(any(test, feature = "arbitrary-impls"))]
 pub mod arbitrary;
