@@ -663,27 +663,27 @@ impl BasicSnippet for WeldBranch {
         // Authenticate one variable-length field of one operand and leave the
         // field's pointer behind, for the multiset comparison that follows.
         //
-        // BEFORE: _ [own_program_digest] disc [txk_digest] *witness .. (k words)
-        // AFTER:  _ [own_program_digest] disc [txk_digest] *witness .. *field (k+1 words)
+        // BEFORE: _ *witness .. (k words)
+        // AFTER:  _ *witness .. *field (k+1 words)
         let authenticated_field = |k: usize,
                                    root: &[LabelledInstruction],
                                    accessor: &[LabelledInstruction],
                                    authenticate: &str| {
             triton_asm!(
-                // _ .. (k)
+                // _ ..
                 {&root}
-                // _ .. [root] (k+5)
+                // _ *witness .. [root]
 
                 dup {k + Digest::LEN}
                 {&accessor}
-                // _ .. [root] *field size (k+7)
+                // _ *witness .. [root] *field size
 
                 dup 1
                 place 7
-                // _ .. *field [root] *field size
+                // _ *witness .. *field [root] *field size
 
                 call {authenticate}
-                // _ .. *field (k+1)
+                // _ *witness .. *field
             )
         };
 
