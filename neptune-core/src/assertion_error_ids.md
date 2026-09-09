@@ -24,6 +24,7 @@ often.
 |   80..100 | [`WeldBranch`](../../neptune-consensus/src/transaction/validity/tasm/single_proof/weld_branch.rs)                               |
 |  100..120 | [`UpdateBranch`](protocol/consensus/transaction/validity/tasm/single_proof/update_branch.rs)                                    |
 |  120..140 | [`Update`](protocol/consensus/transaction/validity/update.rs)                                                                   |
+|  140..150 | [`Fix`](../../neptune-consensus/src/transaction/validity/tasm/single_proof/fix_branch.rs)                                       |
 |  200..210 | [`CoinbaseAmount`](protocol/consensus/transaction/validity/tasm/coinbase_amount.rs)                                             |
 |  210..250 | [`BlockProgram`](models/blockchain/block/validity/block_program.rs)                                                             |
 |  250..260 | [`HashRemovalRecordIndexSets`](protocol/consensus/transaction/validity/tasm/hash_removal_record_index_sets.rs)                  |
