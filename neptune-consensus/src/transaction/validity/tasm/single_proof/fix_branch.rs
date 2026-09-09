@@ -182,6 +182,8 @@ impl FixBranch {
             single_proof_digest_alloc,
         }
     }
+
+    const CORRUPTED_OWN_PROGRAM_DIGEST_ERROR: i128 = 1_000_150;
 }
 
 impl BasicSnippet for FixBranch {
@@ -282,6 +284,17 @@ impl BasicSnippet for FixBranch {
             // _ [own_program_digest] [txk_digest] *witness disc
 
             addi {-(DISCRIMINANT_FOR_FIX as isize) - 1}
+            // _ [own_program_digest] [txk_digest] *witness -1
+
+            /* Assert that program digest wasn't corrupted by other memory writes */
+            dup 11 dup 11 dup 11 dup 11 dup 11
+            push {self.single_proof_digest_alloc.read_address()}
+            read_mem {Digest::LEN}
+            pop 1
+            // _ [own_program_digest] [txk_digest] *witness -1 [own_program_digest] [own_program_digest_from_mem]
+
+            assert_vector error_id {Self::CORRUPTED_OWN_PROGRAM_DIGEST_ERROR}
+            pop 5
             // _ [own_program_digest] [txk_digest] *witness -1
 
             return
