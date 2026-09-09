@@ -65,6 +65,7 @@ const FEE_IS_NEGATIVE_OR_INVALID_AMOUNT_ERROR: i128 = 1_000_084;
 const FEE_IS_NOT_SUM_OF_OPERAND_FEES_ERROR: i128 = 1_000_085;
 const TIMESTAMP_IS_NOT_MAX_OF_OPERAND_TIMESTAMPS_ERROR: i128 = 1_000_086;
 const MUTATOR_SET_HASH_MISMATCH_ERROR: i128 = 1_000_087;
+const CORRUPTED_OWN_PROGRAM_DIGEST_ERROR: i128 = 1_000_088;
 
 /// The witness consumed by [`WeldBranch`].
 ///
@@ -1063,6 +1064,18 @@ impl BasicSnippet for WeldBranch {
 
             addi {-(DISCRIMINANT_FOR_WELD as isize) - 1}
             // _ [own_program_digest] [txk_digest] *witness -1
+
+            /* Assert that program digest wasn't corrupted by other memory writes */
+            dup 11 dup 11 dup 11 dup 11 dup 11
+            push {self.single_proof_digest_alloc.read_address()}
+            read_mem {Digest::LEN}
+            pop 1
+            // _ [own_program_digest] [txk_digest] *witness -1 [own_program_digest] [own_program_digest_from_mem]
+
+            assert_vector error_id {CORRUPTED_OWN_PROGRAM_DIGEST_ERROR}
+            pop 5
+            // _ [own_program_digest] [txk_digest] *witness -1
+
 
             return
         )
