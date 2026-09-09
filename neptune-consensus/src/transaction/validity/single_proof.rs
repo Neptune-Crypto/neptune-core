@@ -1622,7 +1622,7 @@ pub(crate) mod tests {
 
         test_program_snapshot!(
             SingleProof::new(ConsensusRuleSet::HardforkDelta),
-            "de13af08622357a5872a41818caec163fbb41dbf29378362aa32d2efe8a7a6372890b18a982c1790"
+            "a084f6941fccdfc324bbea82a5dcbf83c0927ccfadce224501873bb540dfd95f2bf67e9008c9478d"
         );
     }
 }
