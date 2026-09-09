@@ -3,7 +3,7 @@ name = "neptune-mutator-set"
 description = "The mutator set, a privacy-preserving cryptographic accumulator invented by the Neptune team. Paper: https://eprint.iacr.org/2023/1208 Article: https://neptune.cash/articles/mutator-sets"
 authors = ["Triton Software"]
 
-version = "0.16.0"
+version = "0.17.0"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -29,7 +29,7 @@ itertools = "0.14"
 num-traits = "0.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_arrays = "0.2"
-tasm-lib = "7.0.0"
+tasm-lib = "8.0.0"
 thiserror = "1.0.65"
 
 # optional: required for unit tests and the arbitrary-impls / test-helpers features.
@@ -41,7 +41,7 @@ rand = { version = "0.9", optional = true }
 
 [dev-dependencies]
 # the crate's own tests use archival-mmr's `mock` constructors.
-neptune-archival-mmr = { version = "0.16.0", path = "../neptune-archival-mmr", features = [
+neptune-archival-mmr = { version = "0.17.0", path = "../neptune-archival-mmr", features = [
     "test-helpers",
 ] }
 arbitrary = { version = "1.4.1", features = ["derive"] }

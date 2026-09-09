@@ -4,9 +4,12 @@ use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::triton_vm::proof::Proof as VmProof;
 use tasm_lib::triton_vm::proof_stream::ProofStream;
 use tasm_lib::triton_vm::stark::Stark;
+use tasm_lib_legacy::triton_vm as triton_vm_legacy;
 use tokio::task;
 use tracing::warn;
 
+use crate::proof_abstractions::tasm::legacy_stark_verify::claim_uses_legacy_proof_system;
+use crate::proof_abstractions::tasm::legacy_stark_verify::LegacyStarkVerify;
 use crate::transaction::validity::neptune_proof::Proof;
 
 /// Historical block claims that define the main-net checkpoint: one hex-encoded,
@@ -46,9 +49,9 @@ enum SuperfluousProofItems {
 /// parameters exist for that padded height.
 fn expected_num_proof_items(stark: Stark, proof: &VmProof) -> Option<usize> {
     /// Items read outside of FRI: the padded height, three Merkle roots, four
-    /// out-of-domain rows, the out-of-domain quotient segments, and, for each of
+    /// out-of-domain rows, two out-of-domain quotient segments, and, for each of
     /// the three tables, the revealed rows plus their authentication structure.
-    const NUM_ITEMS_OUTSIDE_FRI: usize = 15;
+    const NUM_ITEMS_OUTSIDE_FRI: usize = 16;
 
     /// Items read by FRI independently of the number of rounds: the Merkle root
     /// of the first round, the last round's codeword and polynomial, and the
@@ -69,14 +72,17 @@ fn expected_num_proof_items(stark: Stark, proof: &VmProof) -> Option<usize> {
     )
 }
 
-/// Determine whether the proof holds exactly those proof items that Triton VM's
-/// verifier reads, and no others.
+/// Determine whether the proof holds exactly those proof items that the
+/// verifier of the proof system selected by the claim's version reads, and no
+/// others.
 ///
-/// Triton VM's native verifier ignores any items beyond the ones it reads,
-/// whereas the verifier running *inside* the VM rejects them. A transaction
-/// carrying such a proof would therefore be relayed by every node but could
-/// never be merged into a block transaction.
-fn has_expected_num_proof_items(proof: &VmProof) -> bool {
+/// The proof systems encode proof items differently, so the proof must be
+/// decoded under the one the claim selects.
+fn has_expected_num_proof_items(proof: &VmProof, claim: &Claim) -> bool {
+    if claim_uses_legacy_proof_system(claim) {
+        return LegacyStarkVerify::has_expected_num_proof_items(proof);
+    }
+
     let Some(expected_num_items) = expected_num_proof_items(Stark::default(), proof) else {
         return false;
     };
@@ -85,6 +91,37 @@ fn has_expected_num_proof_items(proof: &VmProof) -> bool {
     };
 
     proof_stream.items.len() == expected_num_items
+}
+
+/// Verify a (claim, proof) pair produced under the pre-delta proof system.
+///
+/// Proofs from before hardfork delta use Triton VM's version-5 proof system.
+/// Until the fork has been activated and a checkpoint covers the pre-delta
+/// blocks, such proofs are verified by the legacy VM.
+fn verify_legacy(claim: &Claim, proof: &VmProof) -> bool {
+    let legacy_claim = triton_vm_legacy::proof::Claim::new(claim.program_digest)
+        .about_version(claim.version)
+        .with_input(claim.input.clone())
+        .with_output(claim.output.clone());
+    let legacy_proof = triton_vm_legacy::proof::Proof(proof.0.clone());
+
+    triton_vm_legacy::verify(
+        triton_vm_legacy::stark::Stark::default(),
+        &legacy_claim,
+        &legacy_proof,
+    )
+}
+
+/// Synchronously verify a (claim, proof) pair against the proof system set in
+/// the claim.
+///
+/// No caching, no mock-proof handling; for those, use [`verify`].
+pub(crate) fn verify_sync(claim: &Claim, proof: &VmProof) -> bool {
+    if claim_uses_legacy_proof_system(claim) {
+        verify_legacy(claim, proof)
+    } else {
+        triton_vm::verify(Stark::default(), claim, proof)
+    }
 }
 
 /// Verify a Triton VM (claim, proof) pair for default STARK parameters.
@@ -129,7 +166,7 @@ async fn verify_inner(
     }
 
     if superfluous_proof_items == SuperfluousProofItems::Reject
-        && !has_expected_num_proof_items(&proof)
+        && !has_expected_num_proof_items(&proof, &claim)
     {
         warn!("rejecting proof that holds an unexpected number of proof items");
         return false;
@@ -138,10 +175,9 @@ async fn verify_inner(
     #[cfg(test)]
     let claim_clone = claim.clone();
 
-    let verdict =
-        task::spawn_blocking(move || triton_vm::verify(Stark::default(), &claim, &proof.into()))
-            .await
-            .expect("should be able to verify proof in new tokio task");
+    let verdict = task::spawn_blocking(move || verify_sync(&claim, &VmProof::from(proof)))
+        .await
+        .expect("should be able to verify proof in new tokio task");
 
     #[cfg(test)]
     if verdict {
@@ -187,6 +223,7 @@ pub(crate) mod tests {
     use triton_vm::prelude::BFieldCodec;
 
     use super::*;
+    use crate::proof_abstractions::tasm::legacy_stark_verify::LegacyProverPipeline;
     use crate::proof_abstractions::test_runtime::shared_tokio_runtime;
 
     pub(crate) fn bogus_proof(claim: &Claim) -> Proof {
@@ -238,8 +275,8 @@ pub(crate) mod tests {
     fn superfluous_proof_items_are_detected() {
         let (claim, proof) = honest_claim_and_proof(200);
         assert!(
-            has_expected_num_proof_items(&proof),
-            "honest proof must hold exactly the expected number of proof items"
+            has_expected_num_proof_items(&proof, &claim),
+            "honest proof must hold the expected number of proof items"
         );
 
         let mut appended_proof_stream = ProofStream::try_from(&proof).unwrap();
@@ -249,17 +286,42 @@ pub(crate) mod tests {
         let appended_proof = VmProof::from(appended_proof_stream);
 
         assert!(
-            !has_expected_num_proof_items(&appended_proof),
+            !has_expected_num_proof_items(&appended_proof, &claim),
             "proof with a trailing proof item must be detected"
         );
 
-        // The divergence this check compensates for: Triton VM's native
-        // verifier accepts the padded proof, while the verifier running inside
-        // the VM rejects it. Should this assertion ever fail, Triton VM itself
-        // rejects superfluous proof items and the check above is redundant.
         assert!(
-            triton_vm::verify(Stark::default(), &claim, &appended_proof),
-            "native verifier is expected to accept a proof with trailing items"
+            !triton_vm::verify(Stark::default(), &claim, &appended_proof),
+            "new verifier is expected to reject a proof with trailing items"
+        );
+
+        // The divergence the check compensates for lives in the legacy proof
+        // system: its native verifier accepts the padded proof, while the
+        // verifier running inside the VM rejects it.
+        let program = triton_program!({&triton_asm![nop; 200]} halt);
+        let legacy_claim =
+            Claim::about_program(&program).about_version(triton_vm_legacy::proof::CURRENT_VERSION);
+        let legacy_proof =
+            LegacyProverPipeline::trace(&program, &legacy_claim, NonDeterminism::default()).prove();
+        assert!(has_expected_num_proof_items(&legacy_proof, &legacy_claim));
+
+        // The legacy proof system encodes proof items differently, so the
+        // trailing item must be appended under the legacy proof stream.
+        let legacy_proof = triton_vm_legacy::proof::Proof(legacy_proof.0);
+        let mut appended_legacy_proof_stream =
+            triton_vm_legacy::proof_stream::ProofStream::try_from(&legacy_proof).unwrap();
+        appended_legacy_proof_stream
+            .items
+            .push(triton_vm_legacy::proof_item::ProofItem::Log2PaddedHeight(8));
+        let appended_legacy_proof =
+            VmProof(triton_vm_legacy::proof::Proof::from(appended_legacy_proof_stream).0);
+        assert!(!has_expected_num_proof_items(
+            &appended_legacy_proof,
+            &legacy_claim
+        ));
+        assert!(
+            verify_legacy(&legacy_claim, &appended_legacy_proof),
+            "legacy verifier is expected to accept a proof with trailing items"
         );
     }
 
@@ -274,15 +336,14 @@ pub(crate) mod tests {
             .push(ProofItem::Log2PaddedHeight(8));
         let appended_proof = Proof::from(VmProof::from(appended_proof_stream));
 
-        // Must precede the `verify` call below, which caches the claim as true
-        // in test builds.
         assert!(
             !verify_transaction_proof(claim.clone(), appended_proof.clone(), network).await,
             "transaction proof with trailing proof item must be rejected"
         );
+
         assert!(
-            verify(claim, appended_proof, network).await,
-            "block proofs are exempt from the proof item count check, for now"
+            !verify(claim, appended_proof, network).await,
+            "new verifier is expected to reject a proof with trailing items"
         );
     }
 

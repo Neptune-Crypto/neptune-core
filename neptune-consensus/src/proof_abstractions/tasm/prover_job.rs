@@ -8,8 +8,11 @@
 //!
 //! The queue is used to ensure that only one `neptune-prover`
 //! program can execute at a time.
+use std::path::Path;
+use std::path::PathBuf;
 use std::process::Stdio;
 
+use itertools::Itertools;
 use neptune_job_queue::channels::JobCancelReceiver;
 use neptune_job_queue::traits::Job;
 use neptune_job_queue::JobCompletion;
@@ -22,6 +25,7 @@ use tokio::io::AsyncWriteExt;
 
 use crate::macros::fn_name;
 use crate::macros::log_scope_duration;
+use crate::proof_abstractions::tasm::legacy_stark_verify::proof_padded_height;
 use crate::proof_abstractions::tasm::neptune_prover_job::NeptuneProverJob;
 use crate::proof_abstractions::triton_vm_env_vars::TritonVmEnvVars;
 use crate::proof_abstractions::tx_proving_capability::TxProvingCapability;
@@ -65,6 +69,12 @@ pub enum VmProcessError {
 
     #[error("could not determine path of own executable: {0}")]
     CouldNotDetermineExePath(#[from] std::io::Error),
+
+    #[error("could not launch `neptune-prover` at {}: {source}", path.display())]
+    CouldNotLaunchProver {
+        path: PathBuf,
+        source: std::io::Error,
+    },
 
     #[error("stdin unavailable")]
     StdinUnavailable,
@@ -373,12 +383,17 @@ impl ProverJob {
         let mut child = {
             let job_payload = serde_json::to_vec(&NeptuneProverJob::from(self.clone()))?;
 
-            let mut child = tokio::process::Command::new(Self::path_to_neptune_prover()?)
+            let prover_path = Self::path_to_neptune_prover()?;
+            let mut child = tokio::process::Command::new(&prover_path)
                 .kill_on_drop(true) // extra insurance.
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
-                .spawn()?;
+                .spawn()
+                .map_err(|source| VmProcessError::CouldNotLaunchProver {
+                    path: prover_path,
+                    source,
+                })?;
 
             // Pipe stderr to matching tracing logs
             if let Some(stderr) = child.stderr.take() {
@@ -432,9 +447,9 @@ impl ProverJob {
                         let proof: Proof = bincode::deserialize(&output.stdout)?;
                         tracing::debug!(
                             "Generated proof, with padded height: {}",
-                            proof.padded_height()
+                            proof_padded_height(&self.claim, &proof)
                                 .map(|x| x.to_string())
-                                .unwrap_or_else(|e| format!("could not get padded height from proof.\nGot: {e}"))
+                                .unwrap_or_else(|| "could not get padded height from proof".to_string())
                         );
                         Ok(ProverProcessCompletion::Finished(proof))
                     }
@@ -482,16 +497,17 @@ impl ProverJob {
     /// Obtains path to `neptune-prover` executable for generating Triton VM
     /// proofs.
     ///
-    /// `neptune-prover` must reside in the same directory as `neptune-core`.
-    /// This colocation enables debug builds of `neptune-core` to invoke debug
-    /// builds of `neptune-prover`. Also works for release build, and for a
-    /// package/distribution.
+    /// `neptune-prover` resides in the same directory as `neptune-core`, which
+    /// covers the release build and any package or distribution. Test binaries
+    /// sit deeper: Cargo has placed them in `target/<profile>/deps/` and, more
+    /// recently, in `target/<profile>/build/<pkg>/<hash>/out/`. Rather than
+    /// encode either layout, walk up from the running executable and take the
+    /// first ancestor directory that holds the binary.
     ///
-    /// note: we do not verify that the path exists. That will occur anyway
-    /// when `neptune-prover` is executed.
-    fn path_to_neptune_prover() -> Result<std::path::PathBuf, VmProcessError> {
-        let mut path = std::env::current_exe()?;
-
+    /// Returns the sibling path when no candidate exists, so that the failure
+    /// surfaces at spawn time as [`VmProcessError::CouldNotLaunchProver`],
+    /// naming the path that was tried.
+    fn path_to_neptune_prover() -> Result<PathBuf, VmProcessError> {
         // Handle the ".exe" extension for Windows automatically
         let extension = std::env::consts::EXE_EXTENSION;
         let bin_name = if extension.is_empty() {
@@ -500,19 +516,34 @@ impl ProverJob {
             format!("neptune-prover.{extension}")
         };
 
-        // If we are in 'target/debug/deps', move up to 'target/debug', which is
-        // where we may expect to find the binary if the directory structure is
-        // the standard layout for Cargo integration tests.
-        if let Some(parent) = path.parent() {
-            if parent.ends_with("deps") {
-                path = parent.parent().unwrap_or(parent).to_path_buf();
-            } else {
-                path = parent.to_path_buf();
-            }
+        let current_exe = std::env::current_exe()?;
+        let candidates = Self::prover_candidates(&current_exe, &bin_name);
+
+        if let Some(found) = candidates.iter().find(|candidate| candidate.is_file()) {
+            return Ok(found.clone());
         }
 
-        path.push(bin_name);
-        Ok(path)
+        Ok(candidates
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| PathBuf::from(bin_name)))
+    }
+
+    /// The directories to look for `neptune-prover` in, nearest first.
+    fn prover_candidates(current_exe: &Path, bin_name: &str) -> Vec<PathBuf> {
+        /// Enough to climb from `target/<profile>/build/<pkg>/<hash>/out/` up
+        /// to `target/<profile>/`, with a little room to spare. Bounded so that
+        /// an unrelated binary further up the filesystem cannot be picked up.
+        const MAX_ANCESTORS_SEARCHED: usize = 6;
+
+        // `skip(1)` drops the executable itself, so the first candidate is its
+        // sibling -- the colocated case.
+        current_exe
+            .ancestors()
+            .skip(1)
+            .take(MAX_ANCESTORS_SEARCHED)
+            .map(|dir| dir.join(bin_name))
+            .collect_vec()
     }
 }
 
@@ -652,5 +683,47 @@ pub(crate) mod unit_testing_prover {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prover_is_found_under_every_known_target_layout() {
+        let profile_dir = Path::new("/repo/target/debug");
+        let expected = profile_dir.join("neptune-prover");
+
+        for exe in [
+            // Release builds and any package or distribution
+            profile_dir.join("neptune-core"),
+            // Test binaries up to and including rustc 1.98
+            profile_dir.join("deps/some_test-0123456789abcdef"),
+            // Test binaries since rustc 1.100
+            profile_dir.join("build/neptune-cash/0123456789abcdef/out/some_test-0123456789abcdef"),
+        ] {
+            let candidates = ProverJob::prover_candidates(&exe, "neptune-prover");
+            assert!(
+                candidates.contains(&expected),
+                "prover must be looked for in {}, given an executable at {}. Candidates: {:?}",
+                profile_dir.display(),
+                exe.display(),
+                candidates
+            );
+        }
+    }
+
+    #[test]
+    fn prover_search_does_not_escape_the_target_directory() {
+        let exe = Path::new(
+            "/home/someone/repo/target/debug/build/neptune-cash/0123456789abcdef/out/some_test",
+        );
+        let candidates = ProverJob::prover_candidates(exe, "neptune-prover");
+
+        assert!(!candidates.contains(&PathBuf::from("/home/someone/neptune-prover")));
+        assert!(!candidates.contains(&PathBuf::from("/home/neptune-prover")));
+        assert!(!candidates.contains(&PathBuf::from("/neptune-prover")));
     }
 }

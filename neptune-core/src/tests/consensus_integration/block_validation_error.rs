@@ -661,7 +661,7 @@ async fn bad_lustration_status_counter_exceeds_initial_value_2p() {
 
     let mut b_new = fake_valid_successor_for_tests(&b_prev, ts, rness, network).await;
     let consensus_rule_set = ConsensusRuleSet::infer_from(network, b_new.header().height);
-    assert_eq!(ConsensusRuleSet::HardforkGamma, consensus_rule_set);
+    assert_eq!(ConsensusRuleSet::HardforkDelta, consensus_rule_set);
     cache_true_claims([BlockProgram::claim(
         b_new.body(),
         b_new.kernel.appendix(),
@@ -919,7 +919,7 @@ async fn block_spending_lustration_bound_inputs(
     let now = now + Timestamp::hours(1);
     let mut block = fake_valid_successor_for_tests(&parent, now, Default::default(), network).await;
     let transaction_kernel = TransactionKernelModifier::default()
-        .inputs(RemovalRecordList::pack(inputs))
+        .inputs(RemovalRecordList::pack(inputs, true))
         .announcements(announcements)
         .modify(block.body().transaction_kernel.clone());
     block.set_transaction_kernel(transaction_kernel);

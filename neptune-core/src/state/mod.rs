@@ -43,6 +43,7 @@ use neptune_consensus::block::block_header::BlockHeaderWithBlockHashWitness;
 use neptune_consensus::block::guesser_receiver_data::GuesserReceiverData;
 use neptune_consensus::block::mutator_set_update::MutatorSetUpdate;
 use neptune_consensus::block::Block;
+use neptune_consensus::chaintx::link_tx::LinkTx;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
 use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
@@ -59,6 +60,7 @@ use neptune_locks::tokio::AtomicRwWriteGuard;
 use neptune_mempool::mempool::Mempool;
 use neptune_mempool::mempool_update_job::MempoolUpdateJob;
 use neptune_mempool::transaction_kernel_id::TransactionKernelId;
+use neptune_mempool::transaction_kernel_id::Txid;
 use neptune_mempool::tx_upgrade_filter::TxUpgradeFilter;
 use neptune_mempool::upgrade_incentive::UpgradeIncentive;
 use neptune_mempool::upgrade_priority::UpgradePriority;
@@ -103,6 +105,8 @@ use tracing::error;
 use tracing::info;
 use tracing::trace;
 use tracing::warn;
+use transaction::chained_tx_artifacts::ChainedTxArtifacts;
+use transaction::link_tx_artifacts::LinkTxArtifacts;
 use transaction::tx_creation_artifacts::TxCreationArtifacts;
 use transaction::tx_creation_artifacts::TxCreationArtifactsError;
 use wallet::wallet_state::WalletState;
@@ -520,6 +524,116 @@ impl GlobalStateLock {
 
         Ok(())
     }
+
+    /// Record a self-initiated chained transaction: the chain-pipeline analog
+    /// of [`Self::record_own_transaction`].
+    ///
+    /// A chained transaction has no primitive witness, so the caller is
+    /// responsible for having validated the link primitive witness it grew
+    /// from. No [`SentTransaction`] is recorded, as its data model assumes
+    /// confirmed inputs.
+    pub(crate) async fn record_own_chained_transaction(
+        &mut self,
+        tx_artifacts: &ChainedTxArtifacts,
+    ) -> std::result::Result<(), RecordTransactionError> {
+        // acquire write-lock
+        let mut gsm = self.lock_guard_mut().await;
+        let block_height = gsm.chain.tip().header().height;
+        let network = gsm.cli().network;
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
+
+        let transaction = tx_artifacts.transaction.clone();
+        let details = tx_artifacts.details.clone();
+
+        if network != details.network {
+            return Err(TxCreationArtifactsError::NetworkMismatch.into());
+        }
+        if !transaction.is_valid(network, consensus_rule_set).await {
+            return Err(TxCreationArtifactsError::InvalidProof.into());
+        }
+
+        let utxos_sent_to_self = gsm
+            .wallet_state
+            .extract_expected_utxos(details.tx_outputs.iter(), UtxoNotifier::Myself);
+        if !utxos_sent_to_self.is_empty() {
+            gsm.wallet_state
+                .add_expected_utxos(utxos_sent_to_self)
+                .await;
+        }
+
+        for txoutput in details.tx_outputs.iter() {
+            gsm.wallet_state
+                .append_to_outgoing_randomness(&txoutput.utxo_triple())
+                .await
+                .map_err(|err| {
+                    RecordTransactionError::FailedToRecordOutgoingRandomness(err.to_string())
+                })?;
+        }
+
+        gsm.mempool_insert((*transaction).clone(), UpgradePriority::Critical)
+            .await;
+
+        // The insert runs the replacement contest; a transaction that loses
+        // it -- e.g. against a conflicting mempool member with a higher fee density
+        // -- is refused, and must not be broadcast.
+        if gsm.mempool().get(transaction.kernel.txid()).is_none() {
+            return Err(RecordTransactionError::RefusedByMempool);
+        }
+
+        gsm.flush_databases().await.expect("flushed DBs");
+
+        Ok(())
+    }
+
+    /// Record a self-initiated link transaction: the link-valued sibling of
+    /// [`Self::record_own_chained_transaction`].
+    pub(crate) async fn record_own_link_transaction(
+        &mut self,
+        tx_artifacts: &LinkTxArtifacts,
+    ) -> std::result::Result<(), RecordTransactionError> {
+        // acquire write-lock
+        let mut gsm = self.lock_guard_mut().await;
+        let network = gsm.cli().network;
+
+        let link_tx = tx_artifacts.link_tx.clone();
+        let details = tx_artifacts.details.clone();
+
+        if network != details.network {
+            return Err(TxCreationArtifactsError::NetworkMismatch.into());
+        }
+
+        let utxos_sent_to_self = gsm
+            .wallet_state
+            .extract_expected_utxos(details.tx_outputs.iter(), UtxoNotifier::Myself);
+        if !utxos_sent_to_self.is_empty() {
+            gsm.wallet_state
+                .add_expected_utxos(utxos_sent_to_self)
+                .await;
+        }
+
+        for txoutput in details.tx_outputs.iter() {
+            gsm.wallet_state
+                .append_to_outgoing_randomness(&txoutput.utxo_triple())
+                .await
+                .map_err(|err| {
+                    RecordTransactionError::FailedToRecordOutgoingRandomness(err.to_string())
+                })?;
+        }
+
+        gsm.mempool_insert_link((*link_tx).clone(), UpgradePriority::Critical)
+            .await;
+
+        // The insert runs the replacement contest; a link transaction that
+        // loses it -- e.g. against a conflicting mempool member with a higher fee
+        // density -- is refused, and must not be broadcast.
+        if gsm.mempool().get_link(link_tx.txid()).is_none() {
+            return Err(RecordTransactionError::RefusedByMempool);
+        }
+
+        gsm.flush_databases().await.expect("flushed DBs");
+
+        Ok(())
+    }
 }
 
 impl Deref for GlobalStateLock {
@@ -544,6 +658,9 @@ pub enum RecordTransactionError {
 
     #[error("Failed to record outgoing randomenss: {0}")]
     FailedToRecordOutgoingRandomness(String),
+
+    #[error("transaction was refused by own mempool; it lost the replacement contest")]
+    RefusedByMempool,
 }
 
 /// abstracts over lock acquisition types for [GlobalStateLock]
@@ -2110,7 +2227,7 @@ impl GlobalState {
                         .num_leafs()
                         - 1;
                     let num_outputs_in_block: u64 = block
-                        .mutator_set_update()
+                        .mutator_set_update(self.cli().network)
                         .expect("Block from state must have mutator set update")
                         .additions
                         .len()
@@ -2629,7 +2746,7 @@ impl GlobalState {
 
                 // revert removals
                 for removal_record in revert_block
-                    .mutator_set_update()
+                    .mutator_set_update(self.cli().network)
                     .expect("Stored block must have mutator set update")
                     .removals
                     .iter()
@@ -2689,7 +2806,7 @@ impl GlobalState {
                     additions,
                     mut removals,
                 } = apply_block
-                    .mutator_set_update()
+                    .mutator_set_update(self.cli().network)
                     .expect("block from archival state must have mutator set update");
 
                 // apply additions
@@ -3297,6 +3414,13 @@ impl GlobalState {
         self.wallet_state.handle_mempool_events(events).await
     }
 
+    /// adds link tx to mempool and notifies wallet of change. value represents
+    /// the value that the link transaction has to caller.
+    pub async fn mempool_insert_link(&mut self, link_tx: LinkTx, priority: UpgradePriority) {
+        let events = self.mempool.insert_link(link_tx, priority);
+        self.wallet_state.handle_mempool_events(events).await
+    }
+
     /// prunes stale tx in mempool and notifies wallet of changes.
     pub async fn mempool_prune_stale_transactions(&mut self) {
         let events = self.mempool.prune_stale_transactions();
@@ -3862,7 +3986,7 @@ mod tests {
                 block = next_block;
 
                 // update membership proofs
-                let mutator_set_update = block.mutator_set_update().unwrap();
+                let mutator_set_update = block.mutator_set_update(network).unwrap();
                 let MutatorSetUpdate {
                     additions,
                     mut removals,
@@ -3931,7 +4055,7 @@ mod tests {
                 }
 
                 block
-                    .mutator_set_update()
+                    .mutator_set_update(network)
                     .unwrap()
                     .apply_to_accumulator(&mut test_msa)
                     .unwrap();

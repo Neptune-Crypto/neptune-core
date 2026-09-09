@@ -5,9 +5,18 @@ use tasm_lib::prelude::Library;
 use tasm_lib::triton_vm::prelude::*;
 
 use super::new_claim::NewClaim;
+use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::transaction::validity::proof_collection::ProofCollection;
 
-pub(crate) struct GenerateTypeScriptClaimTemplate;
+pub(crate) struct GenerateTypeScriptClaimTemplate {
+    consensus_rule_set: ConsensusRuleSet,
+}
+
+impl GenerateTypeScriptClaimTemplate {
+    pub(crate) fn new(consensus_rule_set: ConsensusRuleSet) -> Self {
+        Self { consensus_rule_set }
+    }
+}
 
 impl BasicSnippet for GenerateTypeScriptClaimTemplate {
     fn parameters(&self) -> Vec<(DataType, String)> {
@@ -26,7 +35,7 @@ impl BasicSnippet for GenerateTypeScriptClaimTemplate {
     }
 
     fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
-        let new_claim = library.import(Box::new(NewClaim));
+        let new_claim = library.import(Box::new(NewClaim::new(self.consensus_rule_set)));
 
         let load_digest = triton_asm!(addi {Digest::LEN - 1} read_mem {Digest::LEN} pop 1);
         let reverse_digest = triton_asm!(pick 1 pick 2 pick 3 pick 4);
@@ -135,7 +144,7 @@ mod tests {
 
             stack.push(input_length);
             stack.push(output_length);
-            NewClaim.rust_shadow(stack, memory)?;
+            NewClaim::new(self.consensus_rule_set).rust_shadow(stack, memory)?;
 
             let digest_pointer = stack.pop().unwrap();
             let input_pointer = stack.pop().unwrap();
@@ -172,6 +181,7 @@ mod tests {
             let proof_collection = rt
                 .block_on(ProofCollection::produce(
                     &primitive_witness,
+                    self.consensus_rule_set,
                     TritonVmJobQueue::get_instance(),
                     TritonVmProofJobOptions::default_with_network(Network::Main),
                 ))
@@ -195,6 +205,13 @@ mod tests {
 
     #[test]
     fn unit_test() {
-        ShadowedFunction::new(GenerateTypeScriptClaimTemplate).test();
+        ShadowedFunction::new(GenerateTypeScriptClaimTemplate::new(
+            ConsensusRuleSet::HardforkGamma,
+        ))
+        .test();
+        ShadowedFunction::new(GenerateTypeScriptClaimTemplate::new(
+            ConsensusRuleSet::HardforkDelta,
+        ))
+        .test();
     }
 }

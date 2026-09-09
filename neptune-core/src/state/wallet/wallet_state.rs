@@ -552,6 +552,16 @@ impl WalletState {
             .map(|iu| (&iu.utxo, iu.sender_randomness, iu.receiver_preimage))
     }
 
+    /// Get an iterator over the unconfirmed incoming UTXOs, corresponding to
+    /// outputs of transactions that live in the mempool.
+    pub(crate) fn mempool_incoming_utxos_with_txid(
+        &self,
+    ) -> impl Iterator<Item = (TransactionKernelId, &IncomingUtxo)> {
+        self.mempool_incoming_utxos
+            .iter()
+            .flat_map(|(txid, incoming)| incoming.iter().map(|iu| (*txid, iu)))
+    }
+
     pub(crate) fn mempool_balance_updates(
         &self,
     ) -> (
@@ -1568,7 +1578,7 @@ impl WalletState {
             additions: addition_records,
             removals: removal_records,
         } = block
-            .mutator_set_update()
+            .mutator_set_update(self.configuration.network())
             .expect("Block received as argument must have mutator set update");
         let mut removal_records = removal_records;
         removal_records.reverse();
@@ -1799,7 +1809,7 @@ impl WalletState {
         let mut recovery_data = vec![];
 
         let MutatorSetUpdate { additions, .. } = block
-            .mutator_set_update()
+            .mutator_set_update(self.configuration.network())
             .expect("Block received as argument must have mutator set update");
 
         let block_info = (
@@ -1915,7 +1925,7 @@ impl WalletState {
         let outputs_recovered_through_scan_mode = self.recover_by_scanning(block).await;
 
         let MutatorSetUpdate { additions, .. } = block
-            .mutator_set_update()
+            .mutator_set_update(self.configuration.network())
             .expect("Block received as argument must have mutator set update");
 
         let offchain_received_outputs = self.scan_for_expected_utxos(&additions).await;
@@ -2072,7 +2082,12 @@ impl WalletState {
         // Update database
         let aocl_num_leafs_before_this_block =
             block.mutator_set_accumulator_after()?.aocl.num_leafs()
-                - u64::try_from(block.mutator_set_update()?.additions.len())?;
+                - u64::try_from(
+                    block
+                        .mutator_set_update(self.configuration.network())?
+                        .additions
+                        .len(),
+                )?;
         let recovery_list = self
             .process_outputs_no_maintain_mps(
                 block,
@@ -5493,7 +5508,7 @@ pub(crate) mod tests {
                 single_proof_transaction.kernel,
                 single_proof_transaction.proof.into_single_proof(),
                 block1_mutator_set,
-                block2.mutator_set_update().unwrap(),
+                block2.mutator_set_update(network).unwrap(),
                 upgrade_incentive,
                 consensus_rule_set1,
             ));

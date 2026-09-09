@@ -1,8 +1,10 @@
 pub mod handshake_data;
+pub mod link_tx_notification;
 pub mod peer_block_notifications;
 pub mod peer_info;
 pub mod transaction_notification;
 pub mod transfer_block;
+pub mod transfer_link_tx;
 pub mod transfer_sync_bit_mask;
 pub mod transfer_transaction;
 
@@ -12,6 +14,7 @@ use std::time::SystemTime;
 
 use handshake_data::HandshakeData;
 use itertools::Itertools;
+use link_tx_notification::LinkTxNotification;
 use neptune_consensus::block::Block;
 use neptune_consensus::block::block_header::BlockHeader;
 use neptune_consensus::block::block_header::BlockHeaderWithBlockHashWitness;
@@ -41,6 +44,7 @@ use tracing::debug;
 use tracing::trace;
 use tracing::warn;
 use transaction_notification::TransactionNotification;
+use transfer_link_tx::TransferLinkTx;
 use transfer_transaction::TransferTransaction;
 
 use crate::block_proposal_notification::BlockProposalNotification;
@@ -456,6 +460,18 @@ pub enum PeerMessage {
     /// together with an MMR authentication path relative to the request's
     /// anchor, like the elements of a [`PeerMessage::BlockResponseBatch`].
     ValidatedBlock(Box<(TransferBlock, MmrMembershipProof)>),
+
+    /// Send a notification to a peer, informing it that this node stores the
+    /// link transaction with the id specified in the notification. Only peers
+    /// with a version exceeding 0.16.0 understand this message.
+    LinkTxNotification(LinkTxNotification),
+
+    /// Send a request that this node would like a copy of the link transaction
+    /// with the given ID.
+    LinkTxRequest(TransactionKernelId),
+
+    /// Send a full link transaction object to a peer.
+    LinkTx(Box<TransferLinkTx>),
     // New variants must be added here at the bottom to be backwards compatible.
 }
 
@@ -486,6 +502,9 @@ impl PeerMessage {
             PeerMessage::SyncCoverage(_) => "sync coverage",
             PeerMessage::ValidatedBlockRequestByHeight(_) => "validated block req by height",
             PeerMessage::ValidatedBlock(_) => "validated block",
+            PeerMessage::LinkTxNotification(_) => "link tx notification",
+            PeerMessage::LinkTxRequest(_) => "link tx request",
+            PeerMessage::LinkTx(_) => "link tx",
         }
         .to_string()
     }
@@ -516,6 +535,9 @@ impl PeerMessage {
             PeerMessage::SyncCoverage(_) => true,
             PeerMessage::ValidatedBlockRequestByHeight(_) => false,
             PeerMessage::ValidatedBlock(_) => true,
+            PeerMessage::LinkTxNotification(_) => false,
+            PeerMessage::LinkTxRequest(_) => false,
+            PeerMessage::LinkTx(_) => false,
         }
     }
 
@@ -546,6 +568,9 @@ impl PeerMessage {
             PeerMessage::SyncCoverage(_) => false,
             PeerMessage::ValidatedBlockRequestByHeight(_) => false,
             PeerMessage::ValidatedBlock(_) => false,
+            PeerMessage::LinkTxNotification(_) => true,
+            PeerMessage::LinkTxRequest(_) => true,
+            PeerMessage::LinkTx(_) => true,
         }
     }
 
@@ -577,6 +602,9 @@ impl PeerMessage {
             PeerMessage::SyncCoverage(_) => true,
             PeerMessage::ValidatedBlockRequestByHeight(_) => true,
             PeerMessage::ValidatedBlock(_) => true,
+            PeerMessage::LinkTxNotification(_) => true,
+            PeerMessage::LinkTxRequest(_) => true,
+            PeerMessage::LinkTx(_) => true,
         }
     }
 }

@@ -33,19 +33,21 @@ use tasm_lib::prelude::TasmObject;
 use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::NonDeterminism;
 use tasm_lib::triton_vm::prelude::*;
-use tasm_lib::verifier::stark_verify::StarkVerify;
 use tracing::info;
 
 use crate::block::block_transaction::BlockOrRegularTransaction;
 use crate::block::block_transaction::BlockOrRegularTransactionKernel;
 use crate::block::block_transaction::BlockTransactionKernel;
+use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::prelude::triton_vm::prelude::triton_asm;
+use crate::proof_abstractions::tasm::legacy_stark_verify::import_stark_verify;
+use crate::proof_abstractions::tasm::legacy_stark_verify::update_nondeterminism_for_stark_verification;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
-use crate::proof_abstractions::SecretWitness;
 use crate::transaction::transaction_kernel::TransactionKernelField;
 use crate::transaction::transaction_kernel::TransactionKernelModifier;
+use crate::transaction::validity::single_proof::single_proof_claim;
 use crate::transaction::validity::single_proof::SingleProof;
 use crate::transaction::validity::single_proof::SingleProofWitness;
 use crate::transaction::validity::single_proof::DISCRIMINANT_FOR_MERGE;
@@ -82,6 +84,7 @@ impl MergeWitness {
         left: BlockOrRegularTransaction,
         right: Transaction,
         shuffle_seed: [u8; 32],
+        consensus_rule_set: ConsensusRuleSet,
     ) -> Self {
         let left_kernel = left.kernel();
         let right_kernel = right.kernel;
@@ -98,8 +101,12 @@ impl MergeWitness {
             "Coinbase transaction must be left hand side"
         );
 
-        let new_kernel =
-            Self::new_block_transaction_kernel(&left_kernel, &right_kernel, shuffle_seed);
+        let new_kernel = Self::new_block_transaction_kernel(
+            &left_kernel,
+            &right_kernel,
+            shuffle_seed,
+            consensus_rule_set,
+        );
 
         Self {
             left_kernel: left_kernel.into(),
@@ -148,6 +155,7 @@ impl MergeWitness {
     /// merger. Generates the proof for the merged transaction.
     pub(crate) async fn merge(
         self,
+        consensus_rule_set: ConsensusRuleSet,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> Result<Transaction> {
@@ -169,12 +177,12 @@ impl MergeWitness {
             Proof::valid_mock()
         } else {
             let new_single_proof_witness = SingleProofWitness::from_merge(self);
-            let new_single_proof_claim = new_single_proof_witness.claim();
+            let new_single_proof_claim = new_single_proof_witness.claim(consensus_rule_set);
             info!("Start: creating new single proof through merge");
-            SingleProof
+            SingleProof::new(consensus_rule_set)
                 .prove(
                     new_single_proof_claim,
-                    new_single_proof_witness.nondeterminism(),
+                    new_single_proof_witness.nondeterminism(consensus_rule_set),
                     triton_vm_job_queue,
                     proof_job_options,
                 )
@@ -193,13 +201,17 @@ impl MergeWitness {
         left_kernel: &BlockOrRegularTransactionKernel,
         right_kernel: &TransactionKernel,
         shuffle_seed: [u8; 32],
+        consensus_rule_set: ConsensusRuleSet,
     ) -> BlockTransactionKernel {
         let lhs = match left_kernel {
             BlockOrRegularTransactionKernel::Regular(regular) => regular.clone(),
             BlockOrRegularTransactionKernel::Block(block_transaction_kernel) => {
                 let transaction_kernel: TransactionKernel = block_transaction_kernel.clone().into();
-                let inputs = RemovalRecordList::try_unpack(transaction_kernel.inputs.clone())
-                    .expect(
+                let inputs = RemovalRecordList::try_unpack(
+                    transaction_kernel.inputs.clone(),
+                    consensus_rule_set.allow_big_chunks(),
+                )
+                .expect(
                     "inputs must be packed for block transactions when required by merge version",
                 );
                 TransactionKernelModifier::default()
@@ -210,7 +222,10 @@ impl MergeWitness {
 
         let mut new_kernel = Self::new_kernel(&lhs, right_kernel, shuffle_seed);
 
-        let inputs = RemovalRecordList::pack(new_kernel.inputs.clone());
+        let inputs = RemovalRecordList::pack(
+            new_kernel.inputs.clone(),
+            consensus_rule_set.allow_big_chunks(),
+        );
         new_kernel = TransactionKernelModifier::default()
             .inputs(inputs)
             .modify(new_kernel);
@@ -270,7 +285,7 @@ impl MergeWitness {
     pub(crate) fn populate_nd_streams(
         &self,
         nondeterminism: &mut NonDeterminism,
-        single_proof_program_hash: Digest,
+        consensus_rule_set: ConsensusRuleSet,
     ) {
         // txk digests come from secin / individual tokens
         nondeterminism.individual_tokens.extend(
@@ -282,14 +297,15 @@ impl MergeWitness {
         );
 
         // update nondeterminism in accordance with proof-verification
-        let verify_snippet = StarkVerify::new_with_dynamic_layout(Stark::default());
-        let left_claim = Claim::new(single_proof_program_hash)
-            .with_input(self.left_kernel.mast_hash().reversed().values());
-        let right_claim = Claim::new(single_proof_program_hash)
-            .with_input(self.right_kernel.mast_hash().reversed().values());
+        let left_claim = single_proof_claim(self.left_kernel.mast_hash(), consensus_rule_set);
+        let right_claim = single_proof_claim(self.right_kernel.mast_hash(), consensus_rule_set);
 
-        verify_snippet.update_nondeterminism(nondeterminism, &self.left_proof, &left_claim);
-        verify_snippet.update_nondeterminism(nondeterminism, &self.right_proof, &right_claim);
+        update_nondeterminism_for_stark_verification(nondeterminism, &self.left_proof, &left_claim);
+        update_nondeterminism_for_stark_verification(
+            nondeterminism,
+            &self.right_proof,
+            &right_claim,
+        );
 
         // set digests
         let digests = [
@@ -336,9 +352,15 @@ impl MergeWitness {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct MergeBranch;
+pub(crate) struct MergeBranch {
+    consensus_rule_set: ConsensusRuleSet,
+}
 
 impl MergeBranch {
+    pub(crate) fn new(consensus_rule_set: ConsensusRuleSet) -> Self {
+        Self { consensus_rule_set }
+    }
+
     const RIGHT_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT: i128 = 1_000_070;
     const NEW_FEE_IS_NEGATIVE_OR_INVALID_AMOUNT: i128 = 1_000_071;
 }
@@ -367,10 +389,10 @@ impl BasicSnippet for MergeBranch {
     }
 
     fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
-        let generate_single_proof_claim = library.import(Box::new(GenerateSingleProofClaim));
-        let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
-            Stark::default(),
+        let generate_single_proof_claim = library.import(Box::new(GenerateSingleProofClaim::new(
+            self.consensus_rule_set,
         )));
+        let stark_verify = import_stark_verify(library, self.consensus_rule_set);
         let authenticate_txk_input_field = library.import(Box::new(AuthenticateTxkField(
             TransactionKernelField::Inputs,
         )));
@@ -1082,7 +1104,12 @@ pub(crate) mod tests {
     use crate::transaction::PrimitiveWitness;
 
     impl MergeWitness {
-        pub fn branch_source(&self, single_proof_program_digest: Digest, new_txk_digest: Digest) {
+        pub fn branch_source(
+            &self,
+            single_proof_program_digest: Digest,
+            new_txk_digest: Digest,
+            consensus_rule_set: ConsensusRuleSet,
+        ) {
             // divine the witness for this proof
             let mw = tasm::decode_from_memory::<MergeWitness>(MERGE_WITNESS_ADDRESS);
 
@@ -1091,10 +1118,13 @@ pub(crate) mod tests {
             let right_txk_digest = tasm::tasmlib_io_read_secin___digest();
 
             // verify the proofs of the operand transactions
+            let proof_version = consensus_rule_set.triton_proof_version().version();
             let left_claim = Claim::new(single_proof_program_digest)
-                .with_input(left_txk_digest.reversed().values().to_vec());
+                .with_input(left_txk_digest.reversed().values().to_vec())
+                .about_version(proof_version);
             let right_claim = Claim::new(single_proof_program_digest)
-                .with_input(right_txk_digest.reversed().values().to_vec());
+                .with_input(right_txk_digest.reversed().values().to_vec())
+                .about_version(proof_version);
 
             tasm::verify_stark(Stark::default(), &left_claim, &mw.left_proof);
             tasm::verify_stark(Stark::default(), &right_claim, &mw.right_proof);
@@ -1354,6 +1384,11 @@ pub(crate) mod tests {
         let left = Transaction::new_single_proof(coinbase_transaction.kernel, left_proof);
         let right = Transaction::new_single_proof(tx_with_inputs.kernel, right_proof);
 
-        MergeWitness::for_composition(left.into(), right, shuffle_seed)
+        MergeWitness::for_composition(
+            left.into(),
+            right,
+            shuffle_seed,
+            ConsensusRuleSet::default(),
+        )
     }
 }

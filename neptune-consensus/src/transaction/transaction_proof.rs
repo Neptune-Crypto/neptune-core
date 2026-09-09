@@ -146,7 +146,9 @@ impl TransactionProof {
                 verify_transaction_proof(claim, single_proof.clone(), network).await
             }
             TransactionProof::ProofCollection(proof_collection) => {
-                proof_collection.verify(kernel_mast_hash, network).await
+                proof_collection
+                    .verify(kernel_mast_hash, network, consensus_rule_set)
+                    .await
             }
         }
     }

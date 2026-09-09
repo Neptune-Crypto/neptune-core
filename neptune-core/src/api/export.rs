@@ -7,6 +7,8 @@ pub use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat
 pub use crate::api::tx_initiation::consolidate::ConsolidationError;
 pub use crate::api::wallet::WalletBalances;
 pub use crate::application::config::cli_args::Args;
+pub use crate::state::transaction::chained_tx_artifacts::ChainedTxArtifacts;
+pub use crate::state::transaction::link_tx_artifacts::LinkTxArtifacts;
 pub use crate::state::transaction::tx_creation_artifacts::TxCreationArtifacts;
 pub use crate::state::wallet::input_candidate::InputCandidate;
 pub use crate::state::GlobalStateLock;

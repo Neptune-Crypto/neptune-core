@@ -680,7 +680,7 @@ mod guesser_fee_utxos {
         let MutatorSetUpdate {
             removals: _,
             additions,
-        } = block1.mutator_set_update().unwrap();
+        } = block1.mutator_set_update(network).unwrap();
         assert!(
             ars.iter().all(|ar| additions.contains(ar)),
             "All addition records must be present in block's mutator set update"

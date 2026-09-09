@@ -15,7 +15,7 @@ pub(crate) struct BoundTimeDiff;
 
 impl BoundTimeDiff {
     pub(crate) const MAX_TIMESTAMP_DIFF: Timestamp = Timestamp::hours(12);
-    pub(super) const TIMESTAMP_DIFF_EXCEEDS_MAX_ALLOWED: i128 = 1_000_072;
+    pub(crate) const TIMESTAMP_DIFF_EXCEEDS_MAX_ALLOWED: i128 = 1_000_072;
 }
 
 impl BasicSnippet for BoundTimeDiff {

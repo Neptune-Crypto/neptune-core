@@ -18,6 +18,7 @@ use tracing::trace;
 use super::collect_type_scripts::CollectTypeScriptsWitness;
 use super::kernel_to_outputs::KernelToOutputsWitness;
 use super::removal_records_integrity::RemovalRecordsIntegrity;
+use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::proof_abstractions::error::CreateProofError;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
@@ -87,9 +88,11 @@ impl ProofCollection {
 
     pub async fn produce(
         primitive_witness: &PrimitiveWitness,
+        consensus_rule_set: ConsensusRuleSet,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> Result<Self, CreateProofError> {
+        let proof_version = consensus_rule_set.triton_proof_version().version();
         let (
             removal_records_integrity_witness,
             collect_lock_scripts_witness,
@@ -109,7 +112,9 @@ impl ProofCollection {
         debug!("proving RemovalRecordsIntegrity");
         let removal_records_integrity = RemovalRecordsIntegrity
             .prove(
-                removal_records_integrity_witness.claim(),
+                removal_records_integrity_witness
+                    .claim()
+                    .about_version(proof_version),
                 removal_records_integrity_witness.nondeterminism(),
                 triton_vm_job_queue.clone(),
                 proof_job_options.clone(),
@@ -119,7 +124,9 @@ impl ProofCollection {
         debug!("proving CollectLockScripts");
         let collect_lock_scripts = CollectLockScripts
             .prove(
-                collect_lock_scripts_witness.claim(),
+                collect_lock_scripts_witness
+                    .claim()
+                    .about_version(proof_version),
                 collect_lock_scripts_witness.nondeterminism(),
                 triton_vm_job_queue.clone(),
                 proof_job_options.clone(),
@@ -129,7 +136,9 @@ impl ProofCollection {
         debug!("proving KernelToOutputs");
         let kernel_to_outputs = KernelToOutputs
             .prove(
-                kernel_to_outputs_witness.claim(),
+                kernel_to_outputs_witness
+                    .claim()
+                    .about_version(proof_version),
                 kernel_to_outputs_witness.nondeterminism(),
                 triton_vm_job_queue.clone(),
                 proof_job_options.clone(),
@@ -139,7 +148,9 @@ impl ProofCollection {
         debug!("proving CollectTypeScripts");
         let collect_type_scripts = CollectTypeScripts
             .prove(
-                collect_type_scripts_witness.claim(),
+                collect_type_scripts_witness
+                    .claim()
+                    .about_version(proof_version),
                 collect_type_scripts_witness.nondeterminism(),
                 triton_vm_job_queue.clone(),
                 proof_job_options.clone(),
@@ -153,6 +164,7 @@ impl ProofCollection {
                 lock_script_and_witness
                     .prove(
                         txk_mast_hash_as_input.clone(),
+                        consensus_rule_set,
                         triton_vm_job_queue.clone(),
                         proof_job_options.clone(),
                     )
@@ -173,6 +185,7 @@ impl ProofCollection {
                     txk_mast_hash,
                     salted_inputs_hash,
                     salted_outputs_hash,
+                    consensus_rule_set,
                     triton_vm_job_queue.clone(),
                     proof_job_options.clone(),
                 )
@@ -272,7 +285,13 @@ impl ProofCollection {
         }
     }
 
-    pub(crate) async fn verify(&self, txk_mast_hash: Digest, network: Network) -> bool {
+    pub(crate) async fn verify(
+        &self,
+        txk_mast_hash: Digest,
+        network: Network,
+        consensus_rule_set: ConsensusRuleSet,
+    ) -> bool {
+        let proof_version = consensus_rule_set.triton_proof_version().version();
         debug!("verifying, txk hash: {}", txk_mast_hash);
         debug!("verifying, salted inputs hash: {}", self.salted_inputs_hash);
         debug!(
@@ -315,6 +334,7 @@ impl ProofCollection {
         // compile claims
         let removal_records_integrity_claim =
             Claim::about_program(&RemovalRecordsIntegrity.program())
+                .about_version(proof_version)
                 .with_input(self.kernel_mast_hash.reversed().values())
                 .with_output(self.salted_inputs_hash.values().to_vec());
         trace!(
@@ -322,9 +342,11 @@ impl ProofCollection {
             removal_records_integrity_claim
         );
         let kernel_to_outputs_claim = Claim::about_program(&KernelToOutputs.program())
+            .about_version(proof_version)
             .with_input(self.kernel_mast_hash.reversed().values())
             .with_output(self.salted_outputs_hash.values().to_vec());
         let collect_lock_scripts_claim = Claim::about_program(&CollectLockScripts.program())
+            .about_version(proof_version)
             .with_input(self.salted_inputs_hash.reversed().values())
             .with_output(
                 self.lock_script_hashes
@@ -333,6 +355,7 @@ impl ProofCollection {
                     .collect(),
             );
         let collect_type_scripts_claim = Claim::about_program(&CollectTypeScripts.program())
+            .about_version(proof_version)
             .with_input(
                 [self.salted_inputs_hash, self.salted_outputs_hash]
                     .into_iter()
@@ -349,13 +372,17 @@ impl ProofCollection {
         let lock_script_claims = self
             .lock_script_hashes
             .iter()
-            .map(|&lsh| Claim::new(lsh).with_input(self.kernel_mast_hash.reversed().values()))
+            .map(|&lsh| {
+                Claim::new(lsh)
+                    .about_version(proof_version)
+                    .with_input(self.kernel_mast_hash.reversed().values())
+            })
             .collect_vec();
         let type_script_claims = self
             .type_script_hashes
             .iter()
             .map(|tsh| {
-                Claim::new(*tsh).with_input(
+                Claim::new(*tsh).about_version(proof_version).with_input(
                     [
                         self.kernel_mast_hash,
                         self.salted_inputs_hash,
@@ -423,19 +450,21 @@ impl ProofCollection {
         true
     }
 
-    pub fn removal_records_integrity_claim(&self) -> Claim {
+    pub fn removal_records_integrity_claim(&self, consensus_rule_set: ConsensusRuleSet) -> Claim {
         Claim::about_program(&RemovalRecordsIntegrity.program())
+            .about_version(consensus_rule_set.triton_proof_version().version())
             .with_input(self.kernel_mast_hash.reversed().values())
             .with_output(self.salted_inputs_hash.values().to_vec())
     }
 
-    pub fn kernel_to_outputs_claim(&self) -> Claim {
+    pub fn kernel_to_outputs_claim(&self, consensus_rule_set: ConsensusRuleSet) -> Claim {
         Claim::about_program(&KernelToOutputs.program())
+            .about_version(consensus_rule_set.triton_proof_version().version())
             .with_input(self.kernel_mast_hash.reversed().values())
             .with_output(self.salted_outputs_hash.values().to_vec())
     }
 
-    pub fn collect_lock_scripts_claim(&self) -> Claim {
+    pub fn collect_lock_scripts_claim(&self, consensus_rule_set: ConsensusRuleSet) -> Claim {
         let mut lock_script_hashes_as_output = vec![];
         let mut i: usize = 0;
         while i < self.lock_script_hashes.len() {
@@ -448,11 +477,12 @@ impl ProofCollection {
             i += 1;
         }
         Claim::about_program(&CollectLockScripts.program())
+            .about_version(consensus_rule_set.triton_proof_version().version())
             .with_input(self.salted_inputs_hash.reversed().values())
             .with_output(lock_script_hashes_as_output)
     }
 
-    pub fn collect_type_scripts_claim(&self) -> Claim {
+    pub fn collect_type_scripts_claim(&self, consensus_rule_set: ConsensusRuleSet) -> Claim {
         let mut type_script_hashes_as_output = vec![];
         let mut i = 0;
         while i < self.type_script_hashes.len() {
@@ -465,6 +495,7 @@ impl ProofCollection {
             i += 1;
         }
         Claim::about_program(&CollectTypeScripts.program())
+            .about_version(consensus_rule_set.triton_proof_version().version())
             .with_input(
                 [self.salted_inputs_hash, self.salted_outputs_hash]
                     .map(|digest| digest.reversed().values())
@@ -473,11 +504,12 @@ impl ProofCollection {
             .with_output(type_script_hashes_as_output)
     }
 
-    pub fn lock_script_claims(&self) -> Vec<Claim> {
+    pub fn lock_script_claims(&self, consensus_rule_set: ConsensusRuleSet) -> Vec<Claim> {
         let mut claims = vec![];
         let mut i = 0;
         while i < self.lock_script_hashes.len() {
             let claim = Claim::new(self.lock_script_hashes[i])
+                .about_version(consensus_rule_set.triton_proof_version().version())
                 .with_input(self.kernel_mast_hash.reversed().values());
             claims.push(claim);
 
@@ -487,7 +519,7 @@ impl ProofCollection {
         claims
     }
 
-    pub fn type_script_claims(&self) -> Vec<Claim> {
+    pub fn type_script_claims(&self, consensus_rule_set: ConsensusRuleSet) -> Vec<Claim> {
         let type_script_input = [
             self.kernel_mast_hash.reversed().values(),
             self.salted_inputs_hash.reversed().values(),
@@ -498,7 +530,9 @@ impl ProofCollection {
         let mut i = 0;
         while i < self.type_script_hashes.len() {
             let type_script_hash = self.type_script_hashes[i];
-            let claim = Claim::new(type_script_hash).with_input(type_script_input.clone());
+            let claim = Claim::new(type_script_hash)
+                .about_version(consensus_rule_set.triton_proof_version().version())
+                .with_input(type_script_input.clone());
             claims.push(claim);
             i += 1;
         }
@@ -615,7 +649,9 @@ pub mod tests {
         assert!(!valid.lock_script_hashes.is_empty());
         assert!(!valid.type_script_hashes.is_empty());
         assert!(
-            valid.verify(txk, network).await,
+            valid
+                .verify(txk, network, ConsensusRuleSet::HardforkGamma)
+                .await,
             "sanity: a well-formed valid-mock collection must verify"
         );
 
@@ -623,7 +659,9 @@ pub mod tests {
         let mut missing_lock_proofs = valid.clone();
         missing_lock_proofs.lock_scripts_halt.clear();
         assert!(
-            !missing_lock_proofs.verify(txk, network).await,
+            !missing_lock_proofs
+                .verify(txk, network, ConsensusRuleSet::HardforkGamma)
+                .await,
             "non-empty lock_script_hashes with no lock_scripts_halt must be rejected"
         );
 
@@ -631,7 +669,9 @@ pub mod tests {
         let mut missing_type_proofs = valid.clone();
         missing_type_proofs.type_scripts_halt.clear();
         assert!(
-            !missing_type_proofs.verify(txk, network).await,
+            !missing_type_proofs
+                .verify(txk, network, ConsensusRuleSet::HardforkGamma)
+                .await,
             "non-empty type_script_hashes with no type_scripts_halt must be rejected"
         );
     }
@@ -649,7 +689,11 @@ pub mod tests {
         let merge_bit_false = ProofCollection::produce_mock(&primitive_witness, true);
         assert!(
             merge_bit_false
-                .verify(primitive_witness.kernel.mast_hash(), network)
+                .verify(
+                    primitive_witness.kernel.mast_hash(),
+                    network,
+                    ConsensusRuleSet::HardforkGamma
+                )
                 .await
         );
 
@@ -662,7 +706,9 @@ pub mod tests {
         let txk_digest = primitive_witness.kernel.mast_hash();
         let merge_bit_true = ProofCollection::produce_mock(&primitive_witness, true);
         assert!(
-            !merge_bit_true.verify(txk_digest, network).await,
+            !merge_bit_true
+                .verify(txk_digest, network, ConsensusRuleSet::HardforkGamma)
+                .await,
             "a collection for a kernel with the merge bit set must be rejected"
         );
     }
@@ -682,14 +728,19 @@ pub mod tests {
         prop_assert!(ProofCollection::can_produce(&primitive_witness));
         let pc = ProofCollection::produce(
             &primitive_witness,
+            ConsensusRuleSet::HardforkGamma,
             vm_job_queue(),
             TritonVmProofJobOptions::default(),
         )
         .await
         .unwrap();
         prop_assert!(
-            pc.verify(primitive_witness.kernel.mast_hash(), Network::Main)
-                .await
+            pc.verify(
+                primitive_witness.kernel.mast_hash(),
+                Network::Main,
+                ConsensusRuleSet::HardforkGamma
+            )
+            .await
         );
 
         Ok(())

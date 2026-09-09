@@ -2,6 +2,8 @@
 
 use std::io::Write;
 
+use neptune_consensus::proof_abstractions::tasm::legacy_stark_verify::claim_uses_legacy_proof_system;
+use neptune_consensus::proof_abstractions::tasm::legacy_stark_verify::LegacyProverPipeline;
 use neptune_consensus::proof_abstractions::tasm::neptune_prover_job::NeptuneProverJob;
 use neptune_consensus::proof_abstractions::tasm::prover_job::PROOF_PADDED_HEIGHT_TOO_BIG_PROCESS_OFFSET_ERROR_CODE;
 use tasm_lib::triton_vm::aet::AlgebraicExecutionTrace;
@@ -88,17 +90,13 @@ fn triton_vm_aet(
     aet
 }
 
-/// Execute the proof job in the current process (as opposed to delegating it to
-/// another one).
-fn execute_prover_job(job: NeptuneProverJob) -> Proof {
-    let max_log2_padded_height = job.max_log2_padded_height;
-    let claim = job.claim.clone();
-    let env_vars = job.env_vars;
-
-    let aet = triton_vm_aet(job.program, &job.claim, job.non_determinism);
-    let log2_padded_height = aet.padded_height().ilog2() as u8;
-
-    if max_log2_padded_height.is_some_and(|max| log2_padded_height > max) {
+/// Abort with the padded-height error code if the trace exceeds the cap;
+/// otherwise prepare the process for proving at that height.
+fn prepare_for_proving_at(log2_padded_height: u8, job: &NeptuneProverJob) {
+    if job
+        .max_log2_padded_height
+        .is_some_and(|max| log2_padded_height > max)
+    {
         eprintln!(
             "ERROR: Canceling prover because padded height exceeds max value of {}",
             job.max_log2_padded_height.unwrap()
@@ -111,7 +109,8 @@ fn execute_prover_job(job: NeptuneProverJob) -> Proof {
     }
 
     // Set environment variables for this specific padded height
-    let env_vars = env_vars
+    let env_vars = job
+        .env_vars
         .get(&log2_padded_height)
         .map(|x| x.to_owned())
         .unwrap_or_default();
@@ -119,6 +118,22 @@ fn execute_prover_job(job: NeptuneProverJob) -> Proof {
 
     // run with a low priority so that neptune-core can remain responsive.
     set_current_thread_priority(ThreadPriority::Min).unwrap();
+}
+
+/// Execute the proof job in the current process (as opposed to delegating it to
+/// another one).
+fn execute_prover_job(job: NeptuneProverJob) -> Proof {
+    if claim_uses_legacy_proof_system(&job.claim) {
+        let pipeline =
+            LegacyProverPipeline::trace(&job.program, &job.claim, job.non_determinism.clone());
+        prepare_for_proving_at(pipeline.log2_padded_height(), &job);
+
+        return pipeline.prove();
+    }
+
+    let claim = job.claim.clone();
+    let aet = triton_vm_aet(job.program.clone(), &job.claim, job.non_determinism.clone());
+    prepare_for_proving_at(aet.padded_height().ilog2() as u8, &job);
 
     Stark::default().prove(&claim, &aet).unwrap()
 }

@@ -9,6 +9,7 @@ use neptune_consensus::block::validity::block_primitive_witness::BlockPrimitiveW
 use neptune_consensus::block::validity::block_proof_witness::BlockProofWitness;
 use neptune_consensus::block::Block;
 use neptune_consensus::block::BlockProof;
+use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
 use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier;
 use neptune_consensus::transaction::transaction_proof::TransactionProof;
@@ -168,7 +169,11 @@ pub async fn next_block_incoming_utxos(
 }
 
 fn block_from_tx_kernel(parent: &Block, network: Network, txkernel: TransactionKernel) -> Block {
-    let packed = RemovalRecordList::pack(txkernel.inputs.clone());
+    let consensus_rule_set = ConsensusRuleSet::infer_from(network, parent.header().height.next());
+    let packed = RemovalRecordList::pack(
+        txkernel.inputs.clone(),
+        consensus_rule_set.allow_big_chunks(),
+    );
     let kernel = TransactionKernelModifier::default()
         .merge_bit(true)
         .inputs(packed)

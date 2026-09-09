@@ -197,7 +197,6 @@ impl BlockTransaction {
         shuffle_seed: [u8; 32],
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
-        #[expect(unused_variables, reason = "anticipate future fork")]
         consensus_rule_set: ConsensusRuleSet,
     ) -> anyhow::Result<BlockTransaction> {
         let cb_ts = coinbase.kernel().timestamp;
@@ -207,8 +206,15 @@ impl BlockTransaction {
             diff <= BoundTimeDiff::MAX_TIMESTAMP_DIFF,
             "Time difference may not be too big when merging with coinbase transactions"
         );
-        let merge_witness = MergeWitness::for_composition(coinbase, other, shuffle_seed);
-        let tx = MergeWitness::merge(merge_witness, triton_vm_job_queue, proof_job_options).await?;
+        let merge_witness =
+            MergeWitness::for_composition(coinbase, other, shuffle_seed, consensus_rule_set);
+        let tx = MergeWitness::merge(
+            merge_witness,
+            consensus_rule_set,
+            triton_vm_job_queue,
+            proof_job_options,
+        )
+        .await?;
 
         Ok(tx.try_into().expect("Must have merge bit set"))
     }
@@ -225,7 +231,7 @@ impl BlockTransaction {
 
         use crate::transaction::transaction_kernel::TransactionKernelModifier;
 
-        let packed = RemovalRecordList::pack(tx.kernel.inputs.clone());
+        let packed = RemovalRecordList::pack(tx.kernel.inputs.clone(), true);
         let kernel = TransactionKernelModifier::default()
             .merge_bit(true)
             .inputs(packed)
@@ -245,7 +251,7 @@ impl BlockTransaction {
 
         use crate::transaction::transaction_kernel::TransactionKernelModifier;
 
-        let packed = RemovalRecordList::pack(kernel.inputs.clone());
+        let packed = RemovalRecordList::pack(kernel.inputs.clone(), true);
         let kernel = TransactionKernelModifier::default()
             .merge_bit(true)
             .inputs(packed)

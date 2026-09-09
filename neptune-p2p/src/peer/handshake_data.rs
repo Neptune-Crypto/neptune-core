@@ -78,6 +78,18 @@ impl VersionString {
 
         version > semver::Version::new(0, 15, 1)
     }
+
+    /// Whether a peer on this version understands the link-transaction.
+    ///
+    /// TODO: Remove after hardfork-delta since all peers will then understand
+    /// this message type.
+    pub fn supports_link_transactions(&self) -> bool {
+        let Ok(version) = semver::Version::parse(self) else {
+            return false;
+        };
+
+        version > semver::Version::new(0, 16, 0)
+    }
 }
 
 pub type ExtraDataString = ArrayString<U255>;
@@ -308,6 +320,19 @@ mod tests {
             VersionString::new_from_str("0.11.0"),
             VersionString::new_from_str("0.12.0")
         ));
+    }
+
+    #[test]
+    fn only_versions_above_0_16_0_support_link_transactions() {
+        let not_supported = ["0.16.0", "0.15.2", "0.12.0", "potato", ""];
+        for version in not_supported {
+            assert!(!VersionString::new_from_str(version).supports_link_transactions());
+        }
+
+        let supported = ["0.16.1", "0.17.0", "1.0.0", "9999.99999.9999"];
+        for version in supported {
+            assert!(VersionString::new_from_str(version).supports_link_transactions());
+        }
     }
 
     #[test]

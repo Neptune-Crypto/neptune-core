@@ -92,6 +92,9 @@ pub enum SendError {
     #[error(transparent)]
     RecordTransaction(#[from] RecordTransactionError),
 
+    #[error("chained transaction construction failed: {0}")]
+    Chained(String),
+
     #[error("Send rate limit reached for block height {height} ({digest}). A maximum of {max} tx may be sent per block.", digest = tip_digest.to_hex())]
     RateLimit {
         height: BlockHeight,

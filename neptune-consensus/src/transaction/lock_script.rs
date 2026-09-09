@@ -14,6 +14,7 @@ use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
 use super::utxo::Utxo;
+use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::proof_abstractions::error::CreateProofError;
 use crate::proof_abstractions::proof_builder::ProofBuilder;
 use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
@@ -248,10 +249,13 @@ impl LockScriptAndWitness {
     pub(crate) async fn prove(
         &self,
         public_input: PublicInput,
+        consensus_rule_set: ConsensusRuleSet,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> Result<Proof, CreateProofError> {
-        let claim = Claim::new(self.program.hash()).with_input(public_input.individual_tokens);
+        let claim = Claim::new(self.program.hash())
+            .about_version(consensus_rule_set.triton_proof_version().version())
+            .with_input(public_input.individual_tokens);
         ProofBuilder::new()
             .program(self.program.clone())
             .claim(claim)

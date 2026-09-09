@@ -5,9 +5,18 @@ use tasm_lib::prelude::Library;
 use tasm_lib::triton_vm::prelude::*;
 
 use super::new_claim::NewClaim;
+use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::transaction::validity::proof_collection::ProofCollection;
 
-pub(crate) struct GenerateLockScriptClaimTemplate;
+pub(crate) struct GenerateLockScriptClaimTemplate {
+    consensus_rule_set: ConsensusRuleSet,
+}
+
+impl GenerateLockScriptClaimTemplate {
+    pub(crate) fn new(consensus_rule_set: ConsensusRuleSet) -> Self {
+        Self { consensus_rule_set }
+    }
+}
 
 impl BasicSnippet for GenerateLockScriptClaimTemplate {
     fn parameters(&self) -> Vec<(DataType, String)> {
@@ -26,7 +35,7 @@ impl BasicSnippet for GenerateLockScriptClaimTemplate {
     }
 
     fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
-        let new_claim = library.import(Box::new(NewClaim));
+        let new_claim = library.import(Box::new(NewClaim::new(self.consensus_rule_set)));
 
         let entrypoint = self.entrypoint();
         triton_asm! {
@@ -90,6 +99,7 @@ mod tests {
     use tasm_lib::twenty_first::bfe;
 
     use super::GenerateLockScriptClaimTemplate;
+    use crate::consensus_rule_set::ConsensusRuleSet;
     use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
     use crate::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
     use crate::transaction::primitive_witness::PrimitiveWitness;
@@ -109,7 +119,7 @@ mod tests {
 
             stack.push(input_length);
             stack.push(output_length);
-            NewClaim.rust_shadow(stack, memory)?;
+            NewClaim::new(self.consensus_rule_set).rust_shadow(stack, memory)?;
 
             let digest_pointer = stack.pop().unwrap();
             let input_pointer = stack.pop().unwrap();
@@ -141,6 +151,7 @@ mod tests {
             let proof_collection = rt
                 .block_on(ProofCollection::produce(
                     &primitive_witness,
+                    self.consensus_rule_set,
                     TritonVmJobQueue::get_instance(),
                     TritonVmProofJobOptions::default_with_network(Network::Main),
                 ))
@@ -164,6 +175,13 @@ mod tests {
 
     #[test]
     fn unit_test() {
-        ShadowedFunction::new(GenerateLockScriptClaimTemplate).test();
+        ShadowedFunction::new(GenerateLockScriptClaimTemplate::new(
+            ConsensusRuleSet::HardforkGamma,
+        ))
+        .test();
+        ShadowedFunction::new(GenerateLockScriptClaimTemplate::new(
+            ConsensusRuleSet::HardforkDelta,
+        ))
+        .test();
     }
 }

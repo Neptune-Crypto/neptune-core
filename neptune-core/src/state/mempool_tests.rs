@@ -95,9 +95,12 @@ mod tests {
         network: Network,
     ) {
         let mut updated_txs = vec![];
-        let mutator_set_update = new_block.mutator_set_update().unwrap();
+        let mutator_set_update = new_block.mutator_set_update(network).unwrap();
         for job in update_jobs {
             match job {
+                MempoolUpdateJob::Link { .. } => {
+                    unimplemented!("this mock does not update link transactions")
+                }
                 MempoolUpdateJob::PrimitiveWitness(primitive_witness_update) => {
                     let new_pw = primitive_witness_update
                         .old_primitive_witness
@@ -111,10 +114,13 @@ mod tests {
                     let pc_job = PrimitiveWitnessToProofCollection {
                         primitive_witness: new_pw.clone(),
                     };
+                    let consensus_rule_set =
+                        ConsensusRuleSet::infer_from(network, new_block.header().height);
                     let upgrade_result = pc_job
                         .upgrade(
                             TritonVmJobQueue::get_instance(),
                             &TritonVmProofJobOptions::default(),
+                            consensus_rule_set,
                         )
                         .await
                         .unwrap();
@@ -164,7 +170,7 @@ mod tests {
     ) {
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, new_block.header().height);
         let old_mutator_set = previous_block.mutator_set_accumulator_after().unwrap();
-        let mutator_set_update = new_block.mutator_set_update().unwrap();
+        let mutator_set_update = new_block.mutator_set_update(network).unwrap();
 
         while let Some((old_kernel, old_single_proof, upgrade_priority)) =
             mempool.preferred_update(TxUpgradeFilter::match_all())

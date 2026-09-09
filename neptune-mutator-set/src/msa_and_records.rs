@@ -324,6 +324,7 @@ impl MsaAndRecords {
     pub fn packed_removal_records(&self) -> Vec<RemovalRecord> {
         crate::removal_record::removal_record_list::RemovalRecordList::pack(
             self.removal_records.clone(),
+            true,
         )
     }
 
