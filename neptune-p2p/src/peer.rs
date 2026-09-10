@@ -1,4 +1,5 @@
 pub mod handshake_data;
+pub mod handshake_pow;
 pub mod link_tx_notification;
 pub mod peer_block_notifications;
 pub mod peer_info;

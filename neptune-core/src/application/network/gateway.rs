@@ -19,6 +19,7 @@ use libp2p::swarm::ToSwarm;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
 use neptune_p2p::peer::handshake_data::HandshakeData;
+use neptune_p2p::peer::handshake_pow::Challenge;
 
 use crate::application::network::actor::NetworkActor;
 use crate::application::network::handshake::HandshakeResult;
@@ -68,8 +69,21 @@ pub(crate) struct GatewayHandler {
     /// Whether we requested a handshake.
     outbound_requested_already: bool,
 
+    /// The proof-of-work challenge we issue, unique per connection. `Some` only
+    /// if we are the listener for this connection.
+    challenge: Option<Challenge>,
+
     local_peer_id: libp2p::PeerId,
     remote_peer_id: libp2p::PeerId,
+}
+
+impl GatewayHandler {
+    fn upgrade(&self) -> HandshakeUpgrade {
+        match self.challenge {
+            Some(challenge) => HandshakeUpgrade::listener(self.local_handshake, challenge),
+            None => HandshakeUpgrade::dialer(self.local_handshake),
+        }
+    }
 }
 
 impl ConnectionHandler for GatewayHandler {
@@ -98,12 +112,7 @@ impl ConnectionHandler for GatewayHandler {
     /// By returning `HandshakeUpgrade` here, we force the remote peer to
     /// complete the handshake before the stream is handed to the Actor.
     fn listen_protocol(&self) -> SubstreamProtocol<Self::InboundProtocol, Self::InboundOpenInfo> {
-        SubstreamProtocol::new(
-            HandshakeUpgrade {
-                local_handshake: self.local_handshake,
-            },
-            (),
-        )
+        SubstreamProtocol::new(self.upgrade(), ())
     }
 
     /// Process control signals from the [`StreamGateway`].
@@ -212,12 +221,7 @@ impl ConnectionHandler for GatewayHandler {
         if !self.outbound_requested_already && we_are_initiator {
             self.outbound_requested_already = true;
             return Poll::Ready(ConnectionHandlerEvent::OutboundSubstreamRequest {
-                protocol: SubstreamProtocol::new(
-                    HandshakeUpgrade {
-                        local_handshake: self.local_handshake,
-                    },
-                    (),
-                ),
+                protocol: SubstreamProtocol::new(self.upgrade(), ()),
             });
         }
 
@@ -381,6 +385,7 @@ impl NetworkBehaviour for StreamGateway {
             pending_events: VecDeque::new(),
             pause: !NetworkActor::is_direct(remote_addr),
             outbound_requested_already: false,
+            challenge: Some(Challenge::random()),
             local_peer_id: self.local_peer_id,
             remote_peer_id: peer,
         })
@@ -412,6 +417,7 @@ impl NetworkBehaviour for StreamGateway {
             pending_events: VecDeque::new(),
             pause: !NetworkActor::is_direct(addr),
             outbound_requested_already: false,
+            challenge: None,
             local_peer_id: self.local_peer_id,
             remote_peer_id: peer,
         })

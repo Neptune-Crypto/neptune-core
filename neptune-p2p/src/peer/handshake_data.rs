@@ -90,6 +90,17 @@ impl VersionString {
 
         version > semver::Version::new(0, 16, 0)
     }
+
+    /// Whether a peer on this version takes part in the handshake proof of
+    /// work: solving it when dialing, demanding it when listening. See
+    /// [`handshake_pow`](super::handshake_pow).
+    pub fn supports_handshake_pow(&self) -> bool {
+        let Ok(version) = semver::Version::parse(self) else {
+            return false;
+        };
+
+        version >= semver::Version::new(0, 17, 0)
+    }
 }
 
 pub type ExtraDataString = ArrayString<U255>;
@@ -333,6 +344,20 @@ mod tests {
         let supported = ["0.16.1", "0.17.0", "1.0.0", "9999.99999.9999"];
         for version in supported {
             assert!(VersionString::new_from_str(version).supports_link_transactions());
+        }
+    }
+
+    #[test]
+    fn handshake_pow_starts_at_0_17_0() {
+        for (version, expected) in [
+            ("0.16.9", false),
+            ("0.17.0", true),
+            ("0.17.1", true),
+            ("1.0.0", true),
+            ("nonsense", false),
+        ] {
+            let version = VersionString::new_from_str(version);
+            assert_eq!(expected, version.supports_handshake_pow(), "{version}");
         }
     }
 
