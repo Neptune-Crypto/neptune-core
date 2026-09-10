@@ -506,7 +506,7 @@ impl Mempool {
         let max_num_announcements = consensus_rule_set.max_num_announcements();
 
         // Prevent the spread of too early retirement to other transactions.
-        let now = Timestamp::now();
+        let now = self.now();
         if kernel.retires_before(now + MERGE_RETIREMENT_MARGIN) {
             return None;
         }
@@ -753,7 +753,7 @@ impl Mempool {
         let mut ret = vec![];
         let mut filter_mismatches = vec![];
         let mut priority = UpgradePriority::Irrelevant;
-        let now = Timestamp::now();
+        let now = self.now();
         for candidate_txid in self
             .upgrade_priority_iter()
             .map(|(txid, _)| txid)
@@ -1565,7 +1565,7 @@ impl Mempool {
 
         let mut transactions = vec![];
 
-        let now = Timestamp::now();
+        let now = self.now();
 
         for (txkid, _fee_density) in self.fee_density_iter() {
             if max_num_txs.is_some_and(|max| transactions.len() == max) {

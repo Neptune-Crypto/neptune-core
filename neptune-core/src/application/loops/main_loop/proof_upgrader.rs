@@ -1260,6 +1260,7 @@ mod tests {
             mock_genesis_global_state(2, WalletEntropy::new_random(), cli_args.clone()).await;
         let job = {
             let mut bob = bob.lock_guard_mut().await;
+            bob.mock_mempool_time(px_tx_for_raise.kernel.timestamp);
             bob.mempool_insert(px_tx_for_raise.clone().into(), UpgradePriority::Irrelevant)
                 .await;
 
@@ -1335,10 +1336,12 @@ mod tests {
 
         let mut bob =
             mock_genesis_global_state(2, WalletEntropy::new_random(), cli_args.clone()).await;
-        bob.lock_guard_mut()
-            .await
-            .mempool_insert(pc_tx.clone().into(), UpgradePriority::Irrelevant)
-            .await;
+        {
+            let mut bob = bob.lock_guard_mut().await;
+            bob.mock_mempool_time(pc_tx.kernel.timestamp);
+            bob.mempool_insert(pc_tx.clone().into(), UpgradePriority::Irrelevant)
+                .await;
+        }
 
         // A new block arrives *before* the raise, making the ProofCollection
         // unsynced. It must be retained (#946a) rather than kicked out.
@@ -1407,10 +1410,12 @@ mod tests {
 
         let mut bob =
             mock_genesis_global_state(2, WalletEntropy::new_random(), cli_args.clone()).await;
-        bob.lock_guard_mut()
-            .await
-            .mempool_insert(pc_tx.clone().into(), UpgradePriority::Irrelevant)
-            .await;
+        {
+            let mut bob = bob.lock_guard_mut().await;
+            bob.mock_mempool_time(pc_tx.kernel.timestamp);
+            bob.mempool_insert(pc_tx.clone().into(), UpgradePriority::Irrelevant)
+                .await;
+        }
 
         // A new block makes the ProofCollection unsynced
         let genesis = Block::genesis(network);
@@ -1894,11 +1899,13 @@ mod tests {
                 tx_fee,
             )
             .await;
-            alice
-                .lock_guard_mut()
-                .await
-                .mempool_insert(single_proof_tx.clone().into(), UpgradePriority::Critical)
-                .await;
+            {
+                let mut alice = alice.lock_guard_mut().await;
+                alice.mock_mempool_time(single_proof_tx.kernel.timestamp);
+                alice
+                    .mempool_insert(single_proof_tx.clone().into(), UpgradePriority::Critical)
+                    .await;
+            }
             transactions.push(single_proof_tx);
         }
 

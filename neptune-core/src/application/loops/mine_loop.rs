@@ -1336,11 +1336,13 @@ pub(crate) mod tests {
         let now = genesis_block.kernel.header.timestamp + Timestamp::months(7);
         let amt_to_alice = NativeCurrencyAmount::coins(4);
         let tx_from_alice = make_transaction(amt_to_alice, &alice, now).await;
-        alice
-            .lock_guard_mut()
-            .await
-            .mempool_insert(tx_from_alice.clone(), UpgradePriority::Irrelevant)
-            .await;
+        {
+            let mut alice = alice.lock_guard_mut().await;
+            alice.mock_mempool_time(now);
+            alice
+                .mempool_insert(tx_from_alice.clone(), UpgradePriority::Irrelevant)
+                .await;
+        }
 
         // Update state with block that does not include mempool-transaction
         let block1 = fake_valid_deterministic_successor(&genesis_block, network).await;
