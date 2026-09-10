@@ -35,6 +35,8 @@ use crate::application::network::channel::NetworkEvent;
 use crate::application::network::config::NetworkConfig;
 use crate::application::network::gateway::GatewayEvent;
 use crate::application::network::gateway::StreamGateway;
+use crate::application::network::observed_ips::ip_of;
+use crate::application::network::observed_ips::ObservedIps;
 use crate::application::network::overview::NetworkOverview;
 use crate::application::network::reachability::ReachabilityState;
 use crate::application::network::stack::NetworkStack;
@@ -132,6 +134,9 @@ pub(crate) struct NetworkActor {
     /// they have been connected for.
     active_connections:
         HashMap<PeerId, (SystemTime, HashMap<libp2p::swarm::ConnectionId, Multiaddr>)>,
+
+    /// Where each peer was observed connecting from.
+    observed_ips: ObservedIps,
 
     /// Peers with whom the connection was upgraded to the consensus peer loop.
     upgraded_peers: Arc<Mutex<HashSet<PeerId>>>,
@@ -469,6 +474,7 @@ impl NetworkActor {
             event_tx,
             global_state_lock,
             active_connections: HashMap::new(),
+            observed_ips: ObservedIps::default(),
             address_book,
             relays: HashMap::new(),
             active_listeners: vec![],
@@ -969,6 +975,7 @@ impl NetworkActor {
                 ..
             } => {
                 let address = endpoint.get_remote_address().clone();
+                self.observed_ips.record(peer_id, &address);
 
                 // Duplicate connection: book-keep address only. All the other
                 // actions that follow should only happen on the first
@@ -1737,19 +1744,15 @@ impl NetworkActor {
 
                 match malicious_peer {
                     itertools::Either::Left(malicious_peer_id) => {
-                        // Extract IPs
-                        let active_connection_address = self
+                        // Only ban peers based on observed IPs, not self-
+                        // reported IPs as these can be lied about.
+                        let active_connection_addresses = self
                             .active_connections
                             .get(&malicious_peer_id)
                             .cloned()
                             .into_iter()
                             .flat_map(|(_ts, adm)| adm.values().cloned().collect_vec());
-                        let address_book_addresses = self
-                            .address_book
-                            .get(&malicious_peer_id)
-                            .into_iter()
-                            .flat_map(|peer| peer.listen_addresses.clone());
-                        for address in active_connection_address.chain(address_book_addresses) {
+                        for address in active_connection_addresses {
                             // Ignore relay addresses: avoid banning relay
                             // servers.
                             if address.iter().any(|proto| {
@@ -1758,15 +1761,14 @@ impl NetworkActor {
                                 continue;
                             }
 
-                            // Extract IP addresses.
-                            if let Some(ip) = address.iter().find_map(|protocol| match protocol {
-                                libp2p::multiaddr::Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
-                                libp2p::multiaddr::Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
-                                _ => None,
-                            }) {
+                            if let Some(ip) = ip_of(&address) {
                                 bannable_ips.insert(ip);
                             }
                         }
+
+                        // The peer may already be gone by the time the ban is
+                        // handled, so fall back on where it was seen earlier.
+                        bannable_ips.extend(self.observed_ips.get(&malicious_peer_id));
 
                         // Disconnect
                         let _ = self.swarm.disconnect_peer_id(malicious_peer_id);
@@ -2347,4 +2349,107 @@ pub(crate) enum ActorError {
 
     #[error("No address found for peer {0} in address map")]
     NoAddressForPeer(PeerId),
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use libp2p::identity::Keypair;
+    use neptune_wallet::wallet_entropy::WalletEntropy;
+    use tokio::sync::broadcast;
+
+    use super::*;
+    use crate::application::config::cli_args;
+    use crate::tests::shared::files::unit_test_path;
+    use crate::tests::shared::globalstate::mock_genesis_global_state;
+
+    async fn test_actor() -> NetworkActor {
+        let network = Network::Main;
+        let cli = cli_args::Args {
+            network,
+            ..Default::default()
+        };
+        let global_state_lock =
+            mock_genesis_global_state(0, WalletEntropy::new_random(), cli).await;
+
+        let (peer_task_to_main_tx, _peer_task_to_main_rx) = mpsc::channel(16);
+        let (main_to_peer_broadcast_tx, _) = broadcast::channel(16);
+        let (channels, _command_tx, _event_rx) =
+            NetworkActorChannels::setup(peer_task_to_main_tx, main_to_peer_broadcast_tx);
+
+        let config = NetworkConfig::default()
+            .with_network(network)
+            .with_subdirectory(unit_test_path());
+
+        NetworkActor::new(
+            Keypair::generate_ed25519(),
+            channels,
+            global_state_lock,
+            config,
+        )
+        .expect("test actor must build")
+    }
+
+    #[tokio::test]
+    async fn banning_a_peer_does_not_blacklist_its_self_declared_addresses() {
+        let mut actor = test_actor().await;
+
+        let malicious = PeerId::random();
+        let observed: Multiaddr = "/ip4/203.0.113.7/tcp/9798".parse().unwrap();
+        let third_parties: Vec<Multiaddr> = ["198.51.100.1", "198.51.100.2", "192.0.2.9"]
+            .iter()
+            .map(|ip| format!("/ip4/{ip}/tcp/9798").parse().unwrap())
+            .collect();
+
+        // The peer connects, and declares three unrelated hosts as its own.
+        actor.observed_ips.record(malicious, &observed);
+        actor.address_book.insert_or_update(
+            malicious,
+            third_parties.clone(),
+            "neptune-cash/0.0.0".to_string(),
+            "/neptune/-main".to_string(),
+            vec![],
+        );
+
+        actor
+            .handle_command(NetworkActorCommand::Ban(itertools::Either::Left(malicious)))
+            .await
+            .unwrap();
+
+        assert!(
+            actor
+                .black_list
+                .is_banned(&IpAddr::V4("203.0.113.7".parse().unwrap())),
+            "the address the peer was observed at must be banned"
+        );
+        for third_party in &third_parties {
+            let ip = ip_of(third_party).unwrap();
+            assert!(
+                !actor.black_list.is_banned(&ip),
+                "self-declared address {ip} must not be banned"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_disconnected_peer_is_still_bannable() {
+        let mut actor = test_actor().await;
+
+        let malicious = PeerId::random();
+        let observed: Multiaddr = "/ip4/203.0.113.8/tcp/9798".parse().unwrap();
+        actor.observed_ips.record(malicious, &observed);
+        assert!(actor.active_connections.is_empty());
+
+        actor
+            .handle_command(NetworkActorCommand::Ban(itertools::Either::Left(malicious)))
+            .await
+            .unwrap();
+
+        assert!(
+            actor
+                .black_list
+                .is_banned(&IpAddr::V4("203.0.113.8".parse().unwrap())),
+            "a peer that has gone must still be bannable"
+        );
+    }
 }
