@@ -2098,6 +2098,18 @@ impl PeerLoopHandler {
                     }
                 }
 
+                let num_inputs: u64 = transfer_link_tx.kernel.kernel.inputs.len() as u64;
+                if !self
+                    .global_state_lock
+                    .cli()
+                    .relay_link_transaction(num_inputs, transfer_link_tx.kernel.kernel.fee)
+                {
+                    warn!("Received link transaction not meeting relay criteria");
+                    self.punish(NegativePeerSanction::UnrelayableTransaction)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
                 let link_tx: LinkTx = (*transfer_link_tx).into();
 
                 let (tip, mutator_set_accumulator_after, current_block_height) = {
@@ -5925,6 +5937,77 @@ mod tests {
                 .run(mock, from_main_rx_clone, &mut peer_state)
                 .await
                 .unwrap();
+
+            drop(to_main_rx);
+            drop(main_to_peer_tx);
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn zero_input_pctx_pays_the_one_input_floor() {
+            use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier;
+
+            let network = Network::Main;
+            let (
+                main_to_peer_tx,
+                from_main_rx_clone,
+                to_main_tx,
+                mut to_main_rx,
+                _,
+                _,
+                state_lock,
+                _,
+            ) = get_test_genesis_setup(1, cli_args::Args::default_with_network(network))
+                .await
+                .unwrap();
+            let pctx = genesis_tx_with_proof_type(
+                TxProvingCapability::ProofCollection,
+                network,
+                NativeCurrencyAmount::from_nau(0),
+            )
+            .await;
+            let no_inputs = Transaction {
+                kernel: TransactionKernelModifier::default()
+                    .inputs(vec![])
+                    .modify(pctx.kernel.clone()),
+                proof: pctx.proof.clone(),
+            };
+
+            let mock = Mock::new(vec![
+                Action::Read(PeerMessage::Transaction(Box::new(
+                    (&no_inputs).try_into().unwrap(),
+                ))),
+                Action::Read(PeerMessage::Bye),
+            ]);
+
+            let peer_address = get_dummy_socket_address(0);
+            let peer_hsd = get_dummy_handshake_data_for_genesis(network);
+            let mut peer_loop_handler = PeerLoopHandler::new(
+                to_main_tx,
+                state_lock.clone(),
+                pseudorandom_peer_id(&peer_address),
+                socketaddr_to_multiaddr(peer_address),
+                peer_hsd,
+                true,
+                1,
+            );
+            peer_loop_handler
+                .run_wrapper(mock, from_main_rx_clone)
+                .await
+                .unwrap();
+
+            assert_eq!(Err(TryRecvError::Empty), to_main_rx.try_recv());
+            let latest_sanction = state_lock
+                .lock_guard()
+                .await
+                .net
+                .get_peer_standing_from_database(peer_address.ip())
+                .await
+                .unwrap();
+            assert_eq!(
+                NegativePeerSanction::UnrelayableTransaction,
+                latest_sanction.latest_punishment.unwrap().0
+            );
 
             drop(to_main_rx);
             drop(main_to_peer_tx);
