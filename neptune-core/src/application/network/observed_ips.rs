@@ -153,8 +153,6 @@ mod tests {
         );
     }
 
-    /// A relayed address contains an IP -- the relay's -- but behaviour over
-    /// it must not be pinned on that IP.
     #[test]
     fn a_relayed_address_is_attributable_to_nobody() {
         let relayed = format!("/ip4/9.9.9.9/tcp/9798/p2p/{}/p2p-circuit", peer(9));

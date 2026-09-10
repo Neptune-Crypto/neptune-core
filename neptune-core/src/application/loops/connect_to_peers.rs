@@ -658,16 +658,13 @@ pub(crate) async fn close_peer_connected_callback(
     // Store any new peer-standing to database
     let peer_info_writeback = global_state_mut.net.peer_map.remove(&peer_id);
 
-    // For a relayed connection this is `None`: the only IP in the address is
-    // the relay's, and reading or writing standing under it would sanction the
-    // relay's host for its clients' behaviour.
     let maybe_ip = attributable_ip(&peer_address);
     let new_standing = if let Some(new) = peer_info_writeback {
         new.standing()
     } else {
         error!("Could not find peer standing for {peer_address}");
 
-        // The peer's in-memory standing is gone, so sanction what is on record
+        // Couldn't find an entry in the peer map. So sanction what's persisted
         // instead of potentially clearing a negative standing.
         let stored = match maybe_ip {
             Some(ip) => {
