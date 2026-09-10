@@ -134,8 +134,19 @@ pub struct Args {
     /// that multiple nodes run on the same machine, or multiple machines are
     /// on the same network that uses Network Address Translation and has one
     /// public IP.
-    #[clap(long)]
+    #[clap(long, default_value = "4")]
     pub(crate) max_connections_per_ip: Option<usize>,
+
+    /// Maximum number of inbound connections to accept from each address
+    /// prefix, /24 for IPv4 and /64 for IPv6, which is the granularity at which
+    /// one operator usually controls addresses.
+    #[clap(long, default_value = "8")]
+    pub(crate) max_connections_per_prefix: Option<usize>,
+
+    /// Maximum number of inbound connection attempts to accept from one IP
+    /// address per minute, includes refused attempts.
+    #[clap(long, default_value = "6")]
+    pub(crate) max_connection_attempts_per_ip_per_minute: Option<usize>,
 
     /// Handshake timeout in seconds.
     ///

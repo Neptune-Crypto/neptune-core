@@ -89,6 +89,7 @@ use crate::application::network::actor::NetworkActor;
 use crate::application::network::actor::NetworkActorChannels;
 use crate::application::network::channel::NetworkActorCommand;
 use crate::application::network::config::NetworkConfig;
+use crate::application::network::source_limits::SourceLimitsConfig;
 use crate::application::rpc::server::RPC;
 use crate::state::wallet::wallet_state::WalletState;
 use crate::state::GlobalStateLock;
@@ -248,6 +249,11 @@ pub async fn initialize(
         .with_subdirectory(data_directory.network_subdirectory())
         .with_network(cli_args.network)
         .with_max_num_peers(cli_args.max_num_peers)
+        .with_source_limits(SourceLimitsConfig {
+            max_per_ip: cli_args.max_connections_per_ip,
+            max_per_prefix: cli_args.max_connections_per_prefix,
+            max_attempts_per_minute: cli_args.max_connection_attempts_per_ip_per_minute,
+        })
         .with_cli_bans(cli_args.bans.clone())
         .with_cli_peers(cli_peers_for_network_actor)
         .with_external_addresses(cli_args.own_public_addresses());

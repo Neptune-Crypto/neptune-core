@@ -9,6 +9,7 @@ pub(crate) mod handshake;
 pub(crate) mod observed_ips;
 pub mod overview;
 pub(crate) mod reachability;
+pub(crate) mod source_limits;
 pub(crate) mod stack;
 pub(crate) mod stack_event;
 

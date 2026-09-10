@@ -115,3 +115,10 @@ impl From<GatewayEvent> for NetworkStackEvent {
         Self::StreamGateway(Box::new(event))
     }
 }
+
+/// The limit behaviours never emit events, but the derive still needs this.
+impl From<std::convert::Infallible> for NetworkStackEvent {
+    fn from(never: std::convert::Infallible) -> Self {
+        match never {}
+    }
+}

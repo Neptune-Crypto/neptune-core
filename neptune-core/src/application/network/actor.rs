@@ -39,6 +39,7 @@ use crate::application::network::observed_ips::ip_of;
 use crate::application::network::observed_ips::ObservedIps;
 use crate::application::network::overview::NetworkOverview;
 use crate::application::network::reachability::ReachabilityState;
+use crate::application::network::source_limits::SourceLimits;
 use crate::application::network::stack::NetworkStack;
 use crate::application::network::stack::NEPTUNE_PROTOCOL_STR;
 use crate::application::network::stack_event::NetworkStackEvent;
@@ -337,6 +338,10 @@ impl NetworkActor {
         // Configure connection limits
         let max_num_peers = config.max_num_peers;
 
+        // well above the peer limit, since it only matters under a flood.
+        let max_pending_incoming = u32::try_from(max_num_peers * 2 + 4).unwrap_or(u32::MAX);
+        let source_limits = config.source_limits;
+
         // Configure autoNAT
         let neuter_autonat = !config.external_addresses().is_empty();
 
@@ -406,6 +411,11 @@ impl NetworkActor {
                 let upnp = libp2p::upnp::tokio::Behaviour::default();
 
                 NetworkStack {
+                    connection_limits: libp2p::connection_limits::Behaviour::new(
+                        libp2p::connection_limits::ConnectionLimits::default()
+                            .with_max_pending_incoming(Some(max_pending_incoming)),
+                    ),
+                    source_limits: SourceLimits::new(source_limits),
                     ping: libp2p::ping::Behaviour::new(ping_config),
                     identify: libp2p::identify::Behaviour::new(identify_config),
                     upnp,
@@ -607,6 +617,8 @@ impl NetworkActor {
 
                 // Check sticky peers.
                 _ = check_sticky_peers.tick() => {
+                    self.swarm.behaviour_mut().source_limits.prune();
+
 
                     // Determine which sticky peers to re-dial.
                     let mut dials = vec![];
