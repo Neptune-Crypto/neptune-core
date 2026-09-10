@@ -2,7 +2,6 @@ pub(crate) mod channel;
 
 use std::cmp;
 use std::marker::Unpin;
-use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::time::SystemTime;
 
@@ -14,7 +13,6 @@ use futures::sink::SinkExt;
 use futures::stream::TryStream;
 use futures::stream::TryStreamExt;
 use futures::FutureExt;
-use libp2p::multiaddr::Protocol;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
 use neptune_consensus::block::Block;
@@ -73,6 +71,7 @@ use crate::application::loops::peer_loop::channel::PeerTaskToMainLinkTx;
 use crate::application::loops::peer_loop::channel::PeerTaskToMainTransaction;
 use crate::application::loops::sync_loop::rapid_block_download::truncate_auth_path;
 use crate::application::loops::sync_loop::synchronization_bit_mask::SynchronizationBitMask;
+use crate::application::network::observed_ips::attributable_ip;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
 use crate::state::mining::block_proposal::BlockProposalRejectError;
@@ -2775,11 +2774,7 @@ impl PeerLoopHandler {
     {
         let cli_args = self.global_state_lock.cli().clone();
 
-        let maybe_ip = self.peer_address.iter().find_map(|p| match p {
-            Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
-            Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
-            _ => None,
-        });
+        let maybe_ip = attributable_ip(&self.peer_address);
         let standing = if let Some(ip) = maybe_ip {
             self.global_state_lock
                 .lock_guard()
@@ -2924,6 +2919,7 @@ impl PeerLoopHandler {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use libp2p::multiaddr::Protocol;
     use macro_rules_attr::apply;
     use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
     use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;

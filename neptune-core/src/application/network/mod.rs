@@ -6,6 +6,7 @@ pub(crate) mod channel;
 pub(crate) mod config;
 pub(crate) mod gateway;
 pub(crate) mod handshake;
+pub(crate) mod observed_ips;
 pub mod overview;
 pub(crate) mod reachability;
 pub(crate) mod stack;
