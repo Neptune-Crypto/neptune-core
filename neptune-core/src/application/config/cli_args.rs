@@ -943,6 +943,48 @@ impl Args {
         self.into()
     }
 
+    /// Whether a fee clears the proof-collection floor for this many inputs.
+    ///
+    /// Charges zero-input transactions the one-input floor so as to not make
+    /// them free.
+    fn meets_pctx_fee_floor(&self, num_inputs: u32, tx_fee: NativeCurrencyAmount) -> bool {
+        self.pctx_fee_floor(num_inputs)
+            .is_some_and(|min_fee| tx_fee >= min_fee)
+    }
+
+    fn pctx_fee_floor(&self, num_inputs: u32) -> Option<NativeCurrencyAmount> {
+        let floor = self
+            .min_relay_pctx_fee_per_input
+            .checked_scalar_mul(num_inputs.max(1));
+        if floor.is_none() {
+            error!("Multiplication overflowed in fee calculation. This should not happen.");
+        }
+
+        floor
+    }
+
+    /// Check if a link transaction pays enough fees to be relayed and accepted.
+    ///
+    /// It must clear a fraction of the proof-collection fee floor since a link
+    /// is cheaper to upgrade than a proof collection.
+    pub(crate) fn relay_link_transaction(
+        &self,
+        num_inputs: u64,
+        tx_fee: NativeCurrencyAmount,
+    ) -> bool {
+        /// How much cheaper a link is to upgrade than a proof collection.
+        const LINK_TX_FEE_FLOOR_DIVISOR: i128 = 4;
+
+        let Ok(num_inputs) = u32::try_from(num_inputs) else {
+            return false;
+        };
+        let Some(pctx_floor) = self.pctx_fee_floor(num_inputs) else {
+            return false;
+        };
+
+        tx_fee >= NativeCurrencyAmount::from_nau(pctx_floor.to_nau() / LINK_TX_FEE_FLOOR_DIVISOR)
+    }
+
     /// Check if a transaction should be inserted into the mempool and relayed
     /// to peers. Proofcollection-backed transactions that pay too small fees
     /// are not relayed.
@@ -962,15 +1004,7 @@ impl Args {
                     .try_into()
                     .expect("Already checked that number of inputs was not too high.");
 
-                let Some(min_fee) = self
-                    .min_relay_pctx_fee_per_input
-                    .checked_scalar_mul(num_inputs)
-                else {
-                    error!("Multiplication overflowed in fee calculation. This should not happen.");
-                    return false;
-                };
-
-                tx_fee >= min_fee
+                self.meets_pctx_fee_floor(num_inputs, tx_fee)
             }
             // For now, all single proof txs are relayed. A threshold value
             // could be set here too though.

@@ -396,12 +396,55 @@ async fn hard_fork_delta_async(block_primitive_witness: BlockPrimitiveWitness, n
         ConsensusRuleSet::HardforkDelta,
         ConsensusRuleSet::infer_from(network, hf.header().height)
     );
+
+    // Before its proof of work is found, `hf` is a block proposal: favored on
+    // top of the tip it builds on, and refused on top of the tip before that.
+    {
+        use crate::state::mining::block_proposal::BlockProposalRejectError;
+
+        let guesser_reward = hf.body().total_guesser_reward().unwrap();
+        let bob = bob.lock_guard().await;
+        assert!(bob
+            .favor_incoming_block_proposal(minus1.hash(), guesser_reward)
+            .is_ok());
+        assert!(matches!(
+            bob.favor_incoming_block_proposal(minus2.hash(), guesser_reward),
+            Err(BlockProposalRejectError::WrongParent { .. })
+        ));
+    }
+
+    // Ensure right claims are carried, by activation block, and the one prior
+    // to activation.
+    let with_claims = |block: &Block, consensus_rule_set| {
+        let claims = BlockAppendix::consensus_claims(block.body(), consensus_rule_set);
+        let mut block = block.clone();
+        block.set_appendix(BlockAppendix::new(claims));
+        block
+    };
+    assert_eq!(
+        Err(BlockValidationError::AppendixMissingClaim),
+        with_claims(&hf, ConsensusRuleSet::HardforkGamma)
+            .validate(&minus1, now, network)
+            .await
+    );
+    assert_eq!(
+        Err(BlockValidationError::AppendixMissingClaim),
+        with_claims(&minus1, ConsensusRuleSet::HardforkDelta)
+            .validate(&minus2, now, network)
+            .await
+    );
+
     assert!(
         hf.body().transaction_kernel.inputs.is_empty(),
         "Transaction from mempool must not be mined by the block that activates the hardfork"
     );
     hf.satisfy_pow(minus1.header().difficulty, ConsensusRuleSet::HardforkDelta);
     assert!(hf.has_proof_of_work(network, minus1.header()));
+
+    assert!(
+        hf.is_valid(&minus1, now, network).await,
+        "Block must also be valid after solving PoW"
+    );
 
     assert!(!bob.lock_guard().await.mempool().is_empty());
     bob.set_new_self_composed_tip(hf.clone(), hf_composer_utxos)

@@ -770,12 +770,23 @@ impl PeerLoopHandler {
         let received_block_matches_fork_reconciliation_list = if let Some(successor) =
             peer_state.fork_reconciliation_blocks.last()
         {
+            let network = self.global_state_lock.cli().network;
+
+            // PoW first, since it's expensive to fabricate.
+            if !successor.has_proof_of_work(network, received_block.header()) {
+                let (height, hash) = (successor.header().height, successor.hash());
+                warn!(
+                    "Fork reconciliation failed after receiving {} blocks: successor of received block has insufficient proof of work",
+                    peer_state.fork_reconciliation_blocks.len() + 1
+                );
+                self.punish(NegativePeerSanction::InvalidBlock((height, hash)))
+                    .await?;
+                peer_state.fork_reconciliation_blocks.clear();
+                return Ok(None);
+            }
+
             let valid = successor
-                .is_valid(
-                    received_block.as_ref(),
-                    self.now(),
-                    self.global_state_lock.cli().network,
-                )
+                .is_valid(received_block.as_ref(), self.now(), network)
                 .await;
             if !valid {
                 warn!(
@@ -2096,6 +2107,18 @@ impl PeerLoopHandler {
                             .await?;
                         return Ok(KEEP_CONNECTION_ALIVE);
                     }
+                }
+
+                let num_inputs: u64 = transfer_link_tx.kernel.kernel.inputs.len() as u64;
+                if !self
+                    .global_state_lock
+                    .cli()
+                    .relay_link_transaction(num_inputs, transfer_link_tx.kernel.kernel.fee)
+                {
+                    warn!("Received link transaction not meeting relay criteria");
+                    self.punish(NegativePeerSanction::UnrelayableTransaction)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
                 let link_tx: LinkTx = (*transfer_link_tx).into();
@@ -5295,6 +5318,90 @@ mod tests {
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
+        async fn successor_without_proof_of_work_is_refused_before_verification() -> Result<()> {
+            use neptune_primitives::difficulty_control::Difficulty;
+
+            let network = Network::Testnet(42);
+            let (
+                _peer_broadcast_tx,
+                from_main_rx_clone,
+                to_main_tx,
+                mut to_main_rx1,
+                _,
+                _,
+                mut state_lock,
+                hsd,
+            ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network)).await?;
+            let peer_socket_address: SocketAddr = get_dummy_socket_address(0);
+            let genesis_block: Block = state_lock
+                .lock_guard()
+                .await
+                .chain
+                .archival_state()
+                .get_tip()
+                .await;
+            let [block_1, block_2, block_3, block_4] = fake_valid_sequence_of_blocks_for_tests(
+                &genesis_block,
+                Timestamp::hours(1),
+                StdRng::seed_from_u64(5550001).random(),
+                network,
+            )
+            .await;
+            state_lock.set_new_tip(block_1.clone()).await?;
+            state_lock.set_new_tip(block_2.clone()).await?;
+
+            let mut no_pow_successor = block_4.clone();
+            no_pow_successor.set_difficulty_related_fields(
+                block_4.header().timestamp,
+                Difficulty::MAXIMUM,
+                None,
+            );
+
+            let mock = Mock::new(vec![
+                Action::Read(PeerMessage::Block(Box::new(
+                    no_pow_successor.clone().try_into().unwrap(),
+                ))),
+                Action::Write(PeerMessage::BlockRequestByHash(block_3.hash())),
+                Action::Read(PeerMessage::Block(Box::new(
+                    block_3.clone().try_into().unwrap(),
+                ))),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
+                to_main_tx.clone(),
+                state_lock.clone(),
+                pseudorandom_peer_id(&peer_socket_address),
+                socketaddr_to_multiaddr(peer_socket_address),
+                hsd,
+                false,
+                1,
+                block_4.header().timestamp,
+            );
+            peer_loop_handler
+                .run_wrapper(mock, from_main_rx_clone)
+                .await?;
+
+            assert_eq!(Err(TryRecvError::Empty), to_main_rx1.try_recv());
+            let latest_sanction = state_lock
+                .lock_guard()
+                .await
+                .net
+                .get_peer_standing_from_database(peer_socket_address.ip())
+                .await
+                .unwrap();
+            assert_eq!(
+                NegativePeerSanction::InvalidBlock((
+                    no_pow_successor.header().height,
+                    no_pow_successor.hash()
+                )),
+                latest_sanction.latest_punishment.unwrap().0
+            );
+
+            Ok(())
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
         async fn test_block_reconciliation_interrupted_by_block_notification() -> Result<()> {
             // In this scenario, the client know the genesis block (block 0) and block 1, it
             // then receives block 4, meaning that block 3, 2, and 1 will have to be requested.
@@ -5592,9 +5699,15 @@ mod tests {
                 _,
                 state_lock,
                 _hsd,
-            ) = get_test_genesis_setup(1, cli_args::Args::default_with_network(network))
-                .await
-                .unwrap();
+            ) = get_test_genesis_setup(
+                1,
+                cli_args::Args {
+                    min_relay_pctx_fee_per_input: NativeCurrencyAmount::coins(0),
+                    ..cli_args::Args::default_with_network(network)
+                },
+            )
+            .await
+            .unwrap();
 
             let spending_key = state_lock
                 .lock_guard()
@@ -5804,9 +5917,15 @@ mod tests {
                     _,
                     mut state_lock,
                     _hsd,
-                ) = get_test_genesis_setup(1, cli_args::Args::default_with_network(network))
-                    .await
-                    .unwrap();
+                ) = get_test_genesis_setup(
+                    1,
+                    cli_args::Args {
+                        min_relay_pctx_fee_per_input: NativeCurrencyAmount::coins(0),
+                        ..cli_args::Args::default_with_network(network)
+                    },
+                )
+                .await
+                .unwrap();
                 let consensus_rule_set =
                     ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
                 let fee: NativeCurrencyAmount = 0.2f64.try_into().unwrap();
@@ -5925,6 +6044,77 @@ mod tests {
                 .run(mock, from_main_rx_clone, &mut peer_state)
                 .await
                 .unwrap();
+
+            drop(to_main_rx);
+            drop(main_to_peer_tx);
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn zero_input_pctx_pays_the_one_input_floor() {
+            use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier;
+
+            let network = Network::Main;
+            let (
+                main_to_peer_tx,
+                from_main_rx_clone,
+                to_main_tx,
+                mut to_main_rx,
+                _,
+                _,
+                state_lock,
+                _,
+            ) = get_test_genesis_setup(1, cli_args::Args::default_with_network(network))
+                .await
+                .unwrap();
+            let pctx = genesis_tx_with_proof_type(
+                TxProvingCapability::ProofCollection,
+                network,
+                NativeCurrencyAmount::from_nau(0),
+            )
+            .await;
+            let no_inputs = Transaction {
+                kernel: TransactionKernelModifier::default()
+                    .inputs(vec![])
+                    .modify(pctx.kernel.clone()),
+                proof: pctx.proof.clone(),
+            };
+
+            let mock = Mock::new(vec![
+                Action::Read(PeerMessage::Transaction(Box::new(
+                    (&no_inputs).try_into().unwrap(),
+                ))),
+                Action::Read(PeerMessage::Bye),
+            ]);
+
+            let peer_address = get_dummy_socket_address(0);
+            let peer_hsd = get_dummy_handshake_data_for_genesis(network);
+            let mut peer_loop_handler = PeerLoopHandler::new(
+                to_main_tx,
+                state_lock.clone(),
+                pseudorandom_peer_id(&peer_address),
+                socketaddr_to_multiaddr(peer_address),
+                peer_hsd,
+                true,
+                1,
+            );
+            peer_loop_handler
+                .run_wrapper(mock, from_main_rx_clone)
+                .await
+                .unwrap();
+
+            assert_eq!(Err(TryRecvError::Empty), to_main_rx.try_recv());
+            let latest_sanction = state_lock
+                .lock_guard()
+                .await
+                .net
+                .get_peer_standing_from_database(peer_address.ip())
+                .await
+                .unwrap();
+            assert_eq!(
+                NegativePeerSanction::UnrelayableTransaction,
+                latest_sanction.latest_punishment.unwrap().0
+            );
 
             drop(to_main_rx);
             drop(main_to_peer_tx);
