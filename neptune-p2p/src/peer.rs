@@ -238,10 +238,15 @@ pub const STANDING_HALF_LIFE: Duration = Duration::from_secs(48 * 60 * 60);
 // [PeerStanding::is_bad].
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct PeerStanding {
-    /// The actual standing. The higher, the better.
+    /// The standing as last recorded. The higher, the better. Negative
+    /// values decay with time; read [`Self::standing_now`] for the value that
+    /// applies now.
     pub standing: i32,
+
     pub latest_punishment: Option<(NegativePeerSanction, SystemTime)>,
+
     pub latest_reward: Option<(PositivePeerSanction, SystemTime)>,
+
     pub peer_tolerance: i32,
 }
 #[derive(Debug, Clone, Copy, Default)]
@@ -300,7 +305,7 @@ impl PeerStanding {
     }
 
     pub fn is_negative(&self) -> bool {
-        self.standing.is_negative()
+        self.standing_now().is_negative()
     }
 
     /// The number of whole half-lives that have passed since the peer was last
@@ -323,7 +328,7 @@ impl PeerStanding {
     /// Negative standing decays toward zero, halving every
     /// [`STANDING_HALF_LIFE`], so that a peer sanctioned once is not shut out
     /// for the lifetime of the database. Positive standing does not decay.
-    fn standing_now(&self) -> i32 {
+    pub fn standing_now(&self) -> i32 {
         if !self.standing.is_negative() {
             return self.standing;
         }
@@ -365,7 +370,7 @@ impl PeerStanding {
 
 impl Display for PeerStanding {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.standing)
+        write!(f, "{}", self.standing_now())
     }
 }
 
