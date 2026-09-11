@@ -249,10 +249,13 @@ mod tests {
     }
 
     #[proptest]
-    fn the_two_admission_gates_expire_together(
+    fn the_two_peer_admission_gates_expire_together(
         #[strategy(1u16..=u16::MAX)] tolerance: u16,
         #[strategy(arb_ip_addr())] ip: IpAddr,
     ) {
+        // Ensure that the ban list of the libp2p protocol expires at the same
+        // time as the negative sanction half life is applied.
+
         let margin = Duration::from_secs(60);
         let just_short = BAN_DURATION.checked_sub(margin).unwrap();
         let just_over = BAN_DURATION + margin;
