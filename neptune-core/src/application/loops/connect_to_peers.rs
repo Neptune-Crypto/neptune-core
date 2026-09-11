@@ -1480,9 +1480,13 @@ mod tests {
             refused
         );
 
-        // But if connections per IP is not capped, allow this sixth connection.
-        let allow_all_ips = cli_args::Args::default();
-        state_lock.set_cli(allow_all_ips).await;
+        // But if connections per IP has a higher cap, allow it.
+        let allow_10_connections_from_same_ip = cli_args::Args {
+            max_connections_per_ip: Some(10),
+            network,
+            ..Default::default()
+        };
+        state_lock.set_cli(allow_10_connections_from_same_ip).await;
 
         assert_eq!(
             InternalConnectionStatus::Accepted,

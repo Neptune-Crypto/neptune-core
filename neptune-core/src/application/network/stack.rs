@@ -9,6 +9,7 @@
 use libp2p::swarm::NetworkBehaviour;
 
 use crate::application::network::gateway::StreamGateway;
+use crate::application::network::source_limits::SourceLimits;
 use crate::application::network::stack_event::NetworkStackEvent;
 
 /// The protocol ID string
@@ -63,6 +64,12 @@ pub(crate) const NEPTUNE_PROTOCOL_STR: &str = "/neptune/";
 #[derive(NetworkBehaviour)]
 #[behaviour(to_swarm = "NetworkStackEvent")]
 pub(crate) struct NetworkStack {
+    /// Global cap on connections being initiated, protects against floods.
+    pub(crate) connection_limits: libp2p::connection_limits::Behaviour,
+
+    /// Limits on inbound connections from clustered IPs.
+    pub(crate) source_limits: SourceLimits,
+
     pub(crate) ping: libp2p::ping::Behaviour,
     pub(crate) identify: libp2p::identify::Behaviour,
     pub(crate) upnp: libp2p::upnp::tokio::Behaviour,

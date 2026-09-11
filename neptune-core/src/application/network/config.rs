@@ -4,6 +4,8 @@ use std::path::PathBuf;
 use libp2p::Multiaddr;
 use neptune_primitives::network::Network;
 
+use super::source_limits::SourceLimitsConfig;
+
 pub(crate) const DEFAULT_SUBDIRECTORY: &str = "network/";
 pub(crate) const DEFAULT_IDENTITY_FILENAME: &str = "identity.key";
 pub(crate) const DEFAULT_ADDRESS_BOOK_FILENAME: &str = "address-book.json";
@@ -28,6 +30,9 @@ pub(crate) struct NetworkConfig {
     /// The max. number of peers to connect to.
     pub(super) max_num_peers: usize,
 
+    /// Limits on inbound connections for related IPs.
+    pub(super) source_limits: SourceLimitsConfig,
+
     external_addresses: Vec<Multiaddr>,
 }
 
@@ -42,6 +47,7 @@ impl Default for NetworkConfig {
             banned_peers: vec![],
             sticky_peers: vec![],
             max_num_peers: 10,
+            source_limits: SourceLimitsConfig::default(),
             external_addresses: vec![],
         }
     }
@@ -60,6 +66,11 @@ impl NetworkConfig {
 
     pub(crate) fn with_max_num_peers(mut self, new_max: usize) -> Self {
         self.max_num_peers = new_max;
+        self
+    }
+
+    pub(crate) fn with_source_limits(mut self, source_limits: SourceLimitsConfig) -> Self {
+        self.source_limits = source_limits;
         self
     }
 
