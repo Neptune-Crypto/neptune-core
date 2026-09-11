@@ -7,7 +7,8 @@
 //! minute.
 //!
 //! Relayed connections have no attributable address and pass untouched; the
-//! global pending-connection cap covers those.
+//! global pending-connection cap covers those. A hole-punched connection has
+//! one, and is counted on the side that acts as its listener.
 
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -47,13 +48,13 @@ pub(crate) struct SourceLimitsConfig {
 
 /// Why an inbound connection was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Exceeded {
+pub(crate) enum RefusalReason {
     PerIp { ip: IpAddr, limit: usize },
     PerPrefix { ip: IpAddr, limit: usize },
     AttemptsPerMinute { ip: IpAddr, limit: usize },
 }
 
-impl fmt::Display for Exceeded {
+impl fmt::Display for RefusalReason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::PerIp { ip, limit } => write!(f, "{ip} already holds {limit} connections"),
@@ -67,7 +68,7 @@ impl fmt::Display for Exceeded {
     }
 }
 
-impl std::error::Error for Exceeded {}
+impl std::error::Error for RefusalReason {}
 
 /// A `/24` or `/64`, the granularity at which one operator usually controls
 /// addresses.
@@ -99,7 +100,12 @@ struct SourceCounts {
     config: SourceLimitsConfig,
     by_ip: HashMap<IpAddr, usize>,
     by_prefix: HashMap<Prefix, usize>,
+
+    /// The IP each tracked connection is associated with: the canonical form of
+    /// the one IP a direct address names. Relayed addresses name the relay's
+    /// IP and are never counted.
     connections: HashMap<ConnectionId, IpAddr>,
+
     attempts: HashMap<IpAddr, VecDeque<Instant>>,
 }
 
@@ -114,10 +120,11 @@ impl SourceCounts {
         }
     }
 
-    /// Admit a pending connection from `ip`, or say why not. An admitted
-    /// connection counts until [`Self::release`]. Every attempt, admitted or
-    /// not, counts toward the rate.
-    fn admit(&mut self, id: ConnectionId, ip: IpAddr, now: Instant) -> Result<(), Exceeded> {
+    /// Admit a connection attributed to `ip`, or say why not. On success the
+    /// connection is counted against the per-IP and per-prefix limits until
+    /// [`Self::release`] is called with its id. Every attempt, admitted or not,
+    /// counts toward the rate limit.
+    fn admit(&mut self, id: ConnectionId, ip: IpAddr, now: Instant) -> Result<(), RefusalReason> {
         let ip = ip.to_canonical();
 
         let attempts = self.attempts.entry(ip).or_default();
@@ -130,19 +137,19 @@ impl SourceCounts {
         attempts.push_back(now);
         if let Some(limit) = self.config.max_attempts_per_minute {
             if attempts.len() > limit {
-                return Err(Exceeded::AttemptsPerMinute { ip, limit });
+                return Err(RefusalReason::AttemptsPerMinute { ip, limit });
             }
         }
 
         if let Some(limit) = self.config.max_per_ip {
             if self.by_ip.get(&ip).copied().unwrap_or(0) >= limit {
-                return Err(Exceeded::PerIp { ip, limit });
+                return Err(RefusalReason::PerIp { ip, limit });
             }
         }
         let prefix = Prefix::of(ip);
         if let Some(limit) = self.config.max_per_prefix {
             if self.by_prefix.get(&prefix).copied().unwrap_or(0) >= limit {
-                return Err(Exceeded::PerPrefix { ip, limit });
+                return Err(RefusalReason::PerPrefix { ip, limit });
             }
         }
 
@@ -235,12 +242,23 @@ impl NetworkBehaviour for SourceLimits {
 
     fn handle_established_outbound_connection(
         &mut self,
-        _connection_id: ConnectionId,
+        connection_id: ConnectionId,
         _peer: PeerId,
-        _addr: &Multiaddr,
-        _role_override: Endpoint,
+        addr: &Multiaddr,
+        role_override: Endpoint,
         _port_use: PortUse,
     ) -> Result<THandler<Self>, ConnectionDenied> {
+        // A hole punch is dialed from both sides. The side that ends up as
+        // listener counts the connection, as it would have had the remote
+        // connected directly.
+        if role_override == Endpoint::Listener {
+            if let Some(ip) = attributable_ip(addr) {
+                self.counts
+                    .admit(connection_id, ip, Instant::now())
+                    .map_err(ConnectionDenied::new)?;
+            }
+        }
+
         Ok(dummy::ConnectionHandler)
     }
 
@@ -248,6 +266,7 @@ impl NetworkBehaviour for SourceLimits {
         match event {
             FromSwarm::ConnectionClosed(closed) => self.counts.release(closed.connection_id),
             FromSwarm::ListenFailure(failure) => self.counts.release(failure.connection_id),
+            FromSwarm::DialFailure(failure) => self.counts.release(failure.connection_id),
             _ => {}
         }
     }
@@ -297,7 +316,7 @@ mod tests {
         assert_eq!(Ok(()), counts.admit(id(1), ip(1), now));
         assert_eq!(Ok(()), counts.admit(id(2), ip(1), now));
         assert_eq!(
-            Err(Exceeded::PerIp {
+            Err(RefusalReason::PerIp {
                 ip: ip(1),
                 limit: 2
             }),
@@ -317,7 +336,7 @@ mod tests {
             assert_eq!(Ok(()), counts.admit(id(n), ip(n as u8), now));
         }
         assert_eq!(
-            Err(Exceeded::PerPrefix {
+            Err(RefusalReason::PerPrefix {
                 ip: ip(4),
                 limit: 3
             }),
@@ -336,7 +355,7 @@ mod tests {
             counts.release(id(n));
         }
         assert_eq!(
-            Err(Exceeded::AttemptsPerMinute {
+            Err(RefusalReason::AttemptsPerMinute {
                 ip: ip(1),
                 limit: 3
             }),
@@ -353,7 +372,7 @@ mod tests {
         assert!(counts.admit(id(2), ip(1), now).is_err());
         assert!(counts.admit(id(3), ip(1), now).is_err());
         assert_eq!(
-            Err(Exceeded::AttemptsPerMinute {
+            Err(RefusalReason::AttemptsPerMinute {
                 ip: ip(1),
                 limit: 3
             }),
@@ -377,7 +396,7 @@ mod tests {
         assert_eq!(Ok(()), counts.admit(id(1), ip(1), now));
         let mapped = IpAddr::V6(std::net::Ipv4Addr::new(203, 0, 113, 1).to_ipv6_mapped());
         assert_eq!(
-            Err(Exceeded::PerIp {
+            Err(RefusalReason::PerIp {
                 ip: ip(1),
                 limit: 1
             }),
