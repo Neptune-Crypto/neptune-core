@@ -1,5 +1,51 @@
 Note: (!) indicates a breaking change.
 
+## [0.17.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.16.0..v0.17.0) - 2026-09-11
+
+### ✨ Features
+
+- *(chaintx)* Transaction chaining: `LinkTx` and the `LinkProof` program with its `Forge`, `Chain`, `Update` and `Cast` branches, plus the `Fix` and `Weld` branches of `SingleProof`; activated by hardfork delta ([7af0ee73](https://github.com/Neptune-Crypto/neptune-core/commit/7af0ee73))
+- *(dualvm)* Prove, verify, and assemble under both VM generations ([89c8594e](https://github.com/Neptune-Crypto/neptune-core/commit/89c8594e))
+- *(mempool)* Store and manage `LinkTx`s ([a180fcfd](https://github.com/Neptune-Crypto/neptune-core/commit/a180fcfd))
+- *(p2p)* Share link transactions between peers ([2ebf7424](https://github.com/Neptune-Crypto/neptune-core/commit/2ebf7424))
+- Retire transactions based on announcements ([56c3c6fd](https://github.com/Neptune-Crypto/neptune-core/commit/56c3c6fd))
+- *(network)* Add rudimentary flood protection in libp2p integration ([b379cf44](https://github.com/Neptune-Crypto/neptune-core/commit/b379cf44))
+
+### 🐛 Bug Fixes
+
+- *(job-queue)* Give the singleton VM job queue a runtime of its own lifetime ([673f0415](https://github.com/Neptune-Crypto/neptune-core/commit/673f0415))
+- *(SingleProof)* Key the program caches by rule set ([7abcaf8f](https://github.com/Neptune-Crypto/neptune-core/commit/7abcaf8f))
+- Make `fork_choice_rule` stable: prefer the first-seen block at equal height ([52b175e8](https://github.com/Neptune-Crypto/neptune-core/commit/52b175e8))
+- *(mine_loop)* Never guess on blocks with retired transactions ([80c639ad](https://github.com/Neptune-Crypto/neptune-core/commit/80c639ad))
+- *(network)* Only ban observed IPs, not declared ([b2e269da](https://github.com/Neptune-Crypto/neptune-core/commit/b2e269da))
+- *(ui)* Show current standing, not persisted standing for peers ([5b5f72b1](https://github.com/Neptune-Crypto/neptune-core/commit/5b5f72b1))
+
+### 📚 Documentation
+
+- Describe the transaction-chaining pipeline ([03009145](https://github.com/Neptune-Crypto/neptune-core/commit/03009145))
+- *(transaction)* Fix transaction pipeline description + add transitions diagram ([489548de](https://github.com/Neptune-Crypto/neptune-core/commit/489548de))
+
+### 🔒️ Security
+
+- (!) Allow very big packed chunks, after hardfork delta activation ([095d583b](https://github.com/Neptune-Crypto/neptune-core/commit/095d583b))
+- Min fee when relaying link-transactions ([c404e098](https://github.com/Neptune-Crypto/neptune-core/commit/c404e098))
+- Verify PoW in fork-reconciliation logic ([2cb5b97f](https://github.com/Neptune-Crypto/neptune-core/commit/2cb5b97f))
+
+### ♻️ Refactor
+
+- Timestamp-prune mempool before updating with block ([394eeba0](https://github.com/Neptune-Crypto/neptune-core/commit/394eeba0))
+- *(peer_loop)* Persist both standing decreases, and increases ([d6a59614](https://github.com/Neptune-Crypto/neptune-core/commit/d6a59614))
+- *(network)* Add 48-hour half life to negative peer standings ([5c6ae6c6](https://github.com/Neptune-Crypto/neptune-core/commit/5c6ae6c6))
+
+### ⚙️ Miscellaneous
+
+- Upgrade TVM/tasm-lib dependency to new zk-proved segmentation ([5a0596db](https://github.com/Neptune-Crypto/neptune-core/commit/5a0596db))
+
+### 🪢 Merge
+
+- Merge([#964](https://github.com/Neptune-Crypto/neptune-core/issues/964)): Transaction Chaining ([7af0ee73](https://github.com/Neptune-Crypto/neptune-core/commit/7af0ee73))
+- Merge([#968](https://github.com/Neptune-Crypto/neptune-core/issues/968)): Only ban observed addresses ([4d9a75b3](https://github.com/Neptune-Crypto/neptune-core/commit/4d9a75b3))
+
 ## [0.16.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.15.1..v0.16.0) - 2026-08-07
 
 ### ✨ Features
