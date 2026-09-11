@@ -2315,6 +2315,15 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
+                if new_proposal
+                    .body()
+                    .transaction_kernel
+                    .retires_before(self.now())
+                {
+                    debug!("Ignoring block proposal whose transaction has retired");
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
                 // Is the proposal valid?
                 // Lock needs to be held here because race conditions: otherwise
                 // the block proposal that was validated might not match with
@@ -6181,6 +6190,60 @@ mod tests {
                 drop(to_main_tx);
                 drop(peer_broadcast_tx);
             }
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn retired_block_proposal_is_ignored_without_verification() {
+            use neptune_consensus::transaction::announcement::Announcement;
+            use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier;
+
+            let TestSetup {
+                peer_broadcast_tx,
+                mut peer_loop_handler,
+                mut to_main_rx,
+                from_main_rx,
+                mut peer_state,
+                to_main_tx,
+                genesis_block: _,
+            } = genesis_setup(cli_args::Args::default_with_network(Network::Testnet(42))).await;
+            let mut retired = fake_valid_block_for_tests(
+                &peer_loop_handler.global_state_lock,
+                StdRng::seed_from_u64(5550001).random(),
+            )
+            .await;
+            retired.set_transaction_kernel(
+                TransactionKernelModifier::default()
+                    .announcements(vec![Announcement::retirement(
+                        peer_loop_handler.now() - Timestamp::hours(1),
+                    )])
+                    .modify(retired.body().transaction_kernel.clone()),
+            );
+
+            let mock = Mock::new(vec![
+                Action::Read(PeerMessage::BlockProposal(Box::new(retired))),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            peer_loop_handler
+                .run(mock, from_main_rx, &mut peer_state)
+                .await
+                .unwrap();
+
+            assert_eq!(Err(TryRecvError::Empty), to_main_rx.try_recv());
+            let latest_punishment = peer_loop_handler
+                .global_state_lock
+                .lock_guard()
+                .await
+                .net
+                .peer_map
+                .get(&peer_loop_handler.peer_id)
+                .unwrap()
+                .standing()
+                .latest_punishment;
+            assert!(latest_punishment.is_none());
+
+            drop(to_main_tx);
+            drop(peer_broadcast_tx);
         }
 
         #[traced_test]

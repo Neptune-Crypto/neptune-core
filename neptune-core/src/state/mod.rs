@@ -1784,17 +1784,27 @@ impl GlobalState {
         }
     }
 
-    /// Returns true iff the current block proposal is present and has a high
-    /// enough guesser fee to be worth guessing on. Always  returns true if
-    /// proposal was made locally.
+    /// Returns true iff the current block proposal is present, has a high
+    /// enough guesser fee to be worth guessing on, and its transaction has not
+    /// retired. The fee always suffices if proposal was made locally.
     pub(crate) fn current_block_proposal_meets_threshold(&self) -> bool {
-        match &self.mining_state.block_proposal {
-            BlockProposal::OwnComposition(_) => true,
-            BlockProposal::ForeignComposition(block) => block
-                .relative_guesser_reward()
-                .is_ok_and(|x| x >= self.cli.minimum_guesser_fraction),
-            BlockProposal::None => false,
-        }
+        let block = match &self.mining_state.block_proposal {
+            BlockProposal::OwnComposition((block, _)) => block,
+            BlockProposal::ForeignComposition(block)
+                if block
+                    .relative_guesser_reward()
+                    .is_ok_and(|x| x >= self.cli.minimum_guesser_fraction) =>
+            {
+                block
+            }
+            BlockProposal::ForeignComposition(_) | BlockProposal::None => return false,
+        };
+
+        // Avoid working on blocks with retired transactions.
+        !block
+            .body()
+            .transaction_kernel
+            .retires_before(Timestamp::now())
     }
 
     /// Determine whether the incoming block is more canonical than the current
@@ -6336,6 +6346,35 @@ mod tests {
                 gsl.current_block_proposal_meets_threshold(),
                 "Must return true when proposal is own"
             );
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn dont_guess_when_block_proposal_retired() {
+            use neptune_consensus::transaction::announcement::Announcement;
+
+            let network = Network::Main;
+            let mut gsl = mock_genesis_global_state(
+                2,
+                WalletEntropy::devnet_wallet(),
+                cli_args::Args::default_with_network(network),
+            )
+            .await;
+            let mut gsl = gsl.lock_guard_mut().await;
+
+            let mut retired = invalid_empty_block1_with_guesser_fraction(network, 0.55).await;
+            retired.set_transaction_kernel(
+                TransactionKernelModifier::default()
+                    .announcements(vec![Announcement::retirement(
+                        Timestamp::now() - Timestamp::hours(1),
+                    )])
+                    .modify(retired.body().transaction_kernel.clone()),
+            );
+
+            gsl.mining_state.block_proposal = BlockProposal::ForeignComposition(retired.clone());
+            assert!(!gsl.current_block_proposal_meets_threshold());
+
+            gsl.mining_state.block_proposal = BlockProposal::OwnComposition((retired, vec![]));
+            assert!(!gsl.current_block_proposal_meets_threshold());
         }
 
         #[apply(shared_tokio_runtime)]
