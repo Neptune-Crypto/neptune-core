@@ -140,7 +140,8 @@ pub enum HandshakeValidationError {
 }
 
 impl HandshakeData {
-    /// Determine whether two handshakes are compatible.
+    /// Determine whether two handshakes are compatible, up to everything that
+    /// can be checked without using async code.
     pub fn validate(
         local_handshake: &HandshakeData,
         remote_handshake: &HandshakeData,

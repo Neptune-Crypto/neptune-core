@@ -6,10 +6,15 @@ use std::io::BufWriter;
 use std::net::IpAddr;
 use std::path::Path;
 use std::path::PathBuf;
+use std::time::Duration;
 use std::time::SystemTime;
 
+use neptune_p2p::peer::STANDING_HALF_LIFE;
 use serde::Deserialize;
 use serde::Serialize;
+
+/// How long a ban applies for.
+const BAN_DURATION: Duration = STANDING_HALF_LIFE;
 
 /// Manages a persistent blacklist of IP addresses to enforce network-level
 /// bans.
@@ -76,8 +81,32 @@ impl BlackList {
     }
 
     /// Determine whether the given IP is on the black list.
+    ///
+    /// A ban expires after [`BAN_DURATION`], so that a node sanctioned once, or
+    /// sanctioned for behaviour it has since stopped, is not shut out of the
+    /// network for the lifetime of the blacklist file. Bans given on the
+    /// command line never expire.
     pub(crate) fn is_banned(&self, ip_address: &IpAddr) -> bool {
-        self.list.contains_key(ip_address) || self.ephemeral_bans.contains(ip_address)
+        if self.ephemeral_bans.contains(ip_address) {
+            return true;
+        }
+
+        self.list
+            .get(ip_address)
+            .is_some_and(|banned_at| !Self::is_expired(*banned_at))
+    }
+
+    /// Whether a ban imposed at the given time no longer applies.
+    fn is_expired(banned_at: SystemTime) -> bool {
+        banned_at.elapsed().is_ok_and(|age| age >= BAN_DURATION)
+    }
+
+    /// Drop bans that have expired.
+    ///
+    /// Keeps the persisted file from growing without bound.
+    fn forget_expired_bans(&mut self) {
+        self.list
+            .retain(|_ip, banned_at| !Self::is_expired(*banned_at));
     }
 
     /// Write the current blacklist to disk.
@@ -114,16 +143,21 @@ impl BlackList {
         let file = File::open(&path)?;
         let reader = BufReader::new(file);
         let list = serde_json::from_reader(reader)?;
-        Ok(BlackList {
+        let mut black_list = BlackList {
             filename: path.as_ref().to_path_buf(),
             list,
             ephemeral_bans: HashSet::new(),
-        })
+        };
+        black_list.forget_expired_bans();
+
+        Ok(black_list)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use neptune_p2p::peer::NegativePeerSanction;
+    use neptune_p2p::peer::PeerStanding;
     use proptest::collection::vec;
     use proptest::prelude::any;
     use proptest::prelude::Strategy;
@@ -162,6 +196,8 @@ mod tests {
         temp_path.push(unique_name);
         original.filename = temp_path.clone();
 
+        original.forget_expired_bans();
+
         original.save_to_disk().expect("Failed to save to disk");
 
         let loaded = BlackList::load_or_new(&temp_path).expect("Failed to load from disk");
@@ -196,6 +232,100 @@ mod tests {
 
         // clean up
         let _ = std::fs::remove_file(temp_path);
+    }
+
+    /// A standing that was sanctioned to exactly the ban threshold, `ago` in
+    /// the past.
+    fn standing_at_threshold(tolerance: u16, ago: Duration) -> PeerStanding {
+        PeerStanding {
+            standing: -i32::from(tolerance),
+            latest_punishment: Some((
+                NegativePeerSanction::DifferentGenesis,
+                SystemTime::now() - ago,
+            )),
+            latest_reward: None,
+            peer_tolerance: i32::from(tolerance),
+        }
+    }
+
+    #[proptest]
+    fn the_two_peer_admission_gates_expire_together(
+        #[strategy(1u16..=u16::MAX)] tolerance: u16,
+        #[strategy(arb_ip_addr())] ip: IpAddr,
+    ) {
+        // Ensure that the ban list of the libp2p protocol expires at the same
+        // time as the negative sanction half life is applied.
+
+        let margin = Duration::from_secs(60);
+        let just_short = BAN_DURATION.checked_sub(margin).unwrap();
+        let just_over = BAN_DURATION + margin;
+
+        // Just before the deadline: both gates refuse.
+        let mut before = BlackList::new(PathBuf::from("does-not-exist.json"));
+        before.list.insert(ip, SystemTime::now() - just_short);
+        let standing_before = standing_at_threshold(tolerance, just_short);
+
+        prop_assert!(before.is_banned(&ip), "blacklist must still refuse");
+        prop_assert!(standing_before.is_bad(), "standing must still be bad");
+
+        // Just after: both gates admit.
+        let mut after = BlackList::new(PathBuf::from("does-not-exist.json"));
+        after.list.insert(ip, SystemTime::now() - just_over);
+        let standing_after = standing_at_threshold(tolerance, just_over);
+
+        prop_assert!(!after.is_banned(&ip), "blacklist must have expired");
+        prop_assert!(!standing_after.is_bad(), "standing must no longer be bad");
+    }
+
+    #[proptest]
+    fn ban_expires_after_the_ban_duration(
+        #[strategy(black_list_strategy())] mut black_list: BlackList,
+        #[strategy(arb_ip_addr())] ip: IpAddr,
+    ) {
+        black_list.ban(ip);
+        prop_assert!(black_list.is_banned(&ip));
+
+        // Just short of the duration: still banned.
+        let almost = SystemTime::now() - BAN_DURATION + Duration::from_secs(60);
+        black_list.list.insert(ip, almost);
+        prop_assert!(black_list.is_banned(&ip));
+
+        // Past the duration: no longer banned.
+        let expired = SystemTime::now() - BAN_DURATION - Duration::from_secs(60);
+        black_list.list.insert(ip, expired);
+        prop_assert!(!black_list.is_banned(&ip));
+    }
+
+    #[proptest]
+    fn cli_bans_do_not_expire(
+        #[strategy(black_list_strategy())] mut black_list: BlackList,
+        #[strategy(arb_ip_addr())] ip: IpAddr,
+    ) {
+        black_list.ephemeral_bans.insert(ip);
+        black_list.list.insert(
+            ip,
+            SystemTime::now() - BAN_DURATION - Duration::from_secs(60),
+        );
+
+        prop_assert!(black_list.is_banned(&ip));
+    }
+
+    #[proptest]
+    fn forgetting_expired_bans_keeps_the_live_ones(
+        #[strategy(black_list_strategy())] mut black_list: BlackList,
+        #[strategy(arb_ip_addr())] live: IpAddr,
+        #[strategy(arb_ip_addr())] expired: IpAddr,
+    ) {
+        black_list.list.insert(live, SystemTime::now());
+        black_list.list.insert(
+            expired,
+            SystemTime::now() - BAN_DURATION - Duration::from_secs(60),
+        );
+
+        black_list.forget_expired_bans();
+
+        prop_assert!(black_list.list.contains_key(&live));
+        prop_assert!(!black_list.list.contains_key(&expired));
     }
 
     #[proptest]

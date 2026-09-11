@@ -233,19 +233,12 @@ impl NetworkingState {
     // Storing IP addresses is, according to this answer, not a violation of GDPR:
     // https://law.stackexchange.com/a/28609/45846
     // Wayback machine: https://web.archive.org/web/20220708143841/https://law.stackexchange.com/questions/28603/how-to-satisfy-gdprs-consent-requirement-for-ip-logging/28609
-    pub async fn write_peer_standing_on_decrease(
-        &mut self,
-        ip: IpAddr,
-        current_standing: PeerStanding,
-    ) {
-        let old_standing = self.peer_databases.peer_standings_by_ip.get(ip).await;
-
-        if old_standing.is_none() || old_standing.unwrap().standing > current_standing.standing {
-            self.peer_databases
-                .peer_standings_by_ip
-                .put(ip, current_standing)
-                .await
-        }
+    /// Persist a peer's standing.
+    pub async fn write_peer_standing(&mut self, ip: IpAddr, current_standing: PeerStanding) {
+        self.peer_databases
+            .peer_standings_by_ip
+            .put(ip, current_standing)
+            .await
     }
 
     /// Register the disconnection time of a peer.
@@ -285,5 +278,46 @@ mod test_helpers {
         pub fn sync_download_is_complete(&self) -> bool {
             matches!(&self.sync_status, SyncStatus::Syncing(progress) if progress.download_is_complete())
         }
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use neptune_p2p::peer::NegativePeerSanction;
+    use neptune_wallet::wallet_entropy::WalletEntropy;
+
+    use super::*;
+    use crate::application::config::cli_args;
+    use crate::tests::shared::globalstate::mock_genesis_global_state;
+
+    fn standing(value: i32) -> PeerStanding {
+        PeerStanding::init(
+            value,
+            Some((NegativePeerSanction::DifferentGenesis, SystemTime::now())),
+            None,
+            1000,
+        )
+    }
+
+    #[tokio::test]
+    async fn a_standing_above_the_stored_one_is_still_written() {
+        let cli = cli_args::Args::default();
+        let mut state = mock_genesis_global_state(0, WalletEntropy::new_random(), cli).await;
+        let ip: IpAddr = "203.0.113.10".parse().unwrap();
+
+        let mut guard = state.lock_guard_mut().await;
+        guard.net.write_peer_standing(ip, standing(-1000)).await;
+        guard.net.write_peer_standing(ip, standing(-600)).await;
+
+        assert_eq!(
+            Some(standing(-600).standing),
+            guard
+                .net
+                .get_peer_standing_from_database(ip)
+                .await
+                .map(|s| s.standing),
+            "the later, less negative standing must have been written"
+        );
     }
 }

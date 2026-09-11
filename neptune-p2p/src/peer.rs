@@ -10,6 +10,7 @@ pub mod transfer_transaction;
 
 use std::fmt::Display;
 use std::net::SocketAddr;
+use std::time::Duration;
 use std::time::SystemTime;
 
 use handshake_data::HandshakeData;
@@ -227,6 +228,9 @@ impl Sanction for PeerSanction {
     }
 }
 
+/// How long negative peer standing takes to halve.
+pub const STANDING_HALF_LIFE: Duration = Duration::from_secs(48 * 60 * 60);
+
 /// This is the object that gets stored in the database to record how well a
 /// peer has behaved so far.
 //
@@ -234,10 +238,15 @@ impl Sanction for PeerSanction {
 // [PeerStanding::is_bad].
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct PeerStanding {
-    /// The actual standing. The higher, the better.
+    /// The standing as last recorded. The higher, the better. Negative
+    /// values decay with time; read [`Self::standing_now`] for the value that
+    /// applies now.
     pub standing: i32,
+
     pub latest_punishment: Option<(NegativePeerSanction, SystemTime)>,
+
     pub latest_reward: Option<(PositivePeerSanction, SystemTime)>,
+
     pub peer_tolerance: i32,
 }
 #[derive(Debug, Clone, Copy, Default)]
@@ -265,6 +274,10 @@ impl PeerStanding {
     /// Sanction peer. If (and only if) the peer is now in
     /// [bad standing](Self::is_bad), returns an error.
     pub fn sanction(&mut self, sanction: PeerSanction) -> Result<(), StandingExceedsBanThreshold> {
+        // Reduce negative standing with time-decay, before applying this
+        // sanction.
+        self.realise_decay();
+
         self.standing = self
             .standing
             .saturating_add(sanction.severity())
@@ -292,11 +305,62 @@ impl PeerStanding {
     }
 
     pub fn is_negative(&self) -> bool {
-        self.standing.is_negative()
+        self.standing_now().is_negative()
     }
 
+    /// The number of whole half-lives that have passed since the peer was last
+    /// punished.
+    fn half_lives_since_punishment(&self) -> u32 {
+        let Some((_sanction, punished_at)) = self.latest_punishment else {
+            return 0;
+        };
+
+        // A clock that has moved backwards returns 0 half lives.
+        let Ok(elapsed) = punished_at.elapsed() else {
+            return 0;
+        };
+
+        u32::try_from(elapsed.as_secs() / STANDING_HALF_LIFE.as_secs()).unwrap_or(u32::MAX)
+    }
+
+    /// The standing as it applies now.
+    ///
+    /// Negative standing decays toward zero, halving every
+    /// [`STANDING_HALF_LIFE`], so that a peer sanctioned once is not shut out
+    /// for the lifetime of the database. Positive standing does not decay.
+    pub fn standing_now(&self) -> i32 {
+        if !self.standing.is_negative() {
+            return self.standing;
+        }
+
+        // Arithmetic shift halves toward negative infinity, which errs on the
+        // side of keeping the sanction.
+        match self.half_lives_since_punishment() {
+            0 => self.standing,
+            half_lives if half_lives >= i32::BITS => 0,
+            half_lives => self.standing >> half_lives,
+        }
+    }
+
+    /// Reduce any negative standing with the right number of half lives.
+    fn realise_decay(&mut self) {
+        let half_lives = self.half_lives_since_punishment();
+        if half_lives == 0 {
+            return;
+        }
+
+        self.standing = self.standing_now();
+        if let Some((sanction, punished_at)) = self.latest_punishment {
+            let consumed = STANDING_HALF_LIFE.saturating_mul(half_lives);
+            self.latest_punishment = punished_at
+                .checked_add(consumed)
+                .map(|advanced| (sanction, advanced));
+        }
+    }
+
+    /// Whether the peer is currently prevented from connecting.
     pub fn is_bad(&self) -> bool {
-        self.standing <= -self.peer_tolerance
+        self.standing_now() <= -self.peer_tolerance
     }
 
     pub fn is_good(&self) -> bool {
@@ -306,7 +370,7 @@ impl PeerStanding {
 
 impl Display for PeerStanding {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.standing)
+        write!(f, "{}", self.standing_now())
     }
 }
 
@@ -1093,10 +1157,200 @@ impl PeerStanding {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use proptest::prop_assert;
+    use proptest::prop_assert_eq;
     use rand::Rng;
     use rand::rng;
+    use test_strategy::proptest;
 
     use super::*;
+
+    /// Build a standing that was punished into the given value, `ago` in the
+    /// past.
+    fn punished(standing: i32, tolerance: u16, ago: Duration) -> PeerStanding {
+        PeerStanding {
+            standing,
+            latest_punishment: Some((
+                NegativePeerSanction::InvalidBlock((0u64.into(), Digest::default())),
+                SystemTime::now() - ago,
+            )),
+            latest_reward: None,
+            peer_tolerance: i32::from(tolerance),
+        }
+    }
+
+    #[test]
+    fn a_fresh_sanction_does_not_decay() {
+        let standing = punished(-1000, 1000, Duration::from_secs(0));
+        assert_eq!(-1000, standing.standing_now());
+        assert!(standing.is_bad());
+    }
+
+    #[test]
+    fn negative_standing_halves_every_half_life() {
+        let tolerance = 1000;
+        for (half_lives, expected) in [(1, -500), (2, -250), (3, -125)] {
+            let standing = punished(
+                -1000,
+                tolerance,
+                STANDING_HALF_LIFE * half_lives + Duration::from_secs(60),
+            );
+            assert_eq!(
+                expected,
+                standing.standing_now(),
+                "after {half_lives} half-lives"
+            );
+        }
+    }
+
+    #[test]
+    fn a_banned_peer_is_admitted_after_one_half_life() {
+        let just_banned = punished(-1000, 1000, Duration::from_secs(0));
+        assert!(just_banned.is_bad());
+
+        let served = punished(-1000, 1000, STANDING_HALF_LIFE + Duration::from_secs(60));
+        assert!(!served.is_bad(), "standing should have halved to -500");
+    }
+
+    #[test]
+    fn reading_the_standing_does_not_compound_the_decay() {
+        let standing = punished(-1000, 1000, STANDING_HALF_LIFE + Duration::from_secs(60));
+        assert_eq!(standing.standing_now(), standing.standing_now());
+        assert_eq!(-1000, standing.standing, "the stored value is untouched");
+    }
+
+    #[test]
+    fn a_new_sanction_is_added_to_the_decayed_standing_not_the_read_standing() {
+        let mut standing = punished(-1000, 1000, STANDING_HALF_LIFE + Duration::from_secs(60));
+        let sanction = NegativePeerSanction::InvalidBlock((0u64.into(), Digest::default()));
+        let severity = sanction.severity();
+
+        let _ = standing.sanction(PeerSanction::Negative(sanction));
+
+        assert_eq!(-500 + severity, standing.standing);
+    }
+
+    #[test]
+    fn positive_standing_does_not_decay() {
+        let mut standing = PeerStanding::new(1000);
+        standing.standing = 500;
+        standing.latest_punishment = Some((
+            NegativePeerSanction::InvalidBlock((0u64.into(), Digest::default())),
+            SystemTime::now() - STANDING_HALF_LIFE * 10,
+        ));
+
+        assert_eq!(500, standing.standing_now());
+    }
+
+    #[proptest]
+    fn decay_moves_negative_standing_toward_zero(
+        #[strategy(1u16..=u16::MAX)] tolerance: u16,
+        #[strategy(1..=i32::from(#tolerance))] penalty: i32,
+        #[strategy(0u32..100_000)] hours_elapsed: u32,
+    ) {
+        let standing = punished(
+            -penalty,
+            tolerance,
+            Duration::from_secs(3600) * hours_elapsed,
+        );
+        let now = standing.standing_now();
+
+        prop_assert!(now <= 0, "decay must not manufacture positive standing");
+        prop_assert!(
+            now >= standing.standing,
+            "decay must not make standing more negative"
+        );
+    }
+
+    #[proptest]
+    fn decay_is_monotonic_in_elapsed_time(
+        #[strategy(1u16..=u16::MAX)] tolerance: u16,
+        #[strategy(1..=i32::from(#tolerance))] penalty: i32,
+        #[strategy(0u32..50_000)] earlier_hours: u32,
+        #[strategy(0u32..50_000)] extra_hours: u32,
+    ) {
+        let hour = Duration::from_secs(3600);
+        let earlier = punished(-penalty, tolerance, hour * earlier_hours);
+        let later = punished(-penalty, tolerance, hour * (earlier_hours + extra_hours));
+
+        prop_assert!(earlier.standing_now() <= later.standing_now());
+    }
+
+    #[proptest]
+    fn standing_now_is_idempotent(
+        #[strategy(1u16..=u16::MAX)] tolerance: u16,
+        #[strategy(1..=i32::from(#tolerance))] penalty: i32,
+        #[strategy(0u32..100_000)] hours_elapsed: u32,
+    ) {
+        let standing = punished(
+            -penalty,
+            tolerance,
+            Duration::from_secs(3600) * hours_elapsed,
+        );
+
+        prop_assert_eq!(standing.standing_now(), standing.standing_now());
+    }
+
+    #[proptest]
+    fn realising_decay_idempotency(
+        #[strategy(1u16..=u16::MAX)] tolerance: u16,
+        #[strategy(1..=i32::from(#tolerance))] penalty: i32,
+        #[strategy(0u32..100_000)] hours_elapsed: u32,
+    ) {
+        let mut once = punished(
+            -penalty,
+            tolerance,
+            Duration::from_secs(3600) * hours_elapsed,
+        );
+        once.realise_decay();
+
+        let mut twice = once;
+        twice.realise_decay();
+
+        prop_assert_eq!(once.standing, twice.standing);
+    }
+
+    #[proptest]
+    fn crash_never_improves_standing(
+        #[strategy(1u16..=u16::MAX)] tolerance: u16,
+        #[strategy(1..=i32::from(#tolerance))] penalty: i32,
+        #[strategy(0u32..100_000)] hours_elapsed: u32,
+    ) {
+        let mut standing = punished(
+            -penalty,
+            tolerance,
+            Duration::from_secs(3600) * hours_elapsed,
+        );
+        let before = standing.standing_now();
+
+        let _ = standing.sanction(PeerSanction::Negative(
+            NegativePeerSanction::NoStandingFoundMaybeCrash,
+        ));
+
+        prop_assert!(
+            standing.standing_now() <= before,
+            "standing went from {} to {}",
+            before,
+            standing.standing_now()
+        );
+    }
+
+    #[test]
+    fn a_backwards_clock_does_not_clear_a_sanction() {
+        let mut standing = punished(-1000, 1000, Duration::from_secs(0));
+        standing.latest_punishment = standing
+            .latest_punishment
+            .map(|(s, _)| (s, SystemTime::now() + Duration::from_secs(60 * 60)));
+
+        assert_eq!(-1000, standing.standing_now());
+        assert!(standing.is_bad());
+    }
+
+    #[test]
+    fn many_half_lives_decay_negative_standing_towards_zero() {
+        let standing = punished(-1000, 1000, Duration::from_secs(10_000 * 24 * 24 * 60));
+        assert_eq!(0, standing.standing_now());
+    }
 
     #[test]
     fn check_pow_rejects_first_block_with_more_work_than_last() {

@@ -29,6 +29,9 @@ pub(crate) const ADDRESS_BOOK_MAX_SIZE: usize = 1000_usize;
 pub(crate) struct Peer {
     /// Addresses the peer is listening on, as reported by Identify.
     /// Unlike the active connection, these are persistent locations.
+    ///
+    /// These are *self-declared and unverified*: a peer may name any third
+    /// party's IP here.
     pub(crate) listen_addresses: Vec<Multiaddr>,
 
     /// The software version of the node (e.g., "neptune-cash/0.6.0").

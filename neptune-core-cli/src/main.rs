@@ -587,7 +587,7 @@ async fn main() -> Result<()> {
         Command::Network(NetworkCommand::AllPunishedPeers) => {
             let peer_sanctions = client.all_punished_peers(ctx, token).await??;
             for (ip, sanction) in peer_sanctions {
-                let standing = sanction.standing;
+                let standing = sanction.standing_now();
                 let latest_sanction_str = match sanction.latest_punishment {
                     Some((sanction, _timestamp)) => sanction.to_string(),
                     None => String::default(),

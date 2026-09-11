@@ -373,10 +373,14 @@ impl Widget for PeersScreen {
             PeerSortColumn::Version => {
                 pi.sort_by(|a, b| self.sort_order.compare(a.version(), b.version()))
             }
-            PeerSortColumn::Standing => pi.sort_by(|a, b| {
-                self.sort_order
-                    .compare(a.standing().standing, b.standing().standing)
-            }),
+            // Current standing depends on the clock. So each standing may only
+            // be calculated once. Otherwise this sorting could panic.
+            PeerSortColumn::Standing => {
+                pi.sort_by_cached_key(|p| p.standing().standing_now());
+                if let SortOrder::Descending = self.sort_order {
+                    pi.reverse();
+                }
+            }
             PeerSortColumn::ConnectionEstablished => pi.sort_by(|a, b| {
                 self.sort_order
                     .compare(a.connection_established(), b.connection_established())

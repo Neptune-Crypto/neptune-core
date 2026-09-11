@@ -14,7 +14,6 @@ use chrono::DateTime;
 use chrono::Utc;
 use futures::SinkExt;
 use futures::TryStreamExt;
-use libp2p::multiaddr::Protocol;
 use libp2p::Multiaddr;
 use neptune_p2p::peer::handshake_data::VersionString;
 use neptune_p2p::peer::peer_info::pseudorandom_peer_id;
@@ -46,6 +45,7 @@ use crate::application::config::parser::multiaddr::socketaddr_to_multiaddr;
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
 use crate::application::loops::peer_loop::channel::PeerTaskToMain;
 use crate::application::loops::peer_loop::PeerLoopHandler;
+use crate::application::network::observed_ips::attributable_ip;
 use crate::state::GlobalStateLock;
 use crate::HandshakeData;
 use crate::MAGIC_STRING_REQUEST;
@@ -624,9 +624,10 @@ where
     Ok(())
 }
 
-/// Remove peer from state. This function must be called every time
-/// a peer is disconnected. Whether this happens through a panic
-/// in the peer task or through a regular disconnect.
+/// Remove peer from state and persist its new standing.
+///
+/// This function must be called every time a peer is disconnected. Whether this
+/// happens through a panic in the peer task or/ through a regular disconnect.
 ///
 /// This function is shared between the legacy peer-to-peer stack and the libp2p
 /// network stack.
@@ -656,11 +657,26 @@ pub(crate) async fn close_peer_connected_callback(
 
     // Store any new peer-standing to database
     let peer_info_writeback = global_state_mut.net.peer_map.remove(&peer_id);
+
+    let maybe_ip = attributable_ip(&peer_address);
     let new_standing = if let Some(new) = peer_info_writeback {
         new.standing()
     } else {
         error!("Could not find peer standing for {peer_address}");
-        let mut standing = PeerStanding::new(cli_arguments.peer_tolerance);
+
+        // Couldn't find an entry in the peer map. So sanction what's persisted
+        // instead of potentially clearing a negative standing.
+        let stored = match maybe_ip {
+            Some(ip) => {
+                global_state_mut
+                    .net
+                    .get_peer_standing_from_database(ip)
+                    .await
+            }
+            None => None,
+        };
+        let mut standing =
+            stored.unwrap_or_else(|| PeerStanding::new(cli_arguments.peer_tolerance));
         let sanction = NegativePeerSanction::NoStandingFoundMaybeCrash;
 
         // Don't return early: _must_ send message to main loop at the end of this
@@ -672,15 +688,10 @@ pub(crate) async fn close_peer_connected_callback(
     };
     debug!("Fetched peer info standing {new_standing} for peer {peer_address}");
 
-    let maybe_ip = peer_address.iter().find_map(|p| match p {
-        Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
-        Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
-        _ => None,
-    });
     if let Some(ip) = maybe_ip {
         global_state_mut
             .net
-            .write_peer_standing_on_decrease(ip, new_standing)
+            .write_peer_standing(ip, new_standing)
             .await;
     }
 
@@ -731,6 +742,82 @@ mod tests {
     use crate::tests::shared_tokio_runtime;
     use crate::MAGIC_STRING_REQUEST;
     use crate::MAGIC_STRING_RESPONSE;
+
+    async fn standing_written_at_close(address: Multiaddr, ip: IpAddr) -> Option<PeerStanding> {
+        use neptune_p2p::peer::peer_info::PeerConnectionInfo;
+        use neptune_wallet::wallet_entropy::WalletEntropy;
+
+        use crate::tests::shared::globalstate::mock_genesis_global_state;
+
+        let mut state =
+            mock_genesis_global_state(0, WalletEntropy::new_random(), cli_args::Args::default())
+                .await;
+
+        let sanctioned = PeerStanding::init(
+            -50,
+            Some((NegativePeerSanction::DifferentGenesis, SystemTime::now())),
+            None,
+            i32::from(cli_args::Args::default().peer_tolerance),
+        );
+        let peer_info = PeerInfo::new(
+            PeerConnectionInfo::new(Some(8080), address.clone(), false),
+            &get_dummy_handshake_data_for_genesis(Network::Main),
+            SystemTime::now(),
+            cli_args::Args::default().peer_tolerance,
+        )
+        .with_standing(sanctioned);
+        state.lock_guard_mut().await.net.peer_map.insert(
+            pseudorandom_peer_id(&get_dummy_socket_address(0)),
+            peer_info,
+        );
+
+        let (to_main_tx, mut _to_main_rx) = tokio::sync::mpsc::channel(16);
+        close_peer_connected_callback(state.clone(), address, &to_main_tx).await;
+
+        let stored = state
+            .lock_guard()
+            .await
+            .net
+            .get_peer_standing_from_database(ip)
+            .await;
+
+        stored
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn standing_of_a_direct_peer_is_persisted_at_close() {
+        let ip: IpAddr = "203.0.113.66".parse().unwrap();
+        let address: Multiaddr = "/ip4/203.0.113.66/tcp/9798".parse().unwrap();
+
+        let stored = standing_written_at_close(address, ip).await;
+
+        assert_eq!(
+            Some(-50),
+            stored.map(|s| s.standing),
+            "a direct peer's session standing must be persisted"
+        );
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn standing_of_a_relayed_peer_is_not_pinned_on_the_relays_ip() {
+        let relay_ip: IpAddr = "203.0.113.66".parse().unwrap();
+        use libp2p::multiaddr::Protocol;
+
+        let address = Multiaddr::empty()
+            .with(Protocol::Ip4("203.0.113.66".parse().unwrap()))
+            .with(Protocol::Tcp(9798))
+            .with(Protocol::P2pCircuit);
+
+        let stored = standing_written_at_close(address, relay_ip).await;
+
+        assert_eq!(
+            None,
+            stored.map(|s| s.standing),
+            "the relay's IP must not inherit the relayed peer's standing"
+        );
+    }
 
     #[test]
     fn time_difference_in_seconds_simple() {
@@ -940,7 +1027,7 @@ mod tests {
             .lock_guard_mut()
             .await
             .net
-            .write_peer_standing_on_decrease(peer_sa.ip(), bad_standing)
+            .write_peer_standing(peer_sa.ip(), bad_standing)
             .await;
 
         status = check_if_connection_is_allowed(
@@ -1467,7 +1554,7 @@ mod tests {
             .lock_guard_mut()
             .await
             .net
-            .write_peer_standing_on_decrease(peer_address.ip(), bad_standing)
+            .write_peer_standing(peer_address.ip(), bad_standing)
             .await;
 
         let answer = answer_peer_inner(
