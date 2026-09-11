@@ -5699,9 +5699,15 @@ mod tests {
                 _,
                 state_lock,
                 _hsd,
-            ) = get_test_genesis_setup(1, cli_args::Args::default_with_network(network))
-                .await
-                .unwrap();
+            ) = get_test_genesis_setup(
+                1,
+                cli_args::Args {
+                    min_relay_pctx_fee_per_input: NativeCurrencyAmount::coins(0),
+                    ..cli_args::Args::default_with_network(network)
+                },
+            )
+            .await
+            .unwrap();
 
             let spending_key = state_lock
                 .lock_guard()
@@ -5911,9 +5917,15 @@ mod tests {
                     _,
                     mut state_lock,
                     _hsd,
-                ) = get_test_genesis_setup(1, cli_args::Args::default_with_network(network))
-                    .await
-                    .unwrap();
+                ) = get_test_genesis_setup(
+                    1,
+                    cli_args::Args {
+                        min_relay_pctx_fee_per_input: NativeCurrencyAmount::coins(0),
+                        ..cli_args::Args::default_with_network(network)
+                    },
+                )
+                .await
+                .unwrap();
                 let consensus_rule_set =
                     ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
                 let fee: NativeCurrencyAmount = 0.2f64.try_into().unwrap();
