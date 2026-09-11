@@ -567,6 +567,17 @@ pub(crate) mod tests {
         assert!(ConsensusRuleSet::TvmProofVersion1.use_parent_difficulty());
         assert!(!ConsensusRuleSet::HardforkBeta.use_parent_difficulty());
         assert!(!ConsensusRuleSet::HardforkGamma.use_parent_difficulty());
+        assert!(!ConsensusRuleSet::HardforkDelta.use_parent_difficulty());
+    }
+
+    #[test]
+    fn expected_tx_retirement_rule() {
+        assert!(!ConsensusRuleSet::Reboot.enforce_transaction_retirement());
+        assert!(!ConsensusRuleSet::HardforkAlpha.enforce_transaction_retirement());
+        assert!(!ConsensusRuleSet::TvmProofVersion1.enforce_transaction_retirement());
+        assert!(!ConsensusRuleSet::HardforkBeta.enforce_transaction_retirement());
+        assert!(!ConsensusRuleSet::HardforkGamma.enforce_transaction_retirement());
+        assert!(ConsensusRuleSet::HardforkDelta.enforce_transaction_retirement());
     }
 
     #[test]
