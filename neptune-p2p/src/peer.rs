@@ -171,7 +171,7 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::OversizedAnnouncement => -10,
             NegativePeerSanction::OversizedBlock => -50,
             NegativePeerSanction::NonMinedTransactionHasCoinbase => -10,
-            NegativePeerSanction::NoStandingFoundMaybeCrash => -10,
+            NegativePeerSanction::NoStandingFoundMaybeCrash => -20,
             NegativePeerSanction::BlockProposalNotFound => -1,
             NegativePeerSanction::InvalidBlockProposal => -1,
             NegativePeerSanction::RequestForUnknownBlock => -5,
