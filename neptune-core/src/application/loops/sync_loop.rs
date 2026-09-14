@@ -149,6 +149,7 @@ impl SyncLoop {
         // The tip-successors subtask sends tip-successors to the main loop one
         // by one. Its return value comes to the sync loop over this channel.
         let mut maybe_successors_subtask: Option<JoinHandle<()>> = None;
+        let mut maybe_block_request_task: Option<JoinHandle<()>> = None;
         let (successors_sender, mut successors_receiver) = mpsc::channel(1);
 
         // Track the time of disconnect of the last peer.
@@ -414,9 +415,9 @@ impl SyncLoop {
                                 // control to the loop ASAP.
                                 let moved_download_state = self.download_state.clone();
                                 let moved_main_channel_sender = self.main_channel_sender.clone();
-                                let _ = tokio::task::spawn(
+                                tokio::task::spawn(
                                     Self::fetch_and_send_block(moved_main_channel_sender, moved_download_state, peer_handle, height, requester_anchor)
-                                ).await;
+                                );
                             }
                         }
                         MainToSync::FastForward{ new_tip } => {
@@ -432,6 +433,15 @@ impl SyncLoop {
 
                 // event: fast timer ticks
                 _ = fast_ticker.tick() => {
+                    // A subtask that panicked will never report back. Forget
+                    // it, such that a new one can be started.
+                    if maybe_successors_subtask.as_ref().is_some_and(JoinHandle::is_finished)
+                        && successors_receiver.is_empty()
+                    {
+                        if let Err(e) = maybe_successors_subtask.take().expect("checked above").await {
+                            tracing::error!("Successors subtask ended abnormally: {e}");
+                        }
+                    }
 
                     // If we are finished and there are no messages waiting to
                     // be read, then we can exit.
@@ -512,18 +522,18 @@ impl SyncLoop {
                         }
 
                         // Flush queue of pending block requests. But do this in
-                        // another task so control passes back to the loop.
-                        if !pending_block_requests.is_empty() {
+                        // another task so control passes back to the loop, and
+                        // one at a time so the peers are not flooded.
+                        let request_in_flight = maybe_block_request_task.as_ref().is_some_and(|task| !task.is_finished());
+                        if !pending_block_requests.is_empty() && !request_in_flight {
                             tracing::trace!("sync loop is starting a new random blocks request");
                             let moved_pending_block_requests = pending_block_requests.clone();
                             let moved_coverage = self.download_state.coverage();
                             let moved_peers = self.peers.clone();
                             let moved_channel_to_main = self.main_channel_sender.clone();
-                            if let Err(e) = tokio::task::spawn(
+                            maybe_block_request_task = Some(tokio::task::spawn(
                                 Self::request_random_blocks(moved_coverage, moved_peers, moved_channel_to_main, moved_pending_block_requests)
-                            ).await {
-                                tracing::error!("Failed to request random blocks from peers: {e}.");
-                            }
+                            ));
 
                             pending_block_requests = vec![];
                         }
@@ -1503,6 +1513,26 @@ mod tests {
             .expect("sync loop must terminate when a tip-successor fails validation")
             .unwrap();
         main_loop_handle.abort();
+    }
+
+    #[tracing_test::traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn panicking_validation_does_not_stall_sync() {
+        let mut rng = rng();
+        let mut current_tip = rng.random::<Block>();
+        current_tip.set_header_height(BlockHeight::from(rng.random_range(0u64..10000)));
+        let sync_target_height = BlockHeight::from(current_tip.header().height.value() + 10);
+        let mut main_loop = MockMainLoop::new(current_tip, sync_target_height).await;
+        main_loop
+            .sync_loop_handle
+            .set_block_validator(BlockValidator::TestPanicOnce(Arc::default()));
+
+        main_loop.connect(MockPeer::Good(GoodPeer::new())).await;
+        main_loop.start_sync_loop();
+        tokio::time::timeout(Duration::from_secs(20), main_loop.run())
+            .await
+            .expect("sync must finish after the subtask panicked once");
+        assert!(main_loop.sync_is_finished());
     }
 
     /// A block that fails validation must not bind its height slot. If it does,

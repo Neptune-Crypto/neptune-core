@@ -35,6 +35,10 @@ pub(crate) enum BlockValidator {
     /// being synced.
     #[cfg(test)]
     TestRejectDigest(tasm_lib::prelude::Digest),
+    /// Panics on the first verification and accepts every later one; for
+    /// testing that the sync loop survives a panicking subtask.
+    #[cfg(test)]
+    TestPanicOnce(std::sync::Arc<std::sync::atomic::AtomicBool>),
 }
 
 impl BlockValidator {
@@ -66,6 +70,15 @@ impl BlockValidator {
 
             #[cfg(test)]
             BlockValidator::TestRejectDigest(digest) => successor.hash() != *digest,
+
+            #[cfg(test)]
+            BlockValidator::TestPanicOnce(has_panicked) => {
+                assert!(
+                    has_panicked.swap(true, std::sync::atomic::Ordering::SeqCst),
+                    "test validator panics on its first call"
+                );
+                true
+            }
         }
     }
 
@@ -80,7 +93,8 @@ impl BlockValidator {
             #[cfg(test)]
             BlockValidator::Test
             | BlockValidator::TestReject
-            | BlockValidator::TestRejectDigest(_) => true,
+            | BlockValidator::TestRejectDigest(_)
+            | BlockValidator::TestPanicOnce(_) => true,
         }
     }
 }
