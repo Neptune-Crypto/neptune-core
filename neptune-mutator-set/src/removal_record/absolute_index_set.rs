@@ -140,12 +140,19 @@ impl AbsoluteIndexSet {
     /// active part of the Bloom filter.
     ///
     /// Returns an error if a removal index is a future value, i.e. one that's
-    /// not yet covered by the active window.
+    /// not yet covered by the active window, or lies beyond any valid chunk
+    /// index.
     #[expect(clippy::type_complexity)]
     pub(crate) fn split_by_activity(
         &self,
         mutator_set: &MutatorSetAccumulator,
     ) -> Result<(HashMap<u64, Vec<u128>>, Vec<u128>), MutatorSetError> {
+        // Verify that the chunk index is a valid u64.
+        let chunk_index_fits = |index: u128| u64::try_from(index / u128::from(CHUNK_SIZE)).is_ok();
+        if !self.to_array().into_iter().all(chunk_index_fits) {
+            return Err(MutatorSetError::AbsoluteIndexExceedsTheoreticalBound);
+        }
+
         let (aw_chunk_index_min, aw_chunk_index_max) = mutator_set.active_window_chunk_interval();
         let (inactive, active): (HashMap<_, _>, HashMap<_, _>) =
             indices_to_hash_map(&self.to_array())
@@ -365,6 +372,20 @@ mod tests {
             AbsoluteIndexSet::new_raw(0, [WINDOW_SIZE; NUM_TRIALS as usize])
                 .aocl_range()
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn index_whose_chunk_index_overflows_u64_is_rejected() {
+        let overflowing_abs_index = (u128::from(u64::MAX) + 1) * u128::from(CHUNK_SIZE);
+        let overflowing_abs_index =
+            AbsoluteIndexSet::new_raw(overflowing_abs_index, [0; NUM_TRIALS as usize]);
+
+        assert_eq!(
+            MutatorSetError::AbsoluteIndexExceedsTheoreticalBound,
+            overflowing_abs_index
+                .split_by_activity(&MutatorSetAccumulator::default())
+                .unwrap_err()
         );
     }
 
