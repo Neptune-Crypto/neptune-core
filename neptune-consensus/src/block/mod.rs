@@ -991,6 +991,32 @@ impl Block {
         self.pow_verify(parent_threshold, consensus_rule_set)
     }
 
+    /// Whether the block's proof of work meets the difficulty dictated by its
+    /// own header.
+    ///
+    /// If the block follows a rule set where it dictates its own threshold,
+    /// this is equivalent to [`Self::has_proof_of_work`]. This is true for all
+    /// blocks since the activation of [`ConsensusRuleSet::HardforkBeta`].
+    ///
+    /// Always returns true when the parents dictates the threshold, or on
+    /// networks with non-standard proof-of-work rules.
+    ///
+    /// Does *not* guarantee that the block's header contains the right
+    /// difficulty.
+    pub fn has_own_proof_of_work(&self, network: Network) -> bool {
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, self.header().height);
+        if consensus_rule_set.use_parent_difficulty()
+            || network.difficulty_reset_interval().is_some()
+            || network.allows_mock_pow()
+        {
+            return true;
+        }
+
+        let difficulty = self.header().difficulty;
+        difficulty >= Difficulty::MINIMUM
+            && self.pow_verify(difficulty.target(), consensus_rule_set)
+    }
+
     /// Produce the MAST authentication paths for the `pow` field on
     /// [`BlockHeader`], against the block MAST hash.
     pub fn pow_mast_paths(&self) -> PowMastPaths {
@@ -2011,6 +2037,21 @@ pub(crate) mod tests {
                  under {consensus_rule_set}"
             );
         }
+    }
+
+    #[test]
+    fn own_proof_of_work_is_checked_where_the_block_dictates_its_threshold() {
+        use crate::consensus_rule_set::BLOCK_HEIGHT_HARDFORK_DELTA_MAIN_NET;
+
+        let network = Network::Main;
+        let genesis = Block::genesis(network);
+        let mut block = invalid_empty_block(&genesis, network);
+        block.set_header_height(BLOCK_HEIGHT_HARDFORK_DELTA_MAIN_NET);
+        block.set_difficulty_related_fields(block.header().timestamp, Difficulty::MINIMUM, None);
+        assert!(!block.has_own_proof_of_work(network));
+
+        block.satisfy_pow(Difficulty::MINIMUM, ConsensusRuleSet::HardforkDelta);
+        assert!(block.has_own_proof_of_work(network));
     }
 
     #[test]
