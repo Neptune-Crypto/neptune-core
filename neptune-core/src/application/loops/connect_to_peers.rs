@@ -639,65 +639,66 @@ pub(crate) async fn close_peer_connected_callback(
     peer_address: Multiaddr,
     to_main_tx: &mpsc::Sender<PeerTaskToMain>,
 ) {
-    let cli_arguments = global_state_lock.cli().clone();
-    let mut global_state_mut = global_state_lock.lock_guard_mut().await;
+    let peer_tolerance = global_state_lock.cli().peer_tolerance;
+    let (sync_mode_is_active, peer_id) = {
+        let mut global_state_mut = global_state_lock.lock_guard_mut().await;
 
-    // Find the matching peer id
-    let Some(peer_id) = global_state_mut
-        .net
-        .peer_map
-        .iter()
-        .find(|(_peer_id, peer_info)| peer_info.address() == peer_address)
-        .map(|(peer_id, _)| peer_id)
-        .copied()
-    else {
-        error!("Could not find peer id for {peer_address}");
-        return;
-    };
-
-    // Store any new peer-standing to database
-    let peer_info_writeback = global_state_mut.net.peer_map.remove(&peer_id);
-
-    let maybe_ip = attributable_ip(&peer_address);
-    let new_standing = if let Some(new) = peer_info_writeback {
-        new.standing()
-    } else {
-        error!("Could not find peer standing for {peer_address}");
-
-        // Couldn't find an entry in the peer map. So sanction what's persisted
-        // instead of potentially clearing a negative standing.
-        let stored = match maybe_ip {
-            Some(ip) => {
-                global_state_mut
-                    .net
-                    .get_peer_standing_from_database(ip)
-                    .await
-            }
-            None => None,
-        };
-        let mut standing =
-            stored.unwrap_or_else(|| PeerStanding::new(cli_arguments.peer_tolerance));
-        let sanction = NegativePeerSanction::NoStandingFoundMaybeCrash;
-
-        // Don't return early: _must_ send message to main loop at the end of this
-        // function.
-        // If the peer has now reached bad standing, the connection to it should be
-        // dropped, which is currently happening anyway.
-        let _ = standing.sanction(PeerSanction::Negative(sanction));
-        standing
-    };
-    debug!("Fetched peer info standing {new_standing} for peer {peer_address}");
-
-    if let Some(ip) = maybe_ip {
-        global_state_mut
+        // Find the matching peer id
+        let Some(peer_id) = global_state_mut
             .net
-            .write_peer_standing(ip, new_standing)
-            .await;
-    }
+            .peer_map
+            .iter()
+            .find(|(_peer_id, peer_info)| peer_info.address() == peer_address)
+            .map(|(peer_id, _)| peer_id)
+            .copied()
+        else {
+            error!("Could not find peer id for {peer_address}");
+            return;
+        };
 
-    let sync_mode_is_active = global_state_mut.net.sync_anchor.is_some();
-    drop(global_state_mut); // avoid holding across mpsc::Sender::send()
-    debug!("Stored peer info standing {new_standing} for peer {peer_address}");
+        // Store any new peer-standing to database
+        let peer_info_writeback = global_state_mut.net.peer_map.remove(&peer_id);
+
+        let maybe_ip = attributable_ip(&peer_address);
+        let new_standing = if let Some(new) = peer_info_writeback {
+            new.standing()
+        } else {
+            error!("Could not find peer standing for {peer_address}");
+
+            // Couldn't find an entry in the peer map. So sanction what's persisted
+            // instead of potentially clearing a negative standing.
+            let stored = match maybe_ip {
+                Some(ip) => {
+                    global_state_mut
+                        .net
+                        .get_peer_standing_from_database(ip)
+                        .await
+                }
+                None => None,
+            };
+            let mut standing = stored.unwrap_or_else(|| PeerStanding::new(peer_tolerance));
+            let sanction = NegativePeerSanction::NoStandingFoundMaybeCrash;
+
+            // Don't return early: _must_ send message to main loop at the end of this
+            // function.
+            // If the peer has now reached bad standing, the connection to it should be
+            // dropped, which is currently happening anyway.
+            let _ = standing.sanction(PeerSanction::Negative(sanction));
+            standing
+        };
+        debug!("Fetched peer info standing {new_standing} for peer {peer_address}");
+
+        if let Some(ip) = maybe_ip {
+            global_state_mut
+                .net
+                .write_peer_standing(ip, new_standing)
+                .await;
+        }
+
+        debug!("Stored peer info standing {new_standing} for peer {peer_address}");
+
+        (global_state_mut.net.sync_anchor.is_some(), peer_id)
+    };
 
     // If in sync mode, tell sync loop about dropped peer.
     if sync_mode_is_active {

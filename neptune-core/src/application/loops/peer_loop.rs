@@ -2667,6 +2667,34 @@ impl PeerLoopHandler {
         <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
         <S as TryStream>::Error: std::error::Error,
     {
+        // If we are in sync mode, tell the main loop there is a new peer so
+        // that it can relay the message to the sync loop. Should not happen
+        // while global state lock is being held, as the channel message sending
+        // might (theoretically) be blocked.
+        let (is_syncing, own_cumulative_proof_of_work) = self
+            .global_state_lock
+            .lock(|s| {
+                (
+                    s.net.sync_anchor.is_some(),
+                    s.chain.tip().header().cumulative_proof_of_work,
+                )
+            })
+            .await;
+        if is_syncing {
+            debug!("We are syncing, so tell the sync loop about the new peer.");
+            self.to_main_tx
+                .send(PeerTaskToMain::NewPeer(self.peer_id))
+                .await?;
+        }
+
+        // If peer indicates more canonical block, request a block notification
+        // to catch up ASAP.
+        if self.peer_handshake_data.tip_header.cumulative_proof_of_work
+            > own_cumulative_proof_of_work
+        {
+            peer.send(PeerMessage::BlockNotificationRequest).await?;
+        }
+
         loop {
             select! {
                 // Handle peer messages
@@ -2775,7 +2803,7 @@ impl PeerLoopHandler {
     ///   * acquires `global_state_lock` for write
     pub(crate) async fn run_wrapper<S>(
         &mut self,
-        mut peer: S,
+        peer: S,
         from_main_rx: broadcast::Receiver<MainToPeerTask>,
     ) -> Result<()>
     where
@@ -2821,7 +2849,7 @@ impl PeerLoopHandler {
         // need to make the a check again while holding a write-lock, since
         // we're modifying `peer_map` here. Holding a read-lock doesn't work
         // since it would have to be dropped before acquiring the write-lock.
-        let is_syncing = {
+        {
             let mut global_state = self.global_state_lock.lock_guard_mut().await;
             let peer_map = &mut global_state.net.peer_map;
             if peer_map
@@ -2840,44 +2868,16 @@ impl PeerLoopHandler {
             }
 
             // Inserting a peer into the peer map is where the connection is
-            // considered fully established. This code is prohibited from
-            // crashing or returning between here and the catch-unwind running
-            // of the peer loop below.
+            // considered fully established on the application level. This code
+            // is prohibited from crashing or returning between here and the
+            // connection-close callback below since the code must guarantee
+            // that peers are always removed from this map when they are
+            // disconnected, for any reason.
             peer_map.insert(self.peer_id, new_peer);
-
-            global_state.net.sync_anchor.is_some()
-        };
-
-        // If we are in sync mode, tell the main loop there is a new peer so
-        // that it can relay the message to the sync loop. Should not happen
-        // while global state lock is being held, as the channel message sending
-        // might (theoretically) be blocked.
-        if is_syncing {
-            debug!("We are syncing, so tell the sync loop about the new peer.");
-            self.to_main_tx
-                .send(PeerTaskToMain::NewPeer(self.peer_id))
-                .await?;
         }
 
         // `MutablePeerState` contains the part of the peer-loop's state that is mutable
         let mut peer_state = MutablePeerState::new(self.peer_handshake_data.tip_header.height);
-
-        // If peer indicates more canonical block, request a block notification to catch up ASAP
-        if self.peer_handshake_data.tip_header.cumulative_proof_of_work
-            > self
-                .global_state_lock
-                .lock_guard()
-                .await
-                .chain
-                .tip()
-                .kernel
-                .header
-                .cumulative_proof_of_work
-        {
-            // Send block notification request to catch up ASAP, in case we're
-            // behind the newly-connected peer.
-            peer.send(PeerMessage::BlockNotificationRequest).await?;
-        }
 
         // Run the peer loop inside a catch-unwind, so that we can guarantee
         // that the close-callback is run afterwards -- even in the case of
@@ -2894,7 +2894,7 @@ impl PeerLoopHandler {
             Ok(inner_res) => inner_res,
             Err(e) => {
                 error!(
-                    "Peer task (incoming) for {} panicked. Invoking close connection callback",
+                    "Peer task for {} panicked. Invoking close connection callback",
                     self.peer_id
                 );
                 error!("{e:?}");
@@ -3059,6 +3059,43 @@ mod tests {
             NegativePeerSanction::InvalidMessage,
             peer_standing.unwrap().latest_punishment.unwrap().0
         );
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn peer_lost_before_the_loop_starts_is_still_removed_from_the_peer_map() -> Result<()> {
+        // Claiming more work than our tip makes the node send a block
+        // notification request first thing. The mock refuses that write, as a
+        // peer that has already hung up would.
+        //
+        // Our tip: genesis
+        // Peer tip: block 1
+        use neptune_consensus::block::test_helpers::invalid_empty_block;
+
+        let network = Network::Main;
+        let (peer_broadcast_tx, _, to_main_tx, _to_main_rx, _, _, state_lock, mut hsd) =
+            get_test_genesis_setup(0, cli_args::Args::default_with_network(network)).await?;
+
+        hsd.tip_header = *invalid_empty_block(&Block::genesis(network), network).header();
+        let mock = Mock::new(vec![]);
+        let peer_address_sa = get_dummy_socket_address(0);
+        let mut peer_loop_handler = PeerLoopHandler::new(
+            to_main_tx,
+            state_lock.clone(),
+            pseudorandom_peer_id(&peer_address_sa),
+            socketaddr_to_multiaddr(peer_address_sa),
+            hsd,
+            true,
+            1,
+        );
+
+        assert!(peer_loop_handler
+            .run_wrapper(mock, peer_broadcast_tx.subscribe())
+            .await
+            .is_err());
+        assert!(state_lock.lock_guard().await.net.peer_map.is_empty());
+
+        Ok(())
     }
 
     #[traced_test]
