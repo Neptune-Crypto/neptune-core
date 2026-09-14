@@ -169,14 +169,17 @@ impl PeerLoopHandler {
     /// # Locking:
     ///   * acquires `global_state_lock` for write
     async fn punish(&mut self, reason: NegativePeerSanction) -> Result<()> {
-        let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
-        warn!("Punishing peer {} for {:?}", self.peer_id, reason);
+        let sanction_result = {
+            let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
+            warn!("Punishing peer {} for {reason}", self.peer_id);
 
-        let Some(peer_info) = global_state_mut.net.peer_map.get_mut(&self.peer_id) else {
-            bail!("Could not read peer map.");
+            let Some(peer_info) = global_state_mut.net.peer_map.get_mut(&self.peer_id) else {
+                bail!("Could not read peer map.");
+            };
+            debug!("Peer standing before punishment is {}", peer_info.standing);
+            peer_info.standing.sanction(PeerSanction::Negative(reason))
         };
-        debug!("Peer standing before punishment is {}", peer_info.standing);
-        let sanction_result = peer_info.standing.sanction(PeerSanction::Negative(reason));
+
         if let Err(err) = sanction_result {
             warn!("Banning peer: {err}");
             let _ = self
@@ -342,54 +345,57 @@ impl PeerLoopHandler {
             return Ok(());
         }
 
-        // Hold lock as state mutation must be atomic. Lock must be until
-        // processing is done.
-        let mut state_lock = self.global_state_lock.lock_guard_mut().await;
-        let Some(sync_anchor) = &mut state_lock.net.sync_anchor else {
-            // Handle race condition
-            warn!("Sync status dropped while processing block. Discarding latest block received from peer");
-            return Ok(());
+        // Hold lock as state mutation must be atomic. But not across the send
+        // below: the main loop takes the global lock to handle the message.
+        let message = {
+            let mut state_lock = self.global_state_lock.lock_guard_mut().await;
+            let Some(sync_anchor) = &mut state_lock.net.sync_anchor else {
+                // Handle race condition
+                warn!("Sync status dropped while processing block. Discarding latest block received from peer");
+                return Ok(());
+            };
+
+            // Recalculate under write lock. To avoid race conditions.
+            let is_successor = block.header().prev_block_digest == sync_anchor.champion.1;
+            let is_new_champion = sync_anchor.incoming_block_is_new_champion(height);
+            if is_successor && is_new_champion {
+                // Keep sync anchor up to date, and inform main loop about a new
+                // tip-successor.
+                sync_anchor.catch_up(height, digest);
+                Some(PeerTaskToMain::NewSyncTarget(block))
+            } else if is_new_champion {
+                // The incoming block is the new champion but is not the
+                // successor of the current tip. This happens when
+                //  a) the peer sends new blocks out of order, or one of
+                //     the intermediate blocks was dropped in transit;
+                //     or
+                //  b) the peer reorg'ed.
+                // In either case, we can deal with the problem once
+                // sync mode is done. So ignore for now.
+                tracing::warn!(
+                    "Block {} / {:x} from peer {} is new champion but not successor to tip; ignoring.",
+                    height,
+                    digest,
+                    self.peer_id
+                );
+                None
+            } else if is_successor {
+                // Cannot happen.
+                tracing::error!(
+                    "Block {} / {:x} from peer {} is successor to tip but not new champion; ignoring. Cannot happen.",
+                    height,
+                    digest,
+                    self.peer_id
+                );
+                None
+            } else {
+                // Inform main loop about a new middle block.
+                Some(PeerTaskToMain::NewSyncBlock(block, self.peer_id, auth_path))
+            }
         };
 
-        // Recalculate under write lock. To avoid race conditions.
-        let is_successor = block.header().prev_block_digest == sync_anchor.champion.1;
-        let is_new_champion = sync_anchor.incoming_block_is_new_champion(height);
-        if is_successor && is_new_champion {
-            // Inform main loop about a new tip-successor.
-            self.to_main_tx
-                .send(PeerTaskToMain::NewSyncTarget(block))
-                .await?;
-
-            // Keep sync anchor up to date.
-            sync_anchor.catch_up(height, digest);
-        } else if is_new_champion {
-            // The incoming block is the new champion but is not the
-            // successor of the current tip. This happens when
-            //  a) the peer sends new blocks out of order, or one of
-            //     the intermediate blocks was dropped in transit;
-            //     or
-            //  b) the peer reorg'ed.
-            // In either case, we can deal with the problem once
-            // sync mode is done. So ignore for now.
-            tracing::warn!(
-                "Block {} / {:x} from peer {} is new champion but not successor to tip; ignoring.",
-                height,
-                digest,
-                self.peer_id
-            );
-        } else if is_successor {
-            // Cannot happen.
-            tracing::error!(
-                "Block {} / {:x} from peer {} is successor to tip but not new champion; ignoring. Cannot happen.",
-                height,
-                digest,
-                self.peer_id
-            );
-        } else {
-            // Inform main loop about a new middle block.
-            self.to_main_tx
-                .send(PeerTaskToMain::NewSyncBlock(block, self.peer_id, auth_path))
-                .await?;
+        if let Some(message) = message {
+            self.to_main_tx.send(message).await?;
         }
 
         Ok(())
@@ -2815,7 +2821,7 @@ impl PeerLoopHandler {
         // need to make the a check again while holding a write-lock, since
         // we're modifying `peer_map` here. Holding a read-lock doesn't work
         // since it would have to be dropped before acquiring the write-lock.
-        {
+        let is_syncing = {
             let mut global_state = self.global_state_lock.lock_guard_mut().await;
             let peer_map = &mut global_state.net.peer_map;
             if peer_map
@@ -2833,16 +2839,24 @@ impl PeerLoopHandler {
                 bail!("Already connected to peer with this peer ID. Aborting connection.");
             }
 
+            // Inserting a peer into the peer map is where the connection is
+            // considered fully established. This code is prohibited from
+            // crashing or returning between here and the catch-unwind running
+            // of the peer loop below.
             peer_map.insert(self.peer_id, new_peer);
 
-            // If we are in sync mode, tell the main loop there is a new peer so
-            // that it can relay the message to the sync loop.
-            if global_state.net.sync_anchor.is_some() {
-                debug!("We are syncing, so tell the sync loop about the new peer.");
-                self.to_main_tx
-                    .send(PeerTaskToMain::NewPeer(self.peer_id))
-                    .await?;
-            }
+            global_state.net.sync_anchor.is_some()
+        };
+
+        // If we are in sync mode, tell the main loop there is a new peer so
+        // that it can relay the message to the sync loop. Should not happen
+        // while global state lock is being held, as the channel message sending
+        // might (theoretically) be blocked.
+        if is_syncing {
+            debug!("We are syncing, so tell the sync loop about the new peer.");
+            self.to_main_tx
+                .send(PeerTaskToMain::NewPeer(self.peer_id))
+                .await?;
         }
 
         // `MutablePeerState` contains the part of the peer-loop's state that is mutable
@@ -4273,6 +4287,83 @@ mod tests {
                     Err(_) => bail!("Expected request to be forwarded to the sync loop"),
                 }
             }
+
+            Ok(())
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn sync_block_send_does_not_hold_the_state_guard() -> Result<()> {
+            let network = Network::Testnet(42);
+            let genesis_block = Block::genesis(network);
+            let [block_1, block_2, block_3] = fake_valid_sequence_of_blocks_for_tests(
+                &genesis_block,
+                Timestamp::hours(1),
+                StdRng::seed_from_u64(5550005).random(),
+                network,
+            )
+            .await;
+            let anchor = MmrAccumulator::new_from_leafs(vec![
+                genesis_block.hash(),
+                block_1.hash(),
+                block_2.hash(),
+            ]);
+            let (_peer_broadcast_tx, _, _, _, _, _, mut state_lock, handshake) =
+                get_test_genesis_setup(0, cli_args::Args::default_with_network(network)).await?;
+            let peer_address = get_dummy_socket_address(0);
+            let peer_id = pseudorandom_peer_id(&peer_address);
+            {
+                let mut state = state_lock.lock_guard_mut().await;
+                state.net.sync_anchor = Some(crate::state::networking_state::SyncAnchor::new(
+                    block_2.header().cumulative_proof_of_work,
+                    anchor,
+                    block_2.header().height,
+                    block_2.hash(),
+                ));
+            }
+
+            let (to_main_tx, mut to_main_rx) = mpsc::channel::<PeerTaskToMain>(1);
+            to_main_tx.send(PeerTaskToMain::NewPeer(peer_id)).await?;
+            let mut peer_loop_handler = PeerLoopHandler::new(
+                to_main_tx,
+                state_lock.clone(),
+                peer_id,
+                socketaddr_to_multiaddr(peer_address),
+                handshake,
+                false,
+                1,
+            );
+            let champion = (block_2.header().height, block_2.hash());
+            let peer_task = tokio::spawn(async move {
+                peer_loop_handler
+                    .receive_sync_block(Box::new(block_3), champion, None)
+                    .await
+            });
+
+            // Give the peer task time to verify the block and park in its send.
+            // Before the fix the guard then times out, since the parked task
+            // held it.
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            let guard = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                state_lock.lock_guard_mut(),
+            )
+            .await;
+            assert!(
+                guard.is_ok(),
+                "state guard must be free while the send is parked"
+            );
+            drop(guard);
+
+            assert!(matches!(
+                to_main_rx.recv().await,
+                Some(PeerTaskToMain::NewPeer(_))
+            ));
+            assert!(matches!(
+                to_main_rx.recv().await,
+                Some(PeerTaskToMain::NewSyncTarget(_))
+            ));
+            peer_task.await??;
 
             Ok(())
         }
