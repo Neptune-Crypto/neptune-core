@@ -338,7 +338,8 @@ impl PeerLoopHandler {
         //
         // No locks may be held here, since proof validation takes
         // milliseconds.
-        let is_valid = block.solo_validate(self.now(), network).await.is_ok();
+        let is_valid = block.has_own_proof_of_work(network)
+            && block.solo_validate(self.now(), network).await.is_ok();
         if !is_valid {
             self.punish(NegativePeerSanction::InvalidBlock((height, digest)))
                 .await?;
