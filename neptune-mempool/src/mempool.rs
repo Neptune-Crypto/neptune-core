@@ -1233,6 +1233,24 @@ impl Mempool {
             .transactions_in_conflict_with(&new_link.kernel.kernel)
             .map(|(txkid, mptx)| (*txkid, &mptx.transaction))
             .collect();
+
+        // Two link transaction consuming the same output exclude each other,
+        // like two transactions spending the same input.
+        let shares_a_thruput = |tx: &AnyTx| match tx {
+            AnyTx::Link(link) => link
+                .kernel
+                .thruputs
+                .iter()
+                .any(|thruput| new_link.kernel.thruputs.contains(thruput)),
+            AnyTx::Standard(_) => false,
+        };
+        conflicts.extend(
+            self.tx_dictionary
+                .iter()
+                .filter(|(_, mptx)| shares_a_thruput(&mptx.transaction))
+                .map(|(txkid, mptx)| (*txkid, &mptx.transaction)),
+        );
+
         if same_id_win && let Some(existing) = self.tx_dictionary.get(&txid) {
             conflicts.insert(txid, &existing.transaction);
         }
@@ -3812,13 +3830,17 @@ mod tests {
                 make_plenty_mock_transaction_supported_by_invalid_single_proofs(3)
                     .try_into()
                     .unwrap();
-            let thruputs = arbitrary_addition_records(1);
-            insert_predecessor_with_outputs(&mut mempool, predecessor_base, thruputs.clone());
+            let [own_thruput, foreign_thruput] = arbitrary_addition_records(2).try_into().unwrap();
+            insert_predecessor_with_outputs(
+                &mut mempool,
+                predecessor_base,
+                vec![own_thruput, foreign_thruput],
+            );
 
-            let own_link = proof_backed_link(tx_a.kernel, thruputs.clone());
+            let own_link = proof_backed_link(tx_a.kernel, vec![own_thruput]);
             mempool.insert_link(own_link.clone(), UpgradePriority::Critical);
 
-            let foreign_link = proof_backed_link(tx_b.kernel, thruputs);
+            let foreign_link = proof_backed_link(tx_b.kernel, vec![foreign_thruput]);
             mempool.insert_link(foreign_link, UpgradePriority::Irrelevant);
             assert_eq!(3, mempool.len());
 
@@ -3884,6 +3906,43 @@ mod tests {
                 .expect("a synced, resolved link must be offered for fixing");
             assert_eq!(resolved_txid, preferred.txid());
             assert_eq!(UpgradePriority::Irrelevant, priority);
+        }
+
+        #[test]
+        fn links_sharing_a_thruput_evict_conflicts() {
+            let network = Network::Main;
+            let genesis_block = Block::genesis(network);
+            let mut mempool = Mempool::new(
+                ByteSize::gb(1),
+                TxProvingCapability::ProofCollection,
+                &genesis_block,
+            );
+
+            let [tx_a, tx_b, tx_c, predecessor_base] =
+                make_plenty_mock_transaction_supported_by_invalid_single_proofs(4)
+                    .try_into()
+                    .unwrap();
+            let [thruput] = arbitrary_addition_records(1).try_into().unwrap();
+            insert_predecessor_with_outputs(&mut mempool, predecessor_base, vec![thruput]);
+            let link_with_fee = |tx: Transaction, fee| {
+                let kernel = TransactionKernelModifier::default()
+                    .fee(fee)
+                    .modify(tx.kernel);
+                proof_backed_link(kernel, vec![thruput])
+            };
+            let first = link_with_fee(tx_a, NativeCurrencyAmount::coins(2));
+            let cheaper = link_with_fee(tx_b, NativeCurrencyAmount::coins(1));
+            let more_lavish = link_with_fee(tx_c, NativeCurrencyAmount::coins(3));
+
+            mempool.insert_link(first.clone(), UpgradePriority::Irrelevant);
+            mempool.insert_link(cheaper.clone(), UpgradePriority::Irrelevant);
+            assert!(mempool.contains(first.txid()));
+            assert!(!mempool.contains(cheaper.txid()));
+
+            mempool.insert_link(more_lavish.clone(), UpgradePriority::Irrelevant);
+            assert!(!mempool.contains(first.txid()));
+            assert!(mempool.contains(more_lavish.txid()));
+            assert_eq!(2, mempool.len());
         }
 
         #[test]
