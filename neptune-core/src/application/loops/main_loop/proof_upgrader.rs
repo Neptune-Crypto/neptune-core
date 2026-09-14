@@ -1038,15 +1038,21 @@ pub(super) async fn get_upgrade_task_from_mempool(
     let upgrade_filter = global_state.cli().tx_upgrade_filter;
 
     // Do we have a resolved link transaction to fix? Fixing gobbles nothing,
-    // but our own interest in the transaction can still make it urgent.
+    // but our own interest in the transaction can still make it urgent. A
+    // foreign one is fixed only if this node upgrades for free.
     let fix_job = global_state
         .mempool()
         .preferred_link_fix(upgrade_filter)
-        .map(|(link_tx, priority)| UpgradeJob::Fix {
+        .map(|(link_tx, priority)| {
+            let upgrade_incentive =
+                priority.incentive_given_gobble_potential(NativeCurrencyAmount::zero());
+            (link_tx, upgrade_incentive)
+        })
+        .filter(|(_, upgrade_incentive)| upgrade_incentive.upgrade_is_worth_it(min_gobbling_fee))
+        .map(|(link_tx, upgrade_incentive)| UpgradeJob::Fix {
             link_tx: link_tx.to_owned(),
             mutator_set: tip_mutator_set.clone(),
-            upgrade_incentive: priority
-                .incentive_given_gobble_potential(NativeCurrencyAmount::zero()),
+            upgrade_incentive,
         });
 
     // Do we have any `ProofCollection`s? These may be raised to a SingleProof
@@ -1225,6 +1231,54 @@ mod tests {
     }
 
     #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn foreign_link_is_fixed_only_when_upgrading_for_free() {
+        use neptune_consensus::chaintx::link_kernel::LinkKernel;
+        use neptune_consensus::chaintx::link_tx::LinkTx;
+        use neptune_consensus::chaintx::link_tx::LinkTxProof;
+        use neptune_consensus::transaction::test_helpers::make_plenty_mock_transaction_supported_by_invalid_single_proofs;
+        use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier;
+        use neptune_consensus::transaction::validity::neptune_proof::NeptuneProof;
+
+        let network = Network::Main;
+        let mutator_set_hash = Block::genesis(network)
+            .mutator_set_accumulator_after()
+            .unwrap()
+            .hash();
+        let [tx] = make_plenty_mock_transaction_supported_by_invalid_single_proofs(1)
+            .try_into()
+            .unwrap();
+        let resolved_foreign_link = LinkTx {
+            kernel: LinkKernel {
+                kernel: TransactionKernelModifier::default()
+                    .mutator_set_hash(mutator_set_hash)
+                    .modify(tx.kernel),
+                thruputs: vec![],
+            },
+            proof: LinkTxProof::Proof(NeptuneProof::invalid()),
+        };
+
+        for (min_gobbling_fee, expect_fix) in [
+            (NativeCurrencyAmount::coins(1), false),
+            (NativeCurrencyAmount::coins(0), true),
+        ] {
+            let cli_args = cli_args::Args {
+                min_gobbling_fee,
+                network,
+                tx_proving_capability: Some(TxProvingCapability::SingleProof),
+                ..Default::default()
+            };
+            let mut bob = mock_genesis_global_state(2, WalletEntropy::new_random(), cli_args).await;
+            bob.lock_guard_mut()
+                .await
+                .mempool_insert_link(resolved_foreign_link.clone(), UpgradePriority::Irrelevant)
+                .await;
+
+            let job = get_upgrade_task_from_mempool(&*bob.lock_guard().await).await;
+            assert_eq!(expect_fix, matches!(job, Some(UpgradeJob::Fix { .. })));
+        }
+    }
+
     #[apply(shared_tokio_runtime)]
     async fn updates_after_foreign_raise() {
         // Verify that Bob has an interest in updating Alice's transaction

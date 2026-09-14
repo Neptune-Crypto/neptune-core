@@ -31,6 +31,11 @@ pub enum UpgradePriority {
 impl From<UpgradeIncentive> for UpgradePriority {
     fn from(incentive: UpgradeIncentive) -> Self {
         match incentive {
+            UpgradeIncentive::Gobble(amount) | UpgradeIncentive::BalanceAffecting(amount)
+                if amount == NativeCurrencyAmount::from_nau(0) =>
+            {
+                UpgradePriority::Irrelevant
+            }
             UpgradeIncentive::Gobble(amount) => UpgradePriority::Interested(amount),
             UpgradeIncentive::BalanceAffecting(amount) => UpgradePriority::Interested(amount),
             UpgradeIncentive::Critical => UpgradePriority::Critical,
@@ -103,5 +108,28 @@ impl Add for UpgradePriority {
             (Interested(self_amt), Interested(other_amt)) => Interested(self_amt + other_amt),
             (_, Critical) | (Critical, _) => Critical,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nothing_to_gain_is_irrelevant() {
+        let nothing = NativeCurrencyAmount::coins(0);
+        let something = NativeCurrencyAmount::coins(1);
+        assert_eq!(
+            UpgradePriority::Irrelevant,
+            UpgradePriority::from(UpgradeIncentive::Gobble(nothing))
+        );
+        assert_eq!(
+            UpgradePriority::Irrelevant,
+            UpgradePriority::from(UpgradeIncentive::BalanceAffecting(nothing))
+        );
+        assert_eq!(
+            UpgradePriority::Interested(something),
+            UpgradePriority::from(UpgradeIncentive::Gobble(something))
+        );
     }
 }
