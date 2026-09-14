@@ -1250,23 +1250,23 @@ impl MainLoopHandler {
                     // chain, then we can fast-forward the sync; we are only
                     // interested in downloading blocks that come after.
                     let block_digest = block.hash();
-                    let state = self.global_state_lock.lock_guard().await;
-                    let have_block = state
-                        .chain
-                        .archival_state()
-                        .get_block_header(block_digest)
-                        .await
-                        .is_some();
-                    let is_canonical = if have_block {
-                        state
+                    let is_known_and_canonical = {
+                        let state = self.global_state_lock.lock_guard().await;
+                        let have_block = state
                             .chain
                             .archival_state()
-                            .block_belongs_to_canonical_chain(block_digest)
+                            .get_block_header(block_digest)
                             .await
-                    } else {
-                        false
+                            .is_some();
+                        have_block
+                            && state
+                                .chain
+                                .archival_state()
+                                .block_belongs_to_canonical_chain(block_digest)
+                                .await
                     };
-                    if have_block && is_canonical {
+
+                    if is_known_and_canonical {
                         info!("Fast-forwarding sync to block {}.", block.header().height);
                         sync_loop.send_fast_forward_block(block).await;
                     } else {
