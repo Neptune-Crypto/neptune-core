@@ -75,8 +75,6 @@ use neptune_consensus::transaction::TransactionProof;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_database::storage::storage_vec::traits::StorageVecBase;
 use neptune_mempool::transaction_kernel_id::TransactionKernelId;
-#[cfg(test)]
-use neptune_mempool::transaction_kernel_id::Txid;
 use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::commit;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
@@ -4753,6 +4751,7 @@ mod tests {
     use neptune_consensus::block::test_helpers::invalid_block_with_transaction;
     use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
     use neptune_consensus::transaction::test_helpers::txkernel;
+    use neptune_mempool::transaction_kernel_id::Txid;
     use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
     use neptune_p2p::peer::NegativePeerSanction;
     use neptune_p2p::peer::PeerSanction;

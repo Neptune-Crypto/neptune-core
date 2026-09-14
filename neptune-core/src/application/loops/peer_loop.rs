@@ -151,40 +151,6 @@ impl PeerLoopHandler {
         }
     }
 
-    /// Allows for mocked timestamps such that time dependencies may be tested.
-    #[cfg(test)]
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn with_mocked_time(
-        to_main_tx: mpsc::Sender<PeerTaskToMain>,
-        global_state_lock: GlobalStateLock,
-        peer_id: PeerId,
-        peer_address: Multiaddr,
-        peer_handshake_data: HandshakeData,
-        inbound_connection: bool,
-        distance: u8,
-        mocked_time: Timestamp,
-    ) -> Self {
-        Self {
-            to_main_tx,
-            global_state_lock,
-            peer_id,
-            peer_address,
-            peer_handshake_data,
-            inbound_connection,
-            distance,
-            mock_now: Some(mocked_time),
-            rng: StdRng::from_rng(&mut rand::rng()),
-        }
-    }
-
-    /// Overwrite the random number generator object with a specific one.
-    ///
-    /// Useful for derandomizing tests.
-    #[cfg(test)]
-    fn set_rng(&mut self, rng: StdRng) {
-        self.rng = rng;
-    }
-
     fn now(&self) -> Timestamp {
         #[cfg(not(test))]
         {
@@ -2989,6 +2955,40 @@ mod tests {
     use crate::tests::shared::Action;
     use crate::tests::shared::Mock;
     use crate::tests::shared_tokio_runtime;
+
+    impl PeerLoopHandler {
+        /// Allows for mocked timestamps such that time dependencies may be tested.
+        #[allow(clippy::too_many_arguments)]
+        pub(crate) fn with_mocked_time(
+            to_main_tx: mpsc::Sender<PeerTaskToMain>,
+            global_state_lock: GlobalStateLock,
+            peer_id: PeerId,
+            peer_address: Multiaddr,
+            peer_handshake_data: HandshakeData,
+            inbound_connection: bool,
+            distance: u8,
+            mocked_time: Timestamp,
+        ) -> Self {
+            Self {
+                to_main_tx,
+                global_state_lock,
+                peer_id,
+                peer_address,
+                peer_handshake_data,
+                inbound_connection,
+                distance,
+                mock_now: Some(mocked_time),
+                rng: StdRng::from_rng(&mut rand::rng()),
+            }
+        }
+
+        /// Overwrite the random number generator object with a specific one.
+        ///
+        /// Useful for derandomizing tests.
+        fn set_rng(&mut self, rng: StdRng) {
+            self.rng = rng;
+        }
+    }
 
     #[traced_test]
     #[apply(shared_tokio_runtime)]

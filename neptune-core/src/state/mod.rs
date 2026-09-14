@@ -85,8 +85,6 @@ use neptune_wallet::address::SpendingKey;
 use neptune_wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use neptune_wallet::coinbase_distribution::CoinbaseDistribution;
 use neptune_wallet::composer_parameters::ComposerParameters;
-#[cfg(test)]
-use neptune_wallet::expected_utxo::ExpectedUtxo;
 use neptune_wallet::expected_utxo::UtxoNotifier;
 use neptune_wallet::incoming_utxo::IncomingUtxo;
 use neptune_wallet::incoming_utxo::IncomingUtxoRecoveryData;
@@ -320,21 +318,6 @@ impl GlobalStateLock {
         self.clone().into()
     }
 
-    /// Set tip to a block that we composed.
-    #[cfg(test)]
-    pub async fn set_new_self_composed_tip(
-        &mut self,
-        new_block: Block,
-        composer_reward_utxo_infos: Vec<ExpectedUtxo>,
-    ) -> Result<Vec<MempoolUpdateJob>> {
-        let mut state = self.lock_guard_mut().await;
-        state
-            .wallet_state
-            .add_expected_utxos(composer_reward_utxo_infos)
-            .await;
-        state.set_new_tip(new_block).await
-    }
-
     /// store a block (non coinbase)
     pub async fn set_new_tip(&mut self, new_block: Block) -> Result<Vec<MempoolUpdateJob>> {
         self.lock_guard_mut().await.set_new_tip(new_block).await
@@ -366,13 +349,6 @@ impl GlobalStateLock {
     /// note that the tx_initiator API now uses this sender also.
     pub(crate) fn rpc_server_to_main_tx(&self) -> tokio::sync::mpsc::Sender<RPCServerToMain> {
         self.rpc_server_to_main_tx.clone()
-    }
-
-    /// Test helper function for fine control of CLI parameters.
-    #[cfg(test)]
-    pub async fn set_cli(&mut self, cli: cli_args::Args) {
-        self.lock_guard_mut().await.cli = cli.clone();
-        self.cli = cli;
     }
 
     /// Validate all historical, canonical blocks.
@@ -3686,35 +3662,6 @@ mod state_test_helpers {
     }
 }
 
-/// Trip-wire guarding [`GlobalState`]'s `mempool` field visibility.
-///
-/// The field is private on purpose (see its docs): that is what forces all
-/// mutation through the event-emitting `mempool_*` gateway. This test reads
-/// this very source file and fails if a visibility modifier ever appears before
-/// the declaration. The search needle is built at runtime so this test's own
-/// text cannot match itself.
-#[cfg(test)]
-#[test]
-fn mempool_field_is_private() {
-    let src = include_str!("mod.rs");
-    let needle = format!("mempool{} Mempool", ':');
-    let mut found = 0;
-    for (idx, _) in src.match_indices(&needle) {
-        found += 1;
-        let prefix = src[..idx].trim_end_matches(' ');
-        assert!(
-            prefix.ends_with('\n'),
-            "GlobalState.mempool must remain private: a visibility modifier was \
-             found before a `{needle}` declaration. Keep the field private and \
-             route access through GlobalState::mempool() or a mempool_* method."
-        );
-    }
-    assert!(
-        found >= 1,
-        "expected to find the mempool field declaration in state/mod.rs"
-    );
-}
-
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -3737,6 +3684,7 @@ mod tests {
     use neptune_wallet::address::generation_address::GenerationSpendingKey;
     use neptune_wallet::address::KeyType;
     use neptune_wallet::address::ReceivingAddress;
+    use neptune_wallet::expected_utxo::ExpectedUtxo;
     use neptune_wallet::expected_utxo::UtxoNotifier;
     use neptune_wallet::mock_block::make_mock_block;
     use neptune_wallet::mock_block::make_mock_block_with_inputs_and_outputs;
@@ -3764,6 +3712,56 @@ mod tests {
     use crate::tests::shared::mock_tx::send_coins;
     use crate::tests::shared::wallet_state_has_all_valid_mps;
     use crate::tests::shared_tokio_runtime;
+
+    impl GlobalStateLock {
+        /// Set tip to a block that we composed.
+        pub async fn set_new_self_composed_tip(
+            &mut self,
+            new_block: Block,
+            composer_reward_utxo_infos: Vec<ExpectedUtxo>,
+        ) -> Result<Vec<MempoolUpdateJob>> {
+            let mut state = self.lock_guard_mut().await;
+            state
+                .wallet_state
+                .add_expected_utxos(composer_reward_utxo_infos)
+                .await;
+            state.set_new_tip(new_block).await
+        }
+
+        /// Test helper function for fine control of CLI parameters.
+        pub async fn set_cli(&mut self, cli: cli_args::Args) {
+            self.lock_guard_mut().await.cli = cli.clone();
+            self.cli = cli;
+        }
+    }
+
+    /// Trip-wire guarding [`GlobalState`]'s `mempool` field visibility.
+    ///
+    /// The field is private on purpose (see its docs): that is what forces all
+    /// mutation through the event-emitting `mempool_*` gateway. This test reads
+    /// this very source file and fails if a visibility modifier ever appears
+    /// before the declaration. The search needle is built at runtime so this
+    /// test's own text cannot match itself.
+    #[test]
+    fn mempool_field_is_private() {
+        let src = include_str!("mod.rs");
+        let needle = format!("mempool{} Mempool", ':');
+        let mut found = 0;
+        for (idx, _) in src.match_indices(&needle) {
+            found += 1;
+            let prefix = src[..idx].trim_end_matches(' ');
+            assert!(
+                prefix.ends_with('\n'),
+                "GlobalState.mempool must remain private: a visibility modifier was \
+                 found before a `{needle}` declaration. Keep the field private and \
+                 route access through GlobalState::mempool() or a mempool_* method."
+            );
+        }
+        assert!(
+            found >= 1,
+            "expected to find the mempool field declaration in state/mod.rs"
+        );
+    }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum AnnouncementScanMode {

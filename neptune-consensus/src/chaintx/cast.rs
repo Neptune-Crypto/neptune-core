@@ -604,7 +604,7 @@ pub(crate) mod tests {
         let input = witness.standard_input();
         let mut nondeterminism = witness.nondeterminism();
 
-        witness.single_proof_digest = crate::chaintx::mock_single_proof_digest(1);
+        witness.single_proof_digest = crate::chaintx::tests::mock_single_proof_digest(1);
         encode_to_memory(
             &mut nondeterminism.ram,
             FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
@@ -624,7 +624,7 @@ mod negative_tests {
 
     use super::tests::deterministic_cast_witness;
     use super::*;
-    use crate::chaintx::mock_single_proof_digest;
+    use crate::chaintx::tests::mock_single_proof_digest;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::proof_abstractions::tasm::program::TritonError;
     use crate::transaction::primitive_witness::PrimitiveWitness;

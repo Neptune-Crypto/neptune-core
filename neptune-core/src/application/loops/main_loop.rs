@@ -377,13 +377,6 @@ impl MainLoopHandler {
         self.global_state_lock.clone()
     }
 
-    /// Allows for mocked timestamps such that time dependencies may be tested.
-    #[cfg(test)]
-    fn with_mocked_time(mut self, mocked_time: SystemTime) -> Self {
-        self.mock_now = Some(mocked_time);
-        self
-    }
-
     fn now(&self) -> SystemTime {
         #[cfg(not(test))]
         {
@@ -2774,6 +2767,14 @@ mod tests {
     use tracing_test::traced_test;
 
     use super::*;
+
+    impl MainLoopHandler {
+        /// Allows for mocked timestamps such that time dependencies may be tested.
+        fn with_mocked_time(mut self, mocked_time: SystemTime) -> Self {
+            self.mock_now = Some(mocked_time);
+            self
+        }
+    }
     use crate::application::config::cli_args;
     use crate::tests::shared::blocks::block_with_outputs;
     use crate::tests::shared::blocks::invalid_empty_block1_with_guesser_fraction;

@@ -42,7 +42,6 @@ impl TransactionInitiatorInternal {
     /// it is now just a wrapper around [`InputSelector`],
     /// TransactionDetailsBuilder, TransactionProofBuilder and
     /// TransactionBuilder
-    #[cfg(test)]
     pub(crate) async fn create_transaction(
         &mut self,
         tx_outputs: TxOutputList,

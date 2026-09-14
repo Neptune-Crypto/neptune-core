@@ -272,7 +272,7 @@ mod tests {
     use crate::chaintx::forge::ForgeWitness;
     use crate::chaintx::link_primitive_witness::LinkPrimitiveWitness;
     use crate::chaintx::link_proof_witness::LinkProofWitnessMemory;
-    use crate::chaintx::mock_single_proof_digest;
+    use crate::chaintx::tests::mock_single_proof_digest;
     use crate::proof_abstractions::tasm::builtins as tasm;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::proof_abstractions::tasm::program::tests::test_program_snapshot;

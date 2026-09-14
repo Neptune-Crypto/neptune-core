@@ -34,23 +34,6 @@ impl LinkTxProof {
     }
 }
 
-#[cfg(test)]
-impl LinkTxProof {
-    /// Proptest strategy producing both variants: a witness-backed proof (via
-    /// [`LinkPrimitiveWitness::arbitrary_strategy`]) or a proof-backed one.
-    pub fn arbitrary_strategy() -> proptest::strategy::BoxedStrategy<Self> {
-        use proptest::prelude::Strategy;
-        use proptest_arbitrary_interop::arb;
-
-        proptest::prop_oneof![
-            LinkPrimitiveWitness::arbitrary_strategy()
-                .prop_map(|lw| LinkTxProof::Witness(Box::new(lw))),
-            arb::<NeptuneProof>().prop_map(LinkTxProof::Proof),
-        ]
-        .boxed()
-    }
-}
-
 /// A chained transaction: a [`LinkKernel`] together with the [`LinkTxProof`]
 /// that backs it.
 ///
@@ -87,6 +70,23 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
+
+    impl LinkTxProof {
+        /// Proptest strategy producing both variants: a witness-backed proof
+        /// (via [`LinkPrimitiveWitness::arbitrary_strategy`]) or a proof-backed
+        /// one.
+        pub fn arbitrary_strategy() -> proptest::strategy::BoxedStrategy<Self> {
+            use proptest::prelude::Strategy;
+            use proptest_arbitrary_interop::arb;
+
+            proptest::prop_oneof![
+                LinkPrimitiveWitness::arbitrary_strategy()
+                    .prop_map(|lw| LinkTxProof::Witness(Box::new(lw))),
+                arb::<NeptuneProof>().prop_map(LinkTxProof::Proof),
+            ]
+            .boxed()
+        }
+    }
 
     /// Exactly one of the two variant predicates holds.
     #[proptest]

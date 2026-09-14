@@ -82,11 +82,6 @@ impl LightState {
         self.tip = new_block;
         self.time_to_mine = time_to_mine;
     }
-
-    #[cfg(test)]
-    pub(crate) fn tip_mut(&mut self) -> &mut Block {
-        &mut self.tip
-    }
 }
 
 #[cfg(test)]
@@ -102,6 +97,12 @@ pub(crate) mod tests {
     use rand::SeedableRng;
 
     use super::*;
+
+    impl LightState {
+        pub(crate) fn tip_mut(&mut self) -> &mut Block {
+            &mut self.tip
+        }
+    }
 
     #[test]
     fn update_works() {

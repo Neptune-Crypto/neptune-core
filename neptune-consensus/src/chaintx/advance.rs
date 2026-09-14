@@ -1274,8 +1274,8 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::chaintx::link_primitive_witness::LinkPrimitiveWitness;
-    use crate::chaintx::mock_single_proof_digest;
     pub(super) use crate::chaintx::test_helpers::forge;
+    use crate::chaintx::tests::mock_single_proof_digest;
     use crate::proof_abstractions::tasm::builtins as tasm;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::transaction::primitive_witness::PrimitiveWitness;
@@ -1818,7 +1818,7 @@ mod negative_tests {
     use super::tests::forge;
     use super::tests::promotable;
     use super::*;
-    use crate::chaintx::mock_single_proof_digest;
+    use crate::chaintx::tests::mock_single_proof_digest;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::proof_abstractions::tasm::program::TritonError;
     use crate::transaction::primitive_witness::PrimitiveWitness;

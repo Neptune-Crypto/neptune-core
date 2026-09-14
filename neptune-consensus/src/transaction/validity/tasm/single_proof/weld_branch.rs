@@ -1103,13 +1103,13 @@ pub(crate) mod tests {
     use crate::chaintx::chain::chain;
     use crate::chaintx::chain::ChainWitness;
     use crate::chaintx::link_primitive_witness::LinkPrimitiveWitness;
-    use crate::chaintx::mock_single_proof_digest;
     use crate::chaintx::test_helpers::chainable_link_primitive_witnesses;
     use crate::chaintx::test_helpers::deterministic_chainable_link_primitive_witnesses;
     use crate::chaintx::test_helpers::deterministic_primitive_witness;
     use crate::chaintx::test_helpers::forge;
     use crate::chaintx::test_helpers::predecessor_resolving;
     use crate::chaintx::test_helpers::predecessor_resolving_pw;
+    use crate::chaintx::tests::mock_single_proof_digest;
     use crate::proof_abstractions::tasm::builtins as tasm;
     use crate::proof_abstractions::tasm::program::prove_triton_program;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;

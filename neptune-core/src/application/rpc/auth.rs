@@ -230,16 +230,6 @@ impl Cookie {
         data_dir.rpc_cookie_file_path()
     }
 
-    #[cfg(test)]
-    pub fn as_hex(&self) -> String {
-        use core::fmt::Write;
-        let mut s = String::with_capacity(2 * 32);
-        for byte in self.0 {
-            write!(s, "{:02X}", byte).unwrap()
-        }
-        s
-    }
-
     // creates a cookie that exists in mem only, no .cookie file written to disk.
     #[cfg(any(test, feature = "mock-rpc"))]
     pub fn new_in_mem() -> Self {
@@ -293,6 +283,17 @@ mod tests {
     use super::*;
     use crate::tests::shared::files::unit_test_data_directory;
     use crate::tests::shared_tokio_runtime;
+
+    impl Cookie {
+        pub fn as_hex(&self) -> String {
+            use core::fmt::Write;
+            let mut s = String::with_capacity(2 * 32);
+            for byte in self.0 {
+                write!(s, "{:02X}", byte).unwrap()
+            }
+            s
+        }
+    }
 
     mod token {
         use super::*;

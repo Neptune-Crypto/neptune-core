@@ -68,8 +68,6 @@ use crate::block::block_kernel::BlockKernelField;
 use crate::block::block_transaction::BlockTransaction;
 use crate::block::guesser_receiver_data::GuesserReceiverData;
 use crate::block::pow::LustrationStatus;
-#[cfg(test)]
-use crate::block::pow::Pow;
 use crate::block::pow::PowMastPaths;
 use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::consensus_rule_set::LustrationRule;
@@ -1523,6 +1521,7 @@ pub(crate) mod tests {
     use test_strategy::proptest;
 
     use super::*;
+    use crate::block::pow::Pow;
     use crate::block::test_helpers::invalid_empty_block;
     use crate::consensus_rule_set::TX_BACKDATING_LIMIT;
     use crate::proof_abstractions::test_runtime::shared_tokio_runtime;

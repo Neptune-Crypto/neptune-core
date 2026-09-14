@@ -46,12 +46,6 @@ impl RpcServer {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn with_mock_time(mut self, time: Timestamp) -> Self {
-        self.mock_time = Some(time);
-        self
-    }
-
     pub(crate) fn now(&self) -> Timestamp {
         #[cfg(test)]
         {
@@ -109,6 +103,7 @@ mod tests {
 
     use macro_rules_attr::apply;
     use neptune_primitives::network::Network;
+    use neptune_primitives::timestamp::Timestamp;
     use neptune_rpc_api::api::ops::Namespace;
     use neptune_rpc_api::api::ops::RpcMethods;
     use neptune_rpc_api::api::server::router::RpcRouter;
@@ -123,6 +118,13 @@ mod tests {
     use crate::application::json_rpc::server::service::tests::test_rpc_server_with_cli_args;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared_tokio_runtime;
+
+    impl RpcServer {
+        pub(crate) fn with_mock_time(mut self, time: Timestamp) -> Self {
+            self.mock_time = Some(time);
+            self
+        }
+    }
 
     async fn call_paramless(router: Arc<RpcRouter>, method: &str) -> JsonResponse {
         let empty_params = json!([]);

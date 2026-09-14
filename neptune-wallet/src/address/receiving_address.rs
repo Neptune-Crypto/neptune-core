@@ -206,20 +206,6 @@ impl ReceivingAddress {
         }
     }
 
-    /// encrypts a [Utxo] and `sender_randomness` secret for purpose of transferring to payment recipient
-    #[cfg(test)]
-    pub fn encrypt(
-        &self,
-        utxo_notification_payload: &UtxoNotificationPayload,
-    ) -> Vec<BFieldElement> {
-        match self {
-            Self::Generation(a) => a.encrypt(utxo_notification_payload),
-            Self::Symmetric(a) => a.encrypt(utxo_notification_payload),
-            Self::EcHybrid(a) => a.encrypt(utxo_notification_payload),
-            Self::ViewingAddress(a) => a.encrypt(utxo_notification_payload),
-        }
-    }
-
     /// encodes this address as bech32m
     ///
     /// For any key-type, the resulting bech32m can be provided as input to
@@ -377,6 +363,22 @@ mod tests {
     use crate::address::generation_address::GenerationSpendingKey;
     use crate::address::symmetric_key::SymmetricKey;
     use crate::address::viewing_address::ViewingAddress;
+
+    impl ReceivingAddress {
+        /// encrypts a [Utxo] and `sender_randomness` secret for purpose of
+        /// transferring to payment recipient
+        pub fn encrypt(
+            &self,
+            utxo_notification_payload: &UtxoNotificationPayload,
+        ) -> Vec<BFieldElement> {
+            match self {
+                Self::Generation(a) => a.encrypt(utxo_notification_payload),
+                Self::Symmetric(a) => a.encrypt(utxo_notification_payload),
+                Self::EcHybrid(a) => a.encrypt(utxo_notification_payload),
+                Self::ViewingAddress(a) => a.encrypt(utxo_notification_payload),
+            }
+        }
+    }
 
     fn address_from_seed(seed: Digest, key_type: KeyType) -> ReceivingAddress {
         match key_type {

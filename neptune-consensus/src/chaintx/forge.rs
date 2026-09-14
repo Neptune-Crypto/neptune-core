@@ -1773,7 +1773,7 @@ pub(crate) mod tests {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::chaintx::mock_single_proof_digest;
+    use crate::chaintx::tests::mock_single_proof_digest;
     use crate::proof_abstractions::tasm::builtins as tasm;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::proof_abstractions::triton_vm_job_queue::vm_job_queue;
@@ -1787,14 +1787,11 @@ pub(crate) mod tests {
         /// Cheap test-only constructor: identical to
         /// [`produce`](Self::produce), except it skips lock-script proving.
         ///
-        /// Gated behind `#[cfg(test)]` on purpose. `produce` is the sole
-        /// *production* constructor -- a real `ForgeWitness` always carries its
-        /// proofs, and there is no proofless path into live code. However, many
-        /// tests (negative tests for example, but others too) don't touch
-        /// proofs, and proving as a prerequisite makes running those tests take
-        /// impractically long. These tests build their witnesses here; only the
-        /// positive proof-verifying tests pay the steep price for `produce`.
-        #[cfg(test)]
+        /// Test-only on purpose. `produce` is the only *production* constructor
+        /// -- a real `ForgeWitness` always carries its proofs, and there is no
+        /// proofless path into live code. However, many tests (negative tests
+        /// for example, but others too) don't touch proofs, and proving as a
+        /// prerequisite makes running those tests take impractically long.
         pub(crate) fn without_proofs(lpw: &LinkPrimitiveWitness) -> Self {
             Self::build_from_parts(lpw, mock_single_proof_digest(0), vec![], vec![])
         }
