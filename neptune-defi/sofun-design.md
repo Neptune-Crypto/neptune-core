@@ -84,10 +84,14 @@ counterparty risk. Nothing about that description mentions time locks, mining,
 or native currency.
 
 **Standing swap order** is the name, and the code should use it rather than
-SOFuN's: the announcement flag is `STANDING_SWAP_ORDER` and the body struct is
-`StandingSwapOrderV1` (§4.3). "Standing" says the offer rests until its owner
-withdraws it, "swap" says both sides move at once, and "order" is what a book is
-made of. SOFuN is then one configuration of a standing swap order, and its own
+SOFuN's wherever the thing named is general: the announcement flag is
+`STANDING_SWAP_ORDER` and the generic body struct is `StandingSwapOrderV1`
+(§4.3). SOFuN's name appears only on what belongs to SOFuN alone: the `Sofun`
+configuration, its per-order `SofunParams`, and `SofunBody`, which is the
+generic body's second reading — the same 28 elements, with the demanded-amount
+window carrying each SOFuN order's own parameters instead. "Standing" says the
+offer rests until its owner withdraws it, "swap" says both sides move at once,
+and "order" is what a book is made of. SOFuN is then one configuration of a standing swap order, and its own
 name belongs only to that configuration.
 
 The intent is therefore that SOFuN be a *configuration* of that primitive rather
@@ -95,15 +99,24 @@ than a thing of its own, and that wherever the two diverge the divergence is
 **additive**: SOFuN should be a layer over a general core. The notes below flag
 where the two come apart.
 
-**Partial fills stay out, and the reason is structural.** Filling half an order
-means spending the order UTXO, paying half the reward, and returning the other
-half of the offer to the book — as a new UTXO under the same lock script. So the
-script would have to assert that an output exists whose lock script hash is its
-own, and a Triton program cannot compute its own hash: it can divine a program
-and hash it, but nothing binds what it divined to what is running. The usual way
-out is a type script, which sees inputs and outputs together and can enforce
-continuity between them, or a family of scripts each hard-coding the hash of the
-next. Both are a different mechanism, not a bigger version of this one.
+**Partial fills stay out, but not because the lock script could not express
+them.** Filling half an order means spending the order UTXO, paying half the
+reward, and returning the other half of the offer to the book — as a new UTXO
+under the same lock script. So the script must assert that an output exists
+whose lock script hash is its own, and it can. Triton initializes the op stack
+with the running program's digest, reversed, in its bottom five positions
+(`triton-isa-7.0.0/src/op_stack.rs:58-62`), so a program reads its own hash with
+five `dup 15` and no divination at all; the VM's own tests do exactly that and
+label the result `own_digest`. Self-reference is available, and a continuation
+output can be constrained directly.
+
+What stands in the way is cost and bookkeeping rather than expressiveness. A
+partially fillable order's *remaining* size is not in its announcement, because
+the announcement is written once, at creation; every consumer would have to
+derive the remaining size by replaying each fill against the chain, and the book
+would hold partial rows whose terms change under them. The lock script grows a
+continuity check that every filler re-proves. None of that is impossible, and a
+later version may decide the ledger is worth it.
 
 Against that, the cost of doing without is small and lands on the right party:
 granularity is chosen at order creation, by the proposer, who pays one
@@ -339,42 +352,138 @@ only that the reward be paid.
 
 ### 4.3 Announcement
 
-The envelope is generic; the body is not. Three elements name the market and
-the schema, and everything after them is whatever that schema says varies from
-one order to the next.
+The envelope is generic; the body has two readings of one fixed length. Three
+elements name the market and the schema, and `pair_id` alone decides which
+reading applies to the 28 that follow.
 
 ```
 element 0   flag      STANDING_SWAP_ORDER = 1000
 element 1   pair_id   Hash(offered type scripts ‖ demanded type scripts)[0]
-element 2   version   1
---------------------------------------------------------------- body
+element 2   version   1 for the generic body, 0 for SOFuN
+------------------------------------------------------- body, generic
 StandingSwapOrderV1 {                                          elements
     offered_amount           NativeCurrencyAmount                    4
     demanded_amount          NativeCurrencyAmount                    4
-    d_zero                   Timestamp                               1
     seed                     Digest                                  5
     cancel_post_image        Digest                                  5
     reward_lock_script_hash  Digest                                  5
     reward_receiver_digest   Digest                                  5
-}                                                          total     29
+}                                                          total     28
+--------------------------------------------------------- body, SOFuN
+SofunBody {                                                    elements
+    offered_amount           NativeCurrencyAmount                    4
+    d_zero                   Timestamp                               1  \
+    epoch                    u32                                     1   > 4
+    padding                  u64                                     2  /
+    seed                     Digest                                  5
+    cancel_post_image        Digest                                  5
+    reward_lock_script_hash  Digest                                  5
+    reward_receiver_digest   Digest                                  5
+}                                                          total     28
 ```
 
-Every field is fixed-length, so the body is the struct's `BFieldCodec`
-encoding and nothing else — no bespoke format, and the derived `decode`
-rejects a truncated record. Encoding an announcement is
+**SOFuN overloads the demanded-amount window.** `d_zero` is the origin of the
+grid, and the grid exists only because SOFuN's demanded UTXO carries a release
+date that is unknown when the order is written (§1.5). A general standing swap
+order has a one-element admissible set, no grid, and no origin to publish, so
+`d_zero` cannot go in the generic body without contradicting §1.5's requirement
+that the primitive be specifiable without reference to time locks at all.
+
+It does not need to. SOFuN's `demanded_amount` is not a free parameter: it is
+`Y`, half the block subsidy (§4.1), and `epoch` says which halving's subsidy that
+is, so the amount is determined rather than transmitted. Those four elements are
+dead weight in a SOFuN order, and `d_zero` costs one of them. `epoch` takes a
+second and `padding` fills the remaining two, which keeps both schemas at 28
+elements and every shared field at the same offset.
+
+**The three envelope elements are read, not decoded.** None of them belong in a
+body, because all three are the key that chooses which body to decode: a reader
+must know the version before it can pick a struct, and the same holds for the
+flag and for `pair_id`. They are therefore a fixed-position prefix, assembled
+and inspected element by element. That also matches how the node already treats
+announcements — `Announcement::looks_like_lustration`
+(`neptune-consensus/src/transaction/announcement.rs`) tests element 0 directly,
+and `AnnouncementFlag` (`neptune-primitives/src/announcement_flag.rs`) is
+defined as the first two elements, purpose and receiver id, with `pair_id`
+standing in the second slot.
+
+Do not be tempted to give the prefix a struct with a derived `BFieldCodec`. The
+reversal noted below would write it as `[version, pair_id, flag]`, putting the
+flag at element 2, where no existing scan looks for it.
+
+Nothing further is needed to bind a body to its version. The prefix sits in the
+same announcement as the body, under the same block commitment, so a reader that
+has the body has the version. Repeating the version inside the body would add
+nothing: against an honest reader it guards a bug that cannot occur, since a
+reader has already touched elements 0 and 1 to find the announcement at all, and
+against a dishonest proposer it guards nothing, since the same party writes both
+copies. The requirement is on consumers instead, and it is the ordinary one —
+read element 2, and reject a version you do not implement rather than assuming
+the one you do.
+
+**Both readings keep the derived codec.** The overload is one of whole typed
+fields, not of bits inside a field, so each schema is an ordinary struct with a
+derived `BFieldCodec` and neither needs an encoding of its own. Every field is
+fixed-length, so a body is the struct's encoding and nothing else, and the
+derived `decode` rejects a truncated record. Encoding an announcement is
 `[flag, pair_id, version]` concatenated with `body.encode()`.
+
+Two mechanical notes for anyone reading the wire format:
+
+- **Fields are emitted in reverse declaration order**
+  (`bfieldcodec_derive-0.7.1/src/lib.rs:197`). Read a body back to front: the
+  four digests occupy elements 0 through 19, the overloaded window is 20 through
+  23, and `offered_amount` is 24 through 27. Within the window the same
+  reversal applies, so it is `padding`, then `epoch`, then `d_zero`.
+- **Decoding is parsing, not recognition, and the asymmetry runs one way.**
+  `NativeCurrencyAmount` is an `i128`, whose codec writes four 32-bit limbs and
+  rejects any element above `u32::MAX` on decode. A timestamp in milliseconds is
+  presently about 41 bits, so a generic decoder fed a SOFuN body errors out
+  rather than reporting a nonsense price, and even that follows from real
+  timestamps rather than from the layout: a `d_zero` small enough to pass would
+  be a date before 1970-02-19. The reverse never fails. Every element of a
+  generic order's overloaded window is below `u32::MAX` by construction, which
+  is exactly what `epoch` and `padding` require and `d_zero` accepts anything,
+  so a generic body always decodes as a `SofunBody`. The zero check on
+  `padding` rejects some of those bodies but not all of them: a generic body
+  whose two elements under `padding` are zero converts to a SOFuN order
+  carrying a meaningless release date. Only `pair_id` separates the two
+  schemas. Consult it before
+  choosing a decoder, and never treat decoding success as evidence of which
+  schema a body was written under.
+
+**`padding` must be zero.** A `SofunBody` is a valid version 0 SOFuN order if
+and only if its `padding` is zero. The derived codec accepts any value there, so
+the check sits in the conversion from `SofunBody` to `StandingSwapOrder`, which
+rejects a nonzero `padding`. Under that rule every order has exactly one
+encoding, and anything that hashes, indexes or deduplicates announcements can
+compare the raw elements.
+
+The requirement costs no room for a later schema. The version is element 2 of
+the envelope, outside the body, and a consumer rejects a version it does not
+implement before it decodes anything. A version 0 SOFuN decoder therefore never
+reads a version 1 SOFuN body, and version 1 may assign those two elements
+whatever meaning it needs, whatever version 0 required of them.
+
+The check does not change which UTXO an order describes. `padding` is not an
+input to the lock script, so two announcements that differ only in `padding`
+rebuild the same order UTXO and name the same AOCL leaf. An order announced with
+a nonzero `padding` is still spendable on chain; a conforming consumer does not
+list it. Only software that departs from this document writes one.
 
 **The body carries only the differences.** Both sides' type scripts are fixed by
 the pair, the release date is fixed by the grid, and both offered-side digests
 are derived (below), so none of them are on the wire. What is left is two
-amounts, one grid origin, and four digests. The cost is that the body is
-only decodable by a consumer who knows the pair's schema; an indexer that does
-not can still bucket by `pair_id`, it just cannot read the terms. That is the
-right trade — the alternative is paying for two `coins` lists in every order,
+amounts and four digests generically, and for SOFuN the same four digests, one
+amount, and the grid origin in place of the second amount. The cost is that the
+body is only decodable by a consumer who knows the pair's schema; an indexer that
+does not can still bucket by `pair_id`, it just cannot read the terms. That is
+the right trade — the alternative is paying for two `coins` lists in every order,
 forever — but it means the version at element 2 is a *per-pair schema* version,
-and the generic core of §1.5 is a shared envelope rather than a shared body.
+and what §1.5's generic core shares with SOFuN is the envelope, the length, and
+the offsets of every field the two have in common, rather than the body itself.
 
-**`G` and `K` are not negotiable, so they are not on the wire.** Version 1 fixes
+**`G` and `K` are not negotiable, so they are not on the wire.** SOFuN version 0 fixes
 `G` = 1 week and `K` = 26. `G` sets the proposer's overshoot: at most two weeks
 on top of the three years, one step for quantization and one for §4.6's
 headroom. `K` sets shelf life, because the grid is anchored at order creation —
@@ -396,8 +505,8 @@ grid hashes differently, so its addition record is not the one being looked for,
 so the order does not verify and nobody fills it. A deviant order is exactly as
 fillable as no order at all. That is the whole of the enforcement, and it is
 enough, because the only party who has to agree about the grid is the one
-deciding whether to pay. Escaping the configuration means shipping a
-`StandingSwapOrderV2` and convincing fillers to implement it — which is what
+deciding whether to pay. Escaping the configuration means shipping a new SOFuN
+schema version and convincing fillers to implement it — which is what
 element 2 is for, and is governance rather than a hole in it.
 
 **One seed, three public randomnesses.** The offered side's `sender_randomness`
@@ -693,8 +802,14 @@ whose history changes underneath them.
 standing offers rather than the operator's own belongings, it is kept in step
 with the tip, it is consulted when a block is built, and entries leave it when
 the underlying UTXO is spent. The mempool's structures fit directly: one row per
-open order keyed by the order UTXO's addition record, and a priority queue on
+open order keyed by the order UTXO's AOCL leaf index, and a priority queue on
 `X`, the way the mempool keeps `upgrade_priorities` (`mempool.rs:165-170`). The
+key is the leaf index rather than the addition record because two orders with
+identical terms and identical randomnesses commit to the same record and both
+can be confirmed — which the node's own RPC documents, warning that a query by
+addition record can return several blocks. A leaf index is assigned by the AOCL
+and is unique, and it is what `restore_membership_proof`
+(`archival_mutator_set.rs:238`) needs to fill the order anyway. The
 composer's only query — the largest `X` among orders asking for this block's
 time-locked subsidy — is then reading the top of a queue.
 
@@ -817,6 +932,317 @@ their own money to a stranger's script.
 re-time that invalidates the witness — the composer drops the fill and composes
 the block without it. The block subsidy is worth more than any order, and no
 part of this may sit on the critical path in a way that can block it.
+
+
+### 4.10 Replicating the book, and what the interface has to be
+
+§4.8 settles where the index lives for the composer, which is in the node,
+because the composer consults it while building a template. Everyone else is a
+different problem: a wallet, a market-maker script, an explorer. The end state
+for those is a separate process that subscribes to a node, takes block and
+mempool updates, and answers queries from whatever else is running. Nothing
+below is a reason to build that now, and everything below is chosen so that
+building it later costs a day rather than a rewrite.
+
+**The book is a container, not a chain consumer.** Split the work in two. A
+*feeder* touches the chain: it finds candidate announcements, decodes them under
+the schema `pair_id` names, and performs §7.3's check, which means rebuilding the
+lock script, deriving the order UTXO's addition record, and finding that record
+in the AOCL — whose position is the leaf index the row is then keyed by, so the
+identifier falls out of the verification rather than costing a second lookup. A
+*book* holds what survived and answers questions about it. Only the feeder needs
+archival state, and only the book needs to be fast to query.
+
+**Three types, not one, and each boundary adds information from its own
+source.** An order is written once and read twice, and what it is called at each
+stage is not a naming preference.
+
+| stage | type | what it holds |
+| --- | --- | --- |
+| written | `StandingSwapOrderV1` or `SofunBody` | what varies from one order to the next |
+| meant | `StandingSwapOrder<C>` | the full terms, the configuration's parameters, and the version; the asset pair is the book's |
+| observed | `Order<C>` | the terms, plus confirming height and AOCL leaf index |
+
+From body to logical order, the version comes from the envelope. The asset sets
+come from the consumer's own table: it looked this pair up on purpose and
+computed `pair_id` from those sets in order to query at all, so it already holds
+them, and it hands them to the book once, when the book is created, since every
+order in one book shares them. Nothing recovers them from the announcement, since `pair_id` is a one-way
+hash of a single element — which is §4.3's point from the other side, that an
+indexer ignorant of the pair can bucket by `pair_id` and still not read the
+terms.
+
+From logical order to row, the new information is observational and exists only
+on the chain. That step *is* §7.3's check.
+
+So the type boundary and the process boundary are one boundary. The feeder is
+precisely the part that turns a logical order into a row, and it is the only
+part that needs archival state. Above the line is decoding, below it is storage
+and queries, and that is why a book that performs no chain lookups is
+nonetheless correct.
+
+The whole interface follows from that split:
+
+```rust
+/// Identity of an order: the AOCL leaf index of its UTXO. Not the addition
+/// record, which is not unique.
+pub struct OrderId(pub u64);
+
+/// An order in the book: one that has already passed §7.3, plus what only the
+/// chain can say about it. Nothing here can be built from an announcement
+/// alone, because the book performs no chain lookups.
+pub struct Order<C: Swappable> {
+    pub id: OrderId,
+    /// The confirming block, set by `apply`.
+    pub opened_in: BlockId,
+    /// The block that spent the order UTXO, or `None` while open.
+    pub closed_in: Option<BlockId>,
+    /// The terms, and this order's own parameters of a type the configuration
+    /// chooses: `SofunParams { d_zero, epoch }` for `Sofun`.
+    pub order: StandingSwapOrder<C>,
+}
+
+/// A block, named by height for ordering and by hash for identity.
+pub struct BlockId {
+    pub height: BlockHeight,
+    pub hash: Digest,
+}
+
+/// One block's worth of change, as the feeder observed it.
+pub struct BlockUpdate<C: Swappable> {
+    pub block: BlockId,
+    pub parent: Digest,
+    pub opened: Vec<Order<C>>,
+    pub closed: Vec<OrderId>,
+}
+
+impl<C: Swappable> OrderBook<C> {
+    /// An empty book for one market.
+    pub fn new(pair: AssetPair) -> Self;
+
+    /// The assets every order in this book offers and demands.
+    pub fn pair(&self) -> &AssetPair;
+
+    /// Admit and retire orders. Rejects an update that does not extend the
+    /// tip; re-applying the tip itself is a no-op.
+    pub fn apply(&mut self, update: BlockUpdate<C>) -> Result<(), Discontinuity>;
+
+    /// Undo every change above `luca`, reopen whatever closed on the way
+    /// there, and make `luca` the tip.
+    pub fn roll_back_to(&mut self, luca: BlockId);
+
+    /// Remove every order, open or closed, the predicate selects.
+    pub fn prune(&mut self, prune: impl FnMut(&Order<C>) -> bool);
+
+    /// The block this book reflects, if any.
+    pub fn tip(&self) -> Option<BlockId>;
+
+    /// Every open order, in no particular order.
+    pub fn open_orders(&self) -> impl Iterator<Item = &Order<C>>;
+
+    /// Open or retained closed; `closed_in` says which.
+    pub fn get(&self, id: OrderId) -> Option<&Order<C>>;
+}
+
+/// Queries that depend on what an order means live with the configuration.
+impl OrderBook<Sofun> {
+    /// Open orders asking exactly this amount, richest offer first.
+    pub fn demanding(&self, demanded: NativeCurrencyAmount)
+        -> Vec<&Order<Sofun>>;
+}
+```
+
+**A row holds a `StandingSwapOrder<C>`, it does not restate one.** The terms of an
+order — both amounts and the four digests — already have a type, and the book
+has no business owning a second copy of them. The asset pair is the exception
+that goes the other way: it is identical for every order in the book, so the
+book holds it once instead of every order holding a copy. That also leaves every
+order the same fixed size, with no heap allocation of its own, so a limit on
+the number of orders is a limit on memory. What it adds is
+only what the order itself cannot know, because the chain assigns both rather
+than the proposer choosing them: which block confirmed it, and which AOCL leaf
+its UTXO became.
+
+**`C::Params` is the additive divergence of §1.5, in memory rather than on
+the wire.** `StandingSwapOrder<C>` holds the six fields every configuration
+shares and one field of type `C::Params`, which is `SofunParams { d_zero,
+epoch }` for SOFuN and `()` for a pair with no parameters. The generic struct
+names no SOFuN field, for the same reason the generic body does not carry them
+(§4.3): the type parameter is the only place the configuration enters.
+Parameters and configuration are different things, and the types say so. A
+configuration such as SOFuN is holistic, fixed for the whole book, so it is the
+book's type parameter:
+
+```rust
+pub trait Swappable: Sized {
+    type Params: Debug + Clone;
+    type EncodingFormat: BFieldCodec
+        + From<StandingSwapOrder<Self>>
+        + TryInto<StandingSwapOrder<Self>>;
+    fn version() -> u64;
+
+    /// Provided: checks flag, `pair_id` and version, in that order, then
+    /// decodes the body.
+    fn recognize(pair_id: BFieldElement, message: &[BFieldElement])
+        -> Result<StandingSwapOrder<Self>, Unrecognized>;
+}
+
+pub enum Unrecognized {
+    NotAnOrder,
+    NotThisPair,
+    UnknownVersion(BFieldElement),
+    Malformed,
+}
+
+pub struct StandingSwapOrder<C: Swappable> {
+    offered_amount: NativeCurrencyAmount,
+    demanded_amount: NativeCurrencyAmount,
+    seed: Digest,
+    cancel_post_image: Digest,
+    reward_lock_script_hash: Digest,
+    reward_receiver_digest: Digest,
+    params: C::Params,
+}
+
+pub struct Sofun;
+impl Swappable for Sofun {
+    type Params = SofunParams;
+    type EncodingFormat = SofunBody;
+    fn version() -> u64 { 0 }
+}
+```
+
+**Each configuration constructs its own orders, so encoding cannot fail.** The
+fields of `StandingSwapOrder<C>` are private to its module, so a value exists
+only if a constructor in that module or one of its children built it, and each
+configuration supplies its own. `StandingSwapOrder<Sofun>::new` takes the
+offered amount, the parameters and the four digests, and sets the demanded
+amount to `Y` of the parameters' `epoch` (§4.1). Every SOFuN order therefore
+demands exactly `Y(epoch)`, the conversion to `SofunBody` is total, and decoding
+a body and encoding the result reproduces the body. Decoding is the direction
+that can fail, on a nonzero `padding` (§4.3), and it builds its result through
+`new` as well. Were the terms and the parameters two separate values, a caller
+could pair the terms of one order with the parameters of another, and encoding
+would write an order whose announced amount disagrees with its lock script. A
+configuration with no relation between its terms and its parameters, such as the
+version 1 `Generic` pair, takes both amounts as arguments.
+
+The configuration chooses the parameter type, and each order carries its own
+value of it — two SOFuN orders in one book have different `d_zero`. Keying the
+book on the configuration rather than on the parameter type also means a query
+that only makes sense for one configuration is written against that
+configuration by name, as `demanding` is. No method of the generic book reads
+`params`.
+
+**Rejected: erasing the schema behind `Box<dyn Order>`.** A trait with `id`,
+`offered`, `demanded` and `opened_in` as `&self` methods is object safe, so a
+book of trait objects compiles. It solves a variation that cannot occur: a book
+replicates one pair, `pair_id` fixes that pair's schema, and every order in it
+was therefore decoded the same way. It also costs twice. The composer reads this
+structure on every template build and wants a contiguous run ordered by offered
+amount, not a vector of pointers into separate allocations. And a SOFuN consumer
+holding `&dyn Order` cannot reach `d_zero`, so it either downcasts through `Any`,
+turning a compile-time fact into a runtime failure, or the trait grows a release
+date and the general primitive acquires the time lock §1.5 keeps out of it.
+
+If one process ever serves many pairs, the erasure belongs a level up: a map from
+pair to book, with the *book* behind the trait object. That is one indirection
+per pair rather than per order, and the erased interface is then the query
+surface, which really is uniform across pairs. Inside each book everything stays
+concrete. The one place a trait object fits well is the feeder, where choosing a
+decoder from `pair_id` is dispatch over an open set with a uniform operation, and
+the type parameter reappears on the far side once the schema is known.
+
+**The query is a filter and then a maximum, in that order, and it belongs to
+SOFuN.** A composer cannot fill an order whose demanded amount differs from half
+its own block's subsidy (§4.1), so `demanding` takes that amount and yields the
+rest in descending offered amount. There is no global best order, only a best
+order for a given block, which is why the subsidy is an argument rather than a
+property of the book. Both halves are SOFuN's: the exact-amount filter is its
+constraint, and ranking by offered amount is ranking by price only because every
+SOFuN order demands the same amount. A taker in a general pair can pay many
+amounts and wants price across all of them. So `demanding` is defined on
+`OrderBook<Sofun>` alone, built on the generic `open_orders`, and the
+generic book encodes nothing about what makes one order better than another.
+
+**Expiry is not in this interface, deliberately.** A standing swap order stands
+until its UTXO is spent; it has no clock. SOFuN's shelf life comes from the grid
+running out (§4.6), which is a fact about `d_zero` and `K`, not about the
+primitive. So the caller skips orders whose grid no longer clears `t + 3 years`,
+reading `params`. Putting a deadline on the row, or worse on
+`StandingSwapOrder`, would be exactly the kind of SOFuN-shaped leak into the
+general core that §1.5 rules out.
+
+**Rollback orders by height; the hash is for identity.** A height names exactly
+one block only on a single branch. The book holds one branch at a time, so
+rollback and pruning can compare rows by height alone — and they must, since
+hashes are unordered. A row nonetheless records the confirming block's hash as
+well, so that the block can be named unambiguously by a consumer that does not
+share the book's view of which branch is current. What a height cannot do is notice that the book has left its
+branch. A feeder that sees a reorganization but skips `roll_back_to` would
+otherwise hand the book blocks at heights it has already passed, and a book
+tracking only its height would either drop them as replays or stack the new
+branch onto the orphaned one, silently either way. So every update names its
+parent's hash, and `apply` accepts it only if that hash is the tip's and its
+height is one more. A missed rollback then fails on the first block of the new
+branch, which is what makes the single-branch assumption safe to rely on.
+
+**`roll_back_to` is why closed entries are kept.** An order retired at height
+*h* must come back if the chain abandons *h*, so closing an entry sets its
+`closed_in` rather than removing it, and the entry stays in the book until
+`prune` removes it, typically once its closing block is deeper than the
+operator expects any reorganization to reach. `prune` takes an arbitrary
+predicate and may remove open orders too, such as SOFuN orders whose grid has
+run out; that is safe for the same reason eviction is, since removal can only
+make the book incomplete, never wrong.
+Open and closed entries share one map, which makes rollback two plain steps:
+remove every entry opened above `luca`, then clear `closed_in` on every
+entry closed above it. An entry opened and closed on the abandoned branch falls
+to the first step regardless of the second. A rescan stays the fallback of last
+resort (§4.8).
+
+**Two exits, and only one of them arrives as an announcement.** Orders enter on
+a confirmed announcement and leave when the order UTXO is spent, which is a
+removal record rather than an announcement, and covers a fill and a cancel
+alike. A feeder that watches only announcements builds a book that grows and
+never shrinks.
+
+**What the feeder can use today.** A node run with `--utxo-index`, which also
+requires archival mode, exposes four methods under the `Utxoindex` namespace
+(`neptune-rpc/api/src/api/rpc.rs`). `block_heights_by_flags` answers "which
+blocks carry orders for this pair", because the node's announcement-flag key is
+the first two elements of an announcement, which is precisely this design's flag
+and `pair_id`. `block_heights_by_addition_records` confirms an order UTXO was
+created, and `block_heights_by_absolute_index_sets` reports that one was spent.
+Two cautions: the flag query documents that it may return results from orphaned
+blocks, where the other two promise canonical results, so discovery yields
+candidates and the addition-record query settles them; and the per-flag block
+list is capped at `MAX_NUM_BLOCKS_IN_LOOKUP_LIST`, roughly two months of blocks,
+which is shorter than an order's shelf life, so the flag query serves live sync
+and a bounded backfill rather than a cold scan of deep history.
+
+**What is reversible, and what is not.** The process boundary is the cheapest
+thing here: discovery, validation, `apply` and `roll_back_to` are the same logic
+whether a local archival state drives them or a subscription does, and only the
+trigger differs. What is permanent is the wire format of §4.3 — the flag value,
+how `pair_id` is derived, the 28 elements and their two readings, the reverse
+field order, and `padding` being zero. Once orders exist on mainnet
+under generic version 1 or SOFuN version 0, those cannot be changed without a
+new version that fillers must adopt. Scrutiny belongs there rather than on which process runs the book.
+
+**One rule keeps the rest reversible: dependency direction.** `neptune-defi`
+depends on `neptune-consensus` and `neptune-primitives` and on nothing else in
+the tree, so a separate process can link it unchanged. Never add an edge
+pointing at node internals, which in particular means block processing must not
+call into the book. `apply` and `roll_back_to` take data, not a `Block` and not
+a handle to node state, so archival state can drive them now and a subscription
+later without the book learning which.
+
+**Build nothing for mempool yet.** Going from "an order is in the book" to "an
+order has a state" is a mechanical change when the time comes, and a
+single-variant status today is the dead weight this section exists to avoid. The
+same goes for the query surface: return orders and let a market maker or a
+wallet decide what to do with them, rather than offering to act on their behalf.
 
 
 ## 5. No consensus changes required
@@ -973,8 +1399,10 @@ randomness per order.
 - [x] Existing `set_coinbase_distribution` latch found; only inputs are missing
 - [x] Generalization goal recorded (§1.5)
 - [x] Name chosen for the general primitive: **standing swap order** (§1.5)
-- [x] Partial fills decided deliberately for the general case: out, with the
-      structural reason and the upgrade path recorded (§1.5)
+- [x] Partial fills decided deliberately for the general case: out on grounds of
+      cost and bookkeeping, with the upgrade path recorded (§1.5). An earlier
+      draft claimed they were structurally impossible because a Triton program
+      cannot hash itself; that is false, and the claim is removed.
 - [x] Grid chosen over fixed `D` and over an enforced payout announcement
 - [x] Every open question resolved and written into the body
 - [ ] Design reviewed by a second pair of eyes
@@ -999,13 +1427,27 @@ randomness per order.
 - [ ] `AnnouncementFlag` value 1000 allocated (§4.3)
 - [ ] `G` = 1 week and `K` = 26 defined once, and used by both the lock-script
       builder and the order verifier (§4.3)
-- [ ] `StandingSwapOrderV1` with derived `BFieldCodec`; round-trip proptest
-      over the whole announcement, prefix included
+- [ ] `StandingSwapOrderV1` and `SofunBody` with derived `BFieldCodec`; round-trip
+      proptest over both announcements, envelope included, plus a truncation
+      case and a check that both bodies are 28 elements with every shared field
+      at the same offset
+- [ ] Schema chosen from `pair_id` before decoding, never from which decoder
+      succeeds; test that a generic body decodes as `SofunBody` (§4.3)
+- [ ] Conversion from `SofunBody` rejects a nonzero `padding`, so every order
+      has one encoding and consumers may deduplicate on raw elements (§4.3)
 - [ ] Order-announcement / lock-script consistency check (§7.3) as a library
       function, usable by the accepter and by any validator of a fill
 - [ ] Order index in the node: insert-time verification, priority queue on `X`,
       query by `Y` (§4.8)
+- [ ] Feeder and book split, with the book taking `BlockUpdate` and performing
+      no chain lookups; a row holds a `StandingSwapOrder` rather than repeating
+      its fields (§4.10)
+- [ ] Orders retired on a spent order UTXO, not only admitted on an
+      announcement; test a fill and a cancel (§4.10)
 - [ ] Index rollback on reorg, with a rescan fallback; test both
+- [ ] Closed entries retained for rollback and pruned by depth (§4.10)
+- [ ] `neptune-defi` still depends on nothing below `neptune-consensus`, checked
+      in CI (§4.10)
 - [ ] RPC exposing open orders
 
 ### Phase 3 — proposer side (wallet / `neptune-cli`)
