@@ -390,13 +390,19 @@ impl NetworkActor {
         let upgraded_peers_clone = upgraded_peers.clone();
         let mut swarm = libp2p::SwarmBuilder::with_existing_identity(local_key)
             .with_tokio()
+            // Prefer post-quantum key exchange through TLS 1.3. Fallback to
+            // Noise.
+            // TODO: Get rid of Noise after activation of hardfork-delta?
             .with_tcp(
                 libp2p::tcp::Config::default(),
-                libp2p::noise::Config::new,
+                (libp2p::tls::Config::new, libp2p::noise::Config::new),
                 yamux_tuner,
             )?
             .with_quic()
-            .with_relay_client(libp2p::noise::Config::new, yamux_tuner)?
+            .with_relay_client(
+                (libp2p::tls::Config::new, libp2p::noise::Config::new),
+                yamux_tuner,
+            )?
             .with_behaviour(|key, relay_client| {
                 let local_peer_id = key.public().to_peer_id();
 
