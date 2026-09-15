@@ -1,5 +1,29 @@
 Note: (!) indicates a breaking change.
 
+## [0.17.1](https://github.com/Neptune-Crypto/neptune-core/compare/v0.17.0..v0.17.1) - 2026-09-15
+
+### 🐛 Bug Fixes
+
+- *(dashboard)* Sort peers deterministically ([19185cc3](https://github.com/Neptune-Crypto/neptune-core/commit/19185cc3))
+- *(mutator_set)* Reject overflowing chunk indices ([79f701d4](https://github.com/Neptune-Crypto/neptune-core/commit/79f701d4))
+- *(proof_upgrader)* Only Fix if incentivized ([891506e2](https://github.com/Neptune-Crypto/neptune-core/commit/891506e2))
+- *(mempool)* Evict conflicting link-txs ([61954d5a](https://github.com/Neptune-Crypto/neptune-core/commit/61954d5a))
+
+### 🔒️ Security
+
+- *(peer_loop)* Release global state lock before sending to main loop ([329a8a13](https://github.com/Neptune-Crypto/neptune-core/commit/329a8a13))
+- *(peer_loop)* Guarantee removal from peer map on disconnect ([5fec44b1](https://github.com/Neptune-Crypto/neptune-core/commit/5fec44b1))
+- *(peer_loop)* Double punishment for bad disconnect ([693c4122](https://github.com/Neptune-Crypto/neptune-core/commit/693c4122))
+- *(main_loop)* Drop read-lock before inter-task channel send ([ec46a1fd](https://github.com/Neptune-Crypto/neptune-core/commit/ec46a1fd))
+- *(sync_loop)* Verify block hash against self-reported threshold ([bf86b3ed](https://github.com/Neptune-Crypto/neptune-core/commit/bf86b3ed))
+- *(sync_loop)* Keep draining channels while subtasks run ([b28e3642](https://github.com/Neptune-Crypto/neptune-core/commit/b28e3642))
+- *(p2p)* Prefer TLS with post-quantum cryptography ([3dd77d54](https://github.com/Neptune-Crypto/neptune-core/commit/3dd77d54))
+
+### ⚙️ Miscellaneous
+
+- Upgrade to libp2p v0.57.0 ([239180b9](https://github.com/Neptune-Crypto/neptune-core/commit/239180b9))
+- Cargo update ([775becf2](https://github.com/Neptune-Crypto/neptune-core/commit/775becf2))
+
 ## [0.17.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.16.0..v0.17.0) - 2026-09-11
 
 ### ✨ Features
