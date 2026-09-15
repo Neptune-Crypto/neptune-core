@@ -1646,14 +1646,20 @@ impl NetworkActor {
     ///   NATs or routers).
     fn handle_upnp_event(&mut self, event: libp2p::upnp::Event) {
         match event {
-            libp2p::upnp::Event::NewExternalAddr(addr) => {
+            libp2p::upnp::Event::NewExternalAddr {
+                external_addr: addr,
+                ..
+            } => {
                 tracing::info!("UPnP: NAT successfully mapped a new external address: {addr}");
                 self.add_external_address(addr.clone());
                 self.reachability_state.handle_upnp_success(addr);
                 self.cleanup_relays();
             }
 
-            libp2p::upnp::Event::ExpiredExternalAddr(addr) => {
+            libp2p::upnp::Event::ExpiredExternalAddr {
+                external_addr: addr,
+                ..
+            } => {
                 tracing::debug!("UPnP: External mapping for {addr} has expired or was removed.");
                 self.reachability_state.reset();
                 self.swarm.behaviour_mut().autonat.probe_address(addr);
