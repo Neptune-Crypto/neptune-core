@@ -25,6 +25,7 @@ use super::Swappable;
 
 /// Identity of an order: the AOCL leaf index of the order UTXO.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct OrderId(pub u64);
 
 /// One order, as the book knows it: open, or closed recently enough that a
@@ -53,6 +54,7 @@ pub struct Order<C: Swappable> {
 /// distinguishes blocks at the same height on different branches, which is how
 /// the order book knows it's on the wrong branch (or its update is).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct BlockId {
     pub height: BlockHeight,
     pub hash: Digest,
@@ -72,6 +74,7 @@ pub struct BlockUpdate<C: Swappable> {
 /// The usual cause is a feeder that observed a reorganization but did not call
 /// [`OrderBook::roll_back_to`] before applying blocks from the new branch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct Discontinuity {
     pub book_tip: BlockId,
     pub update_block: BlockId,
@@ -222,6 +225,23 @@ impl<C: Swappable> OrderBook<C> {
     }
 }
 
+// Not derived because the derive can only bound `C`, and `C` is a marker
+// type whose configurations generate orders through their own constructors.
+#[cfg(any(test, feature = "arbitrary-impls"))]
+impl<'a, C: Swappable> arbitrary::Arbitrary<'a> for Order<C>
+where
+    StandingSwapOrder<C>: arbitrary::Arbitrary<'a>,
+{
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Self {
+            id: u.arbitrary()?,
+            opened_in: u.arbitrary()?,
+            closed_in: u.arbitrary()?,
+            order: u.arbitrary()?,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
@@ -230,7 +250,7 @@ mod tests {
     use tasm_lib::triton_vm::prelude::BFieldElement;
 
     use super::*;
-    use crate::standing_swap_order::v1::Generic;
+    use crate::standing_swap_order::v1::V1Swap;
 
     const A: u64 = 0;
     const B: u64 = 1;
@@ -242,7 +262,7 @@ mod tests {
         }
     }
 
-    fn update(block: BlockId, parent: BlockId) -> BlockUpdate<Generic> {
+    fn update(block: BlockId, parent: BlockId) -> BlockUpdate<V1Swap> {
         BlockUpdate {
             block,
             parent: parent.hash,
@@ -258,7 +278,7 @@ mod tests {
         }
     }
 
-    fn entry(id: u64, opened_at: u64) -> Order<Generic> {
+    fn entry(id: u64, opened_at: u64) -> Order<V1Swap> {
         Order {
             id: OrderId(id),
             opened_in: BlockId {
@@ -266,7 +286,7 @@ mod tests {
                 hash: Digest::default(),
             },
             closed_in: None,
-            order: StandingSwapOrder::<Generic>::new(
+            order: StandingSwapOrder::<V1Swap>::new(
                 NativeCurrencyAmount::coins(7),
                 NativeCurrencyAmount::coins(11),
                 Digest::default(),
@@ -278,7 +298,23 @@ mod tests {
     }
 
     #[test]
-    fn a_missed_rollback_is_rejected_and_a_performed_one_is_accepted() {
+    fn arbitrary_impls_are_instantiable() {
+        use arbitrary::Arbitrary;
+        use arbitrary::Unstructured;
+
+        use crate::standing_swap_order::sofun::Sofun;
+
+        let mut u = Unstructured::new(&[0xa5; 1024]);
+        Order::<V1Swap>::arbitrary(&mut u).unwrap();
+        Order::<Sofun>::arbitrary(&mut u).unwrap();
+        Discontinuity::arbitrary(&mut u).unwrap();
+
+        let body = crate::standing_swap_order::sofun::SofunBody::arbitrary(&mut u).unwrap();
+        assert!(StandingSwapOrder::<Sofun>::try_from(body).is_ok());
+    }
+
+    #[test]
+    fn reorganization_requires_rollback() {
         let mut book = OrderBook::new(pair());
         book.apply(update(block(98, A), block(97, A))).unwrap();
         book.apply(update(block(99, A), block(98, A))).unwrap();
@@ -288,50 +324,65 @@ mod tests {
         book.apply(update(block(100, A), block(99, A))).unwrap();
         assert_eq!(Some(block(100, A)), book.tip());
 
-        // Branch B forks after block 98. Without a rollback its first block
-        // does not extend the tip.
+        // Branch B forks after block 98. Presented with no rollback. Reject!
         assert!(book.apply(update(block(99, B), block(98, A))).is_err());
 
+        // Now with rollback.
         book.roll_back_to(block(98, A));
+
+        // Accept.
         book.apply(update(block(99, B), block(98, A))).unwrap();
         book.apply(update(block(100, B), block(99, B))).unwrap();
         book.apply(update(block(101, B), block(100, B))).unwrap();
         assert_eq!(Some(block(101, B)), book.tip());
     }
 
-    /// Regression: rollback used to restore closed entries after filtering the
-    /// open ones, so an order both opened and closed on the abandoned branch
-    /// came back as open although the surviving branch never confirmed it.
     #[test]
-    fn rollback_reopens_only_orders_confirmed_on_the_surviving_branch() {
+    fn rollback_undoes_orphaned_closures() {
         let mut book = OrderBook::new(pair());
+
+        let mut at_96 = update(block(96, A), block(95, A));
+        at_96.opened.push(entry(5, 96));
+        book.apply(at_96).unwrap();
+
+        let mut at_97 = update(block(97, A), block(96, A));
+        at_97.closed.push(OrderId(5));
+        book.apply(at_97).unwrap();
 
         let mut at_98 = update(block(98, A), block(97, A));
         at_98.opened.push(entry(1, 98));
         book.apply(at_98).unwrap();
 
         let mut at_99 = update(block(99, A), block(98, A));
-        at_99.opened.push(entry(2, 99));
+        at_99.opened.extend([entry(2, 99), entry(6, 99)]);
         book.apply(at_99).unwrap();
 
         let mut at_100 = update(block(100, A), block(99, A));
         at_100.closed.extend([OrderId(1), OrderId(2)]);
         book.apply(at_100).unwrap();
-        assert!(book.is_empty());
+        assert_eq!(1, book.len());
 
         book.roll_back_to(block(98, A));
 
-        // Order 1 was confirmed at the ancestor and closed above it.
+        // Order 1 was opened at the ancestor and closed above it. It should
+        // be open now.
         assert!(book.get(OrderId(1)).unwrap().closed_in.is_none());
-        // Order 2 was confirmed and closed above the ancestor.
+
+        // Order 2 was opened and closed above the ancestor. 404
         assert!(book.get(OrderId(2)).is_none());
+
+        // Order 5 was opened and closed below the ancestor. It should still be
+        // closed, in the block that closed it.
+        assert_eq!(Some(block(97, A)), book.get(OrderId(5)).unwrap().closed_in);
+
+        // Order 6 was opened above the ancestor and never closed. 404
+        assert!(book.get(OrderId(6)).is_none());
+
         assert_eq!(1, book.len());
     }
 
-    /// Regression: `apply` used to trust the feeder's confirming height, so an entry
-    /// carrying the wrong height survived a rollback that should remove it.
     #[test]
-    fn apply_records_the_block_that_opened_the_order() {
+    fn rollback_deletes_opened_orders() {
         let mut book = OrderBook::new(pair());
         book.apply(update(block(98, A), block(97, A))).unwrap();
 
@@ -346,7 +397,7 @@ mod tests {
     }
 
     #[test]
-    fn a_closed_entry_is_retained_until_pruned() {
+    fn closed_orders_live_until_pruned() {
         let mut book = OrderBook::new(pair());
 
         let mut at_98 = update(block(98, A), block(97, A));
@@ -361,7 +412,7 @@ mod tests {
         assert_eq!(Some(block(99, A)), book.get(OrderId(4)).unwrap().closed_in);
 
         let closed_below = |height: u64| {
-            move |order: &Order<Generic>| {
+            move |order: &Order<V1Swap>| {
                 order
                     .closed_in
                     .is_some_and(|closed| closed.height < BlockHeight::from(height))

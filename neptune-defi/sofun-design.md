@@ -1125,7 +1125,7 @@ that can fail, on a nonzero `padding` (§4.3), and it builds its result through
 could pair the terms of one order with the parameters of another, and encoding
 would write an order whose announced amount disagrees with its lock script. A
 configuration with no relation between its terms and its parameters, such as the
-version 1 `Generic` pair, takes both amounts as arguments.
+`V1Swap` pair, takes both amounts as arguments.
 
 The configuration chooses the parameter type, and each order carries its own
 value of it — two SOFuN orders in one book have different `d_zero`. Keying the

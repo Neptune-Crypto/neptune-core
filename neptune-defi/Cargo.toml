@@ -10,13 +10,31 @@ license = "Apache-2.0"
 homepage = "https://neptune.cash/"
 repository = "https://github.com/Neptune-Crypto/neptune-core/"
 
+[features]
+# implements arbitrary::Arbitrary for various types
+arbitrary-impls = [
+    "dep:arbitrary",
+    "neptune-consensus/arbitrary-impls",
+    "neptune-primitives/arbitrary-impls",
+]
+
 [dependencies]
+arbitrary = { version = "1.4.1", features = ["derive"], optional = true }
 tasm-lib = "9.0.0"
 triton-vm = "9.0.0"
 twenty-first = "3.0.0"
 
 neptune-consensus = { version = "0.19.0", path = "../neptune-consensus" }
 neptune-primitives = { version = "0.19.0", path = "../neptune-primitives" }
+
+[dev-dependencies]
+# Depending on this crate with the `arbitrary-impls` feature turns that feature
+# on for the crate under test and its dependencies when running `cargo test`.
+neptune-defi = { path = ".", features = ["arbitrary-impls"] }
+
+proptest = "1.7"
+proptest-arbitrary-interop = "0.1"
+test-strategy = "0.3"
 
 [lints]
 workspace = true
