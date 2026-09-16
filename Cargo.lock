@@ -4015,9 +4015,14 @@ dependencies = [
 name = "neptune-defi"
 version = "0.19.0"
 dependencies = [
+ "arbitrary",
  "neptune-consensus",
+ "neptune-defi",
  "neptune-primitives",
+ "proptest",
+ "proptest-arbitrary-interop",
  "tasm-lib",
+ "test-strategy 0.3.1",
  "triton-vm",
  "twenty-first",
 ]

@@ -6,7 +6,8 @@ use super::StandingSwapOrder;
 use super::Swappable;
 
 /// The encoding format of a version 1 [`super::StandingSwapOrder`].
-#[derive(Debug, Clone, Copy, BFieldCodec)]
+#[derive(Debug, Clone, Copy, BFieldCodec, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct StandingSwapOrderV1 {
     pub offered_amount: NativeCurrencyAmount,
     pub demanded_amount: NativeCurrencyAmount,
@@ -16,12 +17,13 @@ pub struct StandingSwapOrderV1 {
     pub reward_receiver_digest: Digest,
 }
 
-/// The generic configuration of a standing swap order: both amounts are free,
-/// and orders carry no parameters.
+/// The configuration of a standing swap order in which both amounts are chosen
+/// by the order's creator, and orders carry no parameters.
 #[derive(Debug, Clone, Copy)]
-pub struct Generic;
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
+pub struct V1Swap;
 
-impl Swappable for Generic {
+impl Swappable for V1Swap {
     fn version() -> u64 {
         1
     }
@@ -31,8 +33,8 @@ impl Swappable for Generic {
     type EncodingFormat = StandingSwapOrderV1;
 }
 
-impl StandingSwapOrder<Generic> {
-    /// A generic order. No relation binds its terms, so every field is an
+impl StandingSwapOrder<V1Swap> {
+    /// A version 1 order. No relation binds its terms, so every field is an
     /// argument.
     pub fn new(
         offered_amount: NativeCurrencyAmount,
@@ -54,8 +56,8 @@ impl StandingSwapOrder<Generic> {
     }
 }
 
-impl From<StandingSwapOrder<Generic>> for StandingSwapOrderV1 {
-    fn from(order: StandingSwapOrder<Generic>) -> Self {
+impl From<StandingSwapOrder<V1Swap>> for StandingSwapOrderV1 {
+    fn from(order: StandingSwapOrder<V1Swap>) -> Self {
         StandingSwapOrderV1 {
             offered_amount: order.offered_amount,
             demanded_amount: order.demanded_amount,
@@ -67,7 +69,7 @@ impl From<StandingSwapOrder<Generic>> for StandingSwapOrderV1 {
     }
 }
 
-impl From<StandingSwapOrderV1> for StandingSwapOrder<Generic> {
+impl From<StandingSwapOrderV1> for StandingSwapOrder<V1Swap> {
     fn from(body: StandingSwapOrderV1) -> Self {
         Self::new(
             body.offered_amount,
@@ -77,5 +79,33 @@ impl From<StandingSwapOrderV1> for StandingSwapOrder<Generic> {
             body.reward_lock_script_hash,
             body.reward_receiver_digest,
         )
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary-impls"))]
+impl<'a> arbitrary::Arbitrary<'a> for StandingSwapOrder<V1Swap> {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Self::new(
+            u.arbitrary()?,
+            u.arbitrary()?,
+            u.arbitrary()?,
+            u.arbitrary()?,
+            u.arbitrary()?,
+            u.arbitrary()?,
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use proptest_arbitrary_interop::arb;
+    use test_strategy::proptest;
+
+    use super::*;
+
+    #[proptest]
+    fn v1swap_round_trip(#[strategy(arb())] body: StandingSwapOrderV1) {
+        let order = StandingSwapOrder::<V1Swap>::from(body);
+        assert_eq!(body, StandingSwapOrderV1::from(order));
     }
 }

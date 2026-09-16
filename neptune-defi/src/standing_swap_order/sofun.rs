@@ -17,7 +17,7 @@ use super::Swappable;
 ///  - d_zero: Timestamp -- when the timestamp grid starts
 ///  - epoch: u32 -- which epoch the order is valid for
 ///  - padding: u64 -- must be zero
-#[derive(Debug, Clone, Copy, BFieldCodec)]
+#[derive(Debug, Clone, Copy, BFieldCodec, PartialEq, Eq)]
 pub struct SofunBody {
     offered_amount: NativeCurrencyAmount,
     d_zero: Timestamp,
@@ -32,6 +32,7 @@ pub struct SofunBody {
 /// The SOFuN configuration of a standing swap order: orders for Future Neptune
 /// coins, paid into a grid of release dates.
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct Sofun;
 
 impl StandingSwapOrder<Sofun> {
@@ -108,6 +109,7 @@ impl Swappable for Sofun {
 
 /// The parameters a SOFuN order carries beyond its standing swap terms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct SofunParams {
     /// The first point of the order's grid of release dates.
     pub d_zero: Timestamp,
@@ -146,15 +148,45 @@ impl OrderBook<Sofun> {
     }
 }
 
+// A derived implementation would set `padding` to nonzero values, which
+// decoding rejects.
+#[cfg(any(test, feature = "arbitrary-impls"))]
+impl<'a> arbitrary::Arbitrary<'a> for SofunBody {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(u.arbitrary::<StandingSwapOrder<Sofun>>()?.into())
+    }
+}
+
+// The demanded amount is not arbitrary, so the constructor must compute it.
+#[cfg(any(test, feature = "arbitrary-impls"))]
+impl<'a> arbitrary::Arbitrary<'a> for StandingSwapOrder<Sofun> {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Self::new(
+            u.arbitrary()?,
+            u.arbitrary()?,
+            u.arbitrary()?,
+            u.arbitrary()?,
+            u.arbitrary()?,
+            u.arbitrary()?,
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use tasm_lib::triton_vm::prelude::BFieldElement;
 
+    use std::collections::HashMap;
     use std::collections::HashSet;
 
     use neptune_primitives::block_height::BlockHeight;
     use neptune_primitives::block_height::BLOCKS_PER_GENERATION;
     use neptune_primitives::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
+    use proptest::collection::hash_map;
+    use proptest::collection::hash_set;
+    use proptest::collection::vec;
+    use proptest_arbitrary_interop::arb;
+    use test_strategy::proptest;
 
     use super::*;
     use crate::standing_swap_order::order_book::BlockId;
@@ -165,40 +197,27 @@ mod tests {
     use crate::standing_swap_order::UnrecognizedOrder;
     use crate::standing_swap_order::STANDING_SWAP_ORDER_FLAG;
 
-    /// The window of disagreement between `StandingSwapOrderV1` and `SofunBody`.
+    /// The window where `StandingSwapOrderV1` and `SofunBody` are allowed to
+    /// disagree.
     /// `StandingSwapOrderV1` spends it on `demanded_amount` and
     /// [`SofunBody`] spends it on `padding`, `epoch` and `d_zero`.
     const OVERLOADED_ELEMENTS: std::ops::Range<usize> = 20..24;
 
-    fn digest(seed: u64) -> Digest {
-        Digest::new([1, 2, 3, 4, 5].map(|i| BFieldElement::new(seed * 100 + i)))
-    }
-
-    fn sofun() -> SofunBody {
-        SofunBody {
-            offered_amount: NativeCurrencyAmount::coins(7),
-            d_zero: Timestamp::millis(1_757_000_000_000),
-            epoch: 3,
-            padding: 0,
-            seed: digest(1),
-            cancel_post_image: digest(2),
-            reward_lock_script_hash: digest(3),
-            reward_receiver_digest: digest(4),
-        }
-    }
-
-    #[test]
-    fn sofun_matches_the_v1_layout() {
+    #[proptest]
+    fn sofun_matches_the_v1_layout(
+        #[strategy(arb())] body: SofunBody,
+        #[strategy(arb())] demanded_amount: NativeCurrencyAmount,
+    ) {
         let generic = StandingSwapOrderV1 {
-            offered_amount: sofun().offered_amount,
-            demanded_amount: NativeCurrencyAmount::coins(11),
-            seed: sofun().seed,
-            cancel_post_image: sofun().cancel_post_image,
-            reward_lock_script_hash: sofun().reward_lock_script_hash,
-            reward_receiver_digest: sofun().reward_receiver_digest,
+            offered_amount: body.offered_amount,
+            demanded_amount,
+            seed: body.seed,
+            cancel_post_image: body.cancel_post_image,
+            reward_lock_script_hash: body.reward_lock_script_hash,
+            reward_receiver_digest: body.reward_receiver_digest,
         };
 
-        let sofun = sofun().encode();
+        let sofun = body.encode();
         let generic = generic.encode();
         assert_eq!(28, sofun.len());
         assert_eq!(28, generic.len());
@@ -213,6 +232,11 @@ mod tests {
             sofun[OVERLOADED_ELEMENTS.end..],
             generic[OVERLOADED_ELEMENTS.end..]
         );
+
+        // The windows agree only if the four limbs of `demanded_amount` equal the
+        // elements of `d_zero`, `epoch` and `padding`, which arbitrary inputs make
+        // negligibly likely. The inequality shows that the fields the schemas
+        // disagree on lie inside the window.
         assert_ne!(sofun[OVERLOADED_ELEMENTS], generic[OVERLOADED_ELEMENTS]);
     }
 
@@ -220,156 +244,174 @@ mod tests {
     ///
     /// `demanded_amount` is an `i128` written as four 32-bit limbs, so every
     /// element in the overloaded window is below `u32::MAX` by construction.
-    /// That is exactly what `SofunBody`'s `epoch` and `padding` require, and its
-    /// `d_zero` accepts any element at all. So a generic body always decodes as
-    /// a SOFuN order, with a meaningless release date. Only `pair_id` separates
-    /// the two.
-    #[test]
-    fn a_generic_body_always_decodes_as_sofun() {
-        for demanded_amount in [
-            NativeCurrencyAmount::coins(11),
-            NativeCurrencyAmount::from_nau(0),
-            NativeCurrencyAmount::from_nau(i128::MAX),
-            NativeCurrencyAmount::from_nau(-1),
-        ] {
-            let generic = StandingSwapOrderV1 {
-                offered_amount: sofun().offered_amount,
-                demanded_amount,
-                seed: sofun().seed,
-                cancel_post_image: sofun().cancel_post_image,
-                reward_lock_script_hash: sofun().reward_lock_script_hash,
-                reward_receiver_digest: sofun().reward_receiver_digest,
-            };
-            assert!(SofunBody::decode(&generic.encode()).is_ok());
-        }
+    /// That is exactly what `SofunBody`'s `epoch` and `padding` require, and
+    /// its `d_zero` accepts any element at all. So a generic body always
+    /// decodes as a SOFuN order, with a meaningless release date. Only
+    /// `pair_id` separates the two.
+    #[proptest]
+    fn v1_always_decodes_as_sofun(#[strategy(arb())] v1: StandingSwapOrderV1, demanded_nau: i128) {
+        // Use a uniform u128 for `demanded_amount`
+        let v1 = StandingSwapOrderV1 {
+            demanded_amount: NativeCurrencyAmount::from_nau(demanded_nau),
+            ..v1
+        };
+        assert!(SofunBody::decode(&v1.encode()).is_ok());
     }
 
-    #[test]
-    fn a_sofun_body_does_not_decode_as_a_generic_order() {
+    #[proptest]
+    fn sofun_body_does_not_decode_as_v1(
+        #[strategy(arb())]
+        #[filter(u64::from(u32::MAX) < #body.d_zero.0.value())]
+        body: SofunBody,
+    ) {
         // A timestamp in milliseconds exceeds `u32::MAX`, and the amount codec
         // rejects any limb above that bound, so the wrong decoder fails loudly
         // rather than reporting a nonsense price. That follows from real
         // timestamps, not from the layout: a `d_zero` small enough to pass
         // would be a date before 1970-02-19, which no order can carry.
-        assert!(u64::from(u32::MAX) < sofun().d_zero.0.value());
-        assert!(StandingSwapOrderV1::decode(&sofun().encode()).is_err());
+        assert!(StandingSwapOrderV1::decode(&body.encode()).is_err());
     }
 
     /// Decoding and re-encoding a valid body reproduces it element for element.
-    #[test]
-    fn a_sofun_body_survives_a_round_trip() {
-        let order = StandingSwapOrder::<Sofun>::try_from(sofun()).unwrap();
-        assert_eq!(sofun().encode(), SofunBody::from(order).encode());
+    #[proptest]
+    fn sofun_body_survives_a_round_trip(#[strategy(arb())] body: SofunBody) {
+        let order = StandingSwapOrder::<Sofun>::try_from(body).unwrap();
+        assert_eq!(body, SofunBody::from(order));
     }
 
-    #[test]
-    fn recognize_checks_the_envelope_before_the_body() {
-        let pair_id = BFieldElement::new(77);
-        let message = |flag, id, version, body: SofunBody| {
-            [vec![flag, id, BFieldElement::new(version)], body.encode()].concat()
-        };
+    #[proptest]
+    fn recognize_checks_envelope_before_body(
+        #[strategy(arb())] pair_id: BFieldElement,
+        #[strategy(arb())] body: SofunBody,
+        #[strategy(arb())]
+        #[filter(#other_flag != STANDING_SWAP_ORDER_FLAG)]
+        other_flag: BFieldElement,
+        #[strategy(arb())]
+        #[filter(#other_pair != #pair_id)]
+        other_pair: BFieldElement,
+        #[strategy(arb())]
+        #[filter(#other_version != BFieldElement::new(Sofun::version()))]
+        other_version: BFieldElement,
+        #[filter(#padding != 0)] padding: u64,
+        #[strategy(1..VALID_LENGTH)] prefix_len: usize,
+        #[strategy(vec(arb::<BFieldElement>(),1..10))] suffix: Vec<BFieldElement>,
+    ) {
+        let version = BFieldElement::new(Sofun::version());
+        let message =
+            |flag, id, version, body: SofunBody| [vec![flag, id, version], body.encode()].concat();
         let recognize = |message: Vec<BFieldElement>| Sofun::recognize(pair_id, &message);
 
-        let valid = message(STANDING_SWAP_ORDER_FLAG, pair_id, 0, sofun());
+        let valid = message(STANDING_SWAP_ORDER_FLAG, pair_id, version, body);
+        assert_eq!(VALID_LENGTH, valid.len());
         let order = recognize(valid.clone()).unwrap();
-        assert_eq!(sofun().encode(), SofunBody::from(order).encode());
+        assert_eq!(body.encode(), SofunBody::from(order).encode());
 
-        let other_flag = BFieldElement::new(999);
-        let other_pair = BFieldElement::new(78);
-        let padded = SofunBody {
-            padding: 1,
-            ..sofun()
-        };
+        let padded = SofunBody { padding, ..body };
         for (message, reason) in [
             (
-                message(other_flag, pair_id, 0, sofun()),
+                message(other_flag, pair_id, version, body),
                 UnrecognizedOrder::NotAnOrder,
             ),
             (
-                message(STANDING_SWAP_ORDER_FLAG, other_pair, 0, sofun()),
+                message(STANDING_SWAP_ORDER_FLAG, other_pair, version, body),
                 UnrecognizedOrder::NotThisPair,
             ),
             (
-                message(STANDING_SWAP_ORDER_FLAG, pair_id, 1, sofun()),
-                UnrecognizedOrder::UnknownVersion(BFieldElement::new(1)),
+                message(STANDING_SWAP_ORDER_FLAG, pair_id, other_version, body),
+                UnrecognizedOrder::UnknownVersion(other_version),
             ),
             (
-                message(STANDING_SWAP_ORDER_FLAG, pair_id, 0, padded),
+                message(STANDING_SWAP_ORDER_FLAG, pair_id, version, padded),
                 UnrecognizedOrder::Malformed,
             ),
-            (
-                valid[..valid.len() - 1].to_vec(),
-                UnrecognizedOrder::Malformed,
-            ),
-            (valid[..2].to_vec(), UnrecognizedOrder::Malformed),
+            (valid[..prefix_len].to_vec(), UnrecognizedOrder::Malformed),
+            ([valid, suffix].concat(), UnrecognizedOrder::Malformed),
         ] {
             assert_eq!(Err(reason), recognize(message).map(|_| ()));
         }
     }
 
-    #[test]
-    fn a_sofun_body_with_nonzero_padding_is_rejected() {
-        let body = SofunBody {
-            padding: 1,
-            ..sofun()
-        };
+    /// The length of a message: three envelope elements and a 28-element body.
+    const VALID_LENGTH: usize = 3 + 28;
+
+    #[proptest]
+    fn sofun_body_with_nonzero_padding_is_rejected(
+        #[strategy(arb())] body: SofunBody,
+        #[filter(#padding != 0)] padding: u64,
+    ) {
+        let body = SofunBody { padding, ..body };
         assert!(StandingSwapOrder::<Sofun>::try_from(body).is_err());
     }
 
-    #[test]
-    fn demanding_filters_by_demanded_amount_then_ranks_by_offered_amount() {
-        let block = BlockId {
-            height: BlockHeight::from(1_u64),
-            hash: Digest::default(),
-        };
-        let order = |id, offered, epoch| Order::<Sofun> {
-            id: OrderId(id),
-            opened_in: block,
-            closed_in: None,
-            order: StandingSwapOrder::<Sofun>::new(
-                NativeCurrencyAmount::coins(offered),
-                SofunParams {
-                    d_zero: Timestamp::default(),
-                    epoch,
-                },
-                Digest::default(),
-                Digest::default(),
-                Digest::default(),
-                Digest::default(),
-            ),
-        };
+    /// `demanding` returns the open orders whose demanded amount is `demanded`,
+    /// and no others, in order of non-increasing offered amount.
+    ///
+    /// Epochs are drawn from a range small enough that orders share them, so
+    /// the filter both keeps and drops orders. Keying the terms on the order ID
+    /// makes the IDs distinct.
+    #[proptest]
+    fn demanding_filters_by_demanded_amount_then_ranks_by_offered_amount(
+        #[strategy(hash_map(arb::<OrderId>(), (arb::<SofunBody>(), 0_u32..4), 0..20))]
+        terms: HashMap<OrderId, (SofunBody, u32)>,
+        #[strategy(0_u32..4)] epoch: u32,
+        #[strategy(arb())] block: BlockId,
+        #[strategy(arb())] parent: Digest,
+        #[strategy(hash_set(arb::<Digest>(), 0..4))] offered: HashSet<Digest>,
+        #[strategy(hash_set(arb::<Digest>(), 0..4))] demanded: HashSet<Digest>,
+    ) {
+        let orders = terms
+            .into_iter()
+            .map(|(id, (body, epoch))| Order::<Sofun> {
+                id,
+                opened_in: block,
+                closed_in: None,
+                order: StandingSwapOrder::<Sofun>::try_from(SofunBody { epoch, ..body }).unwrap(),
+            })
+            .collect::<Vec<_>>();
 
-        let mut book = OrderBook::<Sofun>::new(AssetPair {
-            offered: HashSet::new(),
-            demanded: HashSet::new(),
-        });
+        let mut book = OrderBook::<Sofun>::new(AssetPair { offered, demanded });
         book.apply(BlockUpdate::<Sofun> {
             block,
-            parent: Digest::default(),
-            opened: vec![order(1, 5, 0), order(2, 9, 0), order(3, 99, 1)],
+            parent,
+            opened: orders.clone(),
             closed: vec![],
         })
         .unwrap();
 
-        let ids = book
-            .demanding(Block::generation_subsidy(0).half())
+        let demanded = Block::generation_subsidy(u64::from(epoch)).half();
+        let found = book.demanding(demanded);
+
+        let matching = orders
             .iter()
-            .map(|order| order.id)
-            .collect::<Vec<_>>();
-        assert_eq!(vec![OrderId(2), OrderId(1)], ids);
+            .filter(|order| order.order.demanded_amount() == demanded)
+            .count();
+        assert_eq!(matching, found.len());
+        assert!(found
+            .iter()
+            .all(|order| order.order.demanded_amount() == demanded));
+        assert!(found
+            .windows(2)
+            .all(|pair| pair[0].order.offered_amount() >= pair[1].order.offered_amount()));
     }
 
-    #[test]
-    fn a_decoded_order_is_found_by_half_the_subsidy_of_its_block() {
-        // The first height of generation 1. Without the reboot offset it would
-        // count as generation 0, whose subsidy is twice as large, so an epoch
-        // derived without the offset fails this test.
-        let height = BlockHeight::from(BLOCKS_PER_GENERATION - NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT);
-        assert_eq!(1, height.get_generation());
+    #[proptest]
+    fn sofun_order_is_found(
+        #[strategy(arb())] body: SofunBody,
+        #[strategy(1_u64..8)] generation: u64,
+        #[strategy(0..BLOCKS_PER_GENERATION)] index: u64,
+    ) {
+        // Generation `generation` starts `NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT`
+        // heights before `generation * BLOCKS_PER_GENERATION`. An epoch derived
+        // without the reboot offset is off by one on those first heights of
+        // every generation, and fails this test there.
+        let height = BlockHeight::from(
+            generation * BLOCKS_PER_GENERATION - NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT + index,
+        );
+        assert_eq!(generation, height.get_generation());
 
         let body = SofunBody {
             epoch: u32::try_from(height.get_generation()).unwrap(),
-            ..sofun()
+            ..body
         };
         let decoded = *SofunBody::decode(&body.encode()).unwrap();
         let order = StandingSwapOrder::<Sofun>::try_from(decoded).unwrap();
