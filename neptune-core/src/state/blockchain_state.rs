@@ -1,6 +1,7 @@
 use neptune_archive::archival_state::ArchivalState;
 use neptune_consensus::block::pow::LustrationStatus;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_mempool::recent_mutator_sets::RecentMutatorSets;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_primitives::block_height::BlockHeight;
 use tasm_lib::prelude::Digest;
@@ -107,6 +108,11 @@ impl BlockchainState {
     /// Includes guesser reward outputs.
     pub(crate) fn tip_mutator_set_after(&self) -> MutatorSetAccumulator {
         self.light_state().tip_mutator_set_after()
+    }
+
+    /// The mutator set at the tip and at its nearest ancestors. Cheap to clone.
+    pub(crate) fn recent_mutator_sets(&self) -> &RecentMutatorSets {
+        self.light_state().recent_mutator_sets()
     }
 
     /// Block height of current tip.
