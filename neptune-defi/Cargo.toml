@@ -21,10 +21,9 @@ arbitrary-impls = [
 [dependencies]
 arbitrary = { version = "1.4.1", features = ["derive"], optional = true }
 tasm-lib = "9.0.0"
-triton-vm = "9.0.0"
-twenty-first = "3.0.0"
 
 neptune-consensus = { version = "0.19.0", path = "../neptune-consensus" }
+neptune-mutator-set = { version = "0.19.0", path = "../neptune-mutator-set" }
 neptune-primitives = { version = "0.19.0", path = "../neptune-primitives" }
 
 [dev-dependencies]

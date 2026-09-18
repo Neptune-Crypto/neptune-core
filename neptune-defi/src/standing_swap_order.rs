@@ -1,5 +1,6 @@
 pub mod order_book;
 pub mod sofun;
+pub mod sso_lock_script;
 pub mod v1;
 
 use std::collections::HashSet;
@@ -7,8 +8,8 @@ use std::fmt::Debug;
 
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use tasm_lib::prelude::Digest;
-use triton_vm::prelude::BFieldCodec;
-use triton_vm::prelude::BFieldElement;
+use tasm_lib::triton_vm::prelude::BFieldCodec;
+use tasm_lib::triton_vm::prelude::BFieldElement;
 
 /// Element 0 of every standing swap order announcement.
 //
