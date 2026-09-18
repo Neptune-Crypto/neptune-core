@@ -1,4 +1,4 @@
-pub(crate) mod authenticate_txk_field;
+pub mod authenticate_txk_field;
 pub mod claims;
 pub(crate) mod coinbase_amount;
 pub(crate) mod compute_absolute_indices;

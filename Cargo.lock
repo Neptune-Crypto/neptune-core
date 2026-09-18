@@ -4018,13 +4018,12 @@ dependencies = [
  "arbitrary",
  "neptune-consensus",
  "neptune-defi",
+ "neptune-mutator-set",
  "neptune-primitives",
  "proptest",
  "proptest-arbitrary-interop",
  "tasm-lib",
  "test-strategy 0.3.1",
- "triton-vm",
- "twenty-first",
 ]
 
 [[package]]
