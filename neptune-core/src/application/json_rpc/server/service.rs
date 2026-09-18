@@ -736,10 +736,10 @@ impl RpcApi for RpcServer {
 
         // Which transactions are admitted is policy shared with the peer
         // gossip path; see `tx_admission`.
-        let (tip_mutator_set, lustration_status) = {
+        let (recent_mutator_sets, lustration_status) = {
             let state = self.state.lock_guard().await;
             (
-                state.chain.tip_mutator_set_after(),
+                state.chain.recent_mutator_sets().clone(),
                 state.chain.lustration_status(),
             )
         };
@@ -751,7 +751,7 @@ impl RpcApi for RpcServer {
 
         tx_admission::admissible(
             (&transaction).into(),
-            &tip_mutator_set,
+            &recent_mutator_sets,
             lustration_status,
             already_known,
             self.now(),
@@ -766,9 +766,9 @@ impl RpcApi for RpcServer {
                 TxAdmissionError::TooOld => SubmitTransactionError::TooOld,
                 TxAdmissionError::Retired => SubmitTransactionError::Retired,
                 TxAdmissionError::FutureDated => SubmitTransactionError::FutureDated,
-                TxAdmissionError::NotConfirmable(_) | TxAdmissionError::CannotApplyToMutatorSet => {
-                    SubmitTransactionError::NotConfirmable
-                }
+                TxAdmissionError::NotConfirmable(_)
+                | TxAdmissionError::CannotApplyToMutatorSet
+                | TxAdmissionError::SpentSinceSync(_) => SubmitTransactionError::NotConfirmable,
                 TxAdmissionError::TooManyInputs
                 | TxAdmissionError::TooManyOutputs
                 | TxAdmissionError::TooManyAnnouncements => SubmitTransactionError::TooBig,

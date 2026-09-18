@@ -1,4 +1,5 @@
 use neptune_consensus::block::Block;
+use neptune_mempool::recent_mutator_sets::RecentMutatorSets;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
@@ -7,10 +8,6 @@ use neptune_primitives::timestamp::Timestamp;
 /// along with bookkeeping information about it
 #[derive(Debug, Clone)]
 pub struct LightState {
-    /// The mutator set accumulator as it looks after the application of this
-    /// block, after having added the guesser rewards.
-    mutator_set_accumulator_after: MutatorSetAccumulator,
-
     /// A valid block that has the most accumulated proof-of-work of all blocks
     /// seen on the network.
     ///
@@ -30,19 +27,25 @@ pub struct LightState {
     ///
     /// Matches the network on which the node was started.
     network: Network,
+
+    /// The mutator set at the tip and at its nearest ancestors, with the
+    /// guesser rewards added. Kept in step with `tip`.
+    recent_mutator_sets: RecentMutatorSets,
 }
 
 impl LightState {
     /// Contruct a new light state, from a block.
     pub fn new(block: Block, network: Network) -> Self {
         Self {
-            mutator_set_accumulator_after: block
-                .mutator_set_accumulator_after()
-                .expect("Block stored as tip must be valid"),
+            recent_mutator_sets: RecentMutatorSets::new(&block, network),
             tip: block,
             time_to_mine: None,
             network,
         }
+    }
+
+    pub(super) fn recent_mutator_sets(&self) -> &RecentMutatorSets {
+        &self.recent_mutator_sets
     }
 
     /// A reference to the most canonical block seen on the network.
@@ -58,7 +61,7 @@ impl LightState {
     /// Return the mutator set accumulator as it looks after the application of
     /// this block, after having added the guesser rewards.
     pub(super) fn tip_mutator_set_after(&self) -> MutatorSetAccumulator {
-        self.mutator_set_accumulator_after.clone()
+        self.recent_mutator_sets.tip_mutator_set().clone()
     }
 
     /// The time it took miners to mine the current tip.
@@ -75,9 +78,7 @@ impl LightState {
             None
         };
 
-        self.mutator_set_accumulator_after = new_block
-            .mutator_set_accumulator_after()
-            .expect("Stored block must have a valid MSA after.");
+        self.recent_mutator_sets.update(&new_block, self.network);
 
         self.tip = new_block;
         self.time_to_mine = time_to_mine;

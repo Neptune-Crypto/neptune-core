@@ -9,6 +9,8 @@
 //!   model that decides which transactions are worth proof-upgrading.
 //! - [`transaction_proof_quality`] — the node-level proof-quality policy used
 //!   for mempool replacement and peer gossip.
+//! - [`recent_mutator_sets`] — the mutator set at the tip and its nearest
+//!   ancestors, letting the node admit transactions built a few blocks ago.
 //! - [`tx_admission`] — the rules deciding which transactions are admitted to
 //!   the mempool.
 //! - [`tx_upgrade_filter`] — the TXID filter that partitions upgrade work.
@@ -25,6 +27,7 @@ pub mod mempool_update_job;
 pub mod mempool_update_job_result;
 pub mod merge_input_cache;
 pub mod primitive_witness_update;
+pub mod recent_mutator_sets;
 pub mod transaction_kernel_id;
 pub mod transaction_proof_quality;
 pub mod tx_admission;

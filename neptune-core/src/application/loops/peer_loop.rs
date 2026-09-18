@@ -22,6 +22,7 @@ use neptune_consensus::transaction::transaction_kernel::TransactionConfirmabilit
 use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
 use neptune_consensus::transaction::transaction_kernel::TransactionLustrationError;
 use neptune_consensus::transaction::Transaction;
+use neptune_mempool::recent_mutator_sets::RecentMutatorSets;
 use neptune_mempool::transaction_kernel_id::Txid;
 use neptune_mempool::transaction_proof_quality::TransactionProofQualityExt;
 use neptune_mempool::tx_admission;
@@ -409,7 +410,7 @@ impl PeerLoopHandler {
     /// fault.
     fn sanction_for_inadmissible(
         kernel: &TransactionKernel,
-        mutator_set_accumulator: &MutatorSetAccumulator,
+        recent_mutator_sets: &RecentMutatorSets,
         rejection: TxAdmissionError,
     ) -> Option<NegativePeerSanction> {
         let txid = kernel.txid();
@@ -463,6 +464,10 @@ impl PeerLoopHandler {
                     "Received unconfirmable transaction with TXID {txid}. \
                      Unconfirmable because:"
                 );
+                // Judged against the mutator set the transaction was built for.
+                let mutator_set_accumulator = recent_mutator_sets
+                    .mutator_set(kernel.mutator_set_hash)
+                    .unwrap_or_else(|| recent_mutator_sets.tip_mutator_set());
                 Some(Self::sanction_for_unconfirmable(
                     kernel,
                     mutator_set_accumulator,
@@ -493,7 +498,15 @@ impl PeerLoopHandler {
                 None
             }
             TxAdmissionError::NotSynced => {
-                debug!("Transaction {txid} refers to non-canonical mutator set state");
+                debug!("Transaction {txid} is not synced to the tip");
+                None
+            }
+            TxAdmissionError::SpentSinceSync(index) => {
+                // The peer may not have seen the block that spent the input.
+                debug!(
+                    "Input {index} of transaction {txid} was spent by a block mined after the \
+                     transaction was built"
+                );
                 None
             }
             TxAdmissionError::Invalid => {
@@ -1921,12 +1934,12 @@ impl PeerLoopHandler {
 
                 let transaction: Transaction = (*transaction).into();
 
-                let (tip, mutator_set_accumulator_after, current_block_height) = {
+                let (tip, recent_mutator_sets, current_block_height) = {
                     let state = self.global_state_lock.lock_guard().await;
 
                     (
                         state.chain.tip_hash(),
-                        state.chain.tip_mutator_set_after(),
+                        state.chain.recent_mutator_sets().clone(),
                         state.chain.tip_height(),
                     )
                 };
@@ -1966,7 +1979,7 @@ impl PeerLoopHandler {
 
                 let admission = tx_admission::admissible(
                     (&transaction).into(),
-                    &mutator_set_accumulator_after,
+                    &recent_mutator_sets,
                     lustration_status,
                     already_known,
                     self.now(),
@@ -1978,7 +1991,7 @@ impl PeerLoopHandler {
                 if let Err(rejection) = admission {
                     let sanction = Self::sanction_for_inadmissible(
                         &transaction.kernel,
-                        &mutator_set_accumulator_after,
+                        &recent_mutator_sets,
                         rejection,
                     );
                     if let Some(sanction) = sanction {
@@ -2028,12 +2041,17 @@ impl PeerLoopHandler {
                         return Ok(KEEP_CONNECTION_ALIVE);
                     }
 
-                    // Only accept transactions that do not require executing
-                    // `update`.
-                    if state.chain.tip_mutator_set_after().hash()
-                        != tx_notification.mutator_set_hash
+                    // The mempool holds transactions built against a recent
+                    // ancestor, and proof upgraders update them.
+                    if !state
+                        .chain
+                        .recent_mutator_sets()
+                        .contains(tx_notification.mutator_set_hash)
                     {
-                        debug!("transaction refers to non-canonical mutator set state");
+                        debug!(
+                            "transaction refers to a mutator set that is neither the tip's \
+                             nor a recent ancestor's"
+                        );
                         return Ok(KEEP_CONNECTION_ALIVE);
                     }
                 }
@@ -2096,12 +2114,12 @@ impl PeerLoopHandler {
 
                 let link_tx: LinkTx = (*transfer_link_tx).into();
 
-                let (tip, mutator_set_accumulator_after, current_block_height) = {
+                let (tip, recent_mutator_sets, current_block_height) = {
                     let state = self.global_state_lock.lock_guard().await;
 
                     (
                         state.chain.tip_hash(),
-                        state.chain.tip_mutator_set_after(),
+                        state.chain.recent_mutator_sets().clone(),
                         state.chain.tip_height(),
                     )
                 };
@@ -2149,7 +2167,7 @@ impl PeerLoopHandler {
 
                 let admission = tx_admission::admissible(
                     (&link_tx).into(),
-                    &mutator_set_accumulator_after,
+                    &recent_mutator_sets,
                     lustration_status,
                     already_known,
                     self.now(),
@@ -2161,7 +2179,7 @@ impl PeerLoopHandler {
                 if let Err(rejection) = admission {
                     let sanction = Self::sanction_for_inadmissible(
                         &link_tx.kernel.kernel,
-                        &mutator_set_accumulator_after,
+                        &recent_mutator_sets,
                         rejection,
                     );
 
@@ -6128,6 +6146,158 @@ mod tests {
                 drop(to_main_rx);
                 drop(main_to_peer_tx);
             }
+        }
+
+        /// A transaction built against the previous tip is requested and passed
+        /// on to the main loop.
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn requests_and_admits_tx_synced_to_recent_ancestor() {
+            let network = Network::Main;
+            let (
+                main_to_peer_tx,
+                from_main_rx_clone,
+                to_main_tx,
+                mut to_main_rx,
+                _,
+                _,
+                mut state_lock,
+                _hsd,
+            ) = get_test_genesis_setup(
+                1,
+                cli_args::Args {
+                    min_relay_pctx_fee_per_input: NativeCurrencyAmount::coins(0),
+                    ..cli_args::Args::default_with_network(network)
+                },
+            )
+            .await
+            .unwrap();
+
+            let fee = NativeCurrencyAmount::coins(1);
+            let pctx =
+                genesis_tx_with_proof_type(TxProvingCapability::ProofCollection, network, fee)
+                    .await;
+
+            // A block lands. The transaction is now one block behind the tip.
+            let genesis_block = Block::genesis(network);
+            let block1 = fake_valid_deterministic_successor(&genesis_block, network).await;
+            state_lock
+                .lock_guard_mut()
+                .await
+                .set_new_tip(block1.clone())
+                .await
+                .unwrap();
+            let genesis_msh = genesis_block
+                .mutator_set_accumulator_after()
+                .unwrap()
+                .hash();
+            assert_eq!(genesis_msh, pctx.kernel.mutator_set_hash);
+            assert_ne!(
+                genesis_msh,
+                block1.mutator_set_accumulator_after().unwrap().hash()
+            );
+
+            let tx_notification: TransactionNotification = pctx.as_ref().try_into().unwrap();
+            let mock = Mock::new(vec![
+                Action::Read(PeerMessage::TransactionNotification(tx_notification)),
+                Action::Write(PeerMessage::TransactionRequest(tx_notification.txid)),
+                Action::Read(PeerMessage::Transaction(Box::new(
+                    pctx.as_ref().try_into().unwrap(),
+                ))),
+                Action::Read(PeerMessage::Bye),
+            ]);
+
+            // Mock a timestamp to allow transaction to be considered valid
+            let now = pctx.kernel.timestamp;
+            let (hsd_1, sa_1) = get_dummy_peer_connection_data_genesis(network, 1);
+            let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
+                to_main_tx,
+                state_lock.clone(),
+                pseudorandom_peer_id(&sa_1),
+                socketaddr_to_multiaddr(sa_1),
+                hsd_1,
+                true,
+                1,
+                now,
+            );
+            let mut peer_state = MutablePeerState::new(hsd_1.tip_header.height);
+            peer_loop_handler
+                .run(mock, from_main_rx_clone, &mut peer_state)
+                .await
+                .unwrap();
+
+            match to_main_rx.recv().await {
+                Some(PeerTaskToMain::Transaction(transaction)) => {
+                    assert_eq!(block1.hash(), transaction.confirmable_for_block);
+                    assert_eq!(pctx.kernel, transaction.transaction.kernel);
+                }
+                _ => panic!("Main loop must receive the transaction"),
+            }
+
+            drop(main_to_peer_tx);
+        }
+
+        /// A notification for a transaction built against a mutator set that
+        /// is neither the tip's nor a recent ancestor's is ignored.
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn ignores_tx_notification_for_unknown_mutator_set() {
+            let network = Network::Main;
+            let (
+                main_to_peer_tx,
+                from_main_rx_clone,
+                to_main_tx,
+                mut to_main_rx,
+                _,
+                _,
+                state_lock,
+                hsd,
+            ) = get_test_genesis_setup(
+                1,
+                cli_args::Args {
+                    min_relay_pctx_fee_per_input: NativeCurrencyAmount::coins(0),
+                    ..cli_args::Args::default_with_network(network)
+                },
+            )
+            .await
+            .unwrap();
+
+            let tx_notification = TransactionNotification {
+                txid: invalid_empty_single_proof_transaction().kernel.txid(),
+                mutator_set_hash: Digest::default(),
+                proof_quality: TransactionProofQuality::ProofCollection,
+                fee: NativeCurrencyAmount::coins(1),
+                num_inputs: 1,
+                num_outputs: 1,
+            };
+            let mock = Mock::new(vec![
+                Action::Read(PeerMessage::TransactionNotification(tx_notification)),
+                Action::Read(PeerMessage::Bye),
+            ]);
+
+            let peer_address = get_dummy_socket_address(0);
+            let mut peer_loop_handler = PeerLoopHandler::new(
+                to_main_tx,
+                state_lock,
+                pseudorandom_peer_id(&peer_address),
+                socketaddr_to_multiaddr(peer_address),
+                hsd,
+                true,
+                1,
+            );
+            let mut peer_state = MutablePeerState::new(hsd.tip_header.height);
+            peer_loop_handler
+                .run(mock, from_main_rx_clone, &mut peer_state)
+                .await
+                .unwrap();
+
+            match to_main_rx.try_recv() {
+                Err(TryRecvError::Empty) => (),
+                Err(TryRecvError::Disconnected) => panic!("to_main channel must still be open"),
+                Ok(_) => panic!("to_main channel must be empty"),
+            };
+
+            drop(main_to_peer_tx);
         }
 
         #[apply(shared_tokio_runtime)]

@@ -11,6 +11,15 @@
 //! the other. Hence [`TxAdmissionError`], which names the reason and leaves
 //! the reporting to the caller.
 //!
+//! Proving a transaction can take longer than the time between blocks. So a
+//! transaction built against one of the tip's
+//! [`MAX_TX_SYNC_DEPTH`](crate::recent_mutator_sets::MAX_TX_SYNC_DEPTH)
+//! nearest ancestors is judged against that ancestor's mutator set, and
+//! admitted if no input was spent since. It is held unsynced for a proof
+//! upgrader to update. Any other transaction is judged against the tip's
+//! mutator set. Link transactions must be synced to the tip, since their
+//! thruputs resolve against the mempool as it stands.
+//!
 //! The order in which the rules are applied is deliberate, and is the reason
 //! they live in one place. Verifying a transaction's proof costs orders of
 //! magnitude more than every other check combined, and the peer supplying the
@@ -26,14 +35,17 @@ use neptune_consensus::proof_abstractions::verifier::verify_transaction_proof;
 use neptune_consensus::transaction::transaction_kernel::TransactionConfirmabilityError;
 use neptune_consensus::transaction::transaction_kernel::TransactionLustrationError;
 use neptune_consensus::transaction::validity::single_proof::link_tx_claim;
-use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_primitives::mast_hash::MastHash;
 use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
+use tracing::warn;
 
 use crate::any_tx::AnyTxRef;
 use crate::mempool::MEMPOOL_RETIREMENT_MARGIN;
 use crate::mempool::MEMPOOL_TX_THRESHOLD_AGE;
+use crate::recent_mutator_sets::CatchUpError;
+use crate::recent_mutator_sets::RecentMutatorSets;
+use crate::transaction_kernel_id::Txid;
 
 /// Why a transaction was refused admission to the mempool.
 ///
@@ -53,12 +65,16 @@ pub enum TxAdmissionError {
     /// duplicates arrive whenever more than one of them answers.
     AlreadyKnown,
 
-    /// Cannot be confirmed against the current mutator set.
+    /// Cannot be confirmed against the mutator set it is judged against.
     NotConfirmable(TransactionConfirmabilityError),
 
-    /// Cannot be applied to the current mutator set. Not expected to occur
-    /// when the transaction is confirmable; checked to be sure.
+    /// Cannot be applied to the mutator set it is judged against. Not expected
+    /// to occur when the transaction is confirmable; checked to be sure.
     CannotApplyToMutatorSet,
+
+    /// The input at this index was spent by a block after the transaction was
+    /// built. Routine during block propagation.
+    SpentSinceSync(usize),
 
     TooManyInputs,
 
@@ -85,7 +101,8 @@ pub enum TxAdmissionError {
     /// A link transaction under a rule set without the `Fix` branch.
     NotYetActive,
 
-    /// A transaction not synced to the tip.
+    /// A link transaction not built against the tip. Also a transaction
+    /// without inputs that is not at the tip, since it can never be updated.
     NotSynced,
 
     /// The transaction's proof does not attest to its kernel.
@@ -107,6 +124,10 @@ fn admissible_count(max_num_per_block: usize) -> usize {
 /// Determine whether a transaction, on either pipeline, may be admitted to
 /// the mempool.
 ///
+/// A standard transaction built against a mutator set in
+/// `recent_mutator_sets` is judged against it, any other against the tip's. A
+/// link transaction must be built against the tip's.
+///
 /// `already_known` answers whether the mempool already holds this transaction
 /// at no worse proof quality; it is supplied by the caller so that this
 /// function need not reason about how the mempool is locked. For the same
@@ -122,20 +143,22 @@ fn admissible_count(max_num_per_block: usize) -> usize {
 /// exists to avoid.
 pub async fn admissible(
     tx: AnyTxRef<'_>,
-    tip_mutator_set: &MutatorSetAccumulator,
+    recent_mutator_sets: &RecentMutatorSets,
     lustration_status: Option<LustrationStatus>,
     already_known: bool,
     now: Timestamp,
     network: Network,
     consensus_rule_set: ConsensusRuleSet,
 ) -> Result<(), TxAdmissionError> {
+    let tip_mutator_set_hash = recent_mutator_sets.tip_mutator_set_hash();
+
     // Link-pipeline gates, cheaper than anything below.
     if let AnyTxRef::Link(link_tx) = tx {
         if !consensus_rule_set.has_chain_branches() {
             return Err(TxAdmissionError::NotYetActive);
         }
 
-        if link_tx.kernel.kernel.mutator_set_hash != tip_mutator_set.hash() {
+        if link_tx.kernel.kernel.mutator_set_hash != tip_mutator_set_hash {
             return Err(TxAdmissionError::NotSynced);
         }
     }
@@ -179,19 +202,56 @@ pub async fn admissible(
         return Err(TxAdmissionError::AlreadyKnown);
     }
 
+    let synced_to_tip = kernel.mutator_set_hash == tip_mutator_set_hash;
+
+    // A transaction built against a held ancestor is judged against that
+    // mutator set. Any other is judged against the tip's, where its removal
+    // records may still validate.
+    let held_mutator_set = recent_mutator_sets.mutator_set(kernel.mutator_set_hash);
+    let judged_against = held_mutator_set.unwrap_or_else(|| recent_mutator_sets.tip_mutator_set());
+
+    // A transaction without inputs can never be updated.
+    if !synced_to_tip && kernel.inputs.is_empty() {
+        return Err(TxAdmissionError::NotSynced);
+    }
+
     // For a link transaction this covers the confirmed inputs; thruputs are
     // not removal records.
-    if let Err(confirmability_error) = kernel.is_confirmable_relative_to(tip_mutator_set) {
+    if let Err(confirmability_error) = kernel.is_confirmable_relative_to(judged_against) {
         return Err(TxAdmissionError::NotConfirmable(confirmability_error));
     }
 
     let mutator_set_update = MutatorSetUpdate::new(kernel.inputs.clone(), kernel.outputs.clone());
     if mutator_set_update
-        .apply_to_accumulator(&mut tip_mutator_set.clone())
+        .apply_to_accumulator(&mut judged_against.clone())
         .is_err()
     {
         // Should not be reachable because of above check
         return Err(TxAdmissionError::CannotApplyToMutatorSet);
+    }
+
+    // Blocks have landed since the held ancestor: make sure none of them spent
+    // an input. The caught-up records are discarded, since only a proof can
+    // replace the kernel's.
+    if held_mutator_set.is_some() && !synced_to_tip {
+        match recent_mutator_sets.catch_up(kernel.mutator_set_hash, &kernel.inputs) {
+            Ok(_) => (),
+            Err(CatchUpError::SpentSince(index)) => {
+                return Err(TxAdmissionError::SpentSinceSync(index));
+            }
+            Err(CatchUpError::UnknownMutatorSet) => {
+                // Unreachable: the mutator set was found above.
+                return Err(TxAdmissionError::NotSynced);
+            }
+            Err(CatchUpError::Inconsistent) => {
+                warn!(
+                    "Could not bring removal records of transaction {} forward to the tip; \
+                     refusing it as unsynced",
+                    kernel.txid()
+                );
+                return Err(TxAdmissionError::NotSynced);
+            }
+        }
     }
 
     if let Some(lustration_status) = lustration_status {
@@ -247,12 +307,15 @@ mod tests {
     use neptune_consensus::transaction::validity::neptune_proof::NeptuneProof;
     use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use neptune_mutator_set::addition_record::AdditionRecord;
+    use neptune_mutator_set::msa_and_records::MsaAndRecords;
+    use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use neptune_mutator_set::removal_record::RemovalRecord;
     use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
     use neptune_mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
     use neptune_mutator_set::shared::CHUNK_SIZE;
     use neptune_mutator_set::shared::NUM_TRIALS;
     use neptune_mutator_set::shared::WINDOW_SIZE;
+    use proptest::arbitrary::Arbitrary;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
     use proptest::strategy::Strategy;
@@ -263,7 +326,13 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
+    use crate::recent_mutator_sets::MAX_TX_SYNC_DEPTH;
     use crate::test_utils::shared_tokio_runtime;
+
+    const _: () = assert!(
+        MAX_TX_SYNC_DEPTH >= 1,
+        "these tests need at least one ancestor in the window"
+    );
 
     fn transaction_retiring_at(retirement: Timestamp, timestamp: Timestamp) -> Transaction {
         let mut test_runner = TestRunner::deterministic();
@@ -292,6 +361,8 @@ mod tests {
             now,
             now + MEMPOOL_RETIREMENT_MARGIN - Timestamp::minutes(1),
         ];
+        let recent_mutator_sets =
+            RecentMutatorSets::for_mutator_set(MutatorSetAccumulator::default());
 
         for retirement in retirements {
             let transaction = transaction_retiring_at(retirement, now);
@@ -300,7 +371,7 @@ mod tests {
                 Err(TxAdmissionError::Retired),
                 admissible(
                     (&transaction).into(),
-                    &MutatorSetAccumulator::default(),
+                    &recent_mutator_sets,
                     None,
                     false,
                     now,
@@ -317,10 +388,12 @@ mod tests {
         let now = Timestamp::now();
         let retirement = now + MEMPOOL_RETIREMENT_MARGIN + Timestamp::minutes(1);
         let transaction = transaction_retiring_at(retirement, now);
+        let recent_mutator_sets =
+            RecentMutatorSets::for_mutator_set(MutatorSetAccumulator::default());
 
         let rejection = admissible(
             (&transaction).into(),
-            &MutatorSetAccumulator::default(),
+            &recent_mutator_sets,
             None,
             false,
             now,
@@ -348,6 +421,8 @@ mod tests {
         };
         let output = AdditionRecord::new(Digest::default());
         let announcement = Announcement { message: vec![] };
+        let recent_mutator_sets =
+            RecentMutatorSets::for_mutator_set(MutatorSetAccumulator::default());
 
         let max_num_inputs = admissible_count(consensus_rule_set.max_num_inputs());
         let max_num_outputs = admissible_count(consensus_rule_set.max_num_outputs());
@@ -394,7 +469,7 @@ mod tests {
 
             let rejection = admissible(
                 (&transaction).into(),
-                &MutatorSetAccumulator::default(),
+                &recent_mutator_sets,
                 None,
                 false,
                 now,
@@ -432,6 +507,7 @@ mod tests {
         with_lustration_status: bool,
         #[strategy(arb())] max_lustrating_aocl_leaf_index: u64,
         #[strategy(arb::<u8>())] boundary_selector: u8,
+        synced_to_tip: bool,
     ) {
         let lustration_status = with_lustration_status.then(|| LustrationStatus {
             counter: NativeCurrencyAmount::coins(42),
@@ -459,6 +535,19 @@ mod tests {
             _ => active_window_start + u128::from(WINDOW_SIZE) + 1,
         };
 
+        // Half the cases are synced to an ancestor, to reach the catch-up path.
+        let mut recent_mutator_sets = RecentMutatorSets::for_mutator_set(tip_mutator_set.clone());
+        let mutator_set_hash = if synced_to_tip {
+            tip_mutator_set.hash()
+        } else {
+            let ancestor_hash = tip_mutator_set.hash();
+            recent_mutator_sets.push_update(MutatorSetUpdate::new(
+                vec![],
+                vec![AdditionRecord::new(Digest::default())],
+            ));
+            ancestor_hash
+        };
+
         // The cheap checks come first and reject almost every arbitrary
         // transaction, so satisfy them: otherwise the code that reads the
         // mutator set -- where the interesting panics are -- is never reached.
@@ -470,6 +559,7 @@ mod tests {
             .coinbase(None)
             .fee(NativeCurrencyAmount::coins(1))
             .timestamp(now)
+            .mutator_set_hash(mutator_set_hash)
             .modify(kernel);
 
         // Everything this test is about happens before proof verification.
@@ -480,7 +570,7 @@ mod tests {
 
         let _ = admissible(
             (&transaction).into(),
-            &tip_mutator_set,
+            &recent_mutator_sets,
             lustration_status,
             already_known,
             now,
@@ -490,11 +580,164 @@ mod tests {
         .await;
     }
 
+    /// A mutator set with removal records that are valid against it.
+    fn mutator_set_with_records(num_records: usize) -> MsaAndRecords {
+        let removables =
+            vec![(Digest::default(), Digest::default(), Digest::default()); num_records];
+        let mut test_runner = TestRunner::deterministic();
+        MsaAndRecords::arbitrary_with((removables, 1u64 << 20))
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current()
+    }
+
+    /// A transaction with an invalid proof.
+    fn spending(
+        inputs: Vec<RemovalRecord>,
+        mutator_set_hash: Digest,
+        now: Timestamp,
+    ) -> Transaction {
+        let mut test_runner = TestRunner::deterministic();
+        let kernel = txkernel::with_lengths(0..1, 0..1, 0..1, true)
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let kernel = TransactionKernelModifier::default()
+            .inputs(inputs)
+            .coinbase(None)
+            .fee(NativeCurrencyAmount::coins(1))
+            .timestamp(now)
+            .mutator_set_hash(mutator_set_hash)
+            .modify(kernel);
+
+        Transaction {
+            kernel,
+            proof: TransactionProof::invalid(),
+        }
+    }
+
+    fn additions(seed: u64, count: u64) -> Vec<AdditionRecord> {
+        (0..count)
+            .map(|i| AdditionRecord::new(Digest::new([(seed * 1000 + i).into(); 5])))
+            .collect()
+    }
+
+    /// A transaction built against a recent ancestor passes every check up to
+    /// proof verification, as long as its inputs are unspent at the tip.
+    #[apply(shared_tokio_runtime)]
+    async fn transaction_synced_to_recent_ancestor_is_admitted_up_to_its_proof() {
+        let now = Timestamp::now();
+        let admission = async |transaction: &Transaction, recent: &RecentMutatorSets| {
+            admissible(
+                transaction.into(),
+                recent,
+                None,
+                false,
+                now,
+                Network::Main,
+                ConsensusRuleSet::default(),
+            )
+            .await
+        };
+
+        let msa_and_records = mutator_set_with_records(3);
+        let ancestor_hash = msa_and_records.mutator_set_accumulator.hash();
+        let records = msa_and_records.unpacked_removal_records();
+        let mut recent =
+            RecentMutatorSets::for_mutator_set(msa_and_records.mutator_set_accumulator);
+
+        // Synced to the tip: the only rejection left is the invalid proof.
+        let at_tip = spending(records[..2].to_vec(), ancestor_hash, now);
+        assert_eq!(
+            Err(TxAdmissionError::Invalid),
+            admission(&at_tip, &recent).await
+        );
+
+        // Addition-only blocks land, as many as the window holds.
+        let base = recent.clone();
+        for seed in 0..MAX_TX_SYNC_DEPTH as u64 {
+            recent.push_update(MutatorSetUpdate::new(vec![], additions(seed, 9)));
+        }
+        assert_eq!(Some(MAX_TX_SYNC_DEPTH), recent.depth_of(ancestor_hash));
+        assert_eq!(
+            Err(TxAdmissionError::Invalid),
+            admission(&at_tip, &recent).await
+        );
+
+        // Inputs that do not validate against the claimed mutator set.
+        let bogus = spending(
+            vec![RemovalRecord {
+                absolute_indices: records[0].absolute_indices,
+                target_chunks: ChunkDictionary::empty(),
+            }],
+            recent.tip_mutator_set_hash(),
+            now,
+        );
+        let rejection = admission(&bogus, &recent).await;
+        assert!(
+            matches!(rejection, Err(TxAdmissionError::NotConfirmable(_))),
+            "got {rejection:?}"
+        );
+
+        // Not built against any mutator set in the window: judged against the
+        // tip, where only removal records that validate there will do.
+        let at_the_tip = recent.catch_up(ancestor_hash, &records[..2]).unwrap();
+        let unknown = spending(at_the_tip.clone(), Digest::default(), now);
+        assert_eq!(
+            Err(TxAdmissionError::Invalid),
+            admission(&unknown, &recent).await
+        );
+        let unknown_and_stale = spending(bogus.kernel.inputs.clone(), Digest::default(), now);
+        let rejection = admission(&unknown_and_stale, &recent).await;
+        assert!(
+            matches!(rejection, Err(TxAdmissionError::NotConfirmable(_))),
+            "got {rejection:?}"
+        );
+
+        // No inputs and not at the tip: could never be brought up to date.
+        let empty = spending(vec![], ancestor_hash, now);
+        assert_eq!(
+            Err(TxAdmissionError::NotSynced),
+            admission(&empty, &recent).await
+        );
+
+        // One more block pushes the ancestor out of the window. Removal
+        // records that validate against the tip are still enough.
+        let previous_tip = recent.tip_mutator_set_hash();
+        recent.push_update(MutatorSetUpdate::new(vec![], additions(100, 1)));
+        assert_eq!(None, recent.depth_of(ancestor_hash));
+        let at_the_tip = recent.catch_up(previous_tip, &at_the_tip).unwrap();
+        let evicted = spending(at_the_tip, ancestor_hash, now);
+        assert_eq!(
+            Err(TxAdmissionError::Invalid),
+            admission(&evicted, &recent).await
+        );
+
+        // A block spends one of the transaction's inputs.
+        let mut recent = base;
+        recent.push_update(MutatorSetUpdate::new(
+            vec![records[1].clone()],
+            additions(101, 2),
+        ));
+        assert_eq!(
+            Err(TxAdmissionError::SpentSinceSync(1)),
+            admission(&at_tip, &recent).await
+        );
+
+        // The untouched input alone is still fine.
+        let untouched = spending(vec![records[0].clone()], ancestor_hash, now);
+        assert_eq!(
+            Err(TxAdmissionError::Invalid),
+            admission(&untouched, &recent).await
+        );
+    }
+
     #[proptest(cases = 1, async = "tokio")]
     async fn link_transaction_admission(
         #[strategy(txkernel::with_lengths(0..1, 0..1, 0..1, true))] kernel: TransactionKernel,
     ) {
         let tip_mutator_set = MutatorSetAccumulator::default();
+        let mut recent_mutator_sets = RecentMutatorSets::for_mutator_set(tip_mutator_set.clone());
         let now = Timestamp::hours(10_000);
         let link = |kernel: TransactionKernel| LinkTx {
             kernel: LinkKernel {
@@ -503,10 +746,10 @@ mod tests {
             },
             proof: LinkTxProof::Proof(NeptuneProof::invalid()),
         };
-        let admission = async |link_tx: &LinkTx, consensus_rule_set| {
+        let admission = async |link_tx: &LinkTx, recent: &RecentMutatorSets, consensus_rule_set| {
             admissible(
                 link_tx.into(),
-                &tip_mutator_set,
+                recent,
                 None,
                 false,
                 now,
@@ -527,7 +770,12 @@ mod tests {
         // Under a rule set without the `Fix` branch, no link is admitted.
         prop_assert_eq!(
             Err(TxAdmissionError::NotYetActive),
-            admission(&link(base_kernel.clone()), ConsensusRuleSet::HardforkGamma).await,
+            admission(
+                &link(base_kernel.clone()),
+                &recent_mutator_sets,
+                ConsensusRuleSet::HardforkGamma
+            )
+            .await,
         );
 
         let delta = ConsensusRuleSet::HardforkDelta;
@@ -538,7 +786,7 @@ mod tests {
             .modify(base_kernel.clone());
         prop_assert_eq!(
             Err(TxAdmissionError::NotSynced),
-            admission(&link(unsynced), delta).await,
+            admission(&link(unsynced), &recent_mutator_sets, delta).await,
         );
 
         let too_old = TransactionKernelModifier::default()
@@ -546,14 +794,28 @@ mod tests {
             .modify(base_kernel.clone());
         prop_assert_eq!(
             Err(TxAdmissionError::TooOld),
-            admission(&link(too_old), delta).await,
+            admission(&link(too_old), &recent_mutator_sets, delta).await,
         );
 
         // With every cheaper check passed, the proof is verified last -- and
         // this one does not attest to its kernel.
         prop_assert_eq!(
             Err(TxAdmissionError::Invalid),
-            admission(&link(base_kernel), delta).await,
+            admission(&link(base_kernel.clone()), &recent_mutator_sets, delta).await,
+        );
+
+        // A link synced to a recent ancestor is not admitted.
+        recent_mutator_sets.push_update(MutatorSetUpdate::new(
+            vec![],
+            vec![AdditionRecord::new(Digest::default())],
+        ));
+        prop_assert_eq!(
+            Some(1),
+            recent_mutator_sets.depth_of(tip_mutator_set.hash())
+        );
+        prop_assert_eq!(
+            Err(TxAdmissionError::NotSynced),
+            admission(&link(base_kernel), &recent_mutator_sets, delta).await,
         );
     }
 }
