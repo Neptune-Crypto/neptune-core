@@ -1,4 +1,6 @@
 use neptune_consensus::block::Block;
+use neptune_consensus::transaction::utxo::Utxo;
+use neptune_consensus::transaction::utxo_triple::UtxoTriple;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_primitives::timestamp::Timestamp;
 use tasm_lib::prelude::Digest;
@@ -6,8 +8,39 @@ use tasm_lib::triton_vm::prelude::BFieldCodec;
 
 use super::order_book::Order;
 use super::order_book::OrderBook;
+use super::sso_lock_script::SsoLockScript;
 use super::StandingSwapOrder;
 use super::Swappable;
+
+/// `G`: the spacing of an order's grid of release dates.
+///
+/// Fixed, so it is not on the wire.
+pub const GRID_STEP: Timestamp = Timestamp::days(7);
+
+/// `K`: how many release dates an order's grid holds.
+///
+/// It sets the shelf life of an order, because the grid is anchored at
+/// creation: the order is fillable only while its last grid point still clears
+/// three years out, which is `(K - 1) * G` from placement.
+pub const NUM_GRID_POINTS: u32 = 26;
+
+/// A timestamp for unlock dates beyond which a SOFuN order is invalid.
+///
+/// No release date on an order's grid is allowed to reach this bound, so
+/// `D_0 + k * G` is the same number in `u64` as it is in the field, and a
+/// release date is never a wrapped-around one.
+const RELEASE_DATE_BOUND: u64 = 1 << 63;
+
+/// Why a [`SofunBody`] is not a valid SOFuN order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SofunError {
+    /// `padding` is nonzero
+    NonzeroPadding,
+
+    /// `D_0 + (K - 1) * G` reaches `2^63` milliseconds, past which a release
+    /// date would wrap the field.
+    GridOutOfRange,
+}
 
 /// The encoding format of a [`super::StandingSwapOrder`] for Future Neptune
 /// coins.
@@ -35,11 +68,30 @@ pub struct SofunBody {
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct Sofun;
 
+impl SofunParams {
+    /// `D_max`, the last point of the grid, or [`SofunError::GridOutOfRange`]
+    /// if that point reaches [`RELEASE_DATE_BOUND`].
+    ///
+    /// The whole grid lies between `d_zero` and this, so a grid fits if and
+    /// only if its last point does.
+    fn last_release_date(&self) -> Result<Timestamp, SofunError> {
+        let span = u64::from(NUM_GRID_POINTS - 1) * GRID_STEP.to_millis();
+        let d_max = self
+            .d_zero
+            .to_millis()
+            .checked_add(span)
+            .ok_or(SofunError::GridOutOfRange)?;
+        if d_max >= RELEASE_DATE_BOUND {
+            return Err(SofunError::GridOutOfRange);
+        }
+
+        Ok(Timestamp::millis(d_max))
+    }
+}
+
 impl StandingSwapOrder<Sofun> {
     /// A SOFuN order, whose demanded amount is half the block subsidy of
     /// generation `params.epoch`.
-    ///
-    /// The demanded amount is computed rather than passed in.
     pub fn new(
         offered_amount: NativeCurrencyAmount,
         params: SofunParams,
@@ -47,15 +99,73 @@ impl StandingSwapOrder<Sofun> {
         cancel_post_image: Digest,
         reward_lock_script_hash: Digest,
         reward_receiver_digest: Digest,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, SofunError> {
+        // check the grid
+        params.last_release_date()?;
+
+        let demanded_amount = Block::generation_subsidy(u64::from(params.epoch)).half();
+        Ok(Self {
             offered_amount,
-            demanded_amount: Block::generation_subsidy(u64::from(params.epoch)).half(),
+            demanded_amount,
             seed,
             cancel_post_image,
             reward_lock_script_hash,
             reward_receiver_digest,
             params,
+        })
+    }
+
+    /// The reward this order would generate at the given release date.
+    ///
+    /// Accepts release dates off the grid, so it may result in an invalid
+    /// reward if not used with care.
+    fn reward_released_at(&self, release_date: Timestamp) -> UtxoTriple {
+        UtxoTriple {
+            utxo: Utxo::new_native_currency(self.reward_lock_script_hash, self.demanded_amount)
+                .with_time_lock(release_date),
+            sender_randomness: self.reward_sender_randomness(),
+            receiver_digest: self.reward_receiver_digest,
+        }
+    }
+
+    /// The reward that fills this order at grid point `k`, released at
+    /// `D_0 + k * G`. `None` for `k >= K`, which is not a point of the grid.
+    pub fn reward(&self, k: u32) -> Option<UtxoTriple> {
+        if k >= NUM_GRID_POINTS {
+            return None;
+        }
+
+        let release_date = Timestamp::millis(
+            self.params.d_zero.to_millis() + u64::from(k) * GRID_STEP.to_millis(),
+        );
+
+        Some(self.reward_released_at(release_date))
+    }
+
+    /// Every reward this order admits, one per grid point, in grid order.
+    ///
+    /// This is the wallet's watch set: `K` candidate payments, of which at most
+    /// one is ever made.
+    pub fn rewards(&self) -> Vec<UtxoTriple> {
+        (0..NUM_GRID_POINTS)
+            .map(|k| self.reward(k).expect("k < K"))
+            .collect()
+    }
+
+    /// The order's lock script: cancelled by the proposer's preimage, filled by
+    /// any transaction paying one of [`Self::rewards`].
+    ///
+    /// The grid is a rule for constructing the admissible set, and this is
+    /// where the rule is applied. Everything below this point is the general
+    /// standing swap order of §1.5, which knows nothing about release dates.
+    pub fn lock_script(&self) -> SsoLockScript {
+        SsoLockScript {
+            cancel_post_image: self.cancel_post_image,
+            admissible_outputs: self
+                .rewards()
+                .iter()
+                .map(UtxoTriple::addition_record)
+                .collect(),
         }
     }
 }
@@ -76,24 +186,24 @@ impl From<StandingSwapOrder<Sofun>> for SofunBody {
 }
 
 impl TryFrom<SofunBody> for StandingSwapOrder<Sofun> {
-    type Error = ();
+    type Error = SofunError;
 
     fn try_from(body: SofunBody) -> Result<Self, Self::Error> {
         if body.padding != 0 {
-            return Err(());
+            return Err(SofunError::NonzeroPadding);
         }
         let params = SofunParams {
             d_zero: body.d_zero,
             epoch: body.epoch,
         };
-        Ok(Self::new(
+        Self::new(
             body.offered_amount,
             params,
             body.seed,
             body.cancel_post_image,
             body.reward_lock_script_hash,
             body.reward_receiver_digest,
-        ))
+        )
     }
 }
 
@@ -109,7 +219,6 @@ impl Swappable for Sofun {
 
 /// The parameters a SOFuN order carries beyond its standing swap terms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
 pub struct SofunParams {
     /// The first point of the order's grid of release dates.
     pub d_zero: Timestamp,
@@ -148,6 +257,19 @@ impl OrderBook<Sofun> {
     }
 }
 
+// A derived implementation would draw a `d_zero` whose grid runs off the end of
+// the field, which the constructor rejects.
+#[cfg(any(test, feature = "arbitrary-impls"))]
+impl<'a> arbitrary::Arbitrary<'a> for SofunParams {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let span = u64::from(NUM_GRID_POINTS - 1) * GRID_STEP.to_millis();
+        Ok(Self {
+            d_zero: Timestamp::millis(u.int_in_range(0..=RELEASE_DATE_BOUND - span - 1)?),
+            epoch: u.arbitrary()?,
+        })
+    }
+}
+
 // A derived implementation would set `padding` to nonzero values, which
 // decoding rejects.
 #[cfg(any(test, feature = "arbitrary-impls"))]
@@ -161,6 +283,8 @@ impl<'a> arbitrary::Arbitrary<'a> for SofunBody {
 #[cfg(any(test, feature = "arbitrary-impls"))]
 impl<'a> arbitrary::Arbitrary<'a> for StandingSwapOrder<Sofun> {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        // `SofunParams` draws a grid that fits, so the constructor's only
+        // failure cannot occur here.
         Ok(Self::new(
             u.arbitrary()?,
             u.arbitrary()?,
@@ -168,7 +292,8 @@ impl<'a> arbitrary::Arbitrary<'a> for StandingSwapOrder<Sofun> {
             u.arbitrary()?,
             u.arbitrary()?,
             u.arbitrary()?,
-        ))
+        )
+        .expect("an arbitrary grid fits"))
     }
 }
 
@@ -179,12 +304,17 @@ mod tests {
     use std::collections::HashMap;
     use std::collections::HashSet;
 
+    use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
+    use neptune_mutator_set::addition_record::AdditionRecord;
     use neptune_primitives::block_height::BlockHeight;
     use neptune_primitives::block_height::BLOCKS_PER_GENERATION;
     use neptune_primitives::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
     use proptest::collection::hash_map;
     use proptest::collection::hash_set;
     use proptest::collection::vec;
+    use proptest::prop_assert;
+    use proptest::prop_assert_eq;
+    use proptest::prop_assume;
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
 
@@ -192,6 +322,8 @@ mod tests {
     use crate::standing_swap_order::order_book::BlockId;
     use crate::standing_swap_order::order_book::BlockUpdate;
     use crate::standing_swap_order::order_book::OrderId;
+    use crate::standing_swap_order::sso_lock_script::tests::public_input;
+    use crate::standing_swap_order::sso_lock_script::tests::with_outputs;
     use crate::standing_swap_order::v1::StandingSwapOrderV1;
     use crate::standing_swap_order::AssetPair;
     use crate::standing_swap_order::UnrecognizedOrder;
@@ -341,6 +473,196 @@ mod tests {
     ) {
         let body = SofunBody { padding, ..body };
         assert!(StandingSwapOrder::<Sofun>::try_from(body).is_err());
+    }
+
+    #[proptest]
+    fn sofun_reward_expected_features(
+        #[strategy(arb())] order: StandingSwapOrder<Sofun>,
+        #[strategy(0..NUM_GRID_POINTS)] k: u32,
+    ) {
+        let reward = order.reward(k).unwrap();
+        let expected_release_date = Timestamp::millis(
+            order.params.d_zero.to_millis() + u64::from(k) * GRID_STEP.to_millis(),
+        );
+
+        prop_assert_eq!(
+            order.reward_lock_script_hash,
+            reward.utxo.lock_script_hash()
+        );
+        prop_assert_eq!(2, reward.utxo.coins().len());
+        prop_assert_eq!(
+            order.demanded_amount,
+            reward.utxo.get_native_currency_amount()
+        );
+        prop_assert_eq!(Some(expected_release_date), reward.utxo.release_date());
+        prop_assert_eq!(order.reward_receiver_digest, reward.receiver_digest);
+        prop_assert_eq!(order.reward_sender_randomness(), reward.sender_randomness);
+    }
+
+    /// A transaction fills the order if and only if it pays the
+    /// reward at some point of the grid. Any point of the grid works.
+    #[proptest(cases = 2)]
+    fn order_is_filled_at_every_grid_point_and_nowhere_else(
+        #[strategy(arb())] order: StandingSwapOrder<Sofun>,
+        #[strategy(arb())] kernel: TransactionKernel,
+        #[strategy(vec(arb::<AdditionRecord>(), 0..3))] other_outputs: Vec<AdditionRecord>,
+    ) {
+        let lock_script = order.lock_script();
+        prop_assert_eq!(
+            NUM_GRID_POINTS as usize,
+            lock_script.admissible_outputs.len()
+        );
+
+        let unpaid = with_outputs(&kernel, other_outputs.clone());
+        prop_assert!(lock_script.fill(&unpaid).is_none());
+
+        for k in 0..NUM_GRID_POINTS {
+            let reward = order.reward(k).unwrap().addition_record();
+            let paid = with_outputs(&kernel, [other_outputs.clone(), vec![reward]].concat());
+            prop_assert!(lock_script
+                .fill(&paid)
+                .unwrap()
+                .halts_gracefully(public_input(&paid)));
+        }
+    }
+
+    /// The grid stops at `K`. A release date one step past the last is a date
+    /// like any other, and the order does not admit its reward.
+    #[proptest(cases = 4)]
+    fn no_release_date_past_the_grid_fills_the_order(
+        #[strategy(arb())] order: StandingSwapOrder<Sofun>,
+        #[strategy(arb())] kernel: TransactionKernel,
+        #[strategy(NUM_GRID_POINTS..NUM_GRID_POINTS + 4)] k: u32,
+    ) {
+        prop_assert!(order.reward(k).is_none());
+
+        let past_the_grid = Timestamp::millis(
+            order.params.d_zero.to_millis() + u64::from(k) * GRID_STEP.to_millis(),
+        );
+        let reward = order.reward_released_at(past_the_grid).addition_record();
+        let paid = with_outputs(&kernel, vec![reward]);
+        prop_assert!(order.lock_script().fill(&paid).is_none());
+    }
+
+    #[proptest(cases = 2)]
+    fn malformed_reward_does_not_fill(
+        #[strategy(arb())] order: StandingSwapOrder<Sofun>,
+        #[strategy(arb())] kernel: TransactionKernel,
+        #[strategy(0_u32..8)] epoch: u32,
+        #[strategy(0_u32..8)] other_epoch: u32,
+        #[strategy(arb())] other_lock_script_hash: Digest,
+        #[strategy(arb())] other_receiver_digest: Digest,
+        #[strategy(0..NUM_GRID_POINTS)] k: u32,
+    ) {
+        prop_assume!(epoch != other_epoch);
+        prop_assume!(order.reward_lock_script_hash != other_lock_script_hash);
+        prop_assume!(order.reward_receiver_digest != other_receiver_digest);
+
+        let variant = |epoch, reward_lock_script_hash, reward_receiver_digest| {
+            StandingSwapOrder::<Sofun>::new(
+                order.offered_amount,
+                SofunParams {
+                    epoch,
+                    ..order.params
+                },
+                order.seed,
+                order.cancel_post_image,
+                reward_lock_script_hash,
+                reward_receiver_digest,
+            )
+            .unwrap()
+        };
+
+        let lsh = order.reward_lock_script_hash;
+        let rd = order.reward_receiver_digest;
+        let order = variant(epoch, lsh, rd);
+        let lock_script = order.lock_script();
+
+        // The right reward at the same grid point does fill, so each failure
+        // below is the one term that was changed and nothing else.
+        let successful_fill =
+            with_outputs(&kernel, vec![order.reward(k).unwrap().addition_record()]);
+        prop_assert!(lock_script
+            .fill(&successful_fill)
+            .unwrap()
+            .halts_gracefully(public_input(&successful_fill)));
+
+        for wrong in [
+            variant(other_epoch, lsh, rd),
+            variant(epoch, other_lock_script_hash, rd),
+            variant(epoch, lsh, other_receiver_digest),
+        ] {
+            let failed_fill =
+                with_outputs(&kernel, vec![wrong.reward(k).unwrap().addition_record()]);
+            prop_assert!(lock_script.fill(&failed_fill).is_none());
+        }
+    }
+
+    /// Two orders
+    /// agreeing on every reward parameter but the seed share no admissible
+    /// output, at any grid point, so no one output spends both.
+    #[proptest(cases = 2)]
+    fn distinct_seeds_make_two_orders_disjoint(
+        #[strategy(arb())] order: StandingSwapOrder<Sofun>,
+        #[strategy(arb())] other_seed: Digest,
+    ) {
+        prop_assume!(order.seed != other_seed);
+        let other = StandingSwapOrder::<Sofun> {
+            seed: other_seed,
+            ..order
+        };
+
+        let admissible = order.lock_script().admissible_outputs;
+        prop_assert!(other
+            .lock_script()
+            .admissible_outputs
+            .iter()
+            .all(|output| !admissible.contains(output)));
+    }
+
+    /// The last grid point stays below the bound, so no release date is a
+    /// wrapped-around one. The constructor is the only place that check lives,
+    /// so an order with such a grid cannot be built, and an announcement
+    /// carrying one is malformed rather than an order nobody can fill.
+    #[proptest]
+    fn out_of_bounds_grid_is_rejected(
+        #[strategy(arb())] body: SofunBody,
+        #[strategy(arb())] pair_id: BFieldElement,
+        #[strategy(0_u64..1000)] overshoot: u64,
+    ) {
+        let span = u64::from(NUM_GRID_POINTS - 1) * GRID_STEP.to_millis();
+        let build = |d_zero| StandingSwapOrder::<Sofun>::try_from(SofunBody { d_zero, ..body });
+
+        // The bound is on the last grid point, so the two `d_zero` that
+        // straddle it are `RELEASE_DATE_BOUND - span` and one millisecond
+        // below. Both are asserted outright rather than drawn, because a
+        // strategy that merely contains the boundary usually misses it: 256
+        // uniform draws from a thousand values hit any one of them only about
+        // a quarter of the time, and it is the boundary that tells `>=` from
+        // `>`.
+        prop_assert!(build(Timestamp::millis(RELEASE_DATE_BOUND - span - 1)).is_ok());
+        prop_assert_eq!(
+            Err(SofunError::GridOutOfRange),
+            build(Timestamp::millis(RELEASE_DATE_BOUND - span)).map(|_| ())
+        );
+
+        // reject out-of-bounds grids on announcements too
+        let d_zero = Timestamp::millis(RELEASE_DATE_BOUND - span + overshoot);
+        prop_assert_eq!(Err(SofunError::GridOutOfRange), build(d_zero).map(|_| ()));
+
+        let message = [
+            vec![
+                STANDING_SWAP_ORDER_FLAG,
+                pair_id,
+                BFieldElement::new(Sofun::version()),
+            ],
+            SofunBody { d_zero, ..body }.encode(),
+        ]
+        .concat();
+        prop_assert_eq!(
+            Err(UnrecognizedOrder::Malformed),
+            Sofun::recognize(pair_id, &message).map(|_| ())
+        );
     }
 
     /// `demanding` returns the open orders whose demanded amount is `demanded`,

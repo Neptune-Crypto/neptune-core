@@ -151,29 +151,31 @@ impl SsoLockScript {
             .iter()
             .position(|output| self.admissible_outputs.contains(output))?;
 
-        self.fill_at(kernel, output_index)
+        // Any 5-tuple that does not hash to the post-image will do. Even a
+        // 5-tuple that does hash to the post-image will do: it generates a
+        // Cancel instead of a Fill but either is a valid spend. Harmless. So:
+        // no need to take a special argument or check anything; zeros is fine.
+        let divined_preimage = Digest::default();
+        self.fill_at(kernel, output_index, divined_preimage)
     }
 
     /// The fill witness pointing at `kernel.outputs[output_index]`, or `None`
     /// if that output does not exist. The witness exists whether or not the
-    /// output is admissible; it halts if and only if it is.
+    /// output is admissible; it halts if and only if it is, or if `divined`
+    /// happens to be the cancel preimage.
     fn fill_at(
         &self,
         kernel: &TransactionKernel,
         output_index: usize,
+        divined: Digest,
     ) -> Option<LockScriptAndWitness> {
         if output_index >= kernel.outputs.len() {
             return None;
         }
 
-        // Any five words that miss the post-image send the script down the
-        // fill path. If these happen to hit it, the order is cancelled instead,
-        // which spends it just the same.
-        let not_the_preimage = [BFieldElement::new(0); Digest::LEN];
-
         let outputs_size = kernel.outputs.encode().len();
         let tokens = [
-            not_the_preimage.to_vec(),
+            divined.reversed().values().to_vec(),
             bfe_vec![outputs_size as u64, output_index as u64],
         ]
         .concat();
@@ -193,7 +195,7 @@ impl SsoLockScript {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use proptest::collection::vec;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
@@ -202,12 +204,16 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
+    use crate::standing_swap_order::sofun::NUM_GRID_POINTS;
 
-    fn public_input(kernel: &TransactionKernel) -> PublicInput {
+    pub(crate) fn public_input(kernel: &TransactionKernel) -> PublicInput {
         PublicInput::new(kernel.mast_hash().reversed().values().to_vec())
     }
 
-    fn with_outputs(kernel: &TransactionKernel, outputs: Vec<AdditionRecord>) -> TransactionKernel {
+    pub(crate) fn with_outputs(
+        kernel: &TransactionKernel,
+        outputs: Vec<AdditionRecord>,
+    ) -> TransactionKernel {
         neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier::default()
             .outputs(outputs)
             .modify(kernel.clone())
@@ -263,10 +269,14 @@ mod tests {
         let unpaid = with_outputs(&kernel, other_outputs.clone());
         prop_assert!(order.fill(&unpaid).is_none());
         for output_index in 0..other_outputs.len() {
-            let witness = order.fill_at(&unpaid, output_index).unwrap();
+            let witness = order
+                .fill_at(&unpaid, output_index, Digest::default())
+                .unwrap();
             prop_assert!(!witness.halts_gracefully(public_input(&unpaid)));
         }
-        prop_assert!(order.fill_at(&unpaid, other_outputs.len()).is_none());
+        prop_assert!(order
+            .fill_at(&unpaid, other_outputs.len(), Digest::default())
+            .is_none());
 
         let mut outputs = other_outputs;
         outputs.insert(position, order.admissible_outputs[member]);
@@ -276,6 +286,144 @@ mod tests {
 
         // The same witness against another kernel fails authentication.
         prop_assert!(!witness.halts_gracefully(public_input(&unpaid)));
+    }
+
+    /// A cancel attempted with the wrong preimage does not fail as a
+    /// cancel. It falls through to the fill path, where the same five words
+    /// spend the order if the reward is present and fail if it is not.
+    #[proptest(cases = 20)]
+    fn wrong_preimage_fails_cancel_and_can_pass_fill(
+        #[strategy(arb())] preimage: Digest,
+        #[strategy(arb())] wrong_preimage: Digest,
+        #[strategy(arb())] admissible_output: AdditionRecord,
+        #[strategy(arb())] other_outputs: Vec<AdditionRecord>,
+        #[strategy(arb())] kernel: TransactionKernel,
+    ) {
+        prop_assume!(preimage != wrong_preimage);
+        prop_assume!(!other_outputs.contains(&admissible_output));
+        let order = SsoLockScript {
+            cancel_post_image: preimage.hash(),
+            admissible_outputs: vec![admissible_output],
+        };
+
+        // fill fails
+        let unpaid = with_outputs(&kernel, other_outputs.clone());
+        prop_assert!(!order
+            .cancel(wrong_preimage)
+            .halts_gracefully(public_input(&unpaid)));
+
+        // fill passes
+        let paid = with_outputs(&kernel, [other_outputs, vec![admissible_output]].concat());
+        let index = paid.outputs.len() - 1;
+        prop_assert!(order
+            .fill_at(&paid, index, wrong_preimage)
+            .unwrap()
+            .halts_gracefully(public_input(&paid)));
+    }
+
+    /// One output fills two orders whose admissible sets meet. The lock
+    /// script cannot see the other order, so nothing here rejects it; what
+    /// keeps the sets apart is a fresh seed per order, which is a wallet
+    /// requirement rather than a script one.
+    #[proptest(cases = 20)]
+    fn one_output_fills_two_orders(
+        #[strategy(arb())] first_post_image: Digest,
+        #[strategy(arb())] second_post_image: Digest,
+        #[strategy(arb())] shared_output: AdditionRecord,
+        #[strategy(arb())] kernel: TransactionKernel,
+    ) {
+        let order = |cancel_post_image| SsoLockScript {
+            cancel_post_image,
+            admissible_outputs: vec![shared_output],
+        };
+        let first = order(first_post_image);
+        let second = order(second_post_image);
+        prop_assume!(first != second);
+
+        // One reward, paid once.
+        let kernel = with_outputs(&kernel, vec![shared_output]);
+        for order in [first, second] {
+            prop_assert!(order
+                .fill(&kernel)
+                .unwrap()
+                .halts_gracefully(public_input(&kernel)));
+        }
+    }
+
+    #[proptest(cases = 20)]
+    fn reward_set_can_have_one_member(
+        #[strategy(arb())] cancel_post_image: Digest,
+        #[strategy(arb())] admissible_output: AdditionRecord,
+        #[strategy(vec(arb(), 1..4))] other_outputs: Vec<AdditionRecord>,
+        #[strategy(arb())] kernel: TransactionKernel,
+    ) {
+        prop_assume!(!other_outputs.contains(&admissible_output));
+        let order = SsoLockScript {
+            cancel_post_image,
+            admissible_outputs: vec![admissible_output],
+        };
+
+        let unpaid = with_outputs(&kernel, other_outputs.clone());
+        prop_assert!(order.fill(&unpaid).is_none());
+
+        let paid = with_outputs(&kernel, [other_outputs, vec![admissible_output]].concat());
+        prop_assert!(order
+            .fill(&paid)
+            .unwrap()
+            .halts_gracefully(public_input(&paid)));
+    }
+
+    /// Proving cost along its two axes: the output count and the size of the
+    /// admissible set.
+    ///
+    /// The output count is the cheaper one. The membership check reads one
+    /// output, which is constant, but authenticating the outputs field hashes
+    /// it in full, so the trace grows by about one and a half cycles per
+    /// output: 254 at one output, 638 at 128.
+    ///
+    /// The admissible set is the expensive one, at 25 cycles per member. SOFuN's
+    /// 26-point grid costs 879 cycles where a one-member general swap order
+    /// costs 254, and that carries the padded height from 4096 to 16384 — four
+    /// times the proving work. The grid dominates the output count until a
+    /// transaction has some four hundred outputs.
+    ///
+    /// Run with `--ignored --nocapture` to read the table.
+    #[proptest(cases = 1)]
+    #[ignore = "a measurement, not an assertion"]
+    fn fill_cost_by_output_count(#[strategy(arb())] kernel: TransactionKernel) {
+        // The general swap order of §1.5, and the SOFuN grid.
+        for num_admissible in [1, NUM_GRID_POINTS as usize] {
+            let admissible_outputs = (0..num_admissible)
+                .map(|i| AdditionRecord::new(Digest::new(bfe_array![i as u64, 0, 0, 0, 0])))
+                .collect::<Vec<_>>();
+            let paid_with = admissible_outputs[num_admissible - 1];
+            let order = SsoLockScript {
+                cancel_post_image: Digest::default(),
+                admissible_outputs,
+            };
+            let program = order.lock_script().program;
+
+            println!("{num_admissible} admissible;  outputs  cycles  padded height");
+            for log2_num_outputs in 0..8 {
+                let num_outputs = 1 << log2_num_outputs;
+                let mut outputs = vec![AdditionRecord::new(Digest::default()); num_outputs];
+                outputs[num_outputs - 1] = paid_with;
+
+                let kernel = with_outputs(&kernel, outputs);
+                let witness = order.fill(&kernel).unwrap();
+                let (aet, _) = VM::trace_execution(
+                    program.clone(),
+                    public_input(&kernel),
+                    witness.nondeterminism(),
+                )
+                .unwrap();
+                println!(
+                    "               {num_outputs:7}  {:6}  {:13}",
+                    aet.processor_trace.nrows(),
+                    aet.padded_height()
+                );
+            }
+        }
     }
 
     /// A spender who points one past the last output, at an admissible record
