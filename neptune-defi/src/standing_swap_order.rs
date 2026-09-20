@@ -8,6 +8,7 @@ use std::fmt::Debug;
 
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use tasm_lib::prelude::Digest;
+use tasm_lib::prelude::Tip5;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 
@@ -15,6 +16,15 @@ use tasm_lib::triton_vm::prelude::BFieldElement;
 //
 // ponytail: defined here until the flag is allocated in `AnnouncementFlag`.
 pub const STANDING_SWAP_ORDER_FLAG: BFieldElement = BFieldElement::new(1000);
+
+/// The domain separator for deriving the reward's sender randomness from the
+/// seed (§4.3).
+///
+/// Domains 0 and 1 belong to the offered side's `sender_randomness` and
+/// `receiver_preimage`, which the wallet derives from the same seed. They are
+/// reserved rather than used here. Reusing one of them would give two of an
+/// order's randomnesses the same value, which is the collision §7.1 is about.
+const REWARD_SENDER_RANDOMNESS_DOMAIN: u64 = 2;
 
 /// The hash of a type script, which is how an asset is named.
 pub type TypeScriptHash = Digest;
@@ -124,5 +134,21 @@ impl<C: Swappable> StandingSwapOrder<C> {
 
     pub fn params(&self) -> C::Params {
         self.params.clone()
+    }
+
+    /// The reward's sender_randomness derived from the order's public `seed`.
+    ///
+    /// Every configuration derives it the same way. The seed is public in all
+    /// of them, and §7.1's freshness requirement is about the seed rather than
+    /// about what the demanded UTXO happens to be, so nothing here depends on
+    /// which configuration `C` is.
+    pub(crate) fn reward_sender_randomness(&self) -> Digest {
+        Tip5::hash_varlen(
+            &[
+                self.seed.values().to_vec(),
+                vec![BFieldElement::new(REWARD_SENDER_RANDOMNESS_DOMAIN)],
+            ]
+            .concat(),
+        )
     }
 }

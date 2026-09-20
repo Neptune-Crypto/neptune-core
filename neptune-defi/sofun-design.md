@@ -240,12 +240,15 @@ AR(D)   = commit( Hash(utxo(D)), sender_randomness*, receiver_digest* )
 where `commit` is the mutator set operation, *i.e.*,
 `hash_pair(hash_pair(item, sender_randomness), receiver_digest)`.
 
-The proposer hard-codes into the lock script: `Y`, the reward lock script hash,
-`sender_randomness*`, `receiver_digest*`, and the grid `(D₀, G, K)`, of which
-only `D₀` is theirs to choose — `G` and `K` are protocol constants (§4.3). The
-accepter divines only `k`, giving `D = D₀ + k·G` with `0 ≤ k < K` — it is
-nondeterministic input to the lock script, not transaction data, and never
-appears on-chain. Write `D_max = D₀ + (K−1)·G` for the last grid point.
+The proposer fixes `Y`, the reward lock script hash, `sender_randomness*`,
+`receiver_digest*`, and the grid `(D₀, G, K)`, of which only `D₀` is theirs to
+choose — `G` and `K` are protocol constants (§4.3). From those they compute
+`AR(D₀ + k·G)` for every `0 ≤ k < K` and hard-code the `K` records into the lock
+script; §4.2 says why the script holds the records rather than the ingredients.
+The accepter picks a `k` by paying the corresponding record. `k` is never
+transmitted — it is not transaction data, not nondeterministic input, and does
+not appear on-chain; the composer's choice is visible only as which of the `K`
+records the block pays. Write `D_max = D₀ + (K−1)·G` for the last grid point.
 
 **`Y` is not a free parameter either.** Every block mints a fixed amount of
 time-locked coin: half the subsidy. It is half however the composer splits the
@@ -283,19 +286,45 @@ push <post-image>                     // 5 words, hard-coded
 opened := (the two digests agree)     // 5×eq + 4×mul -> 1 or 0
 skiz_over: if not opened:
     // fill
-    divine k
-    assert is_u32(k)                  // explicit, not a side effect of `lt`
-    assert k < K                      // K = 26, protocol constant
-    kG   := u64::safe_mul(k, G)       // G = 1 week; asserts no overflow
-    D    := u64::add(D0, kG)          // D0 hard-coded; asserts no overflow
-    assert D0 <= D <= D_max           // D_max hard-coded
-    utxo := [ NativeCurrency(Y), TimeLock(D) ]      // Y, lsh hard-coded
-    ar   := commit(Hash(utxo), sr*, rd*)            // sr*, rd* hard-coded
     divine outputs list               // Vec<AdditionRecord>
     authenticate_txk_field(Outputs, txkmh)
-    assert ar ∈ outputs
+    divine i
+    assert i < |outputs|
+    matches := Σ_{ar ∈ admissible} [outputs[i] == ar]   // admissible hard-coded
+    assert matches ≠ 0
 halt
 ```
+
+**The admissible set is hard-coded, not recomputed.** The script holds `K`
+addition records, one per grid point, and the fill path is a divined index into
+the authenticated outputs and a scan of the output there against those `K`
+constants. `k` never appears. Neither do `D₀`, `G`, `Y`, the reward lock script
+hash, or the two randomnesses: the proposer folds all of them into the records
+before the script is written, and the records are what the script compares
+against.
+
+This is §1.5's formulation taken literally — *path (b) asserts that at least one
+member of an admissible set of addition records appears among the outputs* —
+with the grid as a rule for building the set rather than as arithmetic the
+verifier repeats. The general swap order is the same script with a one-element
+set. A composer filling a SOFuN order still picks `k` by §4.6; it just picks it
+by choosing which of the `K` records to pay, not by transmitting a number.
+
+What this buys is that the script has no arithmetic to get wrong. What it costs
+is `K` hard-coded digests and `K` comparisons in the fill path, and that cost is
+not negligible. Measured (`fill_cost_by_output_count`), a fill against a
+one-element set is 254 cycles and against the 26-element grid is 879 — 25 cycles
+per extra member — which carries the padded height from 4096 to 16384, so the
+grid costs about 4× the proving work of a general swap order. Output count is the
+other axis and the cheaper one: authenticating the outputs field hashes it in
+full, about 1.5 cycles per output, so 128 outputs adds 384. The grid dominates
+until a transaction has some four hundred outputs.
+
+That is the price of `K` payment dates on one order, and it is paid by the
+composer, once per fill, on a proof they are already producing. Recomputing the
+grid in the VM instead would replace `K` comparisons with `k`'s arithmetic and
+one `commit`, which is cheaper; it is not taken, because the arithmetic is the
+part that can be wrong and a spender is the one supplying its input.
 
 **There is no path selector.** The preimage decides. A spender always divines
 five words; if they hash to the post-image the hash lock has opened and the
@@ -319,32 +348,25 @@ the field is `TransactionKernelField::Outputs` (`transaction_kernel.rs:312`).
 The grid needs no additional field authentication. The membership check is a
 linear scan, so path (b) costs O(outputs), which dominates everything else here.
 
-**The grid arithmetic is checked at every step, deliberately.** `k` is the only
-value a spender supplies, and everything downstream of it is a release date the
-proposer cannot renegotiate, so it is checked in u64 rather than in the field:
-`u32::is_u32` on `k`, `lt` against a hard-coded `K`, then `u64::safe_mul` and
-`u64::add` — both of which assert their own absence of overflow — and finally
-`D₀ ≤ D ≤ D_max` against hard-coded bounds
-(`tasm_lib::arithmetic::{u32::is_u32, u64::{lt, safe_mul, add}}`). Field
-wraparound is then impossible by construction rather than by an argument about
-how large a timestamp can plausibly get, and recomposing `D` into the single
-`BFieldElement` a `Timestamp` is (`neptune-primitives/src/timestamp.rs:47`) is
-safe because `D ≤ D_max < 2^63 < p`.
+**The grid bound moved out of the script, so it must hold where the set is
+built.** `Timestamp` is a single `BFieldElement`
+(`neptune-primitives/src/timestamp.rs:47`) and its `Add` is that field's
+addition, which wraps mod `p` in silence; its `Mul` panics rather than reports.
+A `D₀` within half a year of the field bound would therefore give a grid whose
+last points are wrapped-around dates in the distant past — release dates that
+have already passed, on a reward the composer would be paying for nothing.
 
-Two of those checks are redundant against a correctly built order: Triton's
-`lt` already crashes on a non-u32 operand (`OpStackError::FailedU32Conversion`),
-and with `G` and `K` fixed only a `D₀` within half a year of the field bound
-could overflow, which no wallet constructs. They stay anyway. This is a lock
-script — the place where a spender's input meets the proposer's money — and the
-whole apparatus costs on the order of a hundred instructions against a scan that
-is already linear in the transaction's output count. The wallet-side bound is the
-belt; these are the braces.
+With no arithmetic in the script there are no braces, only the belt, so the
+belt is where the check goes: the constructor rejects any `D₀` whose
+`D_max = D₀ + (K−1)·G` reaches `2^63`, in `u64` and before any timestamp
+arithmetic runs. Every `StandingSwapOrder<Sofun>` that exists has a grid that
+fits, which is what makes the lock-script builder total, and an announcement
+carrying an out-of-range `D₀` is rejected as malformed alongside one carrying a
+nonzero `padding` (§4.3).
 
-> **Generalization note (§1.5).** Read the above as the SOFuN instance of a
-> general rule: *path (b) asserts that at least one member of an admissible set
-> of addition records appears among the outputs.* The general case has one
-> member and needs no arithmetic; the grid is a derivation rule for a larger
-> set.
+`2^63` is well under `p` and far past any date a time lock means anything on. It
+is chosen so that `D₀ + k·G` is the same number in `u64` as it is in the field,
+which makes the `u64` check the whole argument.
 
 Note what path (b) does *not* constrain: it says nothing about where `X` goes,
 what else the transaction does, what fee it pays, or who signed it. It insists
@@ -1408,20 +1430,27 @@ randomness per order.
 - [ ] Design reviewed by a second pair of eyes
 
 ### Phase 1 — lock script
-- [ ] Two-path lock script implemented
-- [ ] Unit tests: path (a) accepts the proposer's preimage
-- [ ] Unit tests: a wrong preimage with no reward output fails, and the same
+- [x] Two-path lock script implemented, over a hard-coded admissible set
+      (`SsoLockScript`)
+- [x] Grid → admissible set builder, with `G` and `K` fixed and the grid bound
+      enforced in the constructor (`StandingSwapOrder::<Sofun>::lock_script`)
+- [x] Unit tests: path (a) accepts the proposer's preimage
+- [x] Unit tests: a wrong preimage with no reward output fails, and the same
       wrong preimage with the reward present is a valid fill
-- [ ] Unit tests: path (b) accepts iff `AR(D₀ + k·G)` ∈ outputs
-- [ ] Unit tests: path (b) accepts every `k < K`, rejects `k >= K`
-- [ ] Negative tests: `k` non-u32, `k >= K`, and a grid whose
-      `D₀ + (K−1)·G` reaches the field bound (§4.2)
-- [ ] Negative test: reward output present but with wrong `Y` or wrong reward
-      lock script hash
-- [ ] Negative test for §7.1 — one output, two orders
-- [ ] `K = 1` degenerate case behaves as a fixed-`D` order (the general case
+- [x] Unit tests: path (b) accepts iff `AR(D₀ + k·G)` ∈ outputs
+- [x] Unit tests: path (b) accepts every `k < K`, rejects `k >= K`
+- [x] Negative test: a grid whose `D₀ + (K−1)·G` reaches the field bound (§4.2),
+      rejected by the constructor and by `recognize`
+- [x] Negative test: reward output present but with wrong `Y`, wrong reward
+      lock script hash, or wrong receiver digest
+- [x] Unit test: the reward UTXO is the one §4.1 specifies, coin by coin, so the
+      addition records are not merely self-consistent
+- [x] Negative test for §7.1 — one output, two orders; and its mitigation, that
+      a fresh seed makes two orders' grids disjoint
+- [x] `K = 1` degenerate case behaves as a fixed-`D` order (the general case
       of §1.5; not a reachable SOFuN configuration)
-- [ ] Proving cost measured as a function of output-list length
+- [x] Proving cost measured against both output-list length and admissible-set
+      size (§4.2)
 
 ### Phase 2 — announcement and discovery
 - [ ] `AnnouncementFlag` value 1000 allocated (§4.3)
