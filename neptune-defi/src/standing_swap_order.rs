@@ -6,6 +6,7 @@ pub mod v1;
 use std::collections::HashSet;
 use std::fmt::Debug;
 
+use neptune_consensus::transaction::announcement::Announcement;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Tip5;
@@ -13,8 +14,10 @@ use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 
 /// Element 0 of every standing swap order announcement.
-//
-// ponytail: defined here until the flag is allocated in `AnnouncementFlag`.
+///
+/// An announcement flag is defined next to the protocol that writes it --
+/// generation addresses, symmetric key addresses and lustration each define
+/// their own -- so this is the allocation itself and not a stand-in for one.
 pub const STANDING_SWAP_ORDER_FLAG: BFieldElement = BFieldElement::new(1000);
 
 /// The domain separator for deriving the reward's sender randomness from the
@@ -40,6 +43,24 @@ pub type Asset = HashSet<TypeScriptHash>;
 pub struct AssetPair {
     pub offered: Asset,
     pub demanded: Asset,
+}
+
+impl AssetPair {
+    /// `pair_id`, element 1 of an announcement: the first element of the hash
+    /// of the offered type scripts followed by the demanded ones.
+    pub fn pair_id(&self) -> BFieldElement {
+        fn type_script_hashes(asset: &Asset) -> Vec<BFieldElement> {
+            let mut type_scripts = asset.iter().copied().collect::<Vec<_>>();
+            // Sorting makes the order deterministic so that different consumers
+            // compute the same pair ID.
+            type_scripts.sort();
+            type_scripts.iter().flat_map(|ts| ts.values()).collect()
+        }
+
+        let offered = type_script_hashes(&self.offered);
+        let demanded = type_script_hashes(&self.demanded);
+        Tip5::hash_varlen(&[offered, demanded].concat()).values()[0]
+    }
 }
 
 /// Common logic and data structures for various types of standing swap orders.
@@ -124,6 +145,18 @@ pub struct StandingSwapOrder<C: Swappable> {
 }
 
 impl<C: Swappable> StandingSwapOrder<C> {
+    /// The message that announces this order.
+    pub fn announce(self, pair: &AssetPair) -> Announcement {
+        let envelope = vec![
+            STANDING_SWAP_ORDER_FLAG,
+            pair.pair_id(),
+            BFieldElement::new(C::version()),
+        ];
+        let body = C::EncodingFormat::from(self).encode();
+
+        Announcement::new([envelope, body].concat())
+    }
+
     pub fn offered_amount(&self) -> NativeCurrencyAmount {
         self.offered_amount
     }
@@ -150,5 +183,48 @@ impl<C: Swappable> StandingSwapOrder<C> {
             ]
             .concat(),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use proptest::collection::vec;
+    use proptest_arbitrary_interop::arb;
+    use tasm_lib::triton_vm::prelude::bfe_array;
+    use test_strategy::proptest;
+
+    use super::*;
+
+    fn pair(offered: &[Digest], demanded: &[Digest]) -> AssetPair {
+        AssetPair {
+            offered: offered.iter().copied().collect(),
+            demanded: demanded.iter().copied().collect(),
+        }
+    }
+
+    /// Two [`HashSet`]s holding the same type scripts do not iterate in the
+    /// same order, because each draws its own hash seed. Every consumer of one
+    /// market must nonetheless arrive at the same `pair_id`, so the id cannot
+    /// depend on how the sets were built.
+    #[proptest]
+    fn pair_id_ignores_insertion_order(
+        #[strategy(vec(arb::<Digest>(), 2..5))] offered: Vec<Digest>,
+        #[strategy(vec(arb::<Digest>(), 2..5))] demanded: Vec<Digest>,
+    ) {
+        let reverse = |ts: &[Digest]| ts.iter().copied().rev().collect::<Vec<_>>();
+        assert_eq!(
+            pair(&offered, &demanded).pair_id(),
+            pair(&reverse(&offered), &reverse(&demanded)).pair_id()
+        );
+    }
+
+    /// A pair is directed: offering A for B is not offering B for A. So the
+    /// two sides are hashed one after the other, and not canonicalized
+    /// together.
+    #[test]
+    fn pair_id_is_directed() {
+        let one = [Digest::default()];
+        let other = [Digest::new(bfe_array![1, 0, 0, 0, 0])];
+        assert_ne!(pair(&one, &other).pair_id(), pair(&other, &one).pair_id());
     }
 }

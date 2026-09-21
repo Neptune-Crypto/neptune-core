@@ -1039,8 +1039,9 @@ pub struct BlockUpdate<C: Swappable> {
 }
 
 impl<C: Swappable> OrderBook<C> {
-    /// An empty book for one market.
-    pub fn new(pair: AssetPair) -> Self;
+    /// An empty book for one market. A closed entry is kept until its
+    /// closing block lies `prune_depth` blocks below the tip.
+    pub fn new(pair: AssetPair, prune_depth: u64) -> Self;
 
     /// The assets every order in this book offers and demands.
     pub fn pair(&self) -> &AssetPair;
@@ -1211,12 +1212,15 @@ branch, which is what makes the single-branch assumption safe to rely on.
 
 **`roll_back_to` is why closed entries are kept.** An order retired at height
 *h* must come back if the chain abandons *h*, so closing an entry sets its
-`closed_in` rather than removing it, and the entry stays in the book until
-`prune` removes it, typically once its closing block is deeper than the
-operator expects any reorganization to reach. `prune` takes an arbitrary
-predicate and may remove open orders too, such as SOFuN orders whose grid has
-run out; that is safe for the same reason eviction is, since removal can only
-make the book incomplete, never wrong.
+`closed_in` rather than removing it, and the entry stays in the book while a
+rollback could still reach it. How deep that is belongs to the operator rather
+than to this crate — a deeper book costs memory, a shallower one loses orders a
+rollback would have reopened — so `prune_depth` is given when the book is built,
+and `apply` drops every entry whose closing block has fallen that far below the
+tip. `prune` remains for everything else: it takes an arbitrary predicate and
+may remove open orders too, such as SOFuN orders whose grid has run out; that is
+safe for the same reason eviction is, since removal can only make the book
+incomplete, never wrong.
 Open and closed entries share one map, which makes rollback two plain steps:
 remove every entry opened above `luca`, then clear `closed_in` on every
 entry closed above it. An entry opened and closed on the abandoned branch falls
@@ -1453,28 +1457,40 @@ randomness per order.
       size (§4.2)
 
 ### Phase 2 — announcement and discovery
-- [ ] `AnnouncementFlag` value 1000 allocated (§4.3)
-- [ ] `G` = 1 week and `K` = 26 defined once, and used by both the lock-script
+- [x] `STANDING_SWAP_ORDER_FLAG` = 1000, defined beside the protocol that
+      writes it, which is where every other announcement flag is defined (§4.3)
+- [x] `G` = 1 week and `K` = 26 defined once, and used by both the lock-script
       builder and the order verifier (§4.3)
-- [ ] `StandingSwapOrderV1` and `SofunBody` with derived `BFieldCodec`; round-trip
+- [x] `StandingSwapOrderV1` and `SofunBody` with derived `BFieldCodec`; round-trip
       proptest over both announcements, envelope included, plus a truncation
       case and a check that both bodies are 28 elements with every shared field
       at the same offset
-- [ ] Schema chosen from `pair_id` before decoding, never from which decoder
+- [x] Schema chosen from `pair_id` before decoding, never from which decoder
       succeeds; test that a generic body decodes as `SofunBody` (§4.3)
-- [ ] Conversion from `SofunBody` rejects a nonzero `padding`, so every order
+- [x] Conversion from `SofunBody` rejects a nonzero `padding`, so every order
       has one encoding and consumers may deduplicate on raw elements (§4.3)
+- [x] `pair_id` derived from an `AssetPair`, over sorted type script hashes, so
+      that it does not depend on the order a consumer built the sets in; SOFuN's
+      own pair stated once (§4.3)
+- [x] Announcement generator: the envelope, then the body, read back by
+      `recognize` in a round-trip proptest (§4.3)
 - [ ] Order-announcement / lock-script consistency check (§7.3) as a library
       function, usable by the accepter and by any validator of a fill
 - [ ] Order index in the node: insert-time verification, priority queue on `X`,
       query by `Y` (§4.8)
-- [ ] Feeder and book split, with the book taking `BlockUpdate` and performing
-      no chain lookups; a row holds a `StandingSwapOrder` rather than repeating
-      its fields (§4.10)
-- [ ] Orders retired on a spent order UTXO, not only admitted on an
-      announcement; test a fill and a cancel (§4.10)
-- [ ] Index rollback on reorg, with a rescan fallback; test both
-- [ ] Closed entries retained for rollback and pruned by depth (§4.10)
+- [x] The book takes `BlockUpdate` and performs no chain lookups; a row holds a
+      `StandingSwapOrder` rather than repeating its fields (§4.10)
+- [ ] The feeder, which is the other half of that split: candidate
+      announcements, §7.3's check, and the AOCL leaf index a row is keyed
+      by (§4.10)
+- [x] Orders retired on a spent order UTXO, not only admitted on an
+      announcement (§4.10)
+- [ ] A fill and a cancel tested against chain data, which waits on the feeder
+- [x] Book rollback on reorg, and an update that does not extend the tip
+      rejected rather than applied (§4.10)
+- [ ] Rescan fallback in the node
+- [x] Closed entries retained for rollback and pruned once their closing block
+      lies deeper than a depth given when the book is built (§4.10)
 - [ ] `neptune-defi` still depends on nothing below `neptune-consensus`, checked
       in CI (§4.10)
 - [ ] RPC exposing open orders
