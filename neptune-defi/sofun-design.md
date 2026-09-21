@@ -823,17 +823,26 @@ whose history changes underneath them.
 **It is shaped like the mempool, not like the wallet.** It holds other people's
 standing offers rather than the operator's own belongings, it is kept in step
 with the tip, it is consulted when a block is built, and entries leave it when
-the underlying UTXO is spent. The mempool's structures fit directly: one row per
-open order keyed by the order UTXO's AOCL leaf index, and a priority queue on
-`X`, the way the mempool keeps `upgrade_priorities` (`mempool.rs:165-170`). The
-key is the leaf index rather than the addition record because two orders with
-identical terms and identical randomnesses commit to the same record and both
-can be confirmed — which the node's own RPC documents, warning that a query by
-addition record can return several blocks. A leaf index is assigned by the AOCL
-and is unique, and it is what `restore_membership_proof`
-(`archival_mutator_set.rs:238`) needs to fill the order anyway. The
-composer's only query — the largest `X` among orders asking for this block's
-time-locked subsidy — is then reading the top of a queue.
+the underlying UTXO is spent. So it is one row per open order, keyed by the
+order UTXO's AOCL leaf index. The key is the leaf index rather than the
+addition record because two orders with identical terms and identical
+randomnesses commit to the same record and both can be confirmed — which the
+node's own RPC documents, warning that a query by addition record can return
+several blocks. A leaf index is assigned by the AOCL and is unique, and it is
+what `restore_membership_proof` (`archival_mutator_set.rs:238`) needs to fill
+the order anyway.
+
+**The composer's query is a scan.** It asks for the largest `X` among the
+orders demanding exactly this block's time-locked subsidy, and that amount is
+an argument rather than a property of the book, since `epoch` is the proposer's
+choice and orders naming the next generation's subsidy stand in the same book.
+An ordering by `X` alone therefore answers a question nobody asks: the first
+order under it may demand an amount the composer cannot pay. Answering from the
+front of a queue means one queue per demanded amount, maintained on every
+insert, every retirement and every rollback, and `demanding` (§4.10) does the
+filter and the ranking in one pass instead. It is a few thousand comparisons
+once per template build. When a template build measurably notices, bucket by
+demanded amount and keep a queue on `X` within each bucket.
 
 **Verify on insert, not on query.** An announcement is a hint (§4.3, §7.3), so
 admitting one to the index means rebuilding the lock script from it, computing
@@ -841,6 +850,23 @@ the order UTXO's addition record, and finding that record in the AOCL. Done once
 when the announcement is first seen, a row in the index is a verified order, and
 the composer building a template can take the top of the queue without checking
 anything.
+
+**The feeder runs off the block-processing path.** Verifying an announcement
+is work an attacker chooses: an announcement is a permissionless write, and
+checking one means building a Triton program of `K` addition records and
+hashing it. That cannot sit inside the write that sets the tip, where every
+other consumer of the node waits behind it. So the feeder is a task of its own.
+It holds its own tip, and when the node's tip moves it asks the archival state
+for the path between the two — `find_path`
+(`neptune-archive/src/archival_state.rs:267`) returns the blocks to leave, the
+last common ancestor, and the blocks to take — then rolls the book back to that
+ancestor and applies the arriving blocks. The wallet already restores
+membership proofs this way.
+
+The book therefore trails the node's tip by however long verification takes. An
+order confirmed in block *h* cannot be filled before block *h+1* in any case, so
+a feeder that keeps up with block time costs a composer nothing, and one that
+falls behind costs it orders it would otherwise have filled, never a wrong fill.
 
 **On a reorg, roll back the affected blocks.** The node has them. The mempool's
 answer to a reorg is to clear itself (`mempool.rs:1324-1333`), which is fine for
@@ -974,6 +1000,24 @@ in the AOCL — whose position is the leaf index the row is then keyed by, so th
 identifier falls out of the verification rather than costing a second lookup. A
 *book* holds what survived and answers questions about it. Only the feeder needs
 archival state, and only the book needs to be fast to query.
+
+**An announcement names a UTXO in its own block.** The feeder verifies against
+the block it was handed and nothing else: it rebuilds the lock script from the
+body, derives the order UTXO's addition record, and looks for that record among
+that block's own outputs. The leaf index the row is keyed by is the AOCL's leaf
+count before the block plus the record's position among its outputs, so the
+identifier still falls out of the verification, and no second lookup pays for
+it.
+
+The rule costs a proposer nothing, because one transaction creates the order
+UTXO and carries the announcement. What it buys is that the book is a function
+of the blocks alone: a cold start is a replay, a reorg is a rollback, and
+neither needs an index. The alternative — an announcement free to name a UTXO
+confirmed at any earlier height — is a query by addition record, which needs
+`--utxo-index`, which is capped at `MAX_NUM_BLOCKS_IN_LOOKUP_LIST` blocks,
+which is shorter than an order's shelf life. An announcement whose record is
+not among its block's outputs is not an order, and a conforming consumer does
+not list it.
 
 **Three types, not one, and each boundary adds information from its own
 source.** An order is written once and read twice, and what it is called at each
@@ -1365,9 +1409,10 @@ a test.
 
 Anyone can publish an announcement claiming to be a SOFuN order. Accepters must
 rebuild the lock script from the announced terms and check it against the order
-UTXO's actual lock script hash before treating the order as real. An accepter
-who skips this check can be induced to hand over `Y` for a UTXO that pays
-nothing.
+UTXO's actual lock script hash before treating the order as real, which means
+finding the rebuilt addition record among the outputs of the block that carries
+the announcement (§4.10). An accepter who skips this check can be induced to
+hand over `Y` for a UTXO that pays nothing.
 
 ### 7.4 Dust and spam
 
@@ -1476,13 +1521,15 @@ randomness per order.
       `recognize` in a round-trip proptest (§4.3)
 - [ ] Order-announcement / lock-script consistency check (§7.3) as a library
       function, usable by the accepter and by any validator of a fill
-- [ ] Order index in the node: insert-time verification, priority queue on `X`,
-      query by `Y` (§4.8)
+- [ ] Order index in the node: insert-time verification, and the composer's
+      query by `Y` answered by a scan (§4.8)
 - [x] The book takes `BlockUpdate` and performs no chain lookups; a row holds a
       `StandingSwapOrder` rather than repeating its fields (§4.10)
 - [ ] The feeder, which is the other half of that split: candidate
-      announcements, §7.3's check, and the AOCL leaf index a row is keyed
-      by (§4.10)
+      announcements, §7.3's check against the outputs of the announcement's own
+      block, and the AOCL leaf index a row is keyed by (§4.10)
+- [ ] The feeder as a task of its own, off the write that sets the tip, holding
+      its own tip and catching up through `find_path` (§4.8)
 - [x] Orders retired on a spent order UTXO, not only admitted on an
       announcement (§4.10)
 - [ ] A fill and a cancel tested against chain data, which waits on the feeder
