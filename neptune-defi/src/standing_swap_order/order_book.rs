@@ -102,14 +102,17 @@ pub struct OrderBook<C: Swappable> {
     pair: AssetPair,
     entries: HashMap<OrderId, Order<C>>,
     tip: Option<BlockId>,
+    prune_depth: u64,
 }
 
 impl<C: Swappable> OrderBook<C> {
-    pub fn new(pair: AssetPair) -> Self {
+    /// An empty book for one market.
+    pub fn new(pair: AssetPair, prune_depth: u64) -> Self {
         Self {
             pair,
             entries: HashMap::new(),
             tip: None,
+            prune_depth,
         }
     }
 
@@ -189,7 +192,25 @@ impl<C: Swappable> OrderBook<C> {
         }
 
         self.tip = Some(update.block);
+        self.prune_closed_below(update.block.height);
+
         Ok(())
+    }
+
+    /// Drop every entry whose closing block is `prune_depth` or more blocks
+    /// below `tip`.
+    ///
+    /// Upon a deeper reorganization than `prune_depth` these orders are lost.
+    fn prune_closed_below(&mut self, tip: BlockHeight) {
+        let Some(cutoff) = tip.checked_sub(self.prune_depth) else {
+            return;
+        };
+
+        self.entries.retain(|_, entry| {
+            !entry
+                .closed_in
+                .is_some_and(|closed| closed.height <= cutoff)
+        });
     }
 
     /// Undo every change above `luca`, reopen whatever closed on the way
@@ -255,6 +276,9 @@ mod tests {
     const A: u64 = 0;
     const B: u64 = 1;
 
+    /// No tip is this deep, so nothing is ever pruned automatically.
+    const NEVER_PRUNE: u64 = u64::MAX;
+
     fn block(height: u64, branch: u64) -> BlockId {
         BlockId {
             height: BlockHeight::from(height),
@@ -315,7 +339,7 @@ mod tests {
 
     #[test]
     fn reorganization_requires_rollback() {
-        let mut book = OrderBook::new(pair());
+        let mut book = OrderBook::new(pair(), NEVER_PRUNE);
         book.apply(update(block(98, A), block(97, A))).unwrap();
         book.apply(update(block(99, A), block(98, A))).unwrap();
         book.apply(update(block(100, A), block(99, A))).unwrap();
@@ -339,7 +363,7 @@ mod tests {
 
     #[test]
     fn rollback_undoes_orphaned_closures() {
-        let mut book = OrderBook::new(pair());
+        let mut book = OrderBook::new(pair(), NEVER_PRUNE);
 
         let mut at_96 = update(block(96, A), block(95, A));
         at_96.opened.push(entry(5, 96));
@@ -383,7 +407,7 @@ mod tests {
 
     #[test]
     fn rollback_deletes_opened_orders() {
-        let mut book = OrderBook::new(pair());
+        let mut book = OrderBook::new(pair(), NEVER_PRUNE);
         book.apply(update(block(98, A), block(97, A))).unwrap();
 
         let mut at_99 = update(block(99, A), block(98, A));
@@ -398,7 +422,7 @@ mod tests {
 
     #[test]
     fn closed_orders_live_until_pruned() {
-        let mut book = OrderBook::new(pair());
+        let mut book = OrderBook::new(pair(), NEVER_PRUNE);
 
         let mut at_98 = update(block(98, A), block(97, A));
         at_98.opened.push(entry(4, 98));
@@ -423,6 +447,35 @@ mod tests {
         assert!(book.get(OrderId(4)).is_some());
 
         book.prune(closed_below(100));
+        assert!(book.get(OrderId(4)).is_none());
+    }
+
+    #[test]
+    fn closed_entries_are_pruned_at_the_configured_depth() {
+        const DEPTH: u64 = 3;
+        const CLOSED_AT: u64 = 98;
+
+        let mut book = OrderBook::new(pair(), DEPTH);
+
+        let mut at_97 = update(block(97, A), block(96, A));
+        at_97.opened.push(entry(4, 97));
+        book.apply(at_97).unwrap();
+
+        let mut closing = update(block(CLOSED_AT, A), block(97, A));
+        closing.closed.push(OrderId(4));
+        book.apply(closing).unwrap();
+
+        // The entry survives every block up to, but not including, the one
+        // that buries its closing block `DEPTH` deep.
+        for height in CLOSED_AT + 1..CLOSED_AT + DEPTH {
+            book.apply(update(block(height, A), block(height - 1, A)))
+                .unwrap();
+            assert!(book.get(OrderId(4)).is_some());
+        }
+
+        let buried = CLOSED_AT + DEPTH;
+        book.apply(update(block(buried, A), block(buried - 1, A)))
+            .unwrap();
         assert!(book.get(OrderId(4)).is_none());
     }
 }

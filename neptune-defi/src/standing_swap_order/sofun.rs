@@ -1,7 +1,12 @@
+use std::collections::HashSet;
+
 use neptune_consensus::block::Block;
+use neptune_consensus::proof_abstractions::tasm::program::TritonProgram;
 use neptune_consensus::transaction::utxo::Utxo;
 use neptune_consensus::transaction::utxo_triple::UtxoTriple;
+use neptune_consensus::type_scripts::native_currency::NativeCurrency;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_consensus::type_scripts::time_lock::TimeLock;
 use neptune_primitives::timestamp::Timestamp;
 use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
@@ -9,6 +14,7 @@ use tasm_lib::triton_vm::prelude::BFieldCodec;
 use super::order_book::Order;
 use super::order_book::OrderBook;
 use super::sso_lock_script::SsoLockScript;
+use super::AssetPair;
 use super::StandingSwapOrder;
 use super::Swappable;
 
@@ -204,6 +210,21 @@ impl TryFrom<SofunBody> for StandingSwapOrder<Sofun> {
             body.reward_lock_script_hash,
             body.reward_receiver_digest,
         )
+    }
+}
+
+impl Sofun {
+    /// SOFuN's market: native currency offered for native currency that is
+    /// time-locked.
+    ///
+    /// This is what `pair_id` names. A consumer builds the pair itself, from
+    /// the type scripts this schema fixes, and never recovers it from an
+    /// announcement, since `pair_id` is a one-way hash of a single element.
+    pub fn asset_pair() -> AssetPair {
+        AssetPair {
+            offered: HashSet::from([NativeCurrency.hash()]),
+            demanded: HashSet::from([NativeCurrency.hash(), TimeLock.hash()]),
+        }
     }
 }
 
@@ -463,6 +484,23 @@ mod tests {
         }
     }
 
+    /// An announcement is what `recognize` reads, so the two are tested as
+    /// one: generate, then read back under the pair's own id.
+    #[proptest]
+    fn an_announced_order_is_recognized(#[strategy(arb())] body: SofunBody) {
+        let order = StandingSwapOrder::<Sofun>::try_from(body).unwrap();
+        let pair = Sofun::asset_pair();
+        let message = order.announce(&pair).message;
+
+        assert_eq!(VALID_LENGTH, message.len());
+        assert_eq!(STANDING_SWAP_ORDER_FLAG, message[0]);
+        assert_eq!(pair.pair_id(), message[1]);
+        assert_eq!(BFieldElement::new(Sofun::version()), message[2]);
+
+        let recognized = Sofun::recognize(pair.pair_id(), &message).unwrap();
+        assert_eq!(body, SofunBody::from(recognized));
+    }
+
     /// The length of a message: three envelope elements and a 28-element body.
     const VALID_LENGTH: usize = 3 + 28;
 
@@ -691,7 +729,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let mut book = OrderBook::<Sofun>::new(AssetPair { offered, demanded });
+        let mut book = OrderBook::<Sofun>::new(AssetPair { offered, demanded }, u64::MAX);
         book.apply(BlockUpdate::<Sofun> {
             block,
             parent,
@@ -742,10 +780,13 @@ mod tests {
             height,
             hash: Digest::default(),
         };
-        let mut book = OrderBook::<Sofun>::new(AssetPair {
-            offered: HashSet::new(),
-            demanded: HashSet::new(),
-        });
+        let mut book = OrderBook::<Sofun>::new(
+            AssetPair {
+                offered: HashSet::new(),
+                demanded: HashSet::new(),
+            },
+            u64::MAX,
+        );
         book.apply(BlockUpdate::<Sofun> {
             block,
             parent: Digest::default(),
