@@ -83,6 +83,7 @@ use crate::state::sync_status::SyncStatus;
 use crate::state::wallet::MAX_DERIVATION_INDEX_BUMP;
 use crate::state::GlobalState;
 use crate::state::GlobalStateLock;
+use crate::NETWORK_ACTOR_EXITED_EXIT_CODE;
 use crate::SUCCESS_EXIT_CODE;
 
 const PEER_DISCOVERY_INTERVAL: Duration = Duration::from_secs(2 * 60);
@@ -1832,7 +1833,17 @@ impl MainLoopHandler {
                 }
 
                 // Handle messages from the network actor
-                Some(network_event) = self.network_event_rx.recv() => {
+                maybe_network_event = self.network_event_rx.recv() => {
+                    let Some(network_event) = maybe_network_event else {
+                        // The sender lives in the network actor. So a closed
+                        // channel means the network actor task has exited.
+                        // Without it, no libp2p peer can be dialed or received.
+                        // So exit application instead of continuing in a
+                        // severely degraded state.
+                        error!("Network actor has exited. Shutting down.");
+                        break NETWORK_ACTOR_EXITED_EXIT_CODE;
+                    };
+
                     debug!("Received message from network actor.");
                     self.handle_network_event(network_event, &mut main_loop_state)?;
                 }

@@ -41,7 +41,7 @@ pub(crate) const NEPTUNE_PROTOCOL_STR: &str = "/neptune/";
 ///   out a relay reservation or attempt a hole punch.
 /// * **[`relay`](libp2p::relay)**: Requires nodes to act as a relay server for
 ///   peers behind NATs, making them reachable via proxy. Can be switched off
-///   by the operator, in which case the behaviour is disabled via [`Toggle`].
+///   by the operator, in which case the behaviour is disabled.
 /// * **[`relay::client`](libp2p::relay::client)**: Enables nodes behind a NAT
 ///   to reserve a sub-address with a relay server, thereby becoming reachable.
 /// * **[`dcutr`](libp2p::dcutr)**: *Direct Connection Upgrade through Relay*.

@@ -96,6 +96,7 @@ use crate::state::GlobalStateLock;
 
 pub const SUCCESS_EXIT_CODE: i32 = 0;
 pub const COMPOSITION_FAILED_EXIT_CODE: i32 = 159;
+pub const NETWORK_ACTOR_EXITED_EXIT_CODE: i32 = 160;
 
 /// Magic string to ensure other program is Neptune Core
 pub const MAGIC_STRING_REQUEST: &[u8; 15] = b"7B8AB7FC438F411";
