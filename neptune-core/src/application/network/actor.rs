@@ -566,7 +566,12 @@ impl NetworkActor {
     }
     /// Fetch a list of suitable peers from the address book and dial them.
     pub(crate) fn dial_initial_peers(&mut self) {
-        let initial_peers = self.address_book.select_initial_peers(10);
+        let initial_peers = self
+            .address_book
+            .select_initial_peers(10)
+            .into_iter()
+            .filter(|address| !Self::is_local_address(address))
+            .collect_vec();
         tracing::debug!("Dialing {} initial peers.", initial_peers.len());
         for address in initial_peers {
             if let Err(e) = self.dial(address.clone()) {
@@ -707,7 +712,12 @@ impl NetworkActor {
                     // If we are not connected to anyone, and if there are not
                     // sticky peers, then dial initial peers from address book.
                     if self.sticky_peers.is_empty() && self.active_connections.is_empty() {
-                        dials.append(&mut self.address_book.select_initial_peers(3));
+                        dials.extend(
+                            self.address_book
+                                .select_initial_peers(3)
+                                .into_iter()
+                                .filter(|address| !Self::is_local_address(address)),
+                        );
                     }
 
                     // Disconnect if necessary to free up enough slots.
@@ -732,19 +742,20 @@ impl NetworkActor {
     }
 
     /// Instructs the swarm to dial an address, but only if it passes a filter.
+    /// Dial the address exactly as given.
+    ///
+    /// Addresses learned from the network, as opposed to those the operator
+    /// asked for, should be checked with [`Self::is_local_address`] first so
+    /// that a peer's loopback address is not mistaken for a way to reach it.
     fn dial(&mut self, address: Multiaddr) -> Result<(), libp2p::swarm::DialError> {
-        let addr_str = address.to_string();
-
-        // Filter out addresses that point to ourselves.
-        let is_local = addr_str.contains("127.0.0.1")
-            || addr_str.contains("::1")
-            || addr_str.contains("/lan/");
-
-        if is_local {
-            return Ok(());
-        }
-
         self.swarm.dial(address)
+    }
+
+    /// Whether an address points to this machine rather than to a remote
+    /// peer.
+    fn is_local_address(address: &Multiaddr) -> bool {
+        let addr_str = address.to_string();
+        addr_str.contains("127.0.0.1") || addr_str.contains("::1") || addr_str.contains("/lan/")
     }
 
     /// Record a panic caught while polling or handling the swarm.
