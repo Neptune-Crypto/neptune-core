@@ -1,8 +1,10 @@
+use std::any::Any;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -11,6 +13,7 @@ use std::time::SystemTime;
 use const_format::concatcp;
 use futures::prelude::*;
 use itertools::Itertools;
+use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::swarm::SwarmEvent;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
@@ -173,6 +176,10 @@ pub(crate) struct NetworkActor {
     /// strategy for becoming publicly reachable.
     reachability_state: ReachabilityState,
 
+    /// Counts panics caught while polling the swarm, so that a panic that
+    /// repeats on every poll shuts the actor down instead of spinning.
+    swarm_panics: PanicBreaker,
+
     /// Tracks which protocols this node actually supports, as reported to other
     /// peers in Identify.
     active_protocols: Option<HashSet<libp2p::StreamProtocol>>,
@@ -290,7 +297,27 @@ impl NetworkActor {
     const KEEP_ALIVE: bool = true;
 
     /// How long relay reservations (proxy addresses) last.
-    const RELAY_RESERVATION_DURATION: Duration = Duration::from_secs(120);
+    ///
+    /// Relay clients renew after three quarters of this duration, so the
+    /// last quarter is the margin between a renewal being sent and the old
+    /// reservation expiring on the server. libp2p-relay 0.22.0 panics on the
+    /// server if a renewal is accepted after the old reservation expired, so
+    /// this margin must be long enough to cover a slow accept. One hour, the
+    /// libp2p default, gives a fifteen-minute margin.
+    const RELAY_RESERVATION_DURATION: Duration = Duration::from_secs(60 * 60);
+
+    /// Sliding window over which panics caught while polling the swarm are
+    /// counted.
+    const SWARM_PANIC_WINDOW: Duration = Duration::from_secs(60);
+
+    /// Number of panics tolerated within [`Self::SWARM_PANIC_WINDOW`] before
+    /// the actor gives up.
+    ///
+    /// A panic that repeats on every poll arrives hundreds of times per
+    /// second, so this still trips within a fraction of a second. A peer
+    /// that provokes panics on purpose needs one relay reservation per
+    /// panic, and can hold at most four per IP address.
+    const MAX_SWARM_PANICS_PER_WINDOW: usize = 30;
 
     /// How long before we are allowed to re-initiate a relay to replace the
     /// failed one.
@@ -502,6 +529,10 @@ impl NetworkActor {
             max_num_peers,
             upgraded_peers,
             reachability_state,
+            swarm_panics: PanicBreaker::new(
+                Self::SWARM_PANIC_WINDOW,
+                Self::MAX_SWARM_PANICS_PER_WINDOW,
+            ),
             active_protocols: None,
             accept_new_external_addresses: !neuter_autonat,
         })
@@ -581,8 +612,22 @@ impl NetworkActor {
         loop {
             tokio::select! {
                 // Handle libp2p Swarm Events.
-                event = self.swarm.select_next_some() => {
-                    self.handle_swarm_event(event).await?;
+                //
+                // A panic anywhere in the libp2p behaviours would otherwise
+                // unwind this task and silently take all libp2p connectivity
+                // with it. Don't allow unbounded, repeated panics though.
+                polled = AssertUnwindSafe(self.swarm.select_next_some()).catch_unwind() => {
+                    let outcome = match polled {
+                        Ok(event) => {
+                            AssertUnwindSafe(self.handle_swarm_event(event))
+                                .catch_unwind()
+                                .await
+                        }
+                        Err(panic) => Err(panic),
+                    };
+                    if let Err(panic) = outcome {
+                        self.on_swarm_panic(panic.as_ref())?;
+                    }
                 }
 
                 // Handle Commands from the Main Loop destined for the Actor (so
@@ -702,11 +747,26 @@ impl NetworkActor {
         self.swarm.dial(address)
     }
 
+    /// Record a panic caught while polling or handling the swarm.
+    ///
+    /// Returns an error once panics repeat too quickly, which shuts the actor
+    /// down (and, through the main loop, the node).
+    fn on_swarm_panic(&mut self, panic: &(dyn Any + Send)) -> Result<(), ActorError> {
+        let message = panic_message(panic);
+        if self.swarm_panics.record(std::time::Instant::now()) {
+            tracing::error!(
+                "Caught panic in libp2p swarm: {message}. \
+                 Panics are repeating too quickly; shutting down network actor."
+            );
+            return Err(ActorError::RepeatedPanics);
+        }
+
+        tracing::error!("Caught panic in libp2p swarm: {message}. Continuing.");
+        Ok(())
+    }
+
     /// Handle an event coming from the libp2p Swarm.
-    async fn handle_swarm_event(
-        &mut self,
-        event: SwarmEvent<NetworkStackEvent>,
-    ) -> Result<(), ActorError> {
+    async fn handle_swarm_event(&mut self, event: SwarmEvent<NetworkStackEvent>) {
         match event {
             // An event from our own network stack bubbles up.
             SwarmEvent::Behaviour(network_stack_event) => {
@@ -738,7 +798,7 @@ impl NetworkActor {
 
                     // StreamGateway successfully hijacked a stream.
                     NetworkStackEvent::StreamGateway(gateway_event) => {
-                        self.handle_stream_gateway_event(*gateway_event).await?;
+                        self.handle_stream_gateway_event(*gateway_event).await;
                     }
                 }
             }
@@ -751,7 +811,7 @@ impl NetworkActor {
                     _ => false,
                 });
                 if is_loopback {
-                    return Ok(());
+                    return;
                 }
 
                 // Reject multi-hop circuits.
@@ -764,7 +824,7 @@ impl NetworkActor {
                     tracing::trace!(
                         "Rejecting multi-hop listen address {address} because multi-hop."
                     );
-                    return Ok(());
+                    return;
                 }
 
                 tracing::debug!("Node is listening on {:?}", address);
@@ -1010,7 +1070,7 @@ impl NetworkActor {
                     tracing::debug!(
                         "Established duplicate {connection_id} to peer {peer_id}; tracking address.",
                     );
-                    return Ok(());
+                    return;
                 }
 
                 // Check for banned IPs again. The catch above in
@@ -1025,7 +1085,7 @@ impl NetworkActor {
                         tracing::warn!(target: "net::bounce", bouncee = %address, "Bouncing established connection to {address} because {reason}.");
                     }
                     self.swarm.close_connection(connection_id);
-                    return Ok(());
+                    return;
                 }
 
                 // Connection was successfully established, so erase information
@@ -1071,8 +1131,6 @@ impl NetworkActor {
 
             _ => {}
         }
-
-        Ok(())
     }
 
     /// Check if a connection to the given address should be disallowed.
@@ -1499,12 +1557,9 @@ impl NetworkActor {
     ///     new, authenticated peer is fully operational and ready for
     ///     synchronization.
     ///
-    /// # Errors
-    ///
-    /// Returns [`ActorError::NoAddressForPeer`] if a stream is established for
-    /// a peer whose connection metadata was not correctly tracked in the
-    /// address map.
-    async fn handle_stream_gateway_event(&mut self, event: GatewayEvent) -> Result<(), ActorError> {
+    /// If the peer is not present in the address map, the stream is dropped,
+    /// which closes the connection to that peer. The actor keeps running.
+    async fn handle_stream_gateway_event(&mut self, event: GatewayEvent) {
         let GatewayEvent::HandshakeReceived {
             peer_id,
             remote_handshake,
@@ -1518,8 +1573,12 @@ impl NetworkActor {
 
         // Fetch address from carefully maintained address map.
         let Some((_timestamp, address)) = self.active_connections.get(&peer_id).cloned() else {
-            tracing::trace!("Not upgrading connection because we don't have an address.");
-            return Err(ActorError::NoAddressForPeer(peer_id));
+            tracing::warn!(
+                peer = %peer_id,
+                "Dropping hijacked stream: no address is tracked for this peer."
+            );
+            drop(stream);
+            return;
         };
 
         // Spawn the blockchain peer loop with the hijacked stream.
@@ -1540,8 +1599,6 @@ impl NetworkActor {
                 .send(NetworkEvent::NewPeerLoop { loop_handle })
                 .await;
         }
-
-        Ok(())
     }
 
     /// Handles events emitted by the AutoNAT behavior to determine the node's
@@ -2369,13 +2426,58 @@ impl NetworkActor {
     }
 }
 
+/// Extract a readable message from a panic payload.
+fn panic_message(panic: &(dyn Any + Send)) -> String {
+    if let Some(message) = panic.downcast_ref::<&str>() {
+        (*message).to_string()
+    } else if let Some(message) = panic.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "non-string panic payload".to_string()
+    }
+}
+
+/// Trips when more than a given number of panics are recorded within a sliding
+/// time window.
+#[derive(Debug)]
+struct PanicBreaker {
+    window: Duration,
+    max_panics: usize,
+    timestamps: VecDeque<std::time::Instant>,
+}
+
+impl PanicBreaker {
+    fn new(window: Duration, max_panics: usize) -> Self {
+        Self {
+            window,
+            max_panics,
+            timestamps: VecDeque::new(),
+        }
+    }
+
+    /// Record a panic observed at `now`. Returns `true` if the breaker has
+    /// tripped, i.e. if more than `max_panics` panics fall within `window`.
+    fn record(&mut self, now: std::time::Instant) -> bool {
+        self.timestamps.push_back(now);
+        while self
+            .timestamps
+            .front()
+            .is_some_and(|&first| now.duration_since(first) > self.window)
+        {
+            self.timestamps.pop_front();
+        }
+
+        self.timestamps.len() > self.max_panics
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ActorError {
     #[error("Network channel closed unexpectedly")]
     ChannelClosed,
 
-    #[error("No address found for peer {0} in address map")]
-    NoAddressForPeer(PeerId),
+    #[error("Too many panics caught in the libp2p swarm within a short time")]
+    RepeatedPanics,
 }
 
 #[cfg(test)]
@@ -2389,6 +2491,27 @@ mod tests {
     use crate::application::config::cli_args;
     use crate::tests::shared::files::unit_test_path;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
+
+    #[test]
+    fn panic_breaker_trips_only_on_rapid_repeats() {
+        let window = Duration::from_secs(60);
+        let mut breaker = PanicBreaker::new(window, 3);
+        let start = std::time::Instant::now();
+
+        // Up to `max_panics` within the window is tolerated.
+        assert!(!breaker.record(start));
+        assert!(!breaker.record(start + Duration::from_secs(1)));
+        assert!(!breaker.record(start + Duration::from_secs(2)));
+
+        // One more within the window trips it.
+        assert!(breaker.record(start + Duration::from_secs(3)));
+
+        // Old entries fall out of the window, so spread-out panics never trip.
+        let mut slow_breaker = PanicBreaker::new(window, 3);
+        for i in 0..20u64 {
+            assert!(!slow_breaker.record(start + Duration::from_secs(i * 30)));
+        }
+    }
 
     async fn test_actor() -> NetworkActor {
         let network = Network::Main;
