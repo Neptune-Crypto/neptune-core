@@ -256,7 +256,8 @@ pub async fn initialize(
         })
         .with_cli_bans(cli_args.bans.clone())
         .with_cli_peers(cli_peers_for_network_actor)
-        .with_external_addresses(cli_args.own_public_addresses());
+        .with_external_addresses(cli_args.own_public_addresses())
+        .with_relay_server(!cli_args.disable_relay_server);
     let identity = resolve_identity(
         cli_args
             .identity_file

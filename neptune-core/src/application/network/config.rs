@@ -34,6 +34,9 @@ pub(crate) struct NetworkConfig {
     pub(super) source_limits: SourceLimitsConfig,
 
     external_addresses: Vec<Multiaddr>,
+
+    /// Whether to offer relay reservations to peers behind NATs.
+    pub(super) relay_server: bool,
 }
 
 impl Default for NetworkConfig {
@@ -49,6 +52,7 @@ impl Default for NetworkConfig {
             max_num_peers: 10,
             source_limits: SourceLimitsConfig::default(),
             external_addresses: vec![],
+            relay_server: true,
         }
     }
 }
@@ -81,6 +85,11 @@ impl NetworkConfig {
 
     pub(crate) fn with_cli_peers(mut self, sticky_peers: Vec<Multiaddr>) -> Self {
         self.sticky_peers.extend(sticky_peers);
+        self
+    }
+
+    pub(crate) fn with_relay_server(mut self, enabled: bool) -> Self {
+        self.relay_server = enabled;
         self
     }
 

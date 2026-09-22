@@ -6,6 +6,7 @@
 // violated here.
 #![allow(unreachable_code)]
 
+use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::swarm::NetworkBehaviour;
 
 use crate::application::network::gateway::StreamGateway;
@@ -39,7 +40,8 @@ pub(crate) const NEPTUNE_PROTOCOL_STR: &str = "/neptune/";
 ///   (behind a NAT/Firewall). This status info is used to decide when to seek
 ///   out a relay reservation or attempt a hole punch.
 /// * **[`relay`](libp2p::relay)**: Requires nodes to act as a relay server for
-///   peers behind NATs, making them reachable via proxy.
+///   peers behind NATs, making them reachable via proxy. Can be switched off
+///   by the operator, in which case the behaviour is disabled via [`Toggle`].
 /// * **[`relay::client`](libp2p::relay::client)**: Enables nodes behind a NAT
 ///   to reserve a sub-address with a relay server, thereby becoming reachable.
 /// * **[`dcutr`](libp2p::dcutr)**: *Direct Connection Upgrade through Relay*.
@@ -74,7 +76,7 @@ pub(crate) struct NetworkStack {
     pub(crate) identify: libp2p::identify::Behaviour,
     pub(crate) upnp: libp2p::upnp::tokio::Behaviour,
     pub(crate) autonat: libp2p::autonat::Behaviour,
-    pub(crate) relay_server: libp2p::relay::Behaviour,
+    pub(crate) relay_server: Toggle<libp2p::relay::Behaviour>,
     pub(crate) relay_client: libp2p::relay::client::Behaviour,
     pub(crate) dcutr: libp2p::dcutr::Behaviour,
     pub(crate) kademlia: libp2p::kad::Behaviour<libp2p::kad::store::MemoryStore>,

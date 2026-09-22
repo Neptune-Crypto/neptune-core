@@ -372,6 +372,7 @@ impl NetworkActor {
         };
 
         // Configure relay server
+        let relay_server_enabled = config.relay_server;
         let relay_server_config = libp2p::relay::Config {
             // # sub-addresses
             max_reservations: 128,
@@ -407,7 +408,9 @@ impl NetworkActor {
                 let local_peer_id = key.public().to_peer_id();
 
                 let relay_server =
-                    libp2p::relay::Behaviour::new(local_peer_id, relay_server_config);
+                    Toggle::from(relay_server_enabled.then(|| {
+                        libp2p::relay::Behaviour::new(local_peer_id, relay_server_config)
+                    }));
 
                 let store = libp2p::kad::store::MemoryStore::new(local_peer_id);
                 let mut kademlia =

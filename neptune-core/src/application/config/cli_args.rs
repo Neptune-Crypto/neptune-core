@@ -167,6 +167,14 @@ pub struct Args {
     #[clap(long)]
     pub(crate) bootstrap: bool,
 
+    /// Do not act as a relay server for peers behind NATs.
+    ///
+    /// By default, the node offers relay reservations so that peers behind
+    /// NATs can be reached through it. Setting this flag turns that service
+    /// off. The node can still use other nodes this way.
+    #[clap(long)]
+    pub(crate) disable_relay_server: bool,
+
     /// If this flag is set, the node will refuse to initiate a transaction.
     /// This flag makes sense for machines whose resources are dedicated to
     /// composing, and which must do so in a regular and predictable manner,
