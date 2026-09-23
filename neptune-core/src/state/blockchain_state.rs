@@ -110,7 +110,9 @@ impl BlockchainState {
         self.light_state().tip_mutator_set_after()
     }
 
-    /// The mutator set at the tip and at its nearest ancestors. Cheap to clone.
+    /// The mutator set after the tip, and after recent ancestors.
+    ///
+    /// Cheap to clone.
     pub(crate) fn recent_mutator_sets(&self) -> &RecentMutatorSets {
         self.light_state().recent_mutator_sets()
     }

@@ -128,7 +128,7 @@ impl RecentMutatorSets {
     fn tip_entry(&self) -> &Entry {
         self.entries
             .back()
-            .expect("Window always holds at least the tip")
+            .expect("Window must hold at least the tip")
     }
 
     pub fn tip_block_hash(&self) -> Digest {
@@ -193,9 +193,6 @@ impl RecentMutatorSets {
             return Err(CatchUpError::Inconsistent);
         };
 
-        // The mempool's rule on a new block: an input is spent once all its
-        // indices are set by the blocks in between. Such a record cannot be
-        // brought through the block that spent it.
         let spent_indices: HashSet<u128> = updates_since
             .iter()
             .flat_map(|update| update.removals.iter())

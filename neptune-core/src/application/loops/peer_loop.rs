@@ -405,9 +405,6 @@ impl PeerLoopHandler {
 
     /// Log why a transaction cannot be confirmed, and pick the sanction that
     /// its sender has earned.
-    /// Map an admission rejection to the sanction it earns the sending peer,
-    /// if any. `None` covers rejections that are not necessarily the peer's
-    /// fault.
     fn sanction_for_inadmissible(
         kernel: &TransactionKernel,
         recent_mutator_sets: &RecentMutatorSets,

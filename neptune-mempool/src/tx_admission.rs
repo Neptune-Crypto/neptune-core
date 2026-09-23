@@ -1,30 +1,27 @@
 //! The rules deciding which transactions this node admits to its mempool.
 //!
 //! These are *policy*, not consensus. A transaction refused here is not
-//! thereby invalid: peers may hold it, and it may well be mined into a block
-//! that this node accepts. What the rules express is which transactions this
-//! node is willing to store and relay.
+//! necessarily invalid: peers may hold it, and it may well be mined into a
+//! block that this node accepts. What the rules express is which transactions
+//! this node is willing to store and relay.
 //!
 //! Transactions reach the mempool from more than one direction — gossip from
 //! peers, and submission over the RPC interface — and each direction reports
-//! rejection in its own vocabulary: peer sanctions in one case, RPC errors in
-//! the other. Hence [`TxAdmissionError`], which names the reason and leaves
-//! the reporting to the caller.
+//! rejection in its own vocabulary. Hence [`TxAdmissionError`] names the reason
+//! and leaves reporting to the caller.
 //!
 //! Proving a transaction can take longer than the time between blocks. So a
-//! transaction built against one of the tip's
-//! [`MAX_TX_SYNC_DEPTH`](crate::recent_mutator_sets::MAX_TX_SYNC_DEPTH)
-//! nearest ancestors is judged against that ancestor's mutator set, and
-//! admitted if no input was spent since. It is held unsynced for a proof
-//! upgrader to update. Any other transaction is judged against the tip's
-//! mutator set. Link transactions must be synced to the tip, since their
-//! thruputs resolve against the mempool as it stands.
+//! transaction built against a recent tip (one of the tip's near ancestors)
+//! is judged against that ancestor's mutator set, and admitted if no input was
+//! spent since. It is held unsynced for a proof upgrader to update. Any other
+//! transaction is judged against the tip's mutator set. Link transactions must
+//! be synced to the tip, since their thruputs are checked against the current
+//! mempool.
 //!
 //! The order in which the rules are applied is deliberate, and is the reason
 //! they live in one place. Verifying a transaction's proof costs orders of
-//! magnitude more than every other check combined, and the peer supplying the
-//! transaction decides when we do it. So validity is established last, once no
-//! cheaper reason to reject the transaction remains.
+//! magnitude more than every other check combined. So validity is established
+//! last, once no cheaper reason to reject the transaction remains.
 
 use neptune_consensus::block::FUTUREDATING_LIMIT;
 use neptune_consensus::block::mutator_set_update::MutatorSetUpdate;
@@ -65,11 +62,11 @@ pub enum TxAdmissionError {
     /// duplicates arrive whenever more than one of them answers.
     AlreadyKnown,
 
-    /// Cannot be confirmed against the mutator set it is judged against.
+    /// Cannot be confirmed against the mutator set it is synced to.
     NotConfirmable(TransactionConfirmabilityError),
 
-    /// Cannot be applied to the mutator set it is judged against. Not expected
-    /// to occur when the transaction is confirmable; checked to be sure.
+    /// Cannot be applied to the mutator set it is synced to. Not expected to
+    /// occur when the transaction is confirmable; checked to be sure.
     CannotApplyToMutatorSet,
 
     /// The input at this index was spent by a block after the transaction was
@@ -204,13 +201,11 @@ pub async fn admissible(
 
     let synced_to_tip = kernel.mutator_set_hash == tip_mutator_set_hash;
 
-    // A transaction built against a held ancestor is judged against that
-    // mutator set. Any other is judged against the tip's, where its removal
-    // records may still validate.
-    let held_mutator_set = recent_mutator_sets.mutator_set(kernel.mutator_set_hash);
-    let judged_against = held_mutator_set.unwrap_or_else(|| recent_mutator_sets.tip_mutator_set());
+    let synced_to = recent_mutator_sets.mutator_set(kernel.mutator_set_hash);
+    let judged_against = synced_to.unwrap_or_else(|| recent_mutator_sets.tip_mutator_set());
 
-    // A transaction without inputs can never be updated.
+    // Transactions with no inputs must be synced to the tip, since they cannot
+    // be updated.
     if !synced_to_tip && kernel.inputs.is_empty() {
         return Err(TxAdmissionError::NotSynced);
     }
@@ -230,10 +225,8 @@ pub async fn admissible(
         return Err(TxAdmissionError::CannotApplyToMutatorSet);
     }
 
-    // Blocks have landed since the held ancestor: make sure none of them spent
-    // an input. The caught-up records are discarded, since only a proof can
-    // replace the kernel's.
-    if held_mutator_set.is_some() && !synced_to_tip {
+    // Check if a transaction synced to a tip ancestor is a double spend.
+    if synced_to.is_some() && !synced_to_tip {
         match recent_mutator_sets.catch_up(kernel.mutator_set_hash, &kernel.inputs) {
             Ok(_) => (),
             Err(CatchUpError::SpentSince(index)) => {
@@ -622,10 +615,8 @@ mod tests {
             .collect()
     }
 
-    /// A transaction built against a recent ancestor passes every check up to
-    /// proof verification, as long as its inputs are unspent at the tip.
     #[apply(shared_tokio_runtime)]
-    async fn transaction_synced_to_recent_ancestor_is_admitted_up_to_its_proof() {
+    async fn transaction_synced_to_recent_ancestor_is_admitted() {
         let now = Timestamp::now();
         let admission = async |transaction: &Transaction, recent: &RecentMutatorSets| {
             admissible(
@@ -713,7 +704,8 @@ mod tests {
             admission(&evicted, &recent).await
         );
 
-        // A block spends one of the transaction's inputs.
+        // A block spends one of the transaction's inputs, making the
+        // transaction a double spend.
         let mut recent = base;
         recent.push_update(MutatorSetUpdate::new(
             vec![records[1].clone()],

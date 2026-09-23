@@ -28,8 +28,7 @@ pub struct LightState {
     /// Matches the network on which the node was started.
     network: Network,
 
-    /// The mutator set at the tip and at its nearest ancestors, with the
-    /// guesser rewards added. Kept in step with `tip`.
+    /// The mutator set after the tip, and after its nearest ancestors.
     recent_mutator_sets: RecentMutatorSets,
 }
 
