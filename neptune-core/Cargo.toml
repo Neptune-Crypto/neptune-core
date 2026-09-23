@@ -246,6 +246,8 @@ neptune-p2p = { version = "0.17.1", path = "../neptune-p2p", features = [
 neptune-rpc-api = { version = "0.17.1", path = "../neptune-rpc/api", features = [
     "test-helpers",
 ] }
+# allow integration tests to reach a node over JSON-RPC.
+neptune-rpc-client = { version = "0.17.1", path = "../neptune-rpc/client" }
 
 # enables neptune-database's test-only accessors (e.g. SimpleRustyStorage::db)
 # used by the wallet-db migration tests.

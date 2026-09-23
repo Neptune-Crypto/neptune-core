@@ -6144,8 +6144,6 @@ mod tests {
             }
         }
 
-        /// A transaction built against the previous tip is requested and passed
-        /// on to the main loop.
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn requests_and_admits_tx_synced_to_recent_ancestor() {
@@ -6174,7 +6172,8 @@ mod tests {
                 genesis_tx_with_proof_type(TxProvingCapability::ProofCollection, network, fee)
                     .await;
 
-            // A block lands. The transaction is now one block behind the tip.
+            // A block is received. The transaction is now one block behind the
+            // tip.
             let genesis_block = Block::genesis(network);
             let block1 = fake_valid_deterministic_successor(&genesis_block, network).await;
             state_lock
