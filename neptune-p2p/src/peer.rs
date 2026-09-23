@@ -166,7 +166,7 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::InvalidTransaction => -10,
             NegativePeerSanction::UnconfirmableTransaction => -2,
             NegativePeerSanction::TransactionWithNegativeFee => -22,
-            NegativePeerSanction::DoubleSpendingTransaction => -14,
+            NegativePeerSanction::DoubleSpendingTransaction => -7,
             NegativePeerSanction::CannotApplyTransactionToMutatorSet => -3,
             NegativePeerSanction::OversizedAnnouncement => -10,
             NegativePeerSanction::OversizedBlock => -50,

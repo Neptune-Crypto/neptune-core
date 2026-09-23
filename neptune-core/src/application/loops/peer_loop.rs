@@ -499,12 +499,11 @@ impl PeerLoopHandler {
                 None
             }
             TxAdmissionError::SpentSinceSync(index) => {
-                // The peer may not have seen the block that spent the input.
                 debug!(
                     "Input {index} of transaction {txid} was spent by a block mined after the \
                      transaction was built"
                 );
-                None
+                Some(NegativePeerSanction::DoubleSpendingTransaction)
             }
             TxAdmissionError::Invalid => {
                 warn!("Received invalid tx");
