@@ -41,11 +41,15 @@ pub(crate) const SYNC_LOOP_CHANNEL_CAPACITY: usize = 100;
 /// After this long without a response from a given peer, that peer will be sent
 /// another block request.
 ///
-/// The fast test value is gated on `test-helpers` (not just `test`) so it also
-/// applies to integration tests
-#[cfg(not(any(test, feature = "test-helpers")))]
+///
+/// Integration tests get a value between unit tests and production. Every
+/// reminder is broadcast to all peer loos, so a silent peer may not receive
+/// thousands per second.
+#[cfg(not(any(test, feature = "test-helpers")))] // production
 const PEER_RESPONSE_REMINDER_TIMEOUT: Duration = Duration::from_secs(5);
-#[cfg(any(test, feature = "test-helpers"))]
+#[cfg(all(not(test), feature = "test-helpers"))] // Integration tests
+const PEER_RESPONSE_REMINDER_TIMEOUT: Duration = Duration::from_millis(50);
+#[cfg(test)] // unit tests
 const PEER_RESPONSE_REMINDER_TIMEOUT: Duration = Duration::from_millis(1);
 
 /// After this long without a response from a peer, that peer will be punished.
