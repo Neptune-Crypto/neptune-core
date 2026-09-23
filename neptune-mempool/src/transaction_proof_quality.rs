@@ -10,7 +10,9 @@ use strum::EnumIter;
 /// coinbase transaction, which also is supported by a SingleProof.
 /// ProofCollection requires upgrade to a SingleProof before mining, so it is
 /// of lover quality.
-#[derive(Clone, Copy, EnumIter, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Clone, Copy, EnumIter, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash,
+)]
 pub enum TransactionProofQuality {
     // OnlyLockScripts, // TODO: Add this once Transaction has support
     ProofCollection,

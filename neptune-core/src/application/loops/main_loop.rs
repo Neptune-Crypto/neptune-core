@@ -1172,7 +1172,11 @@ impl MainLoopHandler {
                             .expect("block received by main loop must have guesser reward"),
                     );
                     if let Err(reject_reason) = verdict {
-                        warn!("main loop got unfavorable block proposal. Reason: {reject_reason}");
+                        // The peer loop found this proposal favorable moments
+                        // ago, so a rejection here means the state changed in
+                        // the meantime. Typically, another peer loop delivered
+                        // the same proposal first.
+                        debug!("main loop got unfavorable block proposal. Reason: {reject_reason}");
                         return Ok(());
                     }
 

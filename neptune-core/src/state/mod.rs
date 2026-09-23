@@ -5,6 +5,7 @@ pub mod database;
 pub mod light_state;
 pub mod mining;
 pub mod networking_state;
+pub(crate) mod pending_requests;
 pub mod sync_status;
 pub mod transaction;
 pub mod utxo_validitor;
@@ -95,6 +96,7 @@ use neptune_wallet::wallet_file::WALLET_INCOMING_SECRETS_FILE_NAME;
 use networking_state::NetworkingState;
 use num_traits::CheckedSub;
 use num_traits::Zero;
+use pending_requests::PendingRequests;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::tip5::digest::Digest;
@@ -202,6 +204,13 @@ pub struct GlobalStateLock {
     /// A cache for the synchronous handshake getter, used as a fallback when
     /// syncly acquiring the read lock on `global_state_lock` fails.
     handshake_cache: Arc<std::sync::RwLock<HandshakeData>>,
+
+    /// Objects announced by peers that have been requested but not yet
+    /// received. Shared by all peer tasks so that an object announced by many
+    /// peers is downloaded once. Kept outside the state lock to prevent
+    /// crowding on the global state since peer loops take this lock on each
+    /// announcement.
+    pending_requests: Arc<std::sync::Mutex<PendingRequests>>,
 }
 
 impl GlobalStateLock {
@@ -223,7 +232,16 @@ impl GlobalStateLock {
             cli,
             rpc_server_to_main_tx,
             handshake_cache,
+            pending_requests: Arc::new(std::sync::Mutex::new(PendingRequests::default())),
         }
+    }
+
+    /// Access the registry of pending requests. The guard must not be held
+    /// across an `await`.
+    pub(crate) fn pending_requests(&self) -> std::sync::MutexGuard<'_, PendingRequests> {
+        self.pending_requests
+            .lock()
+            .expect("the registry of pending requests cannot panic while locked")
     }
 
     /// Fetches handshake data synchronously.
