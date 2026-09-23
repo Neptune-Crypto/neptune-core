@@ -1,5 +1,35 @@
 Note: (!) indicates a breaking change.
 
+## [0.18.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.17.1..v0.18.0) - 2026-09-23
+
+### ✨ Features
+
+- *(libp2p)* Allow disabling libp2p relay server ([8571ce5e](https://github.com/Neptune-Crypto/neptune-core/commit/8571ce5e))
+- *(mempool)* Admit transactions synced to a recent ancestor of the tip ([1348008e](https://github.com/Neptune-Crypto/neptune-core/commit/1348008e))
+
+### 🐛 Bug Fixes
+
+- *(libp2p)* Keep network actor alive through swarm panics ([faaed3e6](https://github.com/Neptune-Crypto/neptune-core/commit/faaed3e6))
+
+### ♻️ Refactor
+
+- *(libp2p)* Exit if libp2p actor loop dies ([896124e6](https://github.com/Neptune-Crypto/neptune-core/commit/896124e6))
+
+### ✅ Testing
+
+- *(sync_loop)* Don't poll peer too often in integration tests ([acdf587e](https://github.com/Neptune-Crypto/neptune-core/commit/acdf587e))
+- Add integration test of libp2p connection ([1a2f054a](https://github.com/Neptune-Crypto/neptune-core/commit/1a2f054a))
+- *(libp2p)* Verify that libp2p can form complete graph ([c4a820ab](https://github.com/Neptune-Crypto/neptune-core/commit/c4a820ab))
+- Integration test of recently-synced tx over JSON RPC ([de972260](https://github.com/Neptune-Crypto/neptune-core/commit/de972260))
+
+### ⚙️ Miscellaneous
+
+- Cargo update ([8a97370e](https://github.com/Neptune-Crypto/neptune-core/commit/8a97370e))
+
+### 🚥 Developer Experience
+
+- Add SECURITY.md to communicate responsible disclosure preferences ([2d7bfe98](https://github.com/Neptune-Crypto/neptune-core/commit/2d7bfe98))
+
 ## [0.17.1](https://github.com/Neptune-Crypto/neptune-core/compare/v0.17.0..v0.17.1) - 2026-09-15
 
 ### 🐛 Bug Fixes
