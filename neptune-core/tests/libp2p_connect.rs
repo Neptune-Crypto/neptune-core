@@ -52,3 +52,59 @@ pub async fn two_nodes_connect_over_libp2p() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+/// test: three nodes on localhost form a complete graph over libp2p.
+///
+/// scenario:
+/// 1. bob starts with no peers.
+/// 2. alice and charlie each start with bob's QUIC address as their only
+///    peer, so the only configured edges are alice-bob and bob-charlie.
+/// 3. through identify and Kademlia, alice learns of charlie from bob and
+///    dials him, so every node ends up with two peers.
+#[tokio::test(flavor = "multi_thread")]
+pub async fn three_nodes_form_complete_graph_over_libp2p() -> anyhow::Result<()> {
+    logging::tracing_logger();
+    let timeout_secs = 90;
+
+    let bob_args = GenesisNode::default_args().await;
+    let bob_quic_port = bob_args.quic_port;
+    let bob = GenesisNode::start_node(bob_args).await?;
+    let bob_address: Multiaddr = format!("/ip4/127.0.0.1/udp/{bob_quic_port}/quic-v1").parse()?;
+
+    let mut alice_args = GenesisNode::default_args().await;
+    alice_args.peers = vec![bob_address.clone()];
+    let alice = GenesisNode::start_node(alice_args).await?;
+
+    let mut charlie_args = GenesisNode::default_args().await;
+    charlie_args.peers = vec![bob_address];
+    let charlie_libp2p_ports = [
+        Protocol::Udp(charlie_args.quic_port),
+        Protocol::Tcp(charlie_args.tcp_port),
+    ];
+    let charlie = GenesisNode::start_node(charlie_args).await?;
+
+    for node in [&alice, &bob, &charlie] {
+        node.wait_until_peers_connected(2, timeout_secs).await?;
+    }
+
+    // Alice was never told about charlie through the CLI arguments. So her
+    // entry of him in the peer map proves that a connection was established
+    // through the libp2p peer discovery protocol.
+    let alice_peer_addresses = alice
+        .gsl
+        .lock_guard()
+        .await
+        .net
+        .peer_map
+        .values()
+        .map(|peer| peer.address())
+        .collect::<Vec<_>>();
+    assert!(
+        alice_peer_addresses.iter().any(|address| address
+            .iter()
+            .any(|protocol| charlie_libp2p_ports.contains(&protocol))),
+        "expected alice to discover one of charlie's libp2p addresses, got {alice_peer_addresses:?}"
+    );
+
+    Ok(())
+}

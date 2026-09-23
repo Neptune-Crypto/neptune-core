@@ -190,6 +190,12 @@ pub(crate) struct NetworkActor {
     /// swarm about the external addresses on which the node was dialed. If set,
     /// this information is allowed.
     accept_new_external_addresses: bool,
+
+    /// Whether peers may be reached at loopback and private addresses.
+    ///
+    /// Only used on the regtest network since on that network, multiple nodes
+    /// are spun up on the same machine, for testing purposes.
+    accepts_local_addresses: bool,
 }
 
 /// Helper struct encapsulating all channels for the [`NetworkActor`].
@@ -535,6 +541,7 @@ impl NetworkActor {
             ),
             active_protocols: None,
             accept_new_external_addresses: !neuter_autonat,
+            accepts_local_addresses: config.network.is_reg_test(),
         })
     }
 
@@ -570,7 +577,7 @@ impl NetworkActor {
             .address_book
             .select_initial_peers(10)
             .into_iter()
-            .filter(|address| !Self::is_local_address(address))
+            .filter(|address| self.accepts_local_addresses || !Self::is_local_address(address))
             .collect_vec();
         tracing::debug!("Dialing {} initial peers.", initial_peers.len());
         for address in initial_peers {
@@ -716,7 +723,7 @@ impl NetworkActor {
                             self.address_book
                                 .select_initial_peers(3)
                                 .into_iter()
-                                .filter(|address| !Self::is_local_address(address)),
+                                .filter(|address| self.accepts_local_addresses || !Self::is_local_address(address)),
                         );
                     }
 
@@ -1273,7 +1280,7 @@ impl NetworkActor {
                     })
                 };
                 for addr in info.listen_addrs {
-                    if is_global(&addr) {
+                    if self.accepts_local_addresses || is_global(&addr) {
                         self.swarm
                             .behaviour_mut()
                             .kademlia
