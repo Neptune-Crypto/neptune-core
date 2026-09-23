@@ -163,7 +163,7 @@ mod tests {
             Network::Main,
             HashSet::from([Namespace::Chain]),
             unsafe_rpc,
-            40500,
+            20500,
             None,
         )
         .await;
@@ -189,7 +189,7 @@ mod tests {
             Network::Main,
             HashSet::from([Namespace::Chain, Namespace::Personal]),
             unsafe_rpc,
-            40510,
+            20510,
             None,
         )
         .await;
@@ -209,7 +209,7 @@ mod tests {
             Network::Main,
             HashSet::from([Namespace::Utxoindex]),
             unsafe_rpc,
-            40520,
+            20520,
             None,
         )
         .await;
@@ -249,7 +249,7 @@ mod tests {
             Network::Main,
             HashSet::from([Namespace::Personal]),
             unsafe_rpc,
-            40530,
+            20530,
             None,
         )
         .await;
@@ -271,7 +271,7 @@ mod tests {
             Network::Main,
             HashSet::from([Namespace::Personal]),
             unsafe_rpc,
-            40540,
+            20540,
             None,
         )
         .await;
@@ -295,7 +295,7 @@ mod tests {
             Network::Main,
             HashSet::from([Namespace::Wallet]),
             unsafe_rpc,
-            40550,
+            20550,
             None,
         )
         .await;
@@ -327,7 +327,7 @@ mod tests {
             Network::Main,
             HashSet::from([Namespace::Personal]),
             unsafe_rpc,
-            40560,
+            20560,
             None,
         )
         .await;
@@ -342,7 +342,7 @@ mod tests {
             Network::Main,
             HashSet::from([Namespace::Personal, Namespace::Mempool, Namespace::Node]),
             unsafe_rpc,
-            40570,
+            20570,
             Some(WalletEntropy::devnet_wallet()),
         )
         .await;
@@ -442,7 +442,7 @@ mod tests {
             network,
             HashSet::from([Namespace::Personal, Namespace::Mempool, Namespace::Archival]),
             unsafe_rpc,
-            40580,
+            20580,
             Some(WalletEntropy::devnet_wallet()),
         )
         .await;
@@ -450,7 +450,7 @@ mod tests {
             network,
             HashSet::from([Namespace::Personal, Namespace::Mempool, Namespace::Node]),
             unsafe_rpc,
-            40590,
+            20590,
             None,
         )
         .await;
@@ -586,7 +586,7 @@ mod tests {
             Network::Main,
             HashSet::from([Namespace::Personal]),
             unsafe_rpc,
-            40600,
+            20600,
             None,
         )
         .await;
@@ -602,7 +602,7 @@ mod tests {
             network,
             HashSet::from([Namespace::Personal, Namespace::Wallet]),
             unsafe_rpc,
-            40610,
+            20610,
             Some(wallet.clone()),
         )
         .await;
