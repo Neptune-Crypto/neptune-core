@@ -391,7 +391,7 @@ pub(crate) mod tests {
     #[proptest(cases = 1)]
     #[ignore = "a measurement, not an assertion"]
     fn fill_cost_by_output_count(#[strategy(arb())] kernel: TransactionKernel) {
-        // The general swap order of §1.5, and the SOFuN grid.
+        // The general swap order, and the SOFuN grid.
         for num_admissible in [1, NUM_GRID_POINTS as usize] {
             let admissible_outputs = (0..num_admissible)
                 .map(|i| AdditionRecord::new(Digest::new(bfe_array![i as u64, 0, 0, 0, 0])))
