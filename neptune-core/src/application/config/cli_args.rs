@@ -501,9 +501,13 @@ pub struct Args {
     /// ```text
     /// --peer /ip4/8.8.8.8 \
     /// --peer /ip4/8.8.4.4/udp/1337/quic-v1 \
-    /// --peer 139.162.193.206:9798 \
-    /// --peer [2001:bc8:17c0:41e:46a8:42ff:fe22:e8e9]:9798
+    /// --peer /ip4/51.15.139.238/udp/9800/quic-v1 \
+    /// --peer /ip4/139.162.193.206/tcp/9801 \
+    /// --peer /ip6/2001:bc8:17c0:41e:46a8:42ff:fe22:e8e9/tcp/9801
     /// ```
+    ///
+    /// Connections are made over libp2p only. An address on the legacy TCP
+    /// port (9798) is not dialed.
     ///
     /// It's easier to connect without `/p2p/...` in the end of the address.
     ///

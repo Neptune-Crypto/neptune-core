@@ -23,7 +23,6 @@ use neptune_p2p::peer::NegativePeerSanction;
 use neptune_p2p::peer::PeerMessage;
 use neptune_p2p::peer::PeerSanction;
 use neptune_p2p::peer::PeerStanding;
-use neptune_p2p::peer::TransferConnectionStatus;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 use tokio::sync::broadcast;
@@ -434,7 +433,6 @@ where
             .await?;
     }
 
-    let peer_distance = 1; // All incoming connections have distance 1
     let peer_id = pseudorandom_peer_id(&peer_address);
     let peer_multiaddr = socketaddr_to_multiaddr(peer_address);
     let mut peer_loop_handler = PeerLoopHandler::new(
@@ -444,177 +442,7 @@ where
         peer_multiaddr,
         *peer_handshake,
         true,
-        peer_distance,
     );
-
-    // Run peer loop.
-    peer_loop_handler
-        .run_wrapper(peer, main_to_peer_task_rx)
-        .await?;
-
-    Ok(())
-}
-
-/// Perform handshake and establish connection to a new peer while handling any
-/// panics in the peer task gracefully.
-///
-/// All* outgoing connections to peers must go through this function.
-///
-/// *: This function belongs to the legacy peer-to-peer stack, which is in the
-/// process of being deprecated. Since it is part of the legacy stack, it is
-/// okay to use [`SocketAddr`]. However, the new libp2p network stack offers an
-/// alternative way to call new peers, see
-/// [`NetworkActorCommand::Dial`](crate::application::network::channel::NetworkActorCommand::Dial).
-pub(crate) async fn call_peer(
-    peer_address: std::net::SocketAddr,
-    state: GlobalStateLock,
-    main_to_peer_task_rx: broadcast::Receiver<MainToPeerTask>,
-    peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
-    own_handshake_data: HandshakeData,
-    peer_distance: u8,
-) {
-    debug!("Attempting to initiate connection to {peer_address}");
-    match tokio::net::TcpStream::connect(peer_address).await {
-        Err(e) => {
-            let msg = format!("Failed to establish TCP connection to {peer_address}: {e}");
-            if peer_distance == 1 {
-                // outgoing connection to peer of distance 1 means user has
-                // requested a connection to this peer through CLI
-                // arguments, and should be warned if this fails.
-                warn!("{msg}");
-            } else {
-                debug!("{msg}");
-            }
-        }
-        Ok(stream) => {
-            match call_peer_inner(
-                stream,
-                state,
-                peer_address,
-                main_to_peer_task_rx,
-                peer_task_to_main_tx,
-                &own_handshake_data,
-                peer_distance,
-            )
-            .await
-            {
-                Ok(()) => (),
-                Err(e) => {
-                    let msg = format!("{e}. Failed to establish connection.");
-                    // outgoing connection to peer of distance 1 means user has
-                    // requested a connection to this peer through CLI
-                    // arguments, and should be warned if this fails.
-                    if peer_distance == 1 {
-                        warn!("{msg}");
-                    } else {
-                        debug!("{msg}");
-                    }
-                }
-            }
-        }
-    };
-
-    info!("Connection to {peer_address} closing");
-}
-
-/// Legacy peer-to-peer stack.
-async fn call_peer_inner<S>(
-    stream: S,
-    state: GlobalStateLock,
-    peer_address: std::net::SocketAddr,
-    main_to_peer_task_rx: broadcast::Receiver<MainToPeerTask>,
-    peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
-    own_handshake: &HandshakeData,
-    peer_distance: u8,
-) -> Result<()>
-where
-    S: AsyncRead + AsyncWrite + Debug + Unpin,
-{
-    debug!("Established outgoing TCP connection with {peer_address}");
-
-    // Build the communication/serialization/frame handler
-    let length_delimited = Framed::new(stream, get_codec_rules());
-    let mut peer = SymmetricallyFramed::new(length_delimited, get_bincode_codec());
-
-    // Make Neptune handshake
-    let outgoing_handshake = PeerMessage::Handshake {
-        magic_value: *MAGIC_STRING_REQUEST,
-        data: Box::new(own_handshake.to_owned()),
-    };
-    peer.send(outgoing_handshake).await?;
-    debug!("Awaiting connection status response from {peer_address}");
-
-    let Some(PeerMessage::Handshake {
-        magic_value,
-        data: other_handshake,
-    }) = peer.try_next().await?
-    else {
-        bail!("Didn't get handshake response from {peer_address}");
-    };
-    ensure!(
-        magic_value == *MAGIC_STRING_RESPONSE,
-        "Didn't get expected magic value for handshake from {peer_address}",
-    );
-
-    debug!("Got correct magic value response from {peer_address}!");
-    if other_handshake.network != own_handshake.network {
-        let other = other_handshake.network;
-        let own = own_handshake.network;
-        bail!("Cannot connect with {peer_address}: Peer runs {other}, this client runs {own}.");
-    }
-
-    match peer.try_next().await? {
-        Some(PeerMessage::ConnectionStatus(TransferConnectionStatus::Accepted)) => {
-            debug!("Outgoing connection accepted by {peer_address}");
-        }
-        Some(PeerMessage::ConnectionStatus(TransferConnectionStatus::Refused(reason))) => {
-            bail!("Outgoing connection attempt to {peer_address} refused. Reason: {reason:?}");
-        }
-        _ => {
-            bail!(
-                "Got invalid connection status response from {peer_address} on outgoing connection"
-            );
-        }
-    }
-
-    // Peer accepted us. Check if we accept the peer. Note that the protocol does not stipulate
-    // that we answer with a connection status here, so if the connection is *not* accepted, we
-    // simply hang up but log the reason for the refusal.
-    let connection_status = check_if_connection_is_allowed(
-        state.clone(),
-        own_handshake,
-        &other_handshake,
-        &peer_address,
-    )
-    .await;
-    if let InternalConnectionStatus::Refused(refused_reason) = connection_status {
-        warn!(
-            "Outgoing connection to {peer_address} refused. Reason: {:?}\nNow hanging up.",
-            refused_reason
-        );
-        peer.send(PeerMessage::Bye).await?;
-        bail!("Attempted to connect to peer ({peer_address}) that was not allowed. This connection attempt should not have been made.");
-    }
-
-    // By default, start by asking the peer for its peers. In an adversarial
-    // context, we want the network topology to be as robust as possible.
-    // Blockchain data can be obtained from other peers, if this connection
-    // fails.
-    peer.send(PeerMessage::PeerListRequest).await?;
-
-    let peer_id = pseudorandom_peer_id(&peer_address);
-    let peer_multiaddr = socketaddr_to_multiaddr(peer_address);
-    let mut peer_loop_handler = PeerLoopHandler::new(
-        peer_task_to_main_tx,
-        state.clone(),
-        peer_id,
-        peer_multiaddr,
-        *other_handshake,
-        false,
-        peer_distance,
-    );
-
-    info!("Established outgoing connection to {peer_address}");
 
     // Run peer loop.
     peer_loop_handler
@@ -728,6 +556,7 @@ mod tests {
     use neptune_p2p::peer::NegativePeerSanction;
     use neptune_p2p::peer::PeerMessage;
     use neptune_p2p::peer::PeerStanding;
+    use neptune_p2p::peer::TransferConnectionStatus;
     use neptune_primitives::network::Network;
     use tasm_lib::twenty_first::tip5::digest::Digest;
     use test_strategy::proptest;
@@ -833,50 +662,6 @@ mod tests {
     #[proptest]
     fn time_difference_doesnt_crash(now: SystemTime, and_now: SystemTime) {
         system_time_diff_seconds(now, and_now);
-    }
-
-    #[traced_test]
-    #[apply(shared_tokio_runtime)]
-    async fn test_outgoing_connection_succeed() -> Result<()> {
-        let network = Network::Main;
-        let other_handshake = get_dummy_handshake_data_for_genesis(network);
-        let own_handshake = get_dummy_handshake_data_for_genesis(network);
-        let mock = Builder::new()
-            .write(&to_bytes(&PeerMessage::Handshake {
-                magic_value: *MAGIC_STRING_REQUEST,
-                data: Box::new(own_handshake),
-            })?)
-            .read(&to_bytes(&PeerMessage::Handshake {
-                magic_value: *MAGIC_STRING_RESPONSE,
-                data: Box::new(other_handshake),
-            })?)
-            .read(&to_bytes(&PeerMessage::ConnectionStatus(
-                TransferConnectionStatus::Accepted,
-            ))?)
-            .write(&to_bytes(&PeerMessage::PeerListRequest)?)
-            .read(&to_bytes(&PeerMessage::Bye)?)
-            .build();
-
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, _, _, state, _hsd) =
-            get_test_genesis_setup(0, cli_args::Args::default_with_network(network)).await?;
-        call_peer_inner(
-            mock,
-            state.clone(),
-            get_dummy_socket_address(0),
-            from_main_rx_clone,
-            to_main_tx,
-            &own_handshake,
-            1,
-        )
-        .await?;
-
-        // Verify that peer map is empty after connection has been closed
-        match state.lock(|s| s.net.peer_map.keys().len()).await {
-            0 => (),
-            _ => bail!("Incorrect number of maps in peer map"),
-        };
-
-        Ok(())
     }
 
     #[test]

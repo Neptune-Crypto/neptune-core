@@ -1,5 +1,3 @@
-use std::net::SocketAddr;
-
 use libp2p::Multiaddr;
 use libp2p::PeerId;
 use neptune_consensus::block::Block;
@@ -28,12 +26,6 @@ pub(crate) enum MainToPeerTask {
 
     /// sanction a peer for failing to respond to sync request
     PeerSynchronizationTimeout(PeerId),
-
-    /// Request peer list from connected peers
-    MakePeerDiscoveryRequest,
-
-    /// Request peers from a specific peer to get peers further away
-    MakeSpecificPeerDiscoveryRequest(SocketAddr),
 
     /// Publish knowledge of a transaction
     TransactionNotification(TransactionNotification),
@@ -77,10 +69,6 @@ impl MainToPeerTask {
             MainToPeerTask::Block(_) => "block",
             MainToPeerTask::RequestBlockByHeight { .. } => "req block by height",
             MainToPeerTask::PeerSynchronizationTimeout(_) => "peer sync timeout",
-            MainToPeerTask::MakePeerDiscoveryRequest => "make peer discovery req",
-            MainToPeerTask::MakeSpecificPeerDiscoveryRequest(_) => {
-                "make specific peer discovery req"
-            }
             MainToPeerTask::TransactionNotification(_) => "transaction notification",
             MainToPeerTask::LinkTxNotification(_) => "link tx notification",
             MainToPeerTask::Disconnect(_) => "disconnect",
@@ -102,8 +90,6 @@ impl MainToPeerTask {
             MainToPeerTask::BlockProposalNotification(_) => true,
             MainToPeerTask::RequestBlockByHeight { .. } => true,
             MainToPeerTask::PeerSynchronizationTimeout(_) => true,
-            MainToPeerTask::MakePeerDiscoveryRequest => false,
-            MainToPeerTask::MakeSpecificPeerDiscoveryRequest(_) => false,
             MainToPeerTask::TransactionNotification(_) => true,
             MainToPeerTask::LinkTxNotification(_) => true,
             MainToPeerTask::Disconnect(_) => false,
@@ -130,9 +116,6 @@ pub(crate) enum PeerTaskToMain {
         claimed_block_mmra: MmrAccumulator,
         claimed_block_digest: Digest,
     },
-
-    /// (\[(peer_listen_address)\], reported_by, distance)
-    PeerDiscoveryAnswer((Vec<(SocketAddr, u128)>, PeerId, u8)),
 
     Transaction(Box<PeerTaskToMainTransaction>),
     LinkTx(Box<PeerTaskToMainLinkTx>),
@@ -177,7 +160,6 @@ impl PeerTaskToMain {
         match self {
             PeerTaskToMain::NewBlocks(_) => "new blocks",
             PeerTaskToMain::AddPeerMaxBlockHeight { .. } => "add peer max block height",
-            PeerTaskToMain::PeerDiscoveryAnswer(_) => "peer discovery answer",
             PeerTaskToMain::Transaction(_) => "transaction",
             PeerTaskToMain::LinkTx(_) => "link tx",
             PeerTaskToMain::BlockProposal(_) => "block proposal",

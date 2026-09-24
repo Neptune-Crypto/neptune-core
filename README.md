@@ -96,9 +96,11 @@ Windows should just work out-of-the-box with cargo build etc.
 - Ensure ports 9798, 9800, 9801 are open on your firewall for both TCP and UDP.
 - Run neptune-core daemon: `neptune-core` with:
    - no flags should already be enough to connect to the netwrok;
-   - `--peer [ip_address:port]` or `--peer [Multiaddr]` to connect to a given peer, for instance
-      `--peer 51.15.139.238:9798` or `--peer /ip4/139.162.193.206/tcp/9798` or
-      `--peer [2001:bc8:17c0:41e:46a8:42ff:fe22:e8e9]:9798`.
+   - `--peer [Multiaddr]` to connect to a given peer, for instance
+      `--peer /ip4/51.15.139.238/udp/9800/quic-v1` or
+      `--peer /ip4/139.162.193.206/tcp/9801` or
+      `--peer /ip6/2001:bc8:17c0:41e:46a8:42ff:fe22:e8e9/tcp/9801`. Outgoing connections are
+      made over libp2p only; port 9798 only accepts incoming connections from older nodes.
     - `--compose --guess` to mine — if you want to generate coins.
     - `--help` to get a list of available command-line arguments.
     - `--public-ip [IP address]` if you have a known publicly reachable IP address; this flag allows you to skip a bunch of steps that peers behind NATs need to go through.

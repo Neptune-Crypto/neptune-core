@@ -2265,10 +2265,6 @@ impl NetworkActor {
         raw_stream: libp2p::Stream,
         from_main_rx: tokio::sync::broadcast::Receiver<MainToPeerTask>,
     ) -> Option<JoinHandle<()>> {
-        // Counts the number of hops between the node and peers it is connected
-        // to. We probably don't need this for the libp2p wrapper.
-        const DISTANCE_TO_CONNECTED_PEER: u8 = 1u8;
-
         // Keep track of which peers get upgraded connections. Prevent same
         // peer from getting upgraded multiple times.
         let num_upgraded_peers = {
@@ -2301,7 +2297,6 @@ impl NetworkActor {
             peer_address,
             remote_handshake,
             rand::rng().random_bool(0.5f64),
-            DISTANCE_TO_CONNECTED_PEER,
         );
 
         let peer_stream = bridge_libp2p_stream(raw_stream);

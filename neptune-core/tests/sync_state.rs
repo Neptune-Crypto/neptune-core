@@ -1,12 +1,8 @@
 mod common;
 
-use std::net::Ipv4Addr;
-use std::net::SocketAddr;
-
 use common::genesis_node::GenesisNode;
 use common::logging;
 use neptune_cash::application::config::cli_args::Args;
-use neptune_cash::application::config::parser::multiaddr::socketaddr_to_multiaddr;
 use neptune_cash::application::loops::sync_loop::test_helpers::seed_sync_directory;
 use neptune_cash::state::sync_status::SyncStatus;
 use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
@@ -134,9 +130,7 @@ pub async fn syncing_peers_complete_sync_from_each_other() {
         .join("rapid-block-download");
     bob_args.sync_dir = Some(bob_sync_dir.clone());
     charlie_args.sync_dir = Some(charlie_sync_dir.clone());
-    let multiaddr_of = |args: &Args| {
-        socketaddr_to_multiaddr(SocketAddr::from((Ipv4Addr::LOCALHOST, args.peer_port)))
-    };
+    let multiaddr_of = |args: &Args| GenesisNode::quic_address(args.quic_port);
     bob_args.peers = vec![multiaddr_of(&alice_args), multiaddr_of(&charlie_args)];
     charlie_args.peers = vec![multiaddr_of(&alice_args), multiaddr_of(&bob_args)];
 

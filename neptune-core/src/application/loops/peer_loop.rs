@@ -136,7 +136,6 @@ pub struct PeerLoopHandler {
     peer_address: Multiaddr,
     peer_handshake_data: HandshakeData,
     inbound_connection: bool,
-    distance: u8,
     rng: StdRng,
     #[cfg(test)]
     mock_now: Option<Timestamp>,
@@ -150,7 +149,6 @@ impl PeerLoopHandler {
         peer_address: Multiaddr,
         peer_handshake_data: HandshakeData,
         inbound_connection: bool,
-        distance: u8,
     ) -> Self {
         Self {
             to_main_tx,
@@ -159,7 +157,6 @@ impl PeerLoopHandler {
             peer_address,
             peer_handshake_data,
             inbound_connection,
-            distance,
             rng: StdRng::from_rng(&mut rand::rng()),
             #[cfg(test)]
             mock_now: None,
@@ -1043,28 +1040,10 @@ impl PeerLoopHandler {
                 peer.send(PeerMessage::PeerListResponse(peer_info)).await?;
                 Ok(KEEP_CONNECTION_ALIVE)
             }
-            PeerMessage::PeerListResponse(peers) => {
-                log_slow_scope!(fn_name!() + "::PeerMessage::PeerListResponse");
-
-                if peers.len() > MAX_PEER_LIST_LENGTH {
-                    self.punish(NegativePeerSanction::FloodPeerListResponse)
-                        .await?;
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
-                let peers = peers
-                    .into_iter()
-                    .filter(|(socket_addr, _)| !PeerInfo::ip_is_local(socket_addr.ip()))
-                    .collect();
-
-                self.to_main_tx
-                    .send(PeerTaskToMain::PeerDiscoveryAnswer((
-                        peers,
-                        self.peer_id,
-                        // The distance to the revealed peers is 1 + this peer's distance
-                        self.distance + 1,
-                    )))
-                    .await?;
+            PeerMessage::PeerListResponse(_) => {
+                // Peer lists are never requested anymore; peers are discovered
+                // through the DHT.
+                debug!("Ignoring unsolicited peer list");
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockNotificationRequest => {
@@ -2709,10 +2688,6 @@ impl PeerLoopHandler {
                 // sanction, we don't disconnect.
                 Ok(KEEP_CONNECTION_ALIVE)
             }
-            MainToPeerTask::MakePeerDiscoveryRequest => {
-                peer.send(PeerMessage::PeerListRequest).await?;
-                Ok(KEEP_CONNECTION_ALIVE)
-            }
             MainToPeerTask::Disconnect(peer_id) => {
                 log_slow_scope!(fn_name!() + "::MainToPeerTask::Disconnect");
 
@@ -2733,14 +2708,6 @@ impl PeerLoopHandler {
                 self.register_peer_disconnection().await;
 
                 Ok(DISCONNECT_CONNECTION)
-            }
-            MainToPeerTask::MakeSpecificPeerDiscoveryRequest(target_socket_addr) => {
-                if let Some(socket_addr) = multiaddr_to_socketaddr(&self.peer_address) {
-                    if target_socket_addr == socket_addr {
-                        peer.send(PeerMessage::PeerListRequest).await?;
-                    }
-                }
-                Ok(KEEP_CONNECTION_ALIVE)
             }
             MainToPeerTask::TransactionNotification(transaction_notification) => {
                 debug!("Sending PeerMessage::TransactionNotification");
@@ -3168,7 +3135,6 @@ mod tests {
             peer_address: Multiaddr,
             peer_handshake_data: HandshakeData,
             inbound_connection: bool,
-            distance: u8,
             mocked_time: Timestamp,
         ) -> Self {
             Self {
@@ -3178,7 +3144,6 @@ mod tests {
                 peer_address,
                 peer_handshake_data,
                 inbound_connection,
-                distance,
                 mock_now: Some(mocked_time),
                 rng: StdRng::from_rng(&mut rand::rng()),
             }
@@ -3226,7 +3191,6 @@ mod tests {
             peer_address,
             hsd,
             true,
-            1,
         );
         peer_loop_handler
             .run_wrapper(mock, from_main_rx_clone)
@@ -3274,7 +3238,6 @@ mod tests {
             socketaddr_to_multiaddr(peer_address_sa),
             hsd,
             true,
-            1,
         );
 
         assert!(peer_loop_handler
@@ -3312,7 +3275,6 @@ mod tests {
             peer_address,
             hsd,
             true,
-            1,
         );
         peer_loop_handler
             .run_wrapper(mock, from_main_rx_clone)
@@ -3347,7 +3309,6 @@ mod tests {
             peer_address,
             peer_handshake_data,
             true,
-            1,
         );
         let mock = Mock::new(vec![Action::Read(PeerMessage::Bye)]);
         peer_loop_handler.run_wrapper(mock, from_main_rx).await?;
@@ -3430,7 +3391,6 @@ mod tests {
                 local_ip_1,
                 hsd,
                 true,
-                1,
             );
             peer_loop_handler
                 .run_wrapper(mock, from_main_rx_clone)
@@ -3438,76 +3398,6 @@ mod tests {
                 .unwrap();
 
             drop(to_main_tx);
-        }
-
-        #[apply(shared_tokio_runtime)]
-        async fn ignore_local_ips_in_incoming_response() {
-            let network = Network::Main;
-
-            let num_already_connected_peers = 2;
-            let (
-                peer_broadcast_tx,
-                _from_main_rx_clone,
-                to_main_tx,
-                mut to_main_rx,
-                _,
-                _,
-                state_lock,
-                hsd,
-            ) = get_test_genesis_setup(
-                num_already_connected_peers,
-                cli_args::Args::default_with_network(network),
-            )
-            .await
-            .unwrap();
-
-            let potential_peer_public_ip = (
-                std::net::SocketAddr::from_str("123.123.123.123:8080").unwrap(),
-                7,
-            );
-            let response_with_local_and_global_ip = vec![
-                potential_peer_public_ip,
-                (
-                    std::net::SocketAddr::from_str("192.168.0.23:8080").unwrap(),
-                    55,
-                ),
-                (
-                    std::net::SocketAddr::from_str("[fe80::1]:8080").unwrap(),
-                    42,
-                ),
-            ];
-
-            let mock = Mock::new(vec![
-                Action::Write(PeerMessage::PeerListRequest),
-                Action::Read(PeerMessage::PeerListResponse(
-                    response_with_local_and_global_ip,
-                )),
-                Action::Read(PeerMessage::Bye),
-            ]);
-            let from_main_rx_clone = peer_broadcast_tx.subscribe();
-            let socket_address = std::net::SocketAddr::from_str("22.21.20.122:8080").unwrap();
-            let mut peer_loop_handler = PeerLoopHandler::new(
-                to_main_tx.clone(),
-                state_lock.clone(),
-                pseudorandom_peer_id(&socket_address),
-                socketaddr_to_multiaddr(socket_address),
-                hsd,
-                true,
-                1,
-            );
-            peer_loop_handler
-                .run_wrapper(mock, from_main_rx_clone)
-                .await
-                .expect("sending (one) invalid block should not result in closed connection");
-
-            // Verify that the local IPs were not sent to main loop
-            let Some(PeerTaskToMain::PeerDiscoveryAnswer((potential_peers, _, _))) =
-                to_main_rx.recv().await
-            else {
-                panic!("Main loop must receive peer discovery info")
-            };
-
-            assert_eq!(vec![potential_peer_public_ip], potential_peers);
         }
 
         #[traced_test]
@@ -3571,7 +3461,6 @@ mod tests {
                 ma2,
                 hsd2,
                 true,
-                0,
             );
             peer_loop_handler
                 .run_wrapper(mock, from_main_rx_clone)
@@ -3642,7 +3531,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address_sa),
                 hsd,
                 true,
-                1,
             );
             let res = peer_loop_handler
                 .run_wrapper(mock, from_main_rx_clone)
@@ -3738,7 +3626,6 @@ mod tests {
                 peer_info.address(),
                 hsd,
                 true,
-                1,
             );
 
             let (invalid_pow, valid_pow) = pow_related_blocks(network, &genesis).await;
@@ -3802,7 +3689,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 hsd,
                 true,
-                1,
                 no_pow.header().timestamp,
             );
             peer_loop_handler
@@ -3890,7 +3776,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 hsd,
                 false,
-                1,
                 block_1.header().timestamp,
             );
             alice_peer_loop_handler
@@ -3988,7 +3873,6 @@ mod tests {
                     socketaddr_to_multiaddr(peer_address),
                     handshake,
                     false,
-                    1,
                 );
 
                 peer_loop_handler
@@ -4041,7 +3925,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 handshake,
                 false,
-                1,
             );
             let mmra = state_lock
                 .lock_guard()
@@ -4204,7 +4087,6 @@ mod tests {
                     socketaddr_to_multiaddr(peer_address),
                     handshake,
                     false,
-                    1,
                 );
 
                 peer_loop_handler
@@ -4380,7 +4262,6 @@ mod tests {
                     socketaddr_to_multiaddr(peer_address),
                     handshake,
                     false,
-                    1,
                 );
 
                 peer_loop_handler
@@ -4415,7 +4296,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 handshake,
                 false,
-                1,
             );
 
             peer_loop_handler
@@ -4489,7 +4369,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 handshake,
                 false,
-                1,
             );
 
             peer_loop_handler
@@ -4556,7 +4435,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 handshake,
                 false,
-                1,
             );
             let champion = (block_2.header().height, block_2.hash());
             let peer_task = tokio::spawn(async move {
@@ -4677,7 +4555,6 @@ mod tests {
                     socketaddr_to_multiaddr(peer_address),
                     handshake,
                     false,
-                    1,
                 );
 
                 peer_loop_handler
@@ -4788,7 +4665,6 @@ mod tests {
                     socketaddr_to_multiaddr(peer_address),
                     handshake,
                     false,
-                    1,
                 );
                 let mut peer_state = MutablePeerState::new(handshake.tip_header.height);
 
@@ -4887,7 +4763,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 hsd,
                 false,
-                1,
                 block_3_a.header().timestamp,
             );
 
@@ -4923,7 +4798,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 hsd,
                 false,
-                1,
                 block_3_a.header().timestamp,
             );
 
@@ -5024,7 +4898,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 hsd,
                 false,
-                1,
                 block_3_a.header().timestamp,
             );
 
@@ -5066,7 +4939,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 hsd,
                 false,
-                1,
             );
 
             // This will return error if seen read/write order does not match that of the
@@ -5148,7 +5020,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 hsd,
                 false,
-                1,
                 block_3_a.header().timestamp,
             );
 
@@ -5196,7 +5067,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 hsd,
                 false,
-                1,
                 block_1.header().timestamp,
             );
             peer_loop_handler
@@ -5257,7 +5127,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 hsd,
                 false,
-                1,
             );
             peer_loop_handler
                 .run_wrapper(mock, from_main_rx_clone)
@@ -5301,7 +5170,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 hsd,
                 false,
-                1,
                 block_1.header().timestamp,
             );
             peer_loop_handler
@@ -5372,7 +5240,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 hsd,
                 true,
-                1,
                 block_2.header().timestamp,
             );
             peer_loop_handler
@@ -5452,7 +5319,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address1),
                 hsd1,
                 true,
-                1,
                 block_4.header().timestamp,
             );
             peer_loop_handler
@@ -5532,7 +5398,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 hsd,
                 true,
-                1,
                 block_4.header().timestamp,
             );
             peer_loop_handler
@@ -5603,7 +5468,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 hsd,
                 true,
-                1,
                 block_3.header().timestamp,
             );
             peer_loop_handler
@@ -5690,7 +5554,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_socket_address),
                 hsd,
                 false,
-                1,
                 block_4.header().timestamp,
             );
             peer_loop_handler
@@ -5791,7 +5654,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_socket_address),
                 hsd,
                 false,
-                1,
                 block_5.header().timestamp,
             );
             peer_loop_handler
@@ -5898,7 +5760,6 @@ mod tests {
                 socketaddr_to_multiaddr(sa_1),
                 hsd_1,
                 true,
-                1,
                 block_4.header().timestamp,
             );
             peer_loop_handler
@@ -5989,7 +5850,6 @@ mod tests {
                     socketaddr_to_multiaddr(peer_address),
                     hsd,
                     true,
-                    1,
                 );
 
                 peer_loop_handler
@@ -6074,7 +5934,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 hsd_1,
                 false,
-                1,
                 now,
             );
 
@@ -6151,7 +6010,6 @@ mod tests {
                 socketaddr_to_multiaddr(sa_1),
                 hsd_1,
                 true,
-                1,
             );
             let mut peer_state = MutablePeerState::new(hsd_1.tip_header.height);
 
@@ -6295,7 +6153,6 @@ mod tests {
                     socketaddr_to_multiaddr(sa_1),
                     hsd_1,
                     false,
-                    1,
                     now,
                 );
 
@@ -6385,7 +6242,6 @@ mod tests {
                 socketaddr_to_multiaddr(sa_1),
                 hsd_1,
                 false,
-                1,
                 now,
             );
             let mut peer_state = MutablePeerState::new(hsd_1.tip_header.height);
@@ -6451,7 +6307,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 hsd,
                 true,
-                1,
             );
             let mut peer_state = MutablePeerState::new(hsd.tip_header.height);
             peer_loop_handler
@@ -6503,7 +6358,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 hsd,
                 true,
-                1,
             );
 
             let mut peer_state = MutablePeerState::new(hsd.tip_header.height);
@@ -6563,7 +6417,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 peer_hsd,
                 true,
-                1,
             );
             peer_loop_handler
                 .run_wrapper(mock, from_main_rx_clone)
@@ -6624,7 +6477,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 peer_hsd,
                 true,
-                1,
             );
 
             peer_loop_handler
@@ -6720,7 +6572,6 @@ mod tests {
                 peer_ma,
                 peer_hsd,
                 true,
-                1,
             );
             let peer_state = MutablePeerState::new(peer_hsd.tip_header.height);
 
@@ -6965,7 +6816,6 @@ mod tests {
                 socketaddr_to_multiaddr(address),
                 get_dummy_handshake_data_for_genesis(state.cli().network),
                 inbound,
-                1,
                 now,
             )
         }
@@ -7293,7 +7143,6 @@ mod tests {
                     socketaddr_to_multiaddr(peer_address),
                     handshake,
                     false,
-                    1,
                     now,
                 );
                 let mut peer_state = MutablePeerState::new(handshake.tip_header.height);
@@ -7381,7 +7230,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 alice_hsd,
                 false,
-                1,
             );
             alice_peer_loop_handler
                 .run_wrapper(alice_p2p_messages, alice_main_to_peer_rx)
@@ -7446,7 +7294,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 alice_hsd,
                 false,
-                1,
             );
             alice_peer_loop_handler
                 .run_wrapper(alice_p2p_messages, alice_main_to_peer_rx)
@@ -7585,7 +7432,6 @@ mod tests {
                 bob_multiaddr.clone(),
                 alice_hsd,
                 false,
-                1,
                 bob_tip.header().timestamp,
             );
             alice_peer_loop_handler.set_rng(StdRng::from_seed(alice_rng_seed));
