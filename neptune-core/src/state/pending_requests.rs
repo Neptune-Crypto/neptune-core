@@ -14,10 +14,10 @@ use tasm_lib::prelude::Digest;
 
 /// How long a request for a block or block proposal counts as pending. After
 /// this, the object is requested from the next peer that announced it.
-pub(crate) const BLOCK_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+pub(crate) const BLOCK_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// How long a request for a transaction counts as pending.
-pub(crate) const TRANSACTION_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const TRANSACTION_REQUEST_TIMEOUT: Duration = Duration::from_secs(35);
 
 /// How many requests may be in flight to one peer at a time. Further objects
 /// the peer announced wait until earlier requests are answered or go stale.
