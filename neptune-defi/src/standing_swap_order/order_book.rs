@@ -60,7 +60,7 @@ pub struct BlockId {
     pub hash: Digest,
 }
 
-/// What one block did to the book, as the feeder observed it.
+/// What one block did to the book, as the driver observed it.
 #[derive(Debug, Clone)]
 pub struct BlockUpdate<C: Swappable> {
     pub block: BlockId,
@@ -71,7 +71,7 @@ pub struct BlockUpdate<C: Swappable> {
 
 /// An update that does not extend the book's tip.
 ///
-/// The usual cause is a feeder that observed a reorganization but did not call
+/// The usual cause is a driver that observed a reorganization but did not call
 /// [`OrderBook::roll_back_to`] before applying blocks from the new branch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]

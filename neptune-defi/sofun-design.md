@@ -851,21 +851,32 @@ when the announcement is first seen, a row in the index is a verified order, and
 the composer building a template can take the top of the queue without checking
 anything.
 
-**The feeder runs off the block-processing path.** Verifying an announcement
+**The driver runs off the block-processing path.** Verifying an announcement
 is work an attacker chooses: an announcement is a permissionless write, and
 checking one means building a Triton program of `K` addition records and
 hashing it. That cannot sit inside the write that sets the tip, where every
-other consumer of the node waits behind it. So the feeder is a task of its own.
+other consumer of the node waits behind it. So the driver is a task of its own.
 It holds its own tip, and when the node's tip moves it asks the archival state
 for the path between the two — `find_path`
-(`neptune-archive/src/archival_state.rs:267`) returns the blocks to leave, the
+(`neptune-archive/src/archival_state.rs:215`) returns the blocks to leave, the
 last common ancestor, and the blocks to take — then rolls the book back to that
 ancestor and applies the arriving blocks. The wallet already restores
 membership proofs this way.
 
+**The node tells the driver only that the tip moved.** `set_new_tip` sends the
+new tip's digest on a `tokio::sync::watch` channel, and does nothing else for
+the driver. A watch channel holds only its latest value and sending on it never
+waits, so a slow driver cannot hold up the write that sets the tip. Missed
+notifications cost nothing: if three tips go by while the driver is busy, it
+sees only the last, and one `find_path` from its own tip covers all three. The
+composer reaches the book through a handle to the same task, by sending a
+request carrying the demanded amount and awaiting the orders `demanding`
+returns. The task, and so the book, runs only on an archival node, for the
+reason given at the end of this section.
+
 The book therefore trails the node's tip by however long verification takes. An
 order confirmed in block *h* cannot be filled before block *h+1* in any case, so
-a feeder that keeps up with block time costs a composer nothing, and one that
+a driver that keeps up with block time costs a composer nothing, and one that
 falls behind costs it orders it would otherwise have filled, never a wrong fill.
 
 **On a reorg, roll back the affected blocks.** The node has them. The mempool's
@@ -993,15 +1004,15 @@ below is a reason to build that now, and everything below is chosen so that
 building it later costs a day rather than a rewrite.
 
 **The book is a container, not a chain consumer.** Split the work in two. A
-*feeder* touches the chain: it finds candidate announcements, decodes them under
+*driver* touches the chain: it finds candidate announcements, decodes them under
 the schema `pair_id` names, and performs §7.3's check, which means rebuilding the
 lock script, deriving the order UTXO's addition record, and finding that record
 in the AOCL — whose position is the leaf index the row is then keyed by, so the
 identifier falls out of the verification rather than costing a second lookup. A
-*book* holds what survived and answers questions about it. Only the feeder needs
+*book* holds what survived and answers questions about it. Only the driver needs
 archival state, and only the book needs to be fast to query.
 
-**An announcement names a UTXO in its own block.** The feeder verifies against
+**An announcement names a UTXO in its own block.** The driver verifies against
 the block it was handed and nothing else: it rebuilds the lock script from the
 body, derives the order UTXO's addition record, and looks for that record among
 that block's own outputs. The leaf index the row is keyed by is the AOCL's leaf
@@ -1041,7 +1052,7 @@ terms.
 From logical order to row, the new information is observational and exists only
 on the chain. That step *is* §7.3's check.
 
-So the type boundary and the process boundary are one boundary. The feeder is
+So the type boundary and the process boundary are one boundary. The driver is
 precisely the part that turns a logical order into a row, and it is the only
 part that needs archival state. Above the line is decoding, below it is storage
 and queries, and that is why a book that performs no chain lookups is
@@ -1074,7 +1085,7 @@ pub struct BlockId {
     pub hash: Digest,
 }
 
-/// One block's worth of change, as the feeder observed it.
+/// One block's worth of change, as the driver observed it.
 pub struct BlockUpdate<C: Swappable> {
     pub block: BlockId,
     pub parent: Digest,
@@ -1216,7 +1227,7 @@ If one process ever serves many pairs, the erasure belongs a level up: a map fro
 pair to book, with the *book* behind the trait object. That is one indirection
 per pair rather than per order, and the erased interface is then the query
 surface, which really is uniform across pairs. Inside each book everything stays
-concrete. The one place a trait object fits well is the feeder, where choosing a
+concrete. The one place a trait object fits well is the driver, where choosing a
 decoder from `pair_id` is dispatch over an open set with a uniform operation, and
 the type parameter reappears on the far side once the schema is known.
 
@@ -1246,7 +1257,7 @@ rollback and pruning can compare rows by height alone — and they must, since
 hashes are unordered. A row nonetheless records the confirming block's hash as
 well, so that the block can be named unambiguously by a consumer that does not
 share the book's view of which branch is current. What a height cannot do is notice that the book has left its
-branch. A feeder that sees a reorganization but skips `roll_back_to` would
+branch. A driver that sees a reorganization but skips `roll_back_to` would
 otherwise hand the book blocks at heights it has already passed, and a book
 tracking only its height would either drop them as replays or stack the new
 branch onto the orphaned one, silently either way. So every update names its
@@ -1274,10 +1285,10 @@ resort (§4.8).
 **Two exits, and only one of them arrives as an announcement.** Orders enter on
 a confirmed announcement and leave when the order UTXO is spent, which is a
 removal record rather than an announcement, and covers a fill and a cancel
-alike. A feeder that watches only announcements builds a book that grows and
+alike. A driver that watches only announcements builds a book that grows and
 never shrinks.
 
-**What the feeder can use today.** A node run with `--utxo-index`, which also
+**What the driver can use today.** A node run with `--utxo-index`, which also
 requires archival mode, exposes four methods under the `Utxoindex` namespace
 (`neptune-rpc/api/src/api/rpc.rs`). `block_heights_by_flags` answers "which
 blocks carry orders for this pair", because the node's announcement-flag key is
@@ -1290,6 +1301,29 @@ candidates and the addition-record query settles them; and the per-flag block
 list is capped at `MAX_NUM_BLOCKS_IN_LOOKUP_LIST`, roughly two months of blocks,
 which is shorter than an order's shelf life, so the flag query serves live sync
 and a bounded backfill rather than a cold scan of deep history.
+
+**Two ways a driver talks to the node, and which protocol uses which.** A
+driver can run inside the node, as a tokio task the node holds a handle to, or
+outside it, as a separate process that registers with the node and receives a
+message whenever the tip moves. A third arrangement, a book owned by the node's
+state and updated by a direct call from `set_new_tip`, is ruled out by §4.8:
+verification is work an attacker chooses, and it would run under the write
+lock that sets the tip.
+
+A DeFi protocol layered on Neptune is in principle a separate application, and
+belongs in a separate process. SOFuN is the one exception. The composer is one
+of the two parties to every SOFuN trade, and the fill has to be built into the
+coinbase transaction the composer is already assembling (§4.9), so its driver
+runs inside the node as a task.
+
+Both drivers receive the same notification, that the tip moved, and only the
+way they fetch the path differs. The task calls `find_path` on the archival
+state directly. A separate process needs two things the node does not offer
+yet: a subscription endpoint that sends the notification, and an RPC that
+returns what `find_path` returns, since the `Utxoindex` queries above cannot
+cover a cold start. Neither is worth building before a second protocol needs
+it. Everything else — decoding, §7.3's check, `apply` and `roll_back_to` — is
+the same code in both, and lives in this crate.
 
 **What is reversible, and what is not.** The process boundary is the cheapest
 thing here: discovery, validation, `apply` and `roll_back_to` are the same logic
@@ -1525,14 +1559,21 @@ randomness per order.
       query by `Y` answered by a scan (§4.8)
 - [x] The book takes `BlockUpdate` and performs no chain lookups; a row holds a
       `StandingSwapOrder` rather than repeating its fields (§4.10)
-- [ ] The feeder, which is the other half of that split: candidate
+- [ ] The driver, which is the other half of that split: candidate
       announcements, §7.3's check against the outputs of the announcement's own
       block, and the AOCL leaf index a row is keyed by (§4.10)
-- [ ] The feeder as a task of its own, off the write that sets the tip, holding
+- [ ] The driver as a task of its own, off the write that sets the tip, holding
       its own tip and catching up through `find_path` (§4.8)
+- [ ] `set_new_tip` sends the new tip's digest on a watch channel, and never
+      waits on the driver (§4.8)
+- [ ] The composer's request for the orders demanding an amount, answered by
+      the task through its handle (§4.8)
+- [ ] Deferred until a second protocol needs it: a subscription endpoint for
+      drivers in separate processes, and an RPC returning what `find_path`
+      returns (§4.10)
 - [x] Orders retired on a spent order UTXO, not only admitted on an
       announcement (§4.10)
-- [ ] A fill and a cancel tested against chain data, which waits on the feeder
+- [ ] A fill and a cancel tested against chain data, which waits on the driver
 - [x] Book rollback on reorg, and an update that does not extend the tip
       rejected rather than applied (§4.10)
 - [ ] Rescan fallback in the node
