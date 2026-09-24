@@ -163,7 +163,7 @@ impl StandingSwapOrder<Sofun> {
     ///
     /// The grid is a rule for constructing the admissible set, and this is
     /// where the rule is applied. Everything below this point is the general
-    /// standing swap order of §1.5, which knows nothing about release dates.
+    /// standing swap order, which knows nothing about release dates.
     pub fn lock_script(&self) -> SsoLockScript {
         SsoLockScript {
             cancel_post_image: self.cancel_post_image,

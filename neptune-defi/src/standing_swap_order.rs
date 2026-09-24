@@ -21,12 +21,13 @@ use tasm_lib::triton_vm::prelude::BFieldElement;
 pub const STANDING_SWAP_ORDER_FLAG: BFieldElement = BFieldElement::new(1000);
 
 /// The domain separator for deriving the reward's sender randomness from the
-/// seed (§4.3).
+/// seed.
 ///
 /// Domains 0 and 1 belong to the offered side's `sender_randomness` and
 /// `receiver_preimage`, which the wallet derives from the same seed. They are
 /// reserved rather than used here. Reusing one of them would give two of an
-/// order's randomnesses the same value, which is the collision §7.1 is about.
+/// order's randomnesses the same value, and two orders whose rewards share an
+/// addition record can both be filled by one output.
 const REWARD_SENDER_RANDOMNESS_DOMAIN: u64 = 2;
 
 /// The hash of a type script, which is how an asset is named.
@@ -172,9 +173,9 @@ impl<C: Swappable> StandingSwapOrder<C> {
     /// The reward's sender_randomness derived from the order's public `seed`.
     ///
     /// Every configuration derives it the same way. The seed is public in all
-    /// of them, and §7.1's freshness requirement is about the seed rather than
-    /// about what the demanded UTXO happens to be, so nothing here depends on
-    /// which configuration `C` is.
+    /// of them, and it is the seed's freshness that keeps two orders' rewards
+    /// from sharing an addition record, not what the demanded UTXO happens to
+    /// be, so nothing here depends on which configuration `C` is.
     pub(crate) fn reward_sender_randomness(&self) -> Digest {
         Tip5::hash_varlen(
             &[
