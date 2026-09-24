@@ -213,6 +213,19 @@ impl PeerLoopHandler {
             peer.send(request).await?;
         }
 
+        // A stalled peer that has since disconnected is not in the peer map
+        // and cannot be punished; a stalled peer that gets banned is
+        // disconnected by the main loop.
+        let stalled_peers = self
+            .global_state_lock
+            .pending_requests()
+            .take_stalled_peers();
+        for stalled_peer in stalled_peers {
+            let _ = self
+                .punish_peer(stalled_peer, NegativePeerSanction::StalledRequest)
+                .await;
+        }
+
         Ok(())
     }
 
@@ -223,11 +236,21 @@ impl PeerLoopHandler {
     /// # Locking:
     ///   * acquires `global_state_lock` for write
     async fn punish(&mut self, reason: NegativePeerSanction) -> Result<()> {
+        self.punish_peer(self.peer_id, reason).await
+    }
+
+    /// Punish any connected peer for bad behavior.
+    ///
+    /// Return `Err` if the peer in question is (now) banned, or not connected.
+    ///
+    /// # Locking:
+    ///   * acquires `global_state_lock` for write
+    async fn punish_peer(&mut self, peer_id: PeerId, reason: NegativePeerSanction) -> Result<()> {
         let sanction_result = {
             let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
-            warn!("Punishing peer {} for {reason}", self.peer_id);
+            warn!("Punishing peer {peer_id} for {reason}");
 
-            let Some(peer_info) = global_state_mut.net.peer_map.get_mut(&self.peer_id) else {
+            let Some(peer_info) = global_state_mut.net.peer_map.get_mut(&peer_id) else {
                 bail!("Could not read peer map.");
             };
             debug!("Peer standing before punishment is {}", peer_info.standing);
@@ -236,10 +259,7 @@ impl PeerLoopHandler {
 
         if let Err(err) = sanction_result {
             warn!("Banning peer: {err}");
-            let _ = self
-                .to_main_tx
-                .send(PeerTaskToMain::Ban(self.peer_id))
-                .await;
+            let _ = self.to_main_tx.send(PeerTaskToMain::Ban(peer_id)).await;
         }
 
         sanction_result.map_err(|err| anyhow::anyhow!("Banning peer: {err}"))
@@ -6948,6 +6968,70 @@ mod tests {
 
         fn after(now: Timestamp, delay: Duration) -> Timestamp {
             now + Timestamp::millis(u64::try_from(delay.as_millis()).unwrap())
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn stalled_announcer_is_punished() {
+            let cli = cli_args::Args::default_with_network(Network::Testnet(42));
+            let mut setup = genesis_setup(cli).await;
+            let (notification, request) = proposal_announcement(&setup).await;
+            let height = setup.genesis_block.header().height;
+            let now = Timestamp::now();
+            let mut bob = peer_loop_at(&setup, 6, false, now);
+
+            // Alice, the node's registered peer, announces and is asked.
+            setup.peer_loop_handler.mock_now = Some(now);
+            let alice_stream = Mock::new(vec![
+                Action::Read(notification.clone()),
+                Action::Write(request.clone()),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let alice_from_main = setup.peer_broadcast_tx.subscribe();
+            setup
+                .peer_loop_handler
+                .run(
+                    alice_stream,
+                    alice_from_main,
+                    &mut MutablePeerState::new(height),
+                )
+                .await
+                .unwrap();
+
+            // Bob announces too, and takes over once alice's request is stale.
+            let bob_stream = Mock::new(vec![
+                Action::Read(notification),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let bob_from_main = setup.peer_broadcast_tx.subscribe();
+            bob.run(
+                bob_stream,
+                bob_from_main,
+                &mut MutablePeerState::new(height),
+            )
+            .await
+            .unwrap();
+            let mut bob_stream_later = Mock::new(vec![Action::Write(request)]);
+            bob.mock_now = Some(after(now, BLOCK_REQUEST_TIMEOUT));
+            bob.request_due_objects(&mut bob_stream_later)
+                .await
+                .unwrap();
+            assert!(bob_stream_later.is_done());
+
+            // Alice's standing took the hit.
+            let alice_standing = setup
+                .peer_loop_handler
+                .global_state_lock
+                .lock_guard()
+                .await
+                .net
+                .peer_map[&setup.peer_loop_handler.peer_id]
+                .standing;
+            assert_eq!(
+                Some(NegativePeerSanction::StalledRequest),
+                alice_standing
+                    .latest_punishment
+                    .map(|(sanction, _)| sanction)
+            );
         }
 
         #[apply(shared_tokio_runtime)]

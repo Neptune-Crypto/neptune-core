@@ -123,6 +123,9 @@ struct PeerLoad {
 pub(crate) struct PendingRequests {
     requests: HashMap<AnnouncedObject, PendingRequest>,
     loads: HashMap<PeerId, PeerLoad>,
+
+    /// Peers whose requests went stale since this was last drained.
+    stalled: Vec<PeerId>,
 }
 
 impl PendingRequests {
@@ -138,7 +141,11 @@ impl PendingRequests {
         announcer: Announcer,
         now: SystemTime,
     ) -> bool {
-        let Self { requests, loads } = self;
+        let Self {
+            requests,
+            loads,
+            stalled,
+        } = self;
         let peer = announcer.peer;
 
         if loads
@@ -171,7 +178,7 @@ impl PendingRequests {
         };
         pending.announcers.insert(position, announcer);
 
-        Self::request_now(pending, loads, peer, now, object.request_timeout())
+        Self::request_now(pending, loads, stalled, peer, now, object.request_timeout())
     }
 
     /// Every object that `peer` should request now: those it is the most
@@ -180,24 +187,35 @@ impl PendingRequests {
     ///
     /// Stale requests without remaining announcers are forgotten.
     pub(crate) fn due_requests(&mut self, peer: PeerId, now: SystemTime) -> Vec<AnnouncedObject> {
-        let Self { requests, loads } = self;
+        let Self {
+            requests,
+            loads,
+            stalled,
+        } = self;
         let mut due = vec![];
         requests.retain(|object, pending| {
             let timeout = object.request_timeout();
             if pending.is_stale(now, timeout) && pending.announcers.is_empty() {
                 if let Some((stale_peer, _)) = pending.in_flight {
                     Self::release_in_flight(loads, stale_peer);
+                    stalled.push(stale_peer);
                 }
                 return false;
             }
 
-            if Self::request_now(pending, loads, peer, now, timeout) {
+            if Self::request_now(pending, loads, stalled, peer, now, timeout) {
                 due.push(*object);
             }
             true
         });
 
         due
+    }
+
+    /// The peers whose requests went stale since this was last called. Each
+    /// stall is reported once.
+    pub(crate) fn take_stalled_peers(&mut self) -> Vec<PeerId> {
+        std::mem::take(&mut self.stalled)
     }
 
     /// Record that an object was received.
@@ -240,6 +258,7 @@ impl PendingRequests {
     fn request_now(
         pending: &mut PendingRequest,
         loads: &mut HashMap<PeerId, PeerLoad>,
+        stalled: &mut Vec<PeerId>,
         peer: PeerId,
         now: SystemTime,
         timeout: Duration,
@@ -262,6 +281,7 @@ impl PendingRequests {
 
         if let Some((stale_peer, _)) = pending.in_flight.take() {
             Self::release_in_flight(loads, stale_peer);
+            stalled.push(stale_peer);
         }
         pending.announcers.pop_front();
         pending.in_flight = Some((peer, now));
@@ -391,6 +411,25 @@ mod tests {
         let later = then + block.request_timeout();
         assert!(!pending.record_announcement(block, bob, later));
         assert_eq!(vec![block], pending.due_requests(bob.peer, later));
+    }
+
+    #[test]
+    fn stalled_peers_are_reported_once() {
+        let mut pending = PendingRequests::default();
+        let (alice, bob) = (outbound(), outbound());
+        let (with_fallback, without_fallback) = (block(), block());
+        let then = SystemTime::now();
+
+        assert!(pending.record_announcement(with_fallback, alice, then));
+        assert!(!pending.record_announcement(with_fallback, bob, then));
+        assert!(pending.record_announcement(without_fallback, alice, then));
+        assert!(pending.take_stalled_peers().is_empty());
+
+        // Bob takes over one request; the other is forgotten. Both stalled.
+        let later = then + BLOCK_REQUEST_TIMEOUT;
+        assert_eq!(vec![with_fallback], pending.due_requests(bob.peer, later));
+        assert_eq!(vec![alice.peer, alice.peer], pending.take_stalled_peers());
+        assert!(pending.take_stalled_peers().is_empty());
     }
 
     #[test]
