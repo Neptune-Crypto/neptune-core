@@ -12,9 +12,12 @@ use neptune_mempool::transaction_proof_quality::TransactionProofQuality;
 use neptune_primitives::block_height::BlockHeight;
 use tasm_lib::prelude::Digest;
 
-/// How long a request counts as pending. After this, the object is requested
-/// from the next peer that announced it.
-pub(crate) const PENDING_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+/// How long a request for a block or block proposal counts as pending. After
+/// this, the object is requested from the next peer that announced it.
+pub(crate) const BLOCK_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How long a request for a transaction counts as pending.
+pub(crate) const TRANSACTION_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// How many requests may be in flight to one peer at a time. Further objects
 /// the peer announced wait until earlier requests are answered or go stale.
@@ -37,6 +40,18 @@ pub(crate) enum AnnouncedObject {
         proof_quality: TransactionProofQuality,
         mutator_set_hash: Digest,
     },
+}
+
+impl AnnouncedObject {
+    /// How long a request for this object counts as pending.
+    pub(crate) fn request_timeout(&self) -> Duration {
+        match self {
+            AnnouncedObject::Block { .. } | AnnouncedObject::BlockProposal(_) => {
+                BLOCK_REQUEST_TIMEOUT
+            }
+            AnnouncedObject::Transaction { .. } => TRANSACTION_REQUEST_TIMEOUT,
+        }
+    }
 }
 
 /// A peer that announced an object.
@@ -66,10 +81,10 @@ impl PendingRequest {
     ///
     /// Returns true if no request is in flight, or one has not been delivered
     /// on within the timeout.
-    fn is_stale(&self, now: SystemTime) -> bool {
+    fn is_stale(&self, now: SystemTime, timeout: Duration) -> bool {
         self.in_flight.is_none_or(|(_, since)| {
             now.duration_since(since)
-                .is_ok_and(|elapsed| elapsed >= PENDING_REQUEST_TIMEOUT)
+                .is_ok_and(|elapsed| elapsed >= timeout)
         })
     }
 
@@ -99,7 +114,7 @@ struct PeerLoad {
 /// announce it, or because the peer that announced it is preferred for some
 /// other reason. Later announcers are remembered as fallbacks and take over,
 /// one at a time, if the request is not answered within
-/// [`PENDING_REQUEST_TIMEOUT`].
+/// the object's [request timeout](AnnouncedObject::request_timeout).
 ///
 /// Per peer, at most [`MAX_IN_FLIGHT_PER_PEER`] requests are in flight and at
 /// most [`MAX_PENDING_PER_PEER`] objects are tracked, so that no peer can
@@ -156,7 +171,7 @@ impl PendingRequests {
         };
         pending.announcers.insert(position, announcer);
 
-        Self::request_now(pending, loads, peer, now)
+        Self::request_now(pending, loads, peer, now, object.request_timeout())
     }
 
     /// Every object that `peer` should request now: those it is the most
@@ -168,14 +183,15 @@ impl PendingRequests {
         let Self { requests, loads } = self;
         let mut due = vec![];
         requests.retain(|object, pending| {
-            if pending.is_stale(now) && pending.announcers.is_empty() {
+            let timeout = object.request_timeout();
+            if pending.is_stale(now, timeout) && pending.announcers.is_empty() {
                 if let Some((stale_peer, _)) = pending.in_flight {
                     Self::release_in_flight(loads, stale_peer);
                 }
                 return false;
             }
 
-            if Self::request_now(pending, loads, peer, now) {
+            if Self::request_now(pending, loads, peer, now, timeout) {
                 due.push(*object);
             }
             true
@@ -226,8 +242,9 @@ impl PendingRequests {
         loads: &mut HashMap<PeerId, PeerLoad>,
         peer: PeerId,
         now: SystemTime,
+        timeout: Duration,
     ) -> bool {
-        if !pending.is_stale(now) {
+        if !pending.is_stale(now, timeout) {
             return false;
         }
         let Some(next) = pending.announcers.front() else {
@@ -337,23 +354,23 @@ mod tests {
         assert!(!pending.record_announcement(proposal, carol, then));
 
         // Nothing is stale yet.
-        let soon = then + PENDING_REQUEST_TIMEOUT / 2;
+        let soon = then + proposal.request_timeout() / 2;
         assert!(pending.due_requests(bob.peer, soon).is_empty());
         assert!(pending.due_requests(carol.peer, soon).is_empty());
 
         // Bob announced first, so bob takes over; carol keeps waiting.
-        let later = then + PENDING_REQUEST_TIMEOUT;
+        let later = then + proposal.request_timeout();
         assert!(pending.due_requests(carol.peer, later).is_empty());
         assert_eq!(vec![proposal], pending.due_requests(bob.peer, later));
         assert!(pending.due_requests(bob.peer, later).is_empty());
         assert!(!pending.loads.contains_key(&alice.peer));
 
         // Bob stalls too, so carol takes over.
-        let latest = later + PENDING_REQUEST_TIMEOUT;
+        let latest = later + proposal.request_timeout();
         assert_eq!(vec![proposal], pending.due_requests(carol.peer, latest));
 
         // Nobody is left to take over from carol; the request is forgotten.
-        let end = latest + PENDING_REQUEST_TIMEOUT;
+        let end = latest + proposal.request_timeout();
         assert!(pending.due_requests(alice.peer, end).is_empty());
         assert!(pending.requests.is_empty());
         assert!(pending.loads.is_empty());
@@ -367,13 +384,36 @@ mod tests {
         let then = SystemTime::now();
 
         assert!(pending.record_announcement(block, alice, then));
-        assert!(!pending.record_announcement(block, bob, then + PENDING_REQUEST_TIMEOUT / 2));
+        assert!(!pending.record_announcement(block, bob, then + block.request_timeout() / 2));
 
         // Bob is a fallback already, so announcing again changes nothing, but
         // bob's turn comes on the tick.
-        let later = then + PENDING_REQUEST_TIMEOUT;
+        let later = then + block.request_timeout();
         assert!(!pending.record_announcement(block, bob, later));
         assert_eq!(vec![block], pending.due_requests(bob.peer, later));
+    }
+
+    #[test]
+    fn transactions_are_given_longer_than_blocks() {
+        let mut pending = PendingRequests::default();
+        let (alice, bob) = (outbound(), outbound());
+        let transaction = AnnouncedObject::Transaction {
+            txid: TransactionKernelId::default(),
+            proof_quality: TransactionProofQuality::SingleProof,
+            mutator_set_hash: random(),
+        };
+        let then = SystemTime::now();
+
+        assert!(pending.record_announcement(transaction, alice, then));
+        assert!(!pending.record_announcement(transaction, bob, then));
+
+        let block_timeout = then + BLOCK_REQUEST_TIMEOUT;
+        assert!(pending.due_requests(bob.peer, block_timeout).is_empty());
+        let transaction_timeout = then + TRANSACTION_REQUEST_TIMEOUT;
+        assert_eq!(
+            vec![transaction],
+            pending.due_requests(bob.peer, transaction_timeout)
+        );
     }
 
     #[test]
@@ -387,7 +427,7 @@ mod tests {
         assert!(!pending.record_announcement(block, bob, then));
         assert!(!pending.record_announcement(block, carol, then));
 
-        let later = then + PENDING_REQUEST_TIMEOUT;
+        let later = then + block.request_timeout();
         assert!(pending.due_requests(bob.peer, later).is_empty());
         assert_eq!(vec![block], pending.due_requests(carol.peer, later));
     }
@@ -415,7 +455,7 @@ mod tests {
         assert!(blocks[MAX_IN_FLIGHT_PER_PEER..].contains(&due[0]));
 
         // Stale requests free their slots too.
-        let later = now + PENDING_REQUEST_TIMEOUT;
+        let later = now + BLOCK_REQUEST_TIMEOUT;
         let due_after_timeout = pending.due_requests(alice.peer, later);
         assert_eq!(1, due_after_timeout.len());
         assert!(blocks[MAX_IN_FLIGHT_PER_PEER..].contains(&due_after_timeout[0]));

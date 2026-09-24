@@ -78,7 +78,7 @@ use crate::macros::log_slow_scope;
 use crate::state::mining::block_proposal::BlockProposalRejectError;
 use crate::state::pending_requests::AnnouncedObject;
 use crate::state::pending_requests::Announcer;
-use crate::state::pending_requests::PENDING_REQUEST_TIMEOUT;
+use crate::state::pending_requests::BLOCK_REQUEST_TIMEOUT;
 use crate::state::sync_status::SyncStatus;
 use crate::state::GlobalState;
 use crate::state::GlobalStateLock;
@@ -2838,7 +2838,7 @@ impl PeerLoopHandler {
 
         // Requests that other peers fail to answer are taken over by this
         // peer, if it announced the same object. Checked at this rate.
-        let retry_period = PENDING_REQUEST_TIMEOUT / 10;
+        let retry_period = BLOCK_REQUEST_TIMEOUT / 10;
         let mut retry_stale_requests =
             tokio::time::interval_at(tokio::time::Instant::now() + retry_period, retry_period);
         retry_stale_requests.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -7003,7 +7003,7 @@ mod tests {
                 .await
                 .unwrap();
             assert!(!bob_stream_later.is_done(), "not asked before the timeout");
-            bob.mock_now = Some(after(now, PENDING_REQUEST_TIMEOUT));
+            bob.mock_now = Some(after(now, BLOCK_REQUEST_TIMEOUT));
             bob.request_due_objects(&mut bob_stream_later)
                 .await
                 .unwrap();
