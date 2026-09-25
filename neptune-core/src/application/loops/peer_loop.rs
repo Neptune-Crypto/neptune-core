@@ -3117,6 +3117,7 @@ mod tests {
     use crate::tests::shared::Action;
     use crate::tests::shared::Mock;
     use crate::tests::shared_tokio_runtime;
+    use crate::MAGIC_STRING_REQUEST;
 
     impl PeerLoopHandler {
         /// Allows for mocked timestamps such that time dependencies may be tested.
@@ -3203,6 +3204,147 @@ mod tests {
         assert_eq!(
             NegativePeerSanction::InvalidMessage,
             peer_standing.unwrap().latest_punishment.unwrap().0
+        );
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn concurrent_peer_loops_do_not_deadlock() {
+        // Lots of punishing behavior and connections and disconnections while
+        // other tasks take the global state lock for reading and writing. Meant
+        // to catch a deadlock, or a lock held too long.
+        const LONG_LIVED_PEERS: u8 = 12;
+        const PUNISHMENTS_PER_PEER: usize = 500;
+        const CHURN_ROUNDS: usize = 100;
+        const CHURN_PEERS_PER_ROUND: u8 = 4;
+        const LOCK_ROUNDS: usize = 10_000;
+
+        fn peer_loop(
+            to_main_tx: &mpsc::Sender<PeerTaskToMain>,
+            state_lock: &GlobalStateLock,
+            network: Network,
+            peer_number: u8,
+        ) -> PeerLoopHandler {
+            let address = get_dummy_socket_address(peer_number);
+            PeerLoopHandler::new(
+                to_main_tx.clone(),
+                state_lock.clone(),
+                pseudorandom_peer_id(&address),
+                socketaddr_to_multiaddr(address),
+                get_dummy_handshake_data_for_genesis(network),
+                peer_number.is_multiple_of(2),
+            )
+        }
+
+        let network = Network::Main;
+        let cli = cli_args::Args {
+            max_num_peers: 100,
+            ..cli_args::Args::default_with_network(network)
+        };
+        let (peer_broadcast_tx, _from_main_rx, to_main_tx, mut to_main_rx, _, _, state_lock, hsd) =
+            get_test_genesis_setup(0, cli).await.unwrap();
+
+        // Ensure the main loop channel is not filled up here. Don't read the
+        // messages.
+        let drain = tokio::spawn(async move { while to_main_rx.recv().await.is_some() {} });
+
+        // An out-of-order handshake costs a punishment, which updates the
+        // peer's standing in the peer map under the global write lock, and
+        // sends nothing to the main loop.
+        let punishable = PeerMessage::Handshake {
+            magic_value: *MAGIC_STRING_REQUEST,
+            data: Box::new(hsd),
+        };
+
+        let mut tasks = vec![];
+
+        // Long-lived peers, punished on every message.
+        for peer_number in 0..LONG_LIVED_PEERS {
+            let mut actions: Vec<_> = (0..PUNISHMENTS_PER_PEER)
+                .map(|_| Action::Read(punishable.clone()))
+                .collect();
+            actions.push(Action::Read(PeerMessage::Bye));
+            let mut handler = peer_loop(&to_main_tx, &state_lock, network, peer_number);
+            let from_main = peer_broadcast_tx.subscribe();
+            tasks.push(tokio::spawn(async move {
+                handler
+                    .run_wrapper(Mock::new(actions), from_main)
+                    .await
+                    .unwrap();
+            }));
+        }
+
+        // Peers that connect and disconnect right away, in rounds.
+        tasks.push({
+            let to_main_tx = to_main_tx.clone();
+            let state_lock = state_lock.clone();
+            let peer_broadcast_tx = peer_broadcast_tx.clone();
+            tokio::spawn(async move {
+                for _ in 0..CHURN_ROUNDS {
+                    let mut round = vec![];
+                    for k in 0..CHURN_PEERS_PER_ROUND {
+                        let peer_number = LONG_LIVED_PEERS + k;
+                        let mut handler = peer_loop(&to_main_tx, &state_lock, network, peer_number);
+                        let from_main = peer_broadcast_tx.subscribe();
+                        round.push(tokio::spawn(async move {
+                            let stream = Mock::new(vec![Action::Read(PeerMessage::Bye)]);
+                            handler.run_wrapper(stream, from_main).await.unwrap();
+                        }));
+                    }
+                    for task in round {
+                        task.await.unwrap();
+                    }
+                }
+            })
+        });
+
+        // A task that keeps taking the global write lock, as block
+        // processing does.
+        tasks.push({
+            let mut state_lock = state_lock.clone();
+            tokio::spawn(async move {
+                for _ in 0..LOCK_ROUNDS {
+                    state_lock.lock_guard_mut().await.net.sync_status = SyncStatus::Unknown;
+                    tokio::task::yield_now().await;
+                }
+            })
+        });
+
+        // A task that keeps reading the tip digest, as the RPC server does.
+        tasks.push({
+            let state_lock = state_lock.clone();
+            tokio::spawn(async move {
+                for _ in 0..LOCK_ROUNDS {
+                    let _tip_digest = state_lock.lock(|s| s.chain.tip_hash()).await;
+                    tokio::task::yield_now().await;
+                }
+            })
+        });
+
+        // A task that keeps reading the peer map, as the RPC server does.
+        tasks.push({
+            let state_lock = state_lock.clone();
+            tokio::spawn(async move {
+                for _ in 0..LOCK_ROUNDS {
+                    let _num_peers = state_lock.lock(|s| s.net.peer_map.len()).await;
+                    tokio::task::yield_now().await;
+                }
+            })
+        });
+
+        let outcomes = tokio::time::timeout(
+            std::time::Duration::from_secs(60),
+            futures::future::join_all(tasks),
+        )
+        .await
+        .expect("peer loops must neither deadlock nor stall under contention");
+        for outcome in outcomes {
+            outcome.unwrap();
+        }
+        drain.abort();
+
+        assert!(
+            state_lock.lock(|s| s.net.peer_map.is_empty()).await,
+            "every peer loop must have removed its peer"
         );
     }
 
