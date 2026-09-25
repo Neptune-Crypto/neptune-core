@@ -41,7 +41,7 @@ Despite the reuse of the legacy loops, the influence of the `libp2p` stack is vi
 
 #### Handshake
 
-Prior to entering into the blockchain peer loop, two connecting peers must validate each other's handshake. In the legacy stack, handshake validation happens in-line in `call_peer` and `answer_peer`. In the libp2p stack handshake validation happens in `network/handshake.rs` which calls `HandshakeData::validate`.
+Prior to entering into the blockchain peer loop, two connecting peers must validate each other's handshake. In the legacy stack, handshake validation happens in-line in `answer_peer`. In the libp2p stack handshake validation happens in `network/handshake.rs` which calls `HandshakeData::validate`.
 
 The purpose of the handshake is:
  - To provide security-in-depth backstop against establishing connections with incompatible peers. (For instance, peers running the wrong protocol.)
@@ -51,14 +51,14 @@ The purpose of the handshake is:
 
 | Component | Legacy Stack | libp2p Stack |
 | --- | --- | --- |
-| **Connection Logic** | `call_peer` / `answer_peer` | `StreamGateway` Subprotocol |
+| **Connection Logic** | `answer_peer` (incoming only) | `StreamGateway` Subprotocol |
 | **Addressing** | `SocketAddr` | `Multiaddr` |
 | **Identity** | IP-based / Transient | `PeerId` (Cryptographic) |
 | **Application Logic** | `PeerLoopHandler` | `PeerLoopHandler` (Reused) |
 
 ### 2. Transition and Deprecation Roadmap
 
-The Neptune-Cash network is currently in a **Dual-Stack Phase**. We support both the legacy TCP stack and the `libp2p` stack simultaneously to ensure maximum reach and stability during the transition. However, the legacy stack is officially on a path toward deprecation and eventual removal.
+The Neptune-Cash network is currently in a **Dual-Stack Phase**. Outgoing connections are made over `libp2p` only, and peers are discovered through its DHT. The legacy TCP stack still accepts incoming connections, so that older nodes can reach this one during the transition. The legacy stack is officially on a path toward deprecation and eventual removal.
 
 #### Motivations for the [`libp2p`](https://libp2p.io/) Standard
 

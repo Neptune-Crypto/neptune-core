@@ -1,10 +1,11 @@
 pub mod block_selector;
 pub mod blockchain_state;
 pub mod claim_error;
-pub mod database;
 pub mod light_state;
 pub mod mining;
 pub mod networking_state;
+pub mod peers;
+pub(crate) mod pending_requests;
 pub mod sync_status;
 pub mod transaction;
 pub mod utxo_validitor;
@@ -69,7 +70,6 @@ use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use neptune_mutator_set::removal_record::RemovalRecord;
 use neptune_p2p::peer::handshake_data::HandshakeData;
 use neptune_p2p::peer::handshake_data::VersionString;
-use neptune_p2p::peer::peer_info::PeerInfo;
 use neptune_p2p::peer::transfer_block::TransferBlock;
 use neptune_p2p::peer::SyncChallenge;
 use neptune_p2p::peer::SyncChallengeResponse;
@@ -95,6 +95,8 @@ use neptune_wallet::wallet_file::WALLET_INCOMING_SECRETS_FILE_NAME;
 use networking_state::NetworkingState;
 use num_traits::CheckedSub;
 use num_traits::Zero;
+use peers::Peers;
+use pending_requests::PendingRequests;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::tip5::digest::Digest;
@@ -202,12 +204,23 @@ pub struct GlobalStateLock {
     /// A cache for the synchronous handshake getter, used as a fallback when
     /// syncly acquiring the read lock on `global_state_lock` fails.
     handshake_cache: Arc<std::sync::RwLock<HandshakeData>>,
+
+    /// Objects announced by peers that have been requested but not yet
+    /// received. Shared by all peer tasks so that an object announced by many
+    /// peers is downloaded once. Kept outside the state lock to prevent
+    /// crowding on the global state since peer loops take this lock on each
+    /// announcement.
+    pending_requests: Arc<std::sync::Mutex<PendingRequests>>,
+
+    /// The connected peers and their standings. Needs no global lock.
+    peers: Arc<Peers>,
 }
 
 impl GlobalStateLock {
     pub(crate) fn from_global_state(
         global_state: GlobalState,
         rpc_server_to_main_tx: tokio::sync::mpsc::Sender<RPCServerToMain>,
+        peers: Peers,
     ) -> Self {
         let cli = global_state.cli.clone();
         let initial_handshake_cache = global_state.get_own_handshakedata();
@@ -223,7 +236,22 @@ impl GlobalStateLock {
             cli,
             rpc_server_to_main_tx,
             handshake_cache,
+            pending_requests: Arc::new(std::sync::Mutex::new(PendingRequests::default())),
+            peers: Arc::new(peers),
         }
+    }
+
+    /// The connected peers and their standings. Needs no global lock.
+    pub fn peers(&self) -> &Peers {
+        &self.peers
+    }
+
+    /// Access the registry of pending requests. The guard must not be held
+    /// across an `await`.
+    pub(crate) fn pending_requests(&self) -> std::sync::MutexGuard<'_, PendingRequests> {
+        self.pending_requests
+            .lock()
+            .expect("the registry of pending requests cannot panic while locked")
     }
 
     /// Fetches handshake data synchronously.
@@ -305,7 +333,9 @@ impl GlobalStateLock {
 
     // flush databases (persist to disk)
     pub async fn flush_databases(&mut self) -> Result<()> {
-        self.lock_guard_mut().await.flush_databases().await
+        self.lock_guard_mut().await.flush_databases().await?;
+        self.peers.flush().await;
+        Ok(())
     }
 
     /// access the public Api in mutable context
@@ -951,11 +981,7 @@ impl GlobalState {
         // Get latest block. Use hardcoded genesis block if nothing is in database.
         let latest_block: Block = archival_state.get_tip().await;
 
-        let peer_map: HashMap<_, PeerInfo> = HashMap::new();
-        let peer_databases = NetworkingState::initialize_peer_databases(&data_directory).await?;
-        debug!("Got peer databases");
-
-        let net = NetworkingState::new(peer_map, peer_databases);
+        let net = NetworkingState::new();
 
         let light_state: LightState = LightState::new(latest_block, cli.network);
         let chain = BlockchainArchivalState {
@@ -2952,9 +2978,6 @@ impl GlobalState {
         if let Some(utxo_index) = &mut self.chain.archival_state_mut().utxo_index {
             utxo_index.persist().await;
         }
-
-        // flush peer_standings
-        self.net.peer_databases.peer_standings_by_ip.flush().await;
 
         debug!("Flushed all databases");
 

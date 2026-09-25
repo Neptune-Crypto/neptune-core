@@ -24,6 +24,7 @@ use crate::application::network::channel::NetworkEvent;
 use crate::state::blockchain_state::BlockchainState;
 use crate::state::light_state::LightState;
 use crate::state::networking_state::NetworkingState;
+use crate::state::peers::Peers;
 use crate::state::wallet::wallet_configuration::WalletConfiguration;
 use crate::state::GlobalState;
 use crate::state::GlobalStateLock;
@@ -53,17 +54,16 @@ pub(crate) async fn mock_genesis_global_state_with_block(
     )
     .await;
 
-    let peer_db = NetworkingState::initialize_peer_databases(&data_dir)
-        .await
-        .unwrap();
-    let mut peer_map = get_peer_map();
-    for i in 0..peer_count {
-        let peer_address =
-            std::net::SocketAddr::from_str(&format!("123.123.123.{}:8080", i)).unwrap();
-        let peer_id = pseudorandom_peer_id(&peer_address);
-        peer_map.insert(peer_id, get_dummy_peer_outgoing(peer_address));
-    }
-    let net = NetworkingState::new(peer_map, peer_db);
+    let peers = Peers::initialize(&data_dir).await.unwrap();
+    peers.with_connected_mut(|connected| {
+        for i in 0..peer_count {
+            let peer_address =
+                std::net::SocketAddr::from_str(&format!("123.123.123.{}:8080", i)).unwrap();
+            let peer_id = pseudorandom_peer_id(&peer_address);
+            connected.insert(peer_id, get_dummy_peer_outgoing(peer_address));
+        }
+    });
+    let net = NetworkingState::new();
 
     // Sanity check
     assert_eq!(archival_state.genesis_block().hash(), genesis_block.hash());
@@ -101,7 +101,7 @@ pub(crate) async fn mock_genesis_global_state_with_block(
 
     let global_state = GlobalState::new(wallet_state, chain, net, cli, mempool);
 
-    GlobalStateLock::from_global_state(global_state, rpc_to_main_tx)
+    GlobalStateLock::from_global_state(global_state, rpc_to_main_tx, peers)
 }
 
 /// Get a global state object for unit test purposes. This global state is

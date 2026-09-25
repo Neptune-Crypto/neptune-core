@@ -10,7 +10,6 @@ use std::sync::Mutex;
 use std::time::Duration;
 use std::time::SystemTime;
 
-use const_format::concatcp;
 use futures::prelude::*;
 use itertools::Itertools;
 use libp2p::swarm::behaviour::toggle::Toggle;
@@ -329,10 +328,14 @@ impl NetworkActor {
     /// failed one.
     const RELAY_COOLDOWN_PERIOD: Duration = Duration::from_secs(10);
 
-    /// Hardcoded version strings for Kademlia.
-    const KADEMLIA_FOR_NEPTUNE_STRING: &str = concatcp!(NEPTUNE_PROTOCOL_STR, "kad/1.0.0");
-    const KADEMLIA_FOR_NEPTUNE_PROTOCOL: libp2p::StreamProtocol =
-        libp2p::StreamProtocol::new(Self::KADEMLIA_FOR_NEPTUNE_STRING);
+    /// The Kademlia protocol for the given network, e.g.
+    /// `/neptune/main/kad/1.0.0`. Naming the network keeps the DHTs of
+    /// different networks apart, so that nodes only discover peers on their
+    /// own network.
+    fn kademlia_protocol(network: Network) -> libp2p::StreamProtocol {
+        libp2p::StreamProtocol::try_from_owned(format!("{NEPTUNE_PROTOCOL_STR}{network}/kad/1.0.0"))
+            .expect("network names form valid protocol names")
+    }
 
     /// Initialize a new libp2p Actor.
     ///
@@ -417,7 +420,7 @@ impl NetworkActor {
         };
 
         // Configure Kademlia
-        let kad_config = libp2p::kad::Config::new(Self::KADEMLIA_FOR_NEPTUNE_PROTOCOL);
+        let kad_config = libp2p::kad::Config::new(Self::kademlia_protocol(network));
 
         // Build Swarm
         let upgraded_peers = Arc::new(Mutex::new(HashSet::new()));
@@ -1599,6 +1602,15 @@ impl NetworkActor {
             return;
         };
 
+        // Refuse connections to peers we are already connected to.
+        if let Some(reason) =
+            Self::already_connected_reason(&self.global_state_lock, peer_id, &remote_handshake)
+        {
+            tracing::debug!(peer = %peer_id, "Dropping hijacked stream: {reason}.");
+            drop(stream);
+            return;
+        }
+
         // Spawn the blockchain peer loop with the hijacked stream.
         if let Some(loop_handle) = self.spawn_peer_loop(
             peer_id,
@@ -1617,6 +1629,27 @@ impl NetworkActor {
                 .send(NetworkEvent::NewPeerLoop { loop_handle })
                 .await;
         }
+    }
+
+    /// Returns why a freshly handshaked peer must be refused because it is
+    /// already connected, or `None` if it is not.
+    fn already_connected_reason(
+        global_state_lock: &GlobalStateLock,
+        peer_id: PeerId,
+        remote_handshake: &HandshakeData,
+    ) -> Option<&'static str> {
+        global_state_lock.peers().with_connected(|connected| {
+            if connected
+                .values()
+                .any(|pi| pi.instance_id() == remote_handshake.instance_id)
+            {
+                Some("already connected to peer with this instance ID")
+            } else if connected.contains_key(&peer_id) {
+                Some("already connected to peer with this peer ID")
+            } else {
+                None
+            }
+        })
     }
 
     /// Handles events emitted by the AutoNAT behavior to determine the node's
@@ -2230,10 +2263,6 @@ impl NetworkActor {
         raw_stream: libp2p::Stream,
         from_main_rx: tokio::sync::broadcast::Receiver<MainToPeerTask>,
     ) -> Option<JoinHandle<()>> {
-        // Counts the number of hops between the node and peers it is connected
-        // to. We probably don't need this for the libp2p wrapper.
-        const DISTANCE_TO_CONNECTED_PEER: u8 = 1u8;
-
         // Keep track of which peers get upgraded connections. Prevent same
         // peer from getting upgraded multiple times.
         let num_upgraded_peers = {
@@ -2266,7 +2295,6 @@ impl NetworkActor {
             peer_address,
             remote_handshake,
             rand::rng().random_bool(0.5f64),
-            DISTANCE_TO_CONNECTED_PEER,
         );
 
         let peer_stream = bridge_libp2p_stream(raw_stream);
@@ -2597,6 +2625,13 @@ mod tests {
                 "self-declared address {ip} must not be banned"
             );
         }
+    }
+
+    #[test]
+    fn kademlia_protocol_names_the_network() {
+        let main = NetworkActor::kademlia_protocol(Network::Main);
+        assert_eq!("/neptune/main/kad/1.0.0", main.as_ref());
+        assert_ne!(main, NetworkActor::kademlia_protocol(Network::Testnet(42)));
     }
 
     #[tokio::test]

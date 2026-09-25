@@ -3,11 +3,10 @@ use std::hash::Hash;
 use std::hash::Hasher;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
-use std::net::SocketAddr;
 use std::path::Path;
 use std::path::PathBuf;
-use std::str::FromStr;
 
+use libp2p::Multiaddr;
 use neptune_cash::api::export::GlobalStateLock;
 use neptune_cash::application::config::cli_args::Args;
 use neptune_cash::state::sync_status::SyncStatus;
@@ -158,12 +157,24 @@ impl GenesisNode {
             Self::hash_string_to_port_range(&format!("rpc:{}{}", caller, node_instance));
         args.peer_port =
             Self::hash_string_to_port_range(&format!("peer:{}{}", caller, node_instance));
+        args.quic_port =
+            Self::hash_string_to_port_range(&format!("quic:{}{}", caller, node_instance));
+        args.tcp_port =
+            Self::hash_string_to_port_range(&format!("tcp:{}{}", caller, node_instance));
 
         if let Ok(dd) = Self::integration_test_data_directory(args.network) {
             args.data_dir = Some(dd.root_dir_path());
         }
 
         args
+    }
+
+    /// The libp2p address on which a local node listening on the given QUIC
+    /// port can be reached.
+    pub fn quic_address(quic_port: u16) -> Multiaddr {
+        format!("/ip4/127.0.0.1/udp/{quic_port}/quic-v1")
+            .parse()
+            .expect("QUIC address is a valid multiaddr")
     }
 
     #[track_caller]
@@ -193,25 +204,26 @@ impl GenesisNode {
         // fix ports based on the cluster_id
         base_args.rpc_port = Self::hash_string_to_port_range(&format!("rpc:{}{}", cluster_id, 0));
         base_args.peer_port = Self::hash_string_to_port_range(&format!("peer:{}{}", cluster_id, 0));
+        base_args.quic_port = Self::hash_string_to_port_range(&format!("quic:{}{}", cluster_id, 0));
+        base_args.tcp_port = Self::hash_string_to_port_range(&format!("tcp:{}{}", cluster_id, 0));
 
-        let peers: Vec<_> = (0..u16::from(num_nodes))
-            .map(|v| {
-                SocketAddr::from_str(&format!("127.0.0.1:{}", base_args.peer_port + v)).unwrap()
-            })
+        // The nodes reach each other over libp2p, on their QUIC ports.
+        let peers: Vec<Multiaddr> = (0..u16::from(num_nodes))
+            .map(|v| Self::quic_address(base_args.quic_port + v))
             .collect();
 
         for i in 0..num_nodes {
             let mut args = Self::instance_args(i, base_args.clone());
             args.peers = peers
-                .clone()
-                .into_iter()
+                .iter()
                 .enumerate()
                 .filter(|(x, _)| *x != usize::from(i))
-                .map(|(_, s)| s)
-                .map(neptune_cash::application::config::parser::multiaddr::socketaddr_to_multiaddr)
+                .map(|(_, address)| address.clone())
                 .collect();
             args.peer_port = base_args.peer_port + u16::from(i);
             args.rpc_port = base_args.rpc_port + u16::from(i);
+            args.quic_port = base_args.quic_port + u16::from(i);
+            args.tcp_port = base_args.tcp_port + u16::from(i);
             all_args.push(args)
         }
         tracing::debug!("all_args: {:#?}", all_args);
@@ -303,7 +315,7 @@ impl GenesisNode {
         timeout_secs: u16,
     ) -> anyhow::Result<()> {
         let start = std::time::Instant::now();
-        while self.gsl.lock_guard().await.net.peer_map.len() < min_num_peers.into() {
+        while self.gsl.peers().len() < min_num_peers.into() {
             if start.elapsed() > std::time::Duration::from_secs(timeout_secs.into()) {
                 anyhow::bail!(
                     "connection(s) not established after {} seconds",
@@ -332,7 +344,7 @@ impl GenesisNode {
 
             connected_nodes_count = 0; // reset to 0 each iteration
             for node in nodes {
-                if node.gsl.lock_guard().await.net.peer_map.len() == nodes.len() - 1 {
+                if node.gsl.peers().len() == nodes.len() - 1 {
                     connected_nodes_count += 1;
                 }
             }

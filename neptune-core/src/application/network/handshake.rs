@@ -59,7 +59,15 @@ impl HandshakeUpgrade {
         match HandshakeData::validate(&self.local_handshake, &remote_handshake) {
             Ok(()) => (),
             Err(e) => {
-                tracing::warn!("Handshake failed: {e}.");
+                match e {
+                    // The DHT protocol identifier does not include the
+                    // network, so peers on other networks are discovered and
+                    // refused as a matter of routine.
+                    HandshakeValidationError::NetworkMismatch { .. } => {
+                        tracing::debug!("Handshake failed: {e}.");
+                    }
+                    _ => tracing::warn!("Handshake failed: {e}."),
+                }
                 return Err(HandshakeError::Validation(e));
             }
         };

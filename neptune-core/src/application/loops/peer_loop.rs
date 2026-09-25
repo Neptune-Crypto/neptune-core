@@ -75,7 +75,9 @@ use crate::application::loops::sync_loop::synchronization_bit_mask::Synchronizat
 use crate::application::network::observed_ips::attributable_ip;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
-use crate::state::mining::block_proposal::BlockProposalRejectError;
+use crate::state::pending_requests::AnnouncedObject;
+use crate::state::pending_requests::Announcer;
+use crate::state::pending_requests::BLOCK_REQUEST_TIMEOUT;
 use crate::state::sync_status::SyncStatus;
 use crate::state::GlobalState;
 use crate::state::GlobalStateLock;
@@ -110,6 +112,17 @@ const DISCONNECT_CONNECTION: bool = true;
 
 pub type PeerStandingNumber = i32;
 
+/// Whether an error from the peer stream signals that the underlying
+/// connection is gone, as opposed to a message that could not be decoded.
+///
+/// Both codecs in use report decoding failures as
+/// [`InvalidData`](std::io::ErrorKind::InvalidData); any other I/O error stems
+/// from the transport.
+fn is_transport_error(err: &(dyn std::error::Error + 'static)) -> bool {
+    err.downcast_ref::<std::io::Error>()
+        .is_some_and(|e| e.kind() != std::io::ErrorKind::InvalidData)
+}
+
 /// Handles messages from peers via TCP
 ///
 /// also handles messages from main task over the main-to-peer-tasks broadcast
@@ -122,7 +135,6 @@ pub struct PeerLoopHandler {
     peer_address: Multiaddr,
     peer_handshake_data: HandshakeData,
     inbound_connection: bool,
-    distance: u8,
     rng: StdRng,
     #[cfg(test)]
     mock_now: Option<Timestamp>,
@@ -136,7 +148,6 @@ impl PeerLoopHandler {
         peer_address: Multiaddr,
         peer_handshake_data: HandshakeData,
         inbound_connection: bool,
-        distance: u8,
     ) -> Self {
         Self {
             to_main_tx,
@@ -145,10 +156,17 @@ impl PeerLoopHandler {
             peer_address,
             peer_handshake_data,
             inbound_connection,
-            distance,
             rng: StdRng::from_rng(&mut rand::rng()),
             #[cfg(test)]
             mock_now: None,
+        }
+    }
+
+    /// This peer, as the announcer of an object it notified the node about.
+    fn announcer(&self) -> Announcer {
+        Announcer {
+            peer: self.peer_id,
+            inbound: self.inbound_connection,
         }
     }
 
@@ -163,30 +181,72 @@ impl PeerLoopHandler {
         }
     }
 
+    /// [`Self::now`] as a [`SystemTime`].
+    fn system_time(&self) -> SystemTime {
+        SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(self.now().to_millis())
+    }
+
+    /// Request every announced object whose turn it is to be requested from
+    /// this peer: objects it announced that are not in flight to a peer that
+    /// is still expected to deliver.
+    async fn request_due_objects<S>(&mut self, peer: &mut S) -> Result<()>
+    where
+        S: Sink<PeerMessage> + Unpin,
+        <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
+    {
+        let due = self
+            .global_state_lock
+            .pending_requests()
+            .due_requests(self.peer_id, self.system_time());
+        for object in due {
+            debug!("Requesting {object:?}, which was announced earlier");
+            let request = match object {
+                AnnouncedObject::Block { height, .. } => PeerMessage::BlockRequestByHeight(height),
+                AnnouncedObject::BlockProposal(body_mast_hash) => {
+                    PeerMessage::BlockProposalRequest(BlockProposalRequest::new(body_mast_hash))
+                }
+                AnnouncedObject::Transaction { txid, .. } => PeerMessage::TransactionRequest(txid),
+            };
+            peer.send(request).await?;
+        }
+
+        // A stalled peer that has since disconnected is not in the peer map
+        // and cannot be punished; a stalled peer that gets banned is
+        // disconnected by the main loop.
+        let stalled_peers = self
+            .global_state_lock
+            .pending_requests()
+            .take_stalled_peers();
+        for stalled_peer in stalled_peers {
+            let _ = self
+                .punish_peer(stalled_peer, NegativePeerSanction::StalledRequest)
+                .await;
+        }
+
+        Ok(())
+    }
+
     /// Punish a peer for bad behavior.
     ///
     /// Return `Err` if the peer in question is (now) banned.
-    ///
-    /// # Locking:
-    ///   * acquires `global_state_lock` for write
-    async fn punish(&mut self, reason: NegativePeerSanction) -> Result<()> {
-        let sanction_result = {
-            let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
-            warn!("Punishing peer {} for {reason}", self.peer_id);
+    async fn punish(&self, reason: NegativePeerSanction) -> Result<()> {
+        self.punish_peer(self.peer_id, reason).await
+    }
 
-            let Some(peer_info) = global_state_mut.net.peer_map.get_mut(&self.peer_id) else {
-                bail!("Could not read peer map.");
-            };
-            debug!("Peer standing before punishment is {}", peer_info.standing);
-            peer_info.standing.sanction(PeerSanction::Negative(reason))
-        };
+    /// Punish any connected peer for bad behavior.
+    ///
+    /// Return `Err` if the peer in question is (now) banned, or not connected.
+    async fn punish_peer(&self, peer_id: PeerId, reason: NegativePeerSanction) -> Result<()> {
+        warn!("Punishing peer {peer_id} for {reason}");
+        let sanction_result = self
+            .global_state_lock
+            .peers()
+            .sanction(peer_id, PeerSanction::Negative(reason))
+            .ok_or_else(|| anyhow::anyhow!("Could not read peer map."))?;
 
         if let Err(err) = sanction_result {
             warn!("Banning peer: {err}");
-            let _ = self
-                .to_main_tx
-                .send(PeerTaskToMain::Ban(self.peer_id))
-                .await;
+            let _ = self.to_main_tx.send(PeerTaskToMain::Ban(peer_id)).await;
         }
 
         sanction_result.map_err(|err| anyhow::anyhow!("Banning peer: {err}"))
@@ -195,17 +255,16 @@ impl PeerLoopHandler {
     /// Reward a peer for good behavior.
     ///
     /// Return `Err` if the peer in question is banned.
-    ///
-    /// # Locking:
-    ///   * acquires `global_state_lock` for write
-    async fn reward(&mut self, reason: PositivePeerSanction) -> Result<()> {
-        let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
+    fn reward(&self, reason: PositivePeerSanction) -> Result<()> {
         debug!("Rewarding peer {} for {:?}", self.peer_id, reason);
-        let Some(peer_info) = global_state_mut.net.peer_map.get_mut(&self.peer_id) else {
+        let Some(sanction_result) = self
+            .global_state_lock
+            .peers()
+            .sanction(self.peer_id, PeerSanction::Positive(reason))
+        else {
             error!("Could not read peer map.");
             return Ok(());
         };
-        let sanction_result = peer_info.standing.sanction(PeerSanction::Positive(reason));
         if sanction_result.is_err() {
             error!("Cannot reward banned peer");
         }
@@ -421,10 +480,10 @@ impl PeerLoopHandler {
                 Some(NegativePeerSanction::TransactionWithNegativeFee)
             }
             TxAdmissionError::AlreadyKnown => {
-                // Not held against the peer: the same transaction
-                // is requested from several peers, so duplicates
-                // arrive whenever more than one of them answers.
-                warn!("Received transaction that was already known");
+                // Not held against the peer: a transaction is requested
+                // again from another peer once the first request times
+                // out, so duplicates arrive whenever both answer.
+                debug!("Received transaction that was already known");
                 None
             }
             TxAdmissionError::TooManyInputs
@@ -581,8 +640,7 @@ impl PeerLoopHandler {
     /// main loop.
     ///
     /// # Locking
-    ///   * Acquires `global_state_lock` for write via `self.punish(..)` and
-    ///     `self.reward(..)`.
+    ///   * Acquires `global_state_lock` for read.
     ///
     /// # Panics
     ///
@@ -654,15 +712,37 @@ impl PeerLoopHandler {
             previous_block = new_block;
         }
 
+        // Every received block is valid, so whoever served them delivered what
+        // they announced.
+        {
+            let mut pending_requests = self.global_state_lock.pending_requests();
+            for block in &received_blocks {
+                pending_requests.resolve(&AnnouncedObject::Block {
+                    hash: block.hash(),
+                    height: block.header().height,
+                });
+            }
+        }
+
         // evaluate the fork choice rule
         debug!("Checking last block's canonicity ...");
         let last_block = received_blocks.last().unwrap();
-        let is_canonical = self
+        let (is_canonical, is_tip) = self
             .global_state_lock
-            .lock_guard()
-            .await
-            .incoming_block_is_more_canonical(last_block);
+            .lock(|state| {
+                (
+                    state.incoming_block_is_more_canonical(last_block),
+                    state.chain.tip().hash() == last_block.hash(),
+                )
+            })
+            .await;
         let last_block_height = last_block.header().height;
+        if is_tip {
+            // The same block is requested from several peers, so it
+            // routinely arrives after another peer's copy became tip.
+            debug!("Received block of height {last_block_height} that is already our tip.");
+            return Ok(None);
+        }
         if !is_canonical {
             warn!(
                 "Received {} blocks from peer but incoming blocks are less \
@@ -684,8 +764,7 @@ impl PeerLoopHandler {
         );
 
         // Valuable, new, hard-to-produce information. Reward peer.
-        self.reward(PositivePeerSanction::ValidBlocks(number_of_received_blocks))
-            .await?;
+        self.reward(PositivePeerSanction::ValidBlocks(number_of_received_blocks))?;
 
         Ok(Some(last_block_height))
     }
@@ -708,8 +787,7 @@ impl PeerLoopHandler {
     ///
     /// # Locking:
     ///
-    ///   * Acquires `global_state_lock` for write via `self.punish(..)` and
-    ///     `self.reward(..)`.
+    ///   * Acquires `global_state_lock` for read.
     ///
     /// # Return Value
     ///
@@ -888,9 +966,7 @@ impl PeerLoopHandler {
     /// Otherwise, returns OK(false).
     ///
     /// Locking:
-    ///   * Acquires `global_state_lock` for read.
-    ///   * Acquires `global_state_lock` for write via `self.punish(..)` and
-    ///     `self.reward(..)`.
+    ///   * Acquires `global_state_lock` for read and write.
     async fn handle_peer_message<S>(
         &mut self,
         msg: PeerMessage,
@@ -905,7 +981,7 @@ impl PeerLoopHandler {
         debug!("Received {} from peer {}", msg.get_type(), self.peer_id);
         match msg {
             PeerMessage::Bye => {
-                // Note that the current peer is not removed from the global_state.peer_map here
+                // Note that the current peer is not removed from the connected peers here
                 // but that this is done by the caller.
                 info!("Got bye. Closing connection to peer");
                 Ok(DISCONNECT_CONNECTION)
@@ -917,26 +993,25 @@ impl PeerLoopHandler {
                     // We are interested in the address on which peers accept ingoing connections,
                     // not in the address in which they are connected to us. We are only interested in
                     // peers that accept incoming connections.
-                    let mut peer_info: Vec<(SocketAddr, u128)> = self
-                        .global_state_lock
-                        .lock_guard()
-                        .await
-                        .net
-                        .peer_map
-                        .values()
-                        .filter(|peer_info| {
-                            peer_info.listen_address().is_some() && !peer_info.is_local_connection()
-                        })
-                        .take(MAX_PEER_LIST_LENGTH) // limit length of response
-                        .filter_map(|peer_info| {
-                            multiaddr_to_socketaddr(
-                                &peer_info
-                                    .listen_address()
-                                    .expect("already filtered for some listen address"),
-                            )
-                            .map(|socket_addr| (socket_addr, peer_info.instance_id()))
-                        })
-                        .collect();
+                    let mut peer_info: Vec<(SocketAddr, u128)> =
+                        self.global_state_lock.peers().with_connected(|connected| {
+                            connected
+                                .values()
+                                .filter(|peer_info| {
+                                    peer_info.listen_address().is_some()
+                                        && !peer_info.is_local_connection()
+                                })
+                                .take(MAX_PEER_LIST_LENGTH) // limit length of response
+                                .filter_map(|peer_info| {
+                                    multiaddr_to_socketaddr(
+                                        &peer_info
+                                            .listen_address()
+                                            .expect("already filtered for some listen address"),
+                                    )
+                                    .map(|socket_addr| (socket_addr, peer_info.instance_id()))
+                                })
+                                .collect()
+                        });
 
                     // We sort the returned list, so this function is easier to test
                     peer_info.sort_by_cached_key(|x| x.0);
@@ -947,28 +1022,10 @@ impl PeerLoopHandler {
                 peer.send(PeerMessage::PeerListResponse(peer_info)).await?;
                 Ok(KEEP_CONNECTION_ALIVE)
             }
-            PeerMessage::PeerListResponse(peers) => {
-                log_slow_scope!(fn_name!() + "::PeerMessage::PeerListResponse");
-
-                if peers.len() > MAX_PEER_LIST_LENGTH {
-                    self.punish(NegativePeerSanction::FloodPeerListResponse)
-                        .await?;
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
-                let peers = peers
-                    .into_iter()
-                    .filter(|(socket_addr, _)| !PeerInfo::ip_is_local(socket_addr.ip()))
-                    .collect();
-
-                self.to_main_tx
-                    .send(PeerTaskToMain::PeerDiscoveryAnswer((
-                        peers,
-                        self.peer_id,
-                        // The distance to the revealed peers is 1 + this peer's distance
-                        self.distance + 1,
-                    )))
-                    .await?;
+            PeerMessage::PeerListResponse(_) => {
+                // Peer lists are never requested anymore; peers are discovered
+                // through the DHT.
+                debug!("Ignoring unsolicited peer list");
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockNotificationRequest => {
@@ -1076,6 +1133,19 @@ impl PeerLoopHandler {
                     && sync_anchor_height.is_none()
                     && !claimed_height_and_pow_exceed_sync_mode_threshold
                 {
+                    let block = AnnouncedObject::Block {
+                        hash: block_notification.hash,
+                        height: block_notification.height,
+                    };
+                    let request_now = self
+                        .global_state_lock
+                        .pending_requests()
+                        .record_announcement(block, self.announcer(), self.system_time());
+                    if !request_now {
+                        debug!("block announcement recorded; not requesting it now");
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    }
+
                     debug!(
                         "sending BlockRequestByHeight to peer for block with height {}",
                         block_notification.height
@@ -1909,6 +1979,12 @@ impl PeerLoopHandler {
                     }
                 }
 
+                let announced = AnnouncedObject::Transaction {
+                    txid: transaction.kernel.txid(),
+                    proof_quality: transaction.proof.proof_quality(),
+                    mutator_set_hash: transaction.kernel.mutator_set_hash,
+                };
+
                 let num_inputs: u64 = transaction.kernel.inputs.len().try_into().unwrap();
                 debug!(
                     "`peer_loop` received following transaction from peer. {num_inputs} inputs,\
@@ -1990,12 +2066,21 @@ impl PeerLoopHandler {
                         &recent_mutator_sets,
                         rejection,
                     );
-                    if let Some(sanction) = sanction {
-                        self.punish(sanction).await?;
+                    match sanction {
+                        Some(sanction) => self.punish(sanction).await?,
+                        // The transaction itself is fine, so the peer delivered
+                        // what it announced.
+                        None => self
+                            .global_state_lock
+                            .pending_requests()
+                            .resolve(&announced),
                     }
 
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
+                self.global_state_lock
+                    .pending_requests()
+                    .resolve(&announced);
 
                 // Otherwise, relay to main
                 let pt2m_transaction = PeerTaskToMainTransaction {
@@ -2052,7 +2137,22 @@ impl PeerLoopHandler {
                     }
                 }
 
-                // 2. Request the actual `Transaction` from peer
+                // 2. Request the actual `Transaction` from peer, unless another
+                // peer task is already fetching it.
+                let transaction = AnnouncedObject::Transaction {
+                    txid: tx_notification.txid,
+                    proof_quality: tx_notification.proof_quality,
+                    mutator_set_hash: tx_notification.mutator_set_hash,
+                };
+                let request_now = self
+                    .global_state_lock
+                    .pending_requests()
+                    .record_announcement(transaction, self.announcer(), self.system_time());
+                if !request_now {
+                    debug!("transaction announcement recorded; not requesting it now");
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
                 debug!("requesting transaction from peer");
                 peer.send(PeerMessage::TransactionRequest(tx_notification.txid))
                     .await?;
@@ -2254,24 +2354,37 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockProposalNotification(block_proposal_notification) => {
-                let verdict = self
+                let verdict = match self
                     .global_state_lock
                     .cli()
-                    .accept_block_proposal_from(&self.peer_address);
-
-                // Avoid acquiring lock if ip validation failed
-                let verdict = verdict.map(async |_| {
-                    self.global_state_lock
+                    .accept_block_proposal_from(&self.peer_address)
+                {
+                    // Avoid acquiring lock if ip validation failed
+                    Err(reject_reason) => Err(reject_reason),
+                    Ok(()) => self
+                        .global_state_lock
                         .lock_guard()
                         .await
                         .favor_incoming_block_proposal_legacy(
                             block_proposal_notification.height,
                             block_proposal_notification.guesser_fee,
-                        )
-                });
+                        ),
+                };
 
                 match verdict {
                     Ok(_) => {
+                        let proposal = AnnouncedObject::BlockProposal(
+                            block_proposal_notification.body_mast_hash,
+                        );
+                        let request_now = self
+                            .global_state_lock
+                            .pending_requests()
+                            .record_announcement(proposal, self.announcer(), self.system_time());
+                        if !request_now {
+                            debug!("block proposal announcement recorded; not requesting it now");
+                            return Ok(KEEP_CONNECTION_ALIVE);
+                        }
+
                         peer.send(PeerMessage::BlockProposalRequest(
                             BlockProposalRequest::new(block_proposal_notification.body_mast_hash),
                         ))
@@ -2302,8 +2415,10 @@ impl PeerLoopHandler {
                     peer.send(PeerMessage::BlockProposal(Box::new(proposal)))
                         .await?;
                 } else {
-                    self.punish(NegativePeerSanction::BlockProposalNotFound)
-                        .await?;
+                    // The proposal may have been replaced or cleared since we
+                    // notified this peer about it, so the request is
+                    // legitimate.
+                    debug!("Peer requested block proposal that is no longer held. Ignoring.");
                 }
 
                 Ok(KEEP_CONNECTION_ALIVE)
@@ -2349,6 +2464,13 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
+                // The peer delivered what it announced.
+                self.global_state_lock
+                    .pending_requests()
+                    .resolve(&AnnouncedObject::BlockProposal(
+                        new_proposal.body().mast_hash(),
+                    ));
+
                 // Is block proposal favorable?
                 let is_favorable = state.favor_incoming_block_proposal(
                     new_proposal.header().prev_block_digest,
@@ -2360,28 +2482,20 @@ impl PeerLoopHandler {
                 drop(state);
 
                 if let Err(rejection_reason) = is_favorable {
-                    match rejection_reason {
-                        // no need to punish and log if the fees are equal.  we just ignore the incoming proposal.
-                        BlockProposalRejectError::InsufficientFee { current, received }
-                            if Some(received) == current =>
-                        {
-                            debug!("ignoring new block proposal because the fee is equal to the present one");
-                            return Ok(KEEP_CONNECTION_ALIVE);
-                        }
-                        _ => {
-                            warn!("Rejecting new block proposal:\n{rejection_reason}");
-                            self.punish(NegativePeerSanction::NonFavorableBlockProposal)
-                                .await?;
-                            return Ok(KEEP_CONNECTION_ALIVE);
-                        }
-                    }
+                    // Peers only send proposals we requested, and we only
+                    // request favorable ones. So a proposal that is
+                    // unfavorable now is due to our state changing in the
+                    // meantime, e.g. a better proposal or a new tip arriving.
+                    // Not held against the peer.
+                    debug!("Ignoring new block proposal:\n{rejection_reason}");
+                    return Ok(KEEP_CONNECTION_ALIVE);
                 };
 
                 self.send_to_main(PeerTaskToMain::BlockProposal(new_proposal), line!())
                     .await?;
 
                 // Valuable, new, hard-to-produce information. Reward peer.
-                self.reward(PositivePeerSanction::NewBlockProposal).await?;
+                self.reward(PositivePeerSanction::NewBlockProposal)?;
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
@@ -2458,7 +2572,7 @@ impl PeerLoopHandler {
     /// the connection should be closed.
     ///
     /// Locking:
-    ///   * acquires `global_state_lock` for write via Self::punish()
+    ///   * acquires `global_state_lock` for read
     async fn handle_main_task_message<S>(
         &mut self,
         msg: MainToPeerTask,
@@ -2550,10 +2664,6 @@ impl PeerLoopHandler {
                 // sanction, we don't disconnect.
                 Ok(KEEP_CONNECTION_ALIVE)
             }
-            MainToPeerTask::MakePeerDiscoveryRequest => {
-                peer.send(PeerMessage::PeerListRequest).await?;
-                Ok(KEEP_CONNECTION_ALIVE)
-            }
             MainToPeerTask::Disconnect(peer_id) => {
                 log_slow_scope!(fn_name!() + "::MainToPeerTask::Disconnect");
 
@@ -2564,24 +2674,16 @@ impl PeerLoopHandler {
 
                 peer.send(PeerMessage::Bye).await?;
 
-                self.register_peer_disconnection().await;
+                self.register_peer_disconnection();
 
                 Ok(DISCONNECT_CONNECTION)
             }
             MainToPeerTask::DisconnectAll() => {
                 peer.send(PeerMessage::Bye).await?;
 
-                self.register_peer_disconnection().await;
+                self.register_peer_disconnection();
 
                 Ok(DISCONNECT_CONNECTION)
-            }
-            MainToPeerTask::MakeSpecificPeerDiscoveryRequest(target_socket_addr) => {
-                if let Some(socket_addr) = multiaddr_to_socketaddr(&self.peer_address) {
-                    if target_socket_addr == socket_addr {
-                        peer.send(PeerMessage::PeerListRequest).await?;
-                    }
-                }
-                Ok(KEEP_CONNECTION_ALIVE)
             }
             MainToPeerTask::TransactionNotification(transaction_notification) => {
                 debug!("Sending PeerMessage::TransactionNotification");
@@ -2680,7 +2782,7 @@ impl PeerLoopHandler {
     where
         S: Sink<PeerMessage> + TryStream<Ok = PeerMessage> + Unpin,
         <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
-        <S as TryStream>::Error: std::error::Error,
+        <S as TryStream>::Error: std::error::Error + 'static,
     {
         // If we are in sync mode, tell the main loop there is a new peer so
         // that it can relay the message to the sync loop. Should not happen
@@ -2710,21 +2812,35 @@ impl PeerLoopHandler {
             peer.send(PeerMessage::BlockNotificationRequest).await?;
         }
 
+        // Requests that other peers fail to answer are taken over by this
+        // peer, if it announced the same object. Checked at this rate.
+        let retry_period = BLOCK_REQUEST_TIMEOUT / 10;
+        let mut retry_stale_requests =
+            tokio::time::interval_at(tokio::time::Instant::now() + retry_period, retry_period);
+        retry_stale_requests.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
         loop {
             select! {
+                // Take over requests that other peers did not answer in time.
+                _ = retry_stale_requests.tick() => {
+                    self.request_due_objects(&mut peer).await?;
+                }
+
                 // Handle peer messages
                 peer_message = peer.try_next() => {
                     let peer_address = self.peer_id;
                     let peer_message = match peer_message {
                         Ok(message) => message,
                         Err(err) => {
+                            if is_transport_error(&err) {
+                                info!("Connection to peer {peer_address} lost: {err}");
+                                break;
+                            }
+
                             // Don't disconnect if message type is unknown, as
                             // this allows the adding of new message types in
-                            // the future. Consider only keeping connection open
-                            // if this is a deserialization error, and close
-                            // otherwise.
-                            let msg = format!("Error when receiving from peer: {peer_address}");
-                            warn!("{msg}. Error: {err}");
+                            // the future.
+                            warn!("Error when receiving from peer: {peer_address}. Error: {err}");
                             self.punish(NegativePeerSanction::InvalidMessage).await?;
                             continue;
                         }
@@ -2813,9 +2929,6 @@ impl PeerLoopHandler {
     /// to check the standing again.
     ///
     /// This function is shared between the legacy and libp2p network stacks.
-    ///
-    /// Locking:
-    ///   * acquires `global_state_lock` for write
     pub(crate) async fn run_wrapper<S>(
         &mut self,
         peer: S,
@@ -2824,19 +2937,15 @@ impl PeerLoopHandler {
     where
         S: Sink<PeerMessage> + TryStream<Ok = PeerMessage> + Unpin,
         <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
-        <S as TryStream>::Error: std::error::Error,
+        <S as TryStream>::Error: std::error::Error + 'static,
     {
         let cli_args = self.global_state_lock.cli().clone();
 
         let maybe_ip = attributable_ip(&self.peer_address);
         let standing = if let Some(ip) = maybe_ip {
             self.global_state_lock
-                .lock_guard()
-                .await
-                .net
-                .peer_databases
-                .peer_standings_by_ip
-                .get(ip)
+                .peers()
+                .stored_standing(ip)
                 .await
                 .unwrap_or_else(|| PeerStanding::new(cli_args.peer_tolerance))
         } else {
@@ -2864,32 +2973,33 @@ impl PeerLoopHandler {
         // need to make the a check again while holding a write-lock, since
         // we're modifying `peer_map` here. Holding a read-lock doesn't work
         // since it would have to be dropped before acquiring the write-lock.
-        {
-            let mut global_state = self.global_state_lock.lock_guard_mut().await;
-            let peer_map = &mut global_state.net.peer_map;
-            if peer_map
-                .values()
-                .any(|pi| pi.instance_id() == self.peer_handshake_data.instance_id)
-            {
-                bail!("Already connected to peer with this instance ID. Aborting connection.");
-            }
+        self.global_state_lock
+            .peers()
+            .with_connected_mut(|peer_map| {
+                if peer_map
+                    .values()
+                    .any(|pi| pi.instance_id() == self.peer_handshake_data.instance_id)
+                {
+                    bail!("Already connected to peer with this instance ID. Aborting connection.");
+                }
 
-            if peer_map.len() >= cli_args.max_num_peers {
-                bail!("Attempted to connect to more peers than allowed. Aborting connection.");
-            }
+                if peer_map.len() >= cli_args.max_num_peers {
+                    bail!("Attempted to connect to more peers than allowed. Aborting connection.");
+                }
 
-            if peer_map.contains_key(&self.peer_id) {
-                bail!("Already connected to peer with this peer ID. Aborting connection.");
-            }
+                if peer_map.contains_key(&self.peer_id) {
+                    bail!("Already connected to peer with this peer ID. Aborting connection.");
+                }
 
-            // Inserting a peer into the peer map is where the connection is
-            // considered fully established on the application level. This code
-            // is prohibited from crashing or returning between here and the
-            // connection-close callback below since the code must guarantee
-            // that peers are always removed from this map when they are
-            // disconnected, for any reason.
-            peer_map.insert(self.peer_id, new_peer);
-        }
+                // Inserting a peer into the peer map is where the connection is
+                // considered fully established on the application level. This code
+                // is prohibited from crashing or returning between here and the
+                // connection-close callback below since the code must guarantee
+                // that peers are always removed from this map when they are
+                // disconnected, for any reason.
+                peer_map.insert(self.peer_id, new_peer);
+                Ok::<_, anyhow::Error>(())
+            })?;
 
         // `MutablePeerState` contains the part of the peer-loop's state that is mutable
         let mut peer_state = MutablePeerState::new(self.peer_handshake_data.tip_header.height);
@@ -2934,19 +3044,12 @@ impl PeerLoopHandler {
 
     /// Register graceful peer disconnection in the global state.
     ///
-    /// See also [`NetworkingState::register_peer_disconnection`][1].
-    ///
-    /// # Locking:
-    ///   * acquires `global_state_lock` for write
-    ///
-    /// [1]: crate::state::networking_state::NetworkingState::register_peer_disconnection
-    async fn register_peer_disconnection(&mut self) {
+    /// See also [`Peers::register_disconnection`](crate::state::peers::Peers::register_disconnection).
+    fn register_peer_disconnection(&self) {
         let peer_id = self.peer_handshake_data.instance_id;
         self.global_state_lock
-            .lock_guard_mut()
-            .await
-            .net
-            .register_peer_disconnection(peer_id, SystemTime::now());
+            .peers()
+            .register_disconnection(peer_id, SystemTime::now());
     }
 }
 
@@ -2984,6 +3087,7 @@ mod tests {
     use crate::tests::shared::Action;
     use crate::tests::shared::Mock;
     use crate::tests::shared_tokio_runtime;
+    use crate::MAGIC_STRING_REQUEST;
 
     impl PeerLoopHandler {
         /// Allows for mocked timestamps such that time dependencies may be tested.
@@ -2995,7 +3099,6 @@ mod tests {
             peer_address: Multiaddr,
             peer_handshake_data: HandshakeData,
             inbound_connection: bool,
-            distance: u8,
             mocked_time: Timestamp,
         ) -> Self {
             Self {
@@ -3005,7 +3108,6 @@ mod tests {
                 peer_address,
                 peer_handshake_data,
                 inbound_connection,
-                distance,
                 mock_now: Some(mocked_time),
                 rng: StdRng::from_rng(&mut rand::rng()),
             }
@@ -3053,7 +3155,6 @@ mod tests {
             peer_address,
             hsd,
             true,
-            1,
         );
         peer_loop_handler
             .run_wrapper(mock, from_main_rx_clone)
@@ -3061,10 +3162,8 @@ mod tests {
             .unwrap();
 
         let peer_standing = state_lock
-            .lock_guard()
-            .await
-            .net
-            .get_peer_standing_from_database(peer_address_sa.ip())
+            .peers()
+            .stored_standing(peer_address_sa.ip())
             .await;
         assert_eq!(
             NegativePeerSanction::InvalidMessage.severity(),
@@ -3073,6 +3172,147 @@ mod tests {
         assert_eq!(
             NegativePeerSanction::InvalidMessage,
             peer_standing.unwrap().latest_punishment.unwrap().0
+        );
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn concurrent_peer_loops_do_not_deadlock() {
+        // Lots of punishing behavior and connections and disconnections while
+        // other tasks take the global state lock for reading and writing. Meant
+        // to catch a deadlock, or a lock held too long.
+        const LONG_LIVED_PEERS: u8 = 12;
+        const PUNISHMENTS_PER_PEER: usize = 500;
+        const CHURN_ROUNDS: usize = 100;
+        const CHURN_PEERS_PER_ROUND: u8 = 4;
+        const LOCK_ROUNDS: usize = 10_000;
+
+        fn peer_loop(
+            to_main_tx: &mpsc::Sender<PeerTaskToMain>,
+            state_lock: &GlobalStateLock,
+            network: Network,
+            peer_number: u8,
+        ) -> PeerLoopHandler {
+            let address = get_dummy_socket_address(peer_number);
+            PeerLoopHandler::new(
+                to_main_tx.clone(),
+                state_lock.clone(),
+                pseudorandom_peer_id(&address),
+                socketaddr_to_multiaddr(address),
+                get_dummy_handshake_data_for_genesis(network),
+                peer_number.is_multiple_of(2),
+            )
+        }
+
+        let network = Network::Main;
+        let cli = cli_args::Args {
+            max_num_peers: 100,
+            ..cli_args::Args::default_with_network(network)
+        };
+        let (peer_broadcast_tx, _from_main_rx, to_main_tx, mut to_main_rx, _, _, state_lock, hsd) =
+            get_test_genesis_setup(0, cli).await.unwrap();
+
+        // Ensure the main loop channel is not filled up here. Don't read the
+        // messages.
+        let drain = tokio::spawn(async move { while to_main_rx.recv().await.is_some() {} });
+
+        // An out-of-order handshake costs a punishment, which updates the
+        // peer's standing under the connected-peers lock, and sends nothing to
+        // the main loop.
+        let punishable = PeerMessage::Handshake {
+            magic_value: *MAGIC_STRING_REQUEST,
+            data: Box::new(hsd),
+        };
+
+        let mut tasks = vec![];
+
+        // Long-lived peers, punished on every message.
+        for peer_number in 0..LONG_LIVED_PEERS {
+            let mut actions: Vec<_> = (0..PUNISHMENTS_PER_PEER)
+                .map(|_| Action::Read(punishable.clone()))
+                .collect();
+            actions.push(Action::Read(PeerMessage::Bye));
+            let mut handler = peer_loop(&to_main_tx, &state_lock, network, peer_number);
+            let from_main = peer_broadcast_tx.subscribe();
+            tasks.push(tokio::spawn(async move {
+                handler
+                    .run_wrapper(Mock::new(actions), from_main)
+                    .await
+                    .unwrap();
+            }));
+        }
+
+        // Peers that connect and disconnect right away, in rounds.
+        tasks.push({
+            let to_main_tx = to_main_tx.clone();
+            let state_lock = state_lock.clone();
+            let peer_broadcast_tx = peer_broadcast_tx.clone();
+            tokio::spawn(async move {
+                for _ in 0..CHURN_ROUNDS {
+                    let mut round = vec![];
+                    for k in 0..CHURN_PEERS_PER_ROUND {
+                        let peer_number = LONG_LIVED_PEERS + k;
+                        let mut handler = peer_loop(&to_main_tx, &state_lock, network, peer_number);
+                        let from_main = peer_broadcast_tx.subscribe();
+                        round.push(tokio::spawn(async move {
+                            let stream = Mock::new(vec![Action::Read(PeerMessage::Bye)]);
+                            handler.run_wrapper(stream, from_main).await.unwrap();
+                        }));
+                    }
+                    for task in round {
+                        task.await.unwrap();
+                    }
+                }
+            })
+        });
+
+        // A task that keeps taking the global write lock, as block
+        // processing does.
+        tasks.push({
+            let mut state_lock = state_lock.clone();
+            tokio::spawn(async move {
+                for _ in 0..LOCK_ROUNDS {
+                    state_lock.lock_guard_mut().await.net.sync_status = SyncStatus::Unknown;
+                    tokio::task::yield_now().await;
+                }
+            })
+        });
+
+        // A task that keeps reading the tip digest, as the RPC server does.
+        tasks.push({
+            let state_lock = state_lock.clone();
+            tokio::spawn(async move {
+                for _ in 0..LOCK_ROUNDS {
+                    let _tip_digest = state_lock.lock(|s| s.chain.tip_hash()).await;
+                    tokio::task::yield_now().await;
+                }
+            })
+        });
+
+        // A task that keeps reading the connected peers.
+        tasks.push({
+            let state_lock = state_lock.clone();
+            tokio::spawn(async move {
+                for _ in 0..LOCK_ROUNDS {
+                    let _num_peers = state_lock.peers().len();
+                    tokio::task::yield_now().await;
+                }
+            })
+        });
+
+        let outcomes = tokio::time::timeout(
+            std::time::Duration::from_secs(60),
+            futures::future::join_all(tasks),
+        )
+        .await
+        .expect("peer loops must neither deadlock nor stall under contention");
+        for outcome in outcomes {
+            outcome.unwrap();
+        }
+        drain.abort();
+
+        assert!(
+            state_lock.peers().is_empty(),
+            "every peer loop must have removed its peer"
         );
     }
 
@@ -3101,14 +3341,13 @@ mod tests {
             socketaddr_to_multiaddr(peer_address_sa),
             hsd,
             true,
-            1,
         );
 
         assert!(peer_loop_handler
             .run_wrapper(mock, peer_broadcast_tx.subscribe())
             .await
             .is_err());
-        assert!(state_lock.lock_guard().await.net.peer_map.is_empty());
+        assert!(state_lock.peers().is_empty());
 
         Ok(())
     }
@@ -3139,7 +3378,6 @@ mod tests {
             peer_address,
             hsd,
             true,
-            1,
         );
         peer_loop_handler
             .run_wrapper(mock, from_main_rx_clone)
@@ -3147,7 +3385,7 @@ mod tests {
 
         assert_eq!(
             2,
-            state_lock.lock_guard().await.net.peer_map.len(),
+            state_lock.peers().len(),
             "peer map length must be back to 2 after goodbye"
         );
 
@@ -3174,15 +3412,13 @@ mod tests {
             peer_address,
             peer_handshake_data,
             true,
-            1,
         );
         let mock = Mock::new(vec![Action::Read(PeerMessage::Bye)]);
         peer_loop_handler.run_wrapper(mock, from_main_rx).await?;
 
-        let global_state = state_lock.lock_guard().await;
-        assert!(global_state
-            .net
-            .last_disconnection_time_of_peer(peer_id)
+        assert!(state_lock
+            .peers()
+            .last_disconnection_time(peer_id)
             .is_none());
 
         drop(to_main_rx);
@@ -3213,7 +3449,7 @@ mod tests {
                 _to_main_rx,
                 _,
                 _,
-                mut state_lock,
+                state_lock,
                 hsd,
             ) = get_test_genesis_setup(
                 num_already_connected_peers,
@@ -3225,21 +3461,13 @@ mod tests {
             let local_sa_0 = std::net::SocketAddr::from_str("192.168.0.1:8080").unwrap();
             let peer_id_0 = pseudorandom_peer_id(&local_sa_0);
             state_lock
-                .lock_guard_mut()
-                .await
-                .net
-                .peer_map
+                .peers()
                 .insert(peer_id_0, get_dummy_peer_outgoing(local_sa_0));
 
             let global_sa = std::net::SocketAddr::from_str("92.68.0.1:8080").unwrap();
             let global_pi = get_dummy_peer_outgoing(global_sa);
             let global_id = pseudorandom_peer_id(&global_sa);
-            state_lock
-                .lock_guard_mut()
-                .await
-                .net
-                .peer_map
-                .insert(global_id, global_pi.clone());
+            state_lock.peers().insert(global_id, global_pi.clone());
 
             let expected_response = vec![(global_sa, global_pi.instance_id())];
             let mock = Mock::new(vec![
@@ -3257,7 +3485,6 @@ mod tests {
                 local_ip_1,
                 hsd,
                 true,
-                1,
             );
             peer_loop_handler
                 .run_wrapper(mock, from_main_rx_clone)
@@ -3265,76 +3492,6 @@ mod tests {
                 .unwrap();
 
             drop(to_main_tx);
-        }
-
-        #[apply(shared_tokio_runtime)]
-        async fn ignore_local_ips_in_incoming_response() {
-            let network = Network::Main;
-
-            let num_already_connected_peers = 2;
-            let (
-                peer_broadcast_tx,
-                _from_main_rx_clone,
-                to_main_tx,
-                mut to_main_rx,
-                _,
-                _,
-                state_lock,
-                hsd,
-            ) = get_test_genesis_setup(
-                num_already_connected_peers,
-                cli_args::Args::default_with_network(network),
-            )
-            .await
-            .unwrap();
-
-            let potential_peer_public_ip = (
-                std::net::SocketAddr::from_str("123.123.123.123:8080").unwrap(),
-                7,
-            );
-            let response_with_local_and_global_ip = vec![
-                potential_peer_public_ip,
-                (
-                    std::net::SocketAddr::from_str("192.168.0.23:8080").unwrap(),
-                    55,
-                ),
-                (
-                    std::net::SocketAddr::from_str("[fe80::1]:8080").unwrap(),
-                    42,
-                ),
-            ];
-
-            let mock = Mock::new(vec![
-                Action::Write(PeerMessage::PeerListRequest),
-                Action::Read(PeerMessage::PeerListResponse(
-                    response_with_local_and_global_ip,
-                )),
-                Action::Read(PeerMessage::Bye),
-            ]);
-            let from_main_rx_clone = peer_broadcast_tx.subscribe();
-            let socket_address = std::net::SocketAddr::from_str("22.21.20.122:8080").unwrap();
-            let mut peer_loop_handler = PeerLoopHandler::new(
-                to_main_tx.clone(),
-                state_lock.clone(),
-                pseudorandom_peer_id(&socket_address),
-                socketaddr_to_multiaddr(socket_address),
-                hsd,
-                true,
-                1,
-            );
-            peer_loop_handler
-                .run_wrapper(mock, from_main_rx_clone)
-                .await
-                .expect("sending (one) invalid block should not result in closed connection");
-
-            // Verify that the local IPs were not sent to main loop
-            let Some(PeerTaskToMain::PeerDiscoveryAnswer((potential_peers, _, _))) =
-                to_main_rx.recv().await
-            else {
-                panic!("Main loop must receive peer discovery info")
-            };
-
-            assert_eq!(vec![potential_peer_public_ip], potential_peers);
         }
 
         #[traced_test]
@@ -3360,11 +3517,8 @@ mod tests {
             .unwrap();
 
             let peer_infos = state_lock
-                .lock_guard()
-                .await
-                .net
-                .peer_map
-                .clone()
+                .peers()
+                .snapshot()
                 .into_values()
                 .collect::<Vec<_>>();
 
@@ -3398,7 +3552,6 @@ mod tests {
                 ma2,
                 hsd2,
                 true,
-                0,
             );
             peer_loop_handler
                 .run_wrapper(mock, from_main_rx_clone)
@@ -3407,7 +3560,7 @@ mod tests {
 
             assert_eq!(
                 2,
-                state_lock.lock_guard().await.net.peer_map.len(),
+                state_lock.peers().len(),
                 "peer map must have length 2 after saying goodbye to peer 2"
             );
         }
@@ -3469,7 +3622,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address_sa),
                 hsd,
                 true,
-                1,
             );
             let res = peer_loop_handler
                 .run_wrapper(mock, from_main_rx_clone)
@@ -3489,10 +3641,8 @@ mod tests {
             drop(to_main_tx);
 
             let peer_standing = state_lock
-                .lock_guard()
-                .await
-                .net
-                .get_peer_standing_from_database(peer_address_sa.ip())
+                .peers()
+                .stored_standing(peer_address_sa.ip())
                 .await;
             assert_eq!(
                 -i32::from(state_lock.cli().peer_tolerance),
@@ -3547,15 +3697,7 @@ mod tests {
             ) = get_test_genesis_setup(1, cli_args::Args::default_with_network(network))
                 .await
                 .unwrap();
-            let (peer_id, peer_info) = state_lock
-                .lock_guard()
-                .await
-                .net
-                .peer_map
-                .clone()
-                .into_iter()
-                .next()
-                .unwrap();
+            let (peer_id, peer_info) = state_lock.peers().snapshot().into_iter().next().unwrap();
             let genesis: Block = Block::genesis(network);
 
             let mut peer_loop_handler = PeerLoopHandler::new(
@@ -3565,7 +3707,6 @@ mod tests {
                 peer_info.address(),
                 hsd,
                 true,
-                1,
             );
 
             let (invalid_pow, valid_pow) = pow_related_blocks(network, &genesis).await;
@@ -3629,7 +3770,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 hsd,
                 true,
-                1,
                 no_pow.header().timestamp,
             );
             peer_loop_handler
@@ -3655,12 +3795,8 @@ mod tests {
 
             // Verify that peer standing was stored in database
             let standing = state_lock
-                .lock_guard()
-                .await
-                .net
-                .peer_databases
-                .peer_standings_by_ip
-                .get(peer_address.ip())
+                .peers()
+                .stored_standing(peer_address.ip())
                 .await
                 .unwrap();
             assert!(
@@ -3717,7 +3853,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 hsd,
                 false,
-                1,
                 block_1.header().timestamp,
             );
             alice_peer_loop_handler
@@ -3730,7 +3865,7 @@ mod tests {
             };
             drop(to_main_tx);
 
-            if !alice.lock_guard().await.net.peer_map.is_empty() {
+            if !alice.peers().is_empty() {
                 bail!("peer map must be empty after closing connection gracefully");
             }
 
@@ -3815,7 +3950,6 @@ mod tests {
                     socketaddr_to_multiaddr(peer_address),
                     handshake,
                     false,
-                    1,
                 );
 
                 peer_loop_handler
@@ -3868,7 +4002,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 handshake,
                 false,
-                1,
             );
             let mmra = state_lock
                 .lock_guard()
@@ -4031,7 +4164,6 @@ mod tests {
                     socketaddr_to_multiaddr(peer_address),
                     handshake,
                     false,
-                    1,
                 );
 
                 peer_loop_handler
@@ -4207,7 +4339,6 @@ mod tests {
                     socketaddr_to_multiaddr(peer_address),
                     handshake,
                     false,
-                    1,
                 );
 
                 peer_loop_handler
@@ -4242,7 +4373,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 handshake,
                 false,
-                1,
             );
 
             peer_loop_handler
@@ -4316,7 +4446,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 handshake,
                 false,
-                1,
             );
 
             peer_loop_handler
@@ -4383,7 +4512,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 handshake,
                 false,
-                1,
             );
             let champion = (block_2.header().height, block_2.hash());
             let peer_task = tokio::spawn(async move {
@@ -4504,7 +4632,6 @@ mod tests {
                     socketaddr_to_multiaddr(peer_address),
                     handshake,
                     false,
-                    1,
                 );
 
                 peer_loop_handler
@@ -4534,12 +4661,8 @@ mod tests {
                             "Plain non-successor block from a validated-capable peer must be \
                              ignored"
                         );
-                        let peer_standing = state_lock
-                            .lock_guard()
-                            .await
-                            .net
-                            .get_peer_standing_from_database(peer_address.ip())
-                            .await;
+                        let peer_standing =
+                            state_lock.peers().stored_standing(peer_address.ip()).await;
                         assert!(
                             peer_standing.is_none_or(|standing| standing.standing == 0),
                             "Ignoring a plain block must not punish the sender"
@@ -4615,7 +4738,6 @@ mod tests {
                     socketaddr_to_multiaddr(peer_address),
                     handshake,
                     false,
-                    1,
                 );
                 let mut peer_state = MutablePeerState::new(handshake.tip_header.height);
 
@@ -4714,7 +4836,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 hsd,
                 false,
-                1,
                 block_3_a.header().timestamp,
             );
 
@@ -4750,7 +4871,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 hsd,
                 false,
-                1,
                 block_3_a.header().timestamp,
             );
 
@@ -4851,7 +4971,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 hsd,
                 false,
-                1,
                 block_3_a.header().timestamp,
             );
 
@@ -4893,7 +5012,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 hsd,
                 false,
-                1,
             );
 
             // This will return error if seen read/write order does not match that of the
@@ -4905,10 +5023,8 @@ mod tests {
 
             // Verify that peer is sanctioned for this nonsense.
             assert!(state_lock
-                .lock_guard()
-                .await
-                .net
-                .get_peer_standing_from_database(peer_address.ip())
+                .peers()
+                .stored_standing(peer_address.ip())
                 .await
                 .unwrap()
                 .standing
@@ -4975,7 +5091,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 hsd,
                 false,
-                1,
                 block_3_a.header().timestamp,
             );
 
@@ -5023,7 +5138,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 hsd,
                 false,
-                1,
                 block_1.header().timestamp,
             );
             peer_loop_handler
@@ -5084,7 +5198,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 hsd,
                 false,
-                1,
             );
             peer_loop_handler
                 .run_wrapper(mock, from_main_rx_clone)
@@ -5128,7 +5241,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 hsd,
                 false,
-                1,
                 block_1.header().timestamp,
             );
             peer_loop_handler
@@ -5141,7 +5253,7 @@ mod tests {
                 _ => bail!("Did not find msg sent to main task"),
             };
 
-            if !state_lock.lock_guard().await.net.peer_map.is_empty() {
+            if !state_lock.peers().is_empty() {
                 bail!("peer map must be empty after closing connection gracefully");
             }
 
@@ -5199,7 +5311,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 hsd,
                 true,
-                1,
                 block_2.header().timestamp,
             );
             peer_loop_handler
@@ -5218,7 +5329,7 @@ mod tests {
                 _ => bail!("Did not find msg sent to main task 1"),
             };
 
-            if !state_lock.lock_guard().await.net.peer_map.is_empty() {
+            if !state_lock.peers().is_empty() {
                 bail!("peer map must be empty after closing connection gracefully");
             }
 
@@ -5279,7 +5390,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address1),
                 hsd1,
                 true,
-                1,
                 block_4.header().timestamp,
             );
             peer_loop_handler
@@ -5295,10 +5405,8 @@ mod tests {
 
             // Verify that peer is sanctioned for failed fork reconciliation attempt
             assert!(state_lock
-                .lock_guard()
-                .await
-                .net
-                .get_peer_standing_from_database(peer_address1.ip())
+                .peers()
+                .stored_standing(peer_address1.ip())
                 .await
                 .unwrap()
                 .standing
@@ -5359,7 +5467,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 hsd,
                 true,
-                1,
                 block_4.header().timestamp,
             );
             peer_loop_handler
@@ -5375,7 +5482,7 @@ mod tests {
             assert_eq!(blocks[2].hash(), block_4.hash());
 
             assert!(
-                state_lock.lock_guard().await.net.peer_map.is_empty(),
+                state_lock.peers().is_empty(),
                 "peer map must be empty after closing connection gracefully"
             );
         }
@@ -5430,7 +5537,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 hsd,
                 true,
-                1,
                 block_3.header().timestamp,
             );
             peer_loop_handler
@@ -5452,7 +5558,7 @@ mod tests {
                 _ => bail!("Did not find msg sent to main task"),
             };
 
-            if !state_lock.lock_guard().await.net.peer_map.is_empty() {
+            if !state_lock.peers().is_empty() {
                 bail!("peer map must be empty after closing connection gracefully");
             }
 
@@ -5517,7 +5623,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_socket_address),
                 hsd,
                 false,
-                1,
                 block_4.header().timestamp,
             );
             peer_loop_handler
@@ -5526,10 +5631,8 @@ mod tests {
 
             assert_eq!(Err(TryRecvError::Empty), to_main_rx1.try_recv());
             let latest_sanction = state_lock
-                .lock_guard()
-                .await
-                .net
-                .get_peer_standing_from_database(peer_socket_address.ip())
+                .peers()
+                .stored_standing(peer_socket_address.ip())
                 .await
                 .unwrap();
             assert_eq!(
@@ -5618,7 +5721,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_socket_address),
                 hsd,
                 false,
-                1,
                 block_5.header().timestamp,
             );
             peer_loop_handler
@@ -5640,7 +5742,7 @@ mod tests {
                 _ => bail!("Did not find msg sent to main task"),
             };
 
-            if !state_lock.lock_guard().await.net.peer_map.is_empty() {
+            if !state_lock.peers().is_empty() {
                 bail!("peer map must be empty after closing connection gracefully");
             }
 
@@ -5668,11 +5770,8 @@ mod tests {
             ) = get_test_genesis_setup(1, cli_args::Args::default_with_network(network)).await?;
             let genesis_block = Block::genesis(network);
             let peer_infos: Vec<PeerInfo> = state_lock
-                .lock_guard()
-                .await
-                .net
-                .peer_map
-                .clone()
+                .peers()
+                .snapshot()
                 .into_values()
                 .collect::<Vec<_>>();
 
@@ -5725,7 +5824,6 @@ mod tests {
                 socketaddr_to_multiaddr(sa_1),
                 hsd_1,
                 true,
-                1,
                 block_4.header().timestamp,
             );
             peer_loop_handler
@@ -5750,7 +5848,7 @@ mod tests {
 
             assert_eq!(
                 1,
-                state_lock.lock_guard().await.net.peer_map.len(),
+                state_lock.peers().len(),
                 "One peer must remain in peer list after peer_1 closed gracefully"
             );
 
@@ -5816,7 +5914,6 @@ mod tests {
                     socketaddr_to_multiaddr(peer_address),
                     hsd,
                     true,
-                    1,
                 );
 
                 peer_loop_handler
@@ -5900,8 +5997,7 @@ mod tests {
                 pseudorandom_peer_id(&peer_address),
                 socketaddr_to_multiaddr(peer_address),
                 hsd_1,
-                true,
-                1,
+                false,
                 now,
             );
 
@@ -5978,7 +6074,6 @@ mod tests {
                 socketaddr_to_multiaddr(sa_1),
                 hsd_1,
                 true,
-                1,
             );
             let mut peer_state = MutablePeerState::new(hsd_1.tip_header.height);
 
@@ -6121,8 +6216,7 @@ mod tests {
                     pseudorandom_peer_id(&sa_1),
                     socketaddr_to_multiaddr(sa_1),
                     hsd_1,
-                    true,
-                    1,
+                    false,
                     now,
                 );
 
@@ -6211,8 +6305,7 @@ mod tests {
                 pseudorandom_peer_id(&sa_1),
                 socketaddr_to_multiaddr(sa_1),
                 hsd_1,
-                true,
-                1,
+                false,
                 now,
             );
             let mut peer_state = MutablePeerState::new(hsd_1.tip_header.height);
@@ -6278,7 +6371,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 hsd,
                 true,
-                1,
             );
             let mut peer_state = MutablePeerState::new(hsd.tip_header.height);
             peer_loop_handler
@@ -6330,7 +6422,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 hsd,
                 true,
-                1,
             );
 
             let mut peer_state = MutablePeerState::new(hsd.tip_header.height);
@@ -6390,7 +6481,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 peer_hsd,
                 true,
-                1,
             );
             peer_loop_handler
                 .run_wrapper(mock, from_main_rx_clone)
@@ -6399,10 +6489,8 @@ mod tests {
 
             assert_eq!(Err(TryRecvError::Empty), to_main_rx.try_recv());
             let latest_sanction = state_lock
-                .lock_guard()
-                .await
-                .net
-                .get_peer_standing_from_database(peer_address.ip())
+                .peers()
+                .stored_standing(peer_address.ip())
                 .await
                 .unwrap();
             assert_eq!(
@@ -6451,7 +6539,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 peer_hsd,
                 true,
-                1,
             );
 
             peer_loop_handler
@@ -6466,10 +6553,8 @@ mod tests {
             );
 
             let latest_sanction = state_lock
-                .lock_guard()
-                .await
-                .net
-                .get_peer_standing_from_database(peer_address.ip())
+                .peers()
+                .stored_standing(peer_address.ip())
                 .await
                 .unwrap();
             assert_eq!(
@@ -6494,32 +6579,25 @@ mod tests {
         use super::*;
         use crate::tests::shared::blocks::fake_valid_deterministic_successor;
 
-        struct TestSetup {
-            peer_loop_handler: PeerLoopHandler,
-            to_main_rx: mpsc::Receiver<PeerTaskToMain>,
-            from_main_rx: broadcast::Receiver<MainToPeerTask>,
-            peer_state: MutablePeerState,
-            to_main_tx: mpsc::Sender<PeerTaskToMain>,
-            genesis_block: Block,
-            peer_broadcast_tx: broadcast::Sender<MainToPeerTask>,
+        pub(super) struct TestSetup {
+            pub(super) peer_loop_handler: PeerLoopHandler,
+            pub(super) to_main_rx: mpsc::Receiver<PeerTaskToMain>,
+            pub(super) from_main_rx: broadcast::Receiver<MainToPeerTask>,
+            pub(super) peer_state: MutablePeerState,
+            pub(super) to_main_tx: mpsc::Sender<PeerTaskToMain>,
+            pub(super) genesis_block: Block,
+            pub(super) peer_broadcast_tx: broadcast::Sender<MainToPeerTask>,
         }
 
-        async fn genesis_setup(cli: cli_args::Args) -> TestSetup {
+        pub(super) async fn genesis_setup(cli: cli_args::Args) -> TestSetup {
             let network = cli.network;
             let peer_count = 1;
             let (peer_broadcast_tx, from_main_rx, to_main_tx, to_main_rx, _, _, alice, _hsd) =
                 get_test_genesis_setup(peer_count, cli).await.unwrap();
             let peer_hsd = get_dummy_handshake_data_for_genesis(network);
             let peer_ma = alice
-                .lock_guard()
-                .await
-                .net
-                .peer_map
-                .values()
-                .next()
-                .unwrap()
-                .to_owned()
-                .address();
+                .peers()
+                .with_connected(|connected| connected.values().next().unwrap().address());
             let peer_sa = peer_ma
                 .iter()
                 .find_map(|p| match p {
@@ -6547,7 +6625,6 @@ mod tests {
                 peer_ma,
                 peer_hsd,
                 true,
-                1,
             );
             let peer_state = MutablePeerState::new(peer_hsd.tip_header.height);
 
@@ -6710,16 +6787,15 @@ mod tests {
                 .unwrap();
 
             assert_eq!(Err(TryRecvError::Empty), to_main_rx.try_recv());
-            let latest_punishment = peer_loop_handler
-                .global_state_lock
-                .lock_guard()
-                .await
-                .net
-                .peer_map
-                .get(&peer_loop_handler.peer_id)
-                .unwrap()
-                .standing()
-                .latest_punishment;
+            let latest_punishment =
+                peer_loop_handler
+                    .global_state_lock
+                    .peers()
+                    .with_connected(|connected| {
+                        connected[&peer_loop_handler.peer_id]
+                            .standing()
+                            .latest_punishment
+                    });
             assert!(latest_punishment.is_none());
 
             drop(to_main_tx);
@@ -6762,6 +6838,232 @@ mod tests {
 
             drop(to_main_tx);
             drop(peer_broadcast_tx);
+        }
+    }
+
+    /// Tests of the bookkeeping that keeps an object announced by many peers
+    /// from being requested from all of them.
+    mod pending_requests {
+        use std::time::Duration;
+
+        use neptune_p2p::peer::peer_info::pseudorandom_peer_id;
+
+        use super::block_proposals::genesis_setup;
+        use super::block_proposals::TestSetup;
+        use super::*;
+
+        /// A peer loop for another peer of the same node, at a mocked time.
+        fn peer_loop_at(
+            setup: &TestSetup,
+            peer_number: u8,
+            inbound: bool,
+            now: Timestamp,
+        ) -> PeerLoopHandler {
+            let state = setup.peer_loop_handler.global_state_lock.clone();
+            let address = get_dummy_socket_address(peer_number);
+            PeerLoopHandler::with_mocked_time(
+                setup.to_main_tx.clone(),
+                state.clone(),
+                pseudorandom_peer_id(&address),
+                socketaddr_to_multiaddr(address),
+                get_dummy_handshake_data_for_genesis(state.cli().network),
+                inbound,
+                now,
+            )
+        }
+
+        /// A notification of a block proposal for height 1, and the request
+        /// for that proposal.
+        async fn proposal_announcement(setup: &TestSetup) -> (PeerMessage, PeerMessage) {
+            let block1 = fake_valid_block_for_tests(
+                &setup.peer_loop_handler.global_state_lock,
+                StdRng::seed_from_u64(5550002).random(),
+            )
+            .await;
+            (
+                PeerMessage::BlockProposalNotification((&block1).into()),
+                PeerMessage::BlockProposalRequest(BlockProposalRequest::new(
+                    block1.body().mast_hash(),
+                )),
+            )
+        }
+
+        fn after(now: Timestamp, delay: Duration) -> Timestamp {
+            now + Timestamp::millis(u64::try_from(delay.as_millis()).unwrap())
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn stalled_announcer_is_punished() {
+            let cli = cli_args::Args::default_with_network(Network::Testnet(42));
+            let mut setup = genesis_setup(cli).await;
+            let (notification, request) = proposal_announcement(&setup).await;
+            let height = setup.genesis_block.header().height;
+            let now = Timestamp::now();
+            let mut bob = peer_loop_at(&setup, 6, false, now);
+
+            // Alice, the node's registered peer, announces and is asked.
+            setup.peer_loop_handler.mock_now = Some(now);
+            let alice_stream = Mock::new(vec![
+                Action::Read(notification.clone()),
+                Action::Write(request.clone()),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let alice_from_main = setup.peer_broadcast_tx.subscribe();
+            setup
+                .peer_loop_handler
+                .run(
+                    alice_stream,
+                    alice_from_main,
+                    &mut MutablePeerState::new(height),
+                )
+                .await
+                .unwrap();
+
+            // Bob announces too, and takes over once alice's request is stale.
+            let bob_stream = Mock::new(vec![
+                Action::Read(notification),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let bob_from_main = setup.peer_broadcast_tx.subscribe();
+            bob.run(
+                bob_stream,
+                bob_from_main,
+                &mut MutablePeerState::new(height),
+            )
+            .await
+            .unwrap();
+            let mut bob_stream_later = Mock::new(vec![Action::Write(request)]);
+            bob.mock_now = Some(after(now, BLOCK_REQUEST_TIMEOUT));
+            bob.request_due_objects(&mut bob_stream_later)
+                .await
+                .unwrap();
+            assert!(bob_stream_later.is_done());
+
+            // Alice's standing took the hit.
+            let alice_standing = setup
+                .peer_loop_handler
+                .global_state_lock
+                .peers()
+                .with_connected(|connected| connected[&setup.peer_loop_handler.peer_id].standing);
+            assert_eq!(
+                Some(NegativePeerSanction::StalledRequest),
+                alice_standing
+                    .latest_punishment
+                    .map(|(sanction, _)| sanction)
+            );
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn invalid_delivery_leaves_the_request_to_the_fallback() {
+            let cli = cli_args::Args::default_with_network(Network::Testnet(42));
+            let mut setup = genesis_setup(cli).await;
+            let block1 = fake_valid_block_for_tests(
+                &setup.peer_loop_handler.global_state_lock,
+                StdRng::seed_from_u64(5550003).random(),
+            )
+            .await;
+            let notification = PeerMessage::BlockProposalNotification((&block1).into());
+            let request = PeerMessage::BlockProposalRequest(BlockProposalRequest::new(
+                block1.body().mast_hash(),
+            ));
+            let mut corrupted = block1;
+            corrupted.set_header_height(BlockHeight::from(2u64));
+            let height = setup.genesis_block.header().height;
+            let now = Timestamp::now();
+            let mut bob = peer_loop_at(&setup, 6, false, now);
+
+            // Alice, the node's registered peer, announces the proposal, is
+            // asked, and delivers it with a corrupted header.
+            setup.peer_loop_handler.mock_now = Some(now);
+            let alice_stream = Mock::new(vec![
+                Action::Read(notification.clone()),
+                Action::Write(request.clone()),
+                Action::Read(PeerMessage::BlockProposal(Box::new(corrupted))),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let alice_from_main = setup.peer_broadcast_tx.subscribe();
+            setup
+                .peer_loop_handler
+                .run(
+                    alice_stream,
+                    alice_from_main,
+                    &mut MutablePeerState::new(height),
+                )
+                .await
+                .unwrap();
+
+            // Bob announces too, and takes over once alice's request is stale.
+            let bob_stream = Mock::new(vec![
+                Action::Read(notification),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let bob_from_main = setup.peer_broadcast_tx.subscribe();
+            bob.run(
+                bob_stream,
+                bob_from_main,
+                &mut MutablePeerState::new(height),
+            )
+            .await
+            .unwrap();
+            let mut bob_stream_later = Mock::new(vec![Action::Write(request)]);
+            bob.mock_now = Some(after(now, BLOCK_REQUEST_TIMEOUT));
+            bob.request_due_objects(&mut bob_stream_later)
+                .await
+                .unwrap();
+            assert!(bob_stream_later.is_done());
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn second_announcer_is_asked_only_after_the_first_stalls() {
+            let cli = cli_args::Args::default_with_network(Network::Testnet(42));
+            let setup = genesis_setup(cli).await;
+            let (notification, request) = proposal_announcement(&setup).await;
+            let height = setup.genesis_block.header().height;
+            let now = Timestamp::now();
+            let mut alice = peer_loop_at(&setup, 5, false, now);
+            let mut bob = peer_loop_at(&setup, 6, false, now);
+
+            // Alice announces first and is asked.
+            let alice_stream = Mock::new(vec![
+                Action::Read(notification.clone()),
+                Action::Write(request.clone()),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let alice_from_main = setup.peer_broadcast_tx.subscribe();
+            alice
+                .run(
+                    alice_stream,
+                    alice_from_main,
+                    &mut MutablePeerState::new(height),
+                )
+                .await
+                .unwrap();
+
+            // Bob announces the same proposal and is not asked.
+            let bob_stream = Mock::new(vec![
+                Action::Read(notification),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let bob_from_main = setup.peer_broadcast_tx.subscribe();
+            bob.run(
+                bob_stream,
+                bob_from_main,
+                &mut MutablePeerState::new(height),
+            )
+            .await
+            .unwrap();
+
+            // Alice does not deliver. Once her request is stale, Bob is asked.
+            let mut bob_stream_later = Mock::new(vec![Action::Write(request)]);
+            bob.request_due_objects(&mut bob_stream_later)
+                .await
+                .unwrap();
+            assert!(!bob_stream_later.is_done(), "not asked before the timeout");
+            bob.mock_now = Some(after(now, BLOCK_REQUEST_TIMEOUT));
+            bob.request_due_objects(&mut bob_stream_later)
+                .await
+                .unwrap();
+            assert!(bob_stream_later.is_done(), "asked after the timeout");
         }
     }
 
@@ -6889,8 +7191,7 @@ mod tests {
                     pseudorandom_peer_id(&peer_address),
                     socketaddr_to_multiaddr(peer_address),
                     handshake,
-                    true,
-                    1,
+                    false,
                     now,
                 );
                 let mut peer_state = MutablePeerState::new(handshake.tip_header.height);
@@ -6978,7 +7279,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 alice_hsd,
                 false,
-                1,
             );
             alice_peer_loop_handler
                 .run_wrapper(alice_p2p_messages, alice_main_to_peer_rx)
@@ -6988,10 +7288,8 @@ mod tests {
             drop(alice_peer_to_main_rx);
 
             let latest_sanction = alice
-                .lock_guard()
-                .await
-                .net
-                .get_peer_standing_from_database(peer_address.ip())
+                .peers()
+                .stored_standing(peer_address.ip())
                 .await
                 .unwrap();
             assert_eq!(
@@ -7043,7 +7341,6 @@ mod tests {
                 socketaddr_to_multiaddr(peer_address),
                 alice_hsd,
                 false,
-                1,
             );
             alice_peer_loop_handler
                 .run_wrapper(alice_p2p_messages, alice_main_to_peer_rx)
@@ -7053,10 +7350,8 @@ mod tests {
             drop(alice_peer_to_main_rx);
 
             let latest_sanction = alice
-                .lock_guard()
-                .await
-                .net
-                .get_peer_standing_from_database(peer_address.ip())
+                .peers()
+                .stored_standing(peer_address.ip())
                 .await
                 .unwrap();
             assert_eq!(
@@ -7182,7 +7477,6 @@ mod tests {
                 bob_multiaddr.clone(),
                 alice_hsd,
                 false,
-                1,
                 bob_tip.header().timestamp,
             );
             alice_peer_loop_handler.set_rng(StdRng::from_seed(alice_rng_seed));
