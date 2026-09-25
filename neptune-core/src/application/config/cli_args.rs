@@ -126,7 +126,7 @@ pub struct Args {
         value_name = "COUNT",
         value_parser = clap::value_parser!(u16).map(|u| usize::from(u)),
     )]
-    pub(crate) max_num_peers: usize,
+    pub max_num_peers: usize,
 
     /// Maximum number of peers to accept from each IP address.
     ///
@@ -612,6 +612,11 @@ pub struct Args {
     // to meaningfully suppress rapid reconnection attempts.
     #[clap(long, default_value = "1800", value_parser = duration_from_seconds_str)]
     pub reconnect_cooldown: Duration,
+
+    /// How often, in seconds, to reconnect to peers given as CLI arguments
+    /// whose connection was lost, and to disconnect from excess peers.
+    #[clap(long, default_value = "120", value_parser = duration_from_seconds_str)]
+    pub peer_maintenance_interval: Duration,
 
     /// Scan incoming blocks for inbound transactions.
     ///

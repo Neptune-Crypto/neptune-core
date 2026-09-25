@@ -81,7 +81,6 @@ use crate::state::GlobalStateLock;
 use crate::NETWORK_ACTOR_EXITED_EXIT_CODE;
 use crate::SUCCESS_EXIT_CODE;
 
-const PEER_DISCOVERY_INTERVAL: Duration = Duration::from_secs(2 * 60);
 const SYNC_REQUEST_INTERVAL: Duration = Duration::from_secs(3);
 const MEMPOOL_PRUNE_INTERVAL: Duration = Duration::from_secs(30 * 60);
 const MP_RESYNC_INTERVAL: Duration = Duration::from_secs(59);
@@ -1379,13 +1378,14 @@ impl MainLoopHandler {
         // Similarly, tasks performing network operations (e.g., peer discovery)
         // should probably not try to “catch up” if some ticks were missed.
 
-        // Don't run peer discovery immediately at startup since outgoing
-        // connections started from lib.rs may not have finished yet.
-        let mut peer_discovery_interval = time::interval_at(
-            Instant::now() + PEER_DISCOVERY_INTERVAL,
-            PEER_DISCOVERY_INTERVAL,
+        // Don't run peer maintenance immediately at startup since the
+        // initial connections may not have been established yet.
+        let peer_maintenance_period = self.global_state_lock.cli().peer_maintenance_interval;
+        let mut peer_maintenance_interval = time::interval_at(
+            Instant::now() + peer_maintenance_period,
+            peer_maintenance_period,
         );
-        peer_discovery_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        peer_maintenance_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         let mut block_sync_interval = time::interval(SYNC_REQUEST_INTERVAL);
         block_sync_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -1584,41 +1584,15 @@ impl MainLoopHandler {
                     main_loop_state.maybe_sync_loop = self.handle_sync_loop_message(sync_loop_msg, sync_loop).await;
                 }
 
-                // Handle peer discovery
-                _ = peer_discovery_interval.tick() => {
-                    log_slow_scope!(fn_name!() + "::select::peer_discovery_interval");
+                // Keep the set of peers as configured. Discovery of new
+                // peers is the libp2p network actor's job, through the DHT.
+                _ = peer_maintenance_interval.tick() => {
+                    log_slow_scope!(fn_name!() + "::select::peer_maintenance_interval");
 
-                    // Check number of peers we are connected to and connect to
-                    // more peers if needed.
-                    debug!("Timer: peer discovery job");
-
-                    let perform_discovery = if !self.global_state_lock.cli().network.performs_peer_discovery() {
-                        // this makes regtest mode behave in a local, controlled way
-                        // because no regtest nodes attempt to discover eachother, so the only
-                        // peers are those that are manually added.
-                        // see: https://github.com/Neptune-Crypto/neptune-core/issues/539#issuecomment-2764701027
-                        debug!("peer discovery disabled for network {}", self.global_state_lock.cli().network);
-                        false
-                    } else if self.global_state_lock.cli().restrict_peers_to_list {
-                        debug!("peer discovery disabled due to --restrict-peers-to-list");
-                        false
-                    } else {
-                        true
-                    };
-
-                    if perform_discovery {
-                        self.prune_peers().await?;
-                        self.reconnect().await?;
-                    }
+                    debug!("Timer: peer maintenance job");
+                    self.prune_peers().await?;
+                    self.reconnect().await?;
                 }
-
-                // // Handle synchronization (i.e. batch-downloading of blocks)
-                // _ = block_sync_interval.tick() => {
-                //     log_slow_scope!(fn_name!() + "::select::block_sync_interval");
-
-                //     trace!("Timer: block-synchronization job");
-                //     self.block_sync(&mut main_loop_state).await?;
-                // }
 
                 // Clean up mempool: remove stale / too old transactions
                 _ = mempool_cleanup_interval.tick() => {

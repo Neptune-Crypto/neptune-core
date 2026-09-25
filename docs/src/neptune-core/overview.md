@@ -63,9 +63,8 @@ A transaction that spends UTXOs managed by the client can be made by calling the
 For a working example, see the implementation of the `send_to_many()` RPC method.
 
 ## Scheduled Tasks in Main Loop
-Different tasks are scheduled in the main loop every N seconds. These currently handle: peer discovery, block (batch) synchronization, and mempoool cleanup.
-- Peer discovery: This is used to find new peers to connect to. The logic attempts to find peers that have a distance bigger than 2 in the network where distance 0 is defined as yourself; distance 1 are the peers you connect to at start up, and all incoming connections; distance 2 are your peers' peers and so on.
-- Synchronization: Synchronization is intended for nodes to catch up if they are more than N blocks behind the longest reported chain. When a client is in synchronization mode, it will batch-download blocks in sequential order to catch up with the longest reported chain.
+Different tasks are scheduled in the main loop every N seconds. These currently handle: peer maintenance, and mempoool cleanup.
+- Peer maintenance: Reconnects to peers given as CLI arguments whose connection was lost, and disconnects from excess peers. Discovery of new peers is the network actor's job, through the libp2p DHT.
 - Mempool cleanup: Remove from the mempool transactions that are more than 72 hours old.
 
 A task for recovering unsynced membership proofs would fit well in here.
