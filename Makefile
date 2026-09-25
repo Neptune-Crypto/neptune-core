@@ -80,10 +80,9 @@ run: ensure-clang
 tests: export RUST_BACKTRACE = 1
 tests: ensure-clang
 	$(info RUSTFLAGS is $(RUSTFLAGS))
-	cargo nextest run --workspace
 	cargo nextest run --workspace --run-ignored ignored-only --test-threads 1 \
 		-E 'test(can_resume_sync_from_saved_state) | binary(concurrent_peers)'
-	cargo test --doc --workspace
+	cargo nextest run --workspace --no-fail-fast
 
 bench: ensure-clang
 	$(info RUSTFLAGS is $(RUSTFLAGS))

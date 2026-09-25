@@ -824,12 +824,12 @@ impl MainLoopHandler {
                     ));
 
                     // Clone info from global state and release write lock ASAP.
-                    let peer_map = global_state_mut.net.peer_map.clone();
                     let network = global_state_mut.cli().network;
                     let current_height = global_state_mut.chain.tip_height();
                     let resume_please = !global_state_mut.cli().no_resume_sync;
                     let sync_dir = global_state_mut.cli().sync_dir.clone();
                     drop(global_state_mut);
+                    let peer_map = self.global_state_lock.peers().snapshot();
 
                     // Create sync loop with handle.
                     let genesis_block = Block::genesis(network);
@@ -1023,28 +1023,31 @@ impl MainLoopHandler {
                 }
             }
             PeerTaskToMain::DisconnectFromLongestLivedPeer => {
-                let global_state = self.global_state_lock.lock_guard().await;
-
-                // get all peers
-                let all_peers = global_state.net.peer_map.iter();
-
                 // filter out CLI peers
-                let cli_peers = global_state.cli().peers.iter().collect::<HashSet<_>>();
-                let disconnect_candidates = all_peers
-                    .filter(|(_id, info)| !cli_peers.contains(&info.address()))
-                    .filter(|p| multiaddr_to_socketaddr(&p.1.address()).is_some());
-
-                // find the one with the oldest connection
+                let cli_peers = self
+                    .global_state_lock
+                    .cli()
+                    .peers
+                    .iter()
+                    .collect::<HashSet<_>>();
                 let longest_lived_peer =
-                    disconnect_candidates.min_by(|(_, peer_info_left), (_, peer_info_right)| {
-                        peer_info_left
-                            .connection_established()
-                            .cmp(&peer_info_right.connection_established())
+                    self.global_state_lock.peers().with_connected(|connected| {
+                        connected
+                            .iter()
+                            .filter(|(_id, info)| !cli_peers.contains(&info.address()))
+                            .filter(|p| multiaddr_to_socketaddr(&p.1.address()).is_some())
+                            // find the one with the oldest connection
+                            .min_by(|(_, peer_info_left), (_, peer_info_right)| {
+                                peer_info_left
+                                    .connection_established()
+                                    .cmp(&peer_info_right.connection_established())
+                            })
+                            .map(|(peer_id, _peer_info)| *peer_id)
                     });
 
                 // tell to disconnect
-                if let Some((peer_id, _peer_info)) = longest_lived_peer {
-                    let pmsg = MainToPeerTask::Disconnect(*peer_id);
+                if let Some(peer_id) = longest_lived_peer {
+                    let pmsg = MainToPeerTask::Disconnect(peer_id);
                     self.main_to_peer_broadcast(pmsg);
                 }
             }
@@ -1134,26 +1137,21 @@ impl MainLoopHandler {
     /// surplus of incoming connections to provide their service more reliably.
     ///
     /// Never disconnects peers listed as CLI arguments.
-    ///
-    /// Locking:
-    ///   * acquires `global_state_lock` for read
-    async fn prune_peers(&self) -> Result<()> {
-        // fetch all relevant info from global state; don't hold the lock
+    fn prune_peers(&self) {
+        // copy the connected peers; don't hold the lock
         let cli_args = self.global_state_lock.cli();
-        let global_state = self.global_state_lock.lock_guard().await;
-        let connected_peers = global_state
-            .net
-            .peer_map
-            .iter()
-            .map(|(peer_id, peer_info)| (*peer_id, peer_info.clone()))
+        let connected_peers = self
+            .global_state_lock
+            .peers()
+            .snapshot()
+            .into_iter()
             .collect_vec();
-        drop(global_state);
 
         let num_peers = connected_peers.len();
         let max_num_peers = cli_args.max_num_peers;
         if num_peers <= max_num_peers {
             debug!("No need to prune any peer connections.");
-            return Ok(());
+            return;
         }
         warn!("Connected to {num_peers} peers, which exceeds the maximum ({max_num_peers}).");
 
@@ -1163,7 +1161,7 @@ impl MainLoopHandler {
             .all(|(_, p)| p.connection_is_outbound())
         {
             warn!("Not disconnecting from any peer because all connections are outbound.");
-            return Ok(());
+            return;
         }
 
         let num_peers_to_disconnect = num_peers - max_num_peers;
@@ -1180,23 +1178,15 @@ impl MainLoopHandler {
             let pmsg = MainToPeerTask::Disconnect(peer_id);
             self.main_to_peer_broadcast(pmsg);
         }
-
-        Ok(())
     }
 
     /// If necessary, reconnect to the peers listed as CLI arguments.
-    ///
-    /// Locking:
-    ///   * acquires `global_state_lock` for read
     async fn reconnect(&self) -> Result<()> {
         let connected_peers = self
             .global_state_lock
-            .lock_guard()
-            .await
-            .net
-            .peer_map
-            .iter()
-            .map(|(peer_id, peer_info)| (*peer_id, peer_info.clone()))
+            .peers()
+            .snapshot()
+            .into_iter()
             .collect_vec();
         let connected_peers_addresses = connected_peers
             .iter()
@@ -1482,7 +1472,7 @@ impl MainLoopHandler {
                     }
 
                     // Is this IP banned through database entry?
-                    let peer_banned = self.global_state_lock.lock_guard().await.net.peer_databases.peer_standings_by_ip.get(ip).await.is_some_and(|x| x.is_bad());
+                    let peer_banned = self.global_state_lock.peers().stored_standing(ip).await.is_some_and(|x| x.is_bad());
                     if peer_banned {
                         debug!("Banned peer {ip} attempted incoming connection. Hanging up.");
                         continue;
@@ -1590,7 +1580,7 @@ impl MainLoopHandler {
                     log_slow_scope!(fn_name!() + "::select::peer_maintenance_interval");
 
                     debug!("Timer: peer maintenance job");
-                    self.prune_peers().await?;
+                    self.prune_peers();
                     self.reconnect().await?;
                 }
 
@@ -2035,24 +2025,24 @@ impl MainLoopHandler {
                 // currently connected to them.
                 let mut maybe_network_command = None;
                 let mut maybe_peer_message: Option<MainToPeerTask> = None;
-                if let Some((peer_id, peer_info)) = self
-                    .global_state_lock()
-                    .lock_guard_mut()
-                    .await
-                    .net
-                    .peer_map
-                    .iter_mut()
-                    .find(|(_peer_id, peer_info)| peer_info.address() == multiaddr)
-                {
+
+                let connected_peer_id =
+                    self.global_state_lock()
+                        .peers()
+                        .with_connected_mut(|connected| {
+                            let (peer_id, peer_info) = connected
+                                .iter_mut()
+                                .find(|(_peer_id, peer_info)| peer_info.address() == multiaddr)?;
+                            peer_info.standing.standing = -peer_info.standing.peer_tolerance;
+                            Some(*peer_id)
+                        });
+                if let Some(peer_id) = connected_peer_id {
                     // Send `Ban` command to NetworkActor.
                     info!("Banning peer by PeerId {peer_id}.");
-                    maybe_network_command = Some(NetworkActorCommand::Ban(Either::Left(*peer_id)));
-
-                    // Max out peer's negative standing.
-                    peer_info.standing.standing = -peer_info.standing.peer_tolerance;
+                    maybe_network_command = Some(NetworkActorCommand::Ban(Either::Left(peer_id)));
 
                     // Disconnect.
-                    maybe_peer_message = Some(MainToPeerTask::Disconnect(*peer_id));
+                    maybe_peer_message = Some(MainToPeerTask::Disconnect(peer_id));
                 } else if let Some(ip_addr) = multiaddr.iter().find_map(|protocol| match protocol {
                     libp2p::multiaddr::Protocol::Ip4(ipv4_addr) => Some(IpAddr::V4(ipv4_addr)),
                     libp2p::multiaddr::Protocol::Ip6(ipv6_addr) => Some(IpAddr::V6(ipv6_addr)),
@@ -2099,10 +2089,8 @@ impl MainLoopHandler {
 
                     // Reset standing in database.
                     self.global_state_lock()
-                        .lock_guard_mut()
-                        .await
-                        .net
-                        .clear_ip_standing_in_database(ip_addr)
+                        .peers()
+                        .clear_stored_standing(ip_addr)
                         .await;
                 } else {
                     warn!("Cannot ban peer: failed to extract IP address. Nothing to hammer.");
@@ -2115,10 +2103,8 @@ impl MainLoopHandler {
 
                 // Reset standings.
                 self.global_state_lock()
-                    .lock_guard_mut()
-                    .await
-                    .net
-                    .clear_all_standings_in_database()
+                    .peers()
+                    .clear_all_stored_standings()
                     .await;
 
                 // Instruct NetworkActor to revoke bans.
@@ -2502,19 +2488,15 @@ mod tests {
             peer_to_main_rx,
             network_command_tx,
             network_event_rx,
-            mut state,
+            state,
             _own_handshake_data,
         ) = get_test_genesis_setup(num_init_peers_outgoing, cli)
             .await
             .unwrap();
         assert!(
-            state
-                .lock_guard()
-                .await
-                .net
-                .peer_map
-                .iter()
-                .all(|(_addr, peer)| peer.connection_is_outbound()),
+            state.peers().with_connected(|connected| connected
+                .values()
+                .all(|peer| peer.connection_is_outbound())),
             "Test assumption: All initial peers must represent outgoing connections."
         );
 
@@ -2522,10 +2504,7 @@ mod tests {
             let peer_address = SocketAddr::from_str(&format!("255.254.253.{i}:8080")).unwrap();
             let peer_id = pseudorandom_peer_id(&peer_address);
             state
-                .lock_guard_mut()
-                .await
-                .net
-                .peer_map
+                .peers()
                 .insert(peer_id, get_dummy_peer_incoming(peer_address));
         }
 
@@ -3061,7 +3040,7 @@ mod tests {
                 .set_cli(mocked_cli)
                 .await;
 
-            main_loop_handler.prune_peers().await.unwrap();
+            main_loop_handler.prune_peers();
             assert_eq!(4, main_to_peer_rx.len());
             for _ in 0..4 {
                 let peer_msg = main_to_peer_rx.recv().await.unwrap();
@@ -3095,7 +3074,7 @@ mod tests {
                 .set_cli(mocked_cli)
                 .await;
 
-            main_loop_handler.prune_peers().await.unwrap();
+            main_loop_handler.prune_peers();
             assert!(main_to_peer_rx.is_empty());
         }
     }
@@ -3288,13 +3267,7 @@ mod tests {
             // check sanity: at startup, we are connected to the initial number of peers
             assert_eq!(
                 usize::from(num_init_peers_outgoing),
-                main_loop_handler
-                    .global_state_lock
-                    .lock_guard()
-                    .await
-                    .net
-                    .peer_map
-                    .len()
+                main_loop_handler.global_state_lock.peers().len()
             );
 
             // randomize "connection established" timestamps
@@ -3303,34 +3276,31 @@ mod tests {
             let now_as_unix_timestamp = now.duration_since(UNIX_EPOCH).unwrap();
             main_loop_handler
                 .global_state_lock
-                .lock_guard_mut()
-                .await
-                .net
-                .peer_map
-                .iter_mut()
-                .for_each(|(_socket_address, peer_info)| {
-                    peer_info.set_connection_established(
-                        UNIX_EPOCH
-                            + Duration::from_millis(
-                                rng.random_range(0..(now_as_unix_timestamp.as_millis() as u64)),
-                            ),
-                    );
+                .peers()
+                .with_connected_mut(|connected| {
+                    for peer_info in connected.values_mut() {
+                        peer_info.set_connection_established(
+                            UNIX_EPOCH
+                                + Duration::from_millis(
+                                    rng.random_range(0..(now_as_unix_timestamp.as_millis() as u64)),
+                                ),
+                        );
+                    }
                 });
 
             // compute which peer will be dropped, for later reference
             let expected_drop_peer_socket_address = main_loop_handler
                 .global_state_lock
-                .lock_guard()
-                .await
-                .net
-                .peer_map
-                .iter()
-                .min_by(|l, r| {
-                    l.1.connection_established()
-                        .cmp(&r.1.connection_established())
+                .peers()
+                .with_connected(|connected| {
+                    connected
+                        .iter()
+                        .min_by(|l, r| {
+                            l.1.connection_established()
+                                .cmp(&r.1.connection_established())
+                        })
+                        .map(|(socket_address, _peer_info)| *socket_address)
                 })
-                .map(|(socket_address, _peer_info)| socket_address)
-                .copied()
                 .unwrap();
 
             // simulate incoming connection

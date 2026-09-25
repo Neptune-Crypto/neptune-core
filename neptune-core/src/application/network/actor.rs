@@ -1605,7 +1605,6 @@ impl NetworkActor {
         // Refuse connections to peers we are already connected to.
         if let Some(reason) =
             Self::already_connected_reason(&self.global_state_lock, peer_id, &remote_handshake)
-                .await
         {
             tracing::debug!(peer = %peer_id, "Dropping hijacked stream: {reason}.");
             drop(stream);
@@ -1634,24 +1633,23 @@ impl NetworkActor {
 
     /// Returns why a freshly handshaked peer must be refused because it is
     /// already connected, or `None` if it is not.
-    async fn already_connected_reason(
+    fn already_connected_reason(
         global_state_lock: &GlobalStateLock,
         peer_id: PeerId,
         remote_handshake: &HandshakeData,
     ) -> Option<&'static str> {
-        let instance_id = remote_handshake.instance_id;
-        global_state_lock
-            .lock(|state| {
-                let peer_map = &state.net.peer_map;
-                if peer_map.values().any(|pi| pi.instance_id() == instance_id) {
-                    Some("already connected to peer with this instance ID")
-                } else if peer_map.contains_key(&peer_id) {
-                    Some("already connected to peer with this peer ID")
-                } else {
-                    None
-                }
-            })
-            .await
+        global_state_lock.peers().with_connected(|connected| {
+            if connected
+                .values()
+                .any(|pi| pi.instance_id() == remote_handshake.instance_id)
+            {
+                Some("already connected to peer with this instance ID")
+            } else if connected.contains_key(&peer_id) {
+                Some("already connected to peer with this peer ID")
+            } else {
+                None
+            }
+        })
     }
 
     /// Handles events emitted by the AutoNAT behavior to determine the node's

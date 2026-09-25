@@ -74,7 +74,7 @@ async fn peer_activity_does_not_stall_any_loop() -> anyhow::Result<()> {
         readers.push(tokio::spawn(async move {
             let mut reads = 0usize;
             while !stop.load(Ordering::Relaxed) {
-                let _num_peers = gsl.lock(|s| s.net.peer_map.len()).await;
+                let _num_peers = gsl.peers().len();
                 let _tip_height = gsl.lock(|s| s.chain.tip_height()).await;
                 reads += 1;
                 tokio::time::sleep(Duration::from_millis(20)).await;
