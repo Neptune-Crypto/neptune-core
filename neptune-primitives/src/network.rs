@@ -82,15 +82,6 @@ impl Network {
         }
     }
 
-    /// indicates if peer discovery should be performed by nodes on this network
-    ///
-    /// - regtest: false
-    /// - mainnet and others: true
-    pub fn performs_peer_discovery(&self) -> bool {
-        // disable peer-discovery for regtest only (so far)
-        !self.is_reg_test()
-    }
-
     /// difficulty setting for the Genesis block
     pub fn genesis_difficulty(&self) -> Difficulty {
         match *self {
