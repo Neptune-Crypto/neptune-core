@@ -35,14 +35,8 @@ pub async fn two_nodes_connect_over_libp2p() -> anyhow::Result<()> {
     // confirms the connection went through libp2p.
     let alice_as_seen_by_bob = bob
         .gsl
-        .lock_guard()
-        .await
-        .net
-        .peer_map
-        .values()
-        .next()
-        .expect("bob has a peer")
-        .address();
+        .peers()
+        .with_connected(|connected| connected.values().next().expect("bob has a peer").address());
     assert!(
         alice_as_seen_by_bob
             .iter()
@@ -90,15 +84,12 @@ pub async fn three_nodes_form_complete_graph_over_libp2p() -> anyhow::Result<()>
     // Alice was never told about charlie through the CLI arguments. So her
     // entry of him in the peer map proves that a connection was established
     // through the libp2p peer discovery protocol.
-    let alice_peer_addresses = alice
-        .gsl
-        .lock_guard()
-        .await
-        .net
-        .peer_map
-        .values()
-        .map(|peer| peer.address())
-        .collect::<Vec<_>>();
+    let alice_peer_addresses = alice.gsl.peers().with_connected(|connected| {
+        connected
+            .values()
+            .map(|peer| peer.address())
+            .collect::<Vec<_>>()
+    });
     assert!(
         alice_peer_addresses.iter().any(|address| address
             .iter()

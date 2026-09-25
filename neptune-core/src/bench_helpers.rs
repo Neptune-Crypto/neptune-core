@@ -37,6 +37,7 @@ use tokio::sync::mpsc;
 use crate::api::export::GlobalStateLock;
 use crate::application::config::cli_args;
 use crate::application::loops::channel::RPCServerToMain;
+use crate::state::peers::Peers;
 use crate::state::wallet::wallet_configuration::WalletConfiguration;
 use crate::state::wallet::wallet_state::WalletState;
 use crate::state::GlobalState;
@@ -59,12 +60,13 @@ pub async fn devops_global_state_genesis(cli_args: cli_args::Args) -> GlobalStat
     let data_directory = benchmark_data_directory(cli_args.network).unwrap();
     let genesis = Block::genesis(cli_args.network);
     let premine_receiver = WalletEntropy::devnet_wallet();
+    let peers = Peers::initialize(&data_directory).await.unwrap();
     let gs = GlobalState::try_new(data_directory, genesis, cli_args, Some(premine_receiver))
         .await
         .unwrap();
     let (rpc_server_to_main_tx, _rpc_server_to_main_rx) =
         mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
-    GlobalStateLock::from_global_state(gs, rpc_server_to_main_tx)
+    GlobalStateLock::from_global_state(gs, rpc_server_to_main_tx, peers)
 }
 
 /// Wallet state synced to the genesis block for the specified network.

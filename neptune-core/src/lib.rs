@@ -89,6 +89,7 @@ use crate::application::network::channel::NetworkActorCommand;
 use crate::application::network::config::NetworkConfig;
 use crate::application::network::source_limits::SourceLimitsConfig;
 use crate::application::rpc::server::RPC;
+use crate::state::peers::Peers;
 use crate::state::wallet::wallet_state::WalletState;
 use crate::state::GlobalStateLock;
 
@@ -146,10 +147,12 @@ pub async fn initialize(
     )
     .await?;
 
+    let peers = Peers::initialize(&data_directory).await?;
+
     let (rpc_server_to_main_tx, rpc_server_to_main_rx) =
         mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
     let mut global_state_lock =
-        GlobalStateLock::from_global_state(global_state, rpc_server_to_main_tx.clone());
+        GlobalStateLock::from_global_state(global_state, rpc_server_to_main_tx.clone(), peers);
 
     // Ensure archival state is consistent.
     global_state_lock

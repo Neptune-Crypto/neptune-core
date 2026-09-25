@@ -315,7 +315,7 @@ impl GenesisNode {
         timeout_secs: u16,
     ) -> anyhow::Result<()> {
         let start = std::time::Instant::now();
-        while self.gsl.lock_guard().await.net.peer_map.len() < min_num_peers.into() {
+        while self.gsl.peers().len() < min_num_peers.into() {
             if start.elapsed() > std::time::Duration::from_secs(timeout_secs.into()) {
                 anyhow::bail!(
                     "connection(s) not established after {} seconds",
@@ -344,7 +344,7 @@ impl GenesisNode {
 
             connected_nodes_count = 0; // reset to 0 each iteration
             for node in nodes {
-                if node.gsl.lock_guard().await.net.peer_map.len() == nodes.len() - 1 {
+                if node.gsl.peers().len() == nodes.len() - 1 {
                     connected_nodes_count += 1;
                 }
             }
