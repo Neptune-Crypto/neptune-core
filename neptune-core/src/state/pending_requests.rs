@@ -40,6 +40,10 @@ pub(crate) enum AnnouncedObject {
         proof_quality: TransactionProofQuality,
         mutator_set_hash: Digest,
     },
+    LinkTransaction {
+        txid: TransactionKernelId,
+        mutator_set_hash: Digest,
+    },
 }
 
 impl AnnouncedObject {
@@ -49,7 +53,9 @@ impl AnnouncedObject {
             AnnouncedObject::Block { .. } | AnnouncedObject::BlockProposal(_) => {
                 BLOCK_REQUEST_TIMEOUT
             }
-            AnnouncedObject::Transaction { .. } => TRANSACTION_REQUEST_TIMEOUT,
+            AnnouncedObject::Transaction { .. } | AnnouncedObject::LinkTransaction { .. } => {
+                TRANSACTION_REQUEST_TIMEOUT
+            }
         }
     }
 }

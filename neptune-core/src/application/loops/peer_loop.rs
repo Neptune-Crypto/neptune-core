@@ -207,6 +207,7 @@ impl PeerLoopHandler {
                     PeerMessage::BlockProposalRequest(BlockProposalRequest::new(body_mast_hash))
                 }
                 AnnouncedObject::Transaction { txid, .. } => PeerMessage::TransactionRequest(txid),
+                AnnouncedObject::LinkTransaction { txid, .. } => PeerMessage::LinkTxRequest(txid),
             };
             peer.send(request).await?;
         }
@@ -2061,27 +2062,28 @@ impl PeerLoopHandler {
                 )
                 .await;
 
+                // Only the proof can differ between peers' copies of the
+                // announced transaction, so unless the proof is what failed,
+                // no other announcer needs to be asked. The alternative is to
+                // keep requesting transactions that will be rejected.
+                if !matches!(admission, Err(TxAdmissionError::Invalid)) {
+                    self.global_state_lock
+                        .pending_requests()
+                        .resolve(&announced);
+                }
+
                 if let Err(rejection) = admission {
                     let sanction = Self::sanction_for_inadmissible(
                         &transaction.kernel,
                         &recent_mutator_sets,
                         rejection,
                     );
-                    match sanction {
-                        Some(sanction) => self.punish(sanction).await?,
-                        // The transaction itself is fine, so the peer delivered
-                        // what it announced.
-                        None => self
-                            .global_state_lock
-                            .pending_requests()
-                            .resolve(&announced),
+                    if let Some(sanction) = sanction {
+                        self.punish(sanction).await?;
                     }
 
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
-                self.global_state_lock
-                    .pending_requests()
-                    .resolve(&announced);
 
                 // Otherwise, relay to main
                 let pt2m_transaction = PeerTaskToMainTransaction {
@@ -2197,6 +2199,11 @@ impl PeerLoopHandler {
                     }
                 }
 
+                let announced = AnnouncedObject::LinkTransaction {
+                    txid: transfer_link_tx.kernel.kernel.txid(),
+                    mutator_set_hash: transfer_link_tx.kernel.kernel.mutator_set_hash,
+                };
+
                 let num_inputs: u64 = transfer_link_tx.kernel.kernel.inputs.len() as u64;
                 if !self
                     .global_state_lock
@@ -2273,6 +2280,16 @@ impl PeerLoopHandler {
                 )
                 .await;
 
+                // Only the proof can differ between peers' copies of the
+                // announced link transaction, so unless the proof is what
+                // failed, no other announcer needs to be asked. the alternative
+                // is to keep requesting objects that will be rejected.
+                if !matches!(admission, Err(TxAdmissionError::Invalid)) {
+                    self.global_state_lock
+                        .pending_requests()
+                        .resolve(&announced);
+                }
+
                 if let Err(rejection) = admission {
                     let sanction = Self::sanction_for_inadmissible(
                         &link_tx.kernel.kernel,
@@ -2324,6 +2341,21 @@ impl PeerLoopHandler {
                         debug!("link transaction refers to non-canonical mutator set state");
                         return Ok(KEEP_CONNECTION_ALIVE);
                     }
+                }
+
+                // Request the actual `LinkTx` from peer, unless another peer
+                // task is already fetching it.
+                let link_transaction = AnnouncedObject::LinkTransaction {
+                    txid: link_tx_notification.txid,
+                    mutator_set_hash: link_tx_notification.mutator_set_hash,
+                };
+                let request_now = self
+                    .global_state_lock
+                    .pending_requests()
+                    .record_announcement(link_transaction, self.announcer(), self.system_time());
+                if !request_now {
+                    debug!("link transaction announcement recorded; not requesting it now");
+                    return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
                 debug!("requesting link transaction from peer");
@@ -6853,11 +6885,16 @@ mod tests {
     mod pending_requests {
         use std::time::Duration;
 
+        use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier;
+        use neptune_consensus::transaction::Transaction;
+        use neptune_mempool::transaction_kernel_id::TransactionKernelId;
+        use neptune_p2p::peer::link_tx_notification::LinkTxNotification;
         use neptune_p2p::peer::peer_info::pseudorandom_peer_id;
 
         use super::block_proposals::genesis_setup;
         use super::block_proposals::TestSetup;
         use super::*;
+        use crate::state::pending_requests::TRANSACTION_REQUEST_TIMEOUT;
 
         /// A peer loop for another peer of the same node, at a mocked time.
         fn peer_loop_at(
@@ -7067,6 +7104,165 @@ mod tests {
                 .unwrap();
             assert!(!bob_stream_later.is_done(), "not asked before the timeout");
             bob.mock_now = Some(after(now, BLOCK_REQUEST_TIMEOUT));
+            bob.request_due_objects(&mut bob_stream_later)
+                .await
+                .unwrap();
+            assert!(bob_stream_later.is_done(), "asked after the timeout");
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn rejected_delivery_keeps_the_fallback_only_for_a_bad_proof() {
+            for kernel_is_rejected in [false, true] {
+                let cli = cli_args::Args::default_with_network(Network::Testnet(42));
+                let mut setup = genesis_setup(cli).await;
+                let height = setup.genesis_block.header().height;
+                let now = Timestamp::now();
+                let transaction = invalid_empty_single_proof_transaction();
+                let coinbase = kernel_is_rejected.then_some(NativeCurrencyAmount::coins(1));
+                let transaction = Transaction {
+                    kernel: TransactionKernelModifier::default()
+                        .mutator_set_hash(
+                            setup
+                                .genesis_block
+                                .mutator_set_accumulator_after()
+                                .unwrap()
+                                .hash(),
+                        )
+                        .timestamp(now)
+                        .coinbase(coinbase)
+                        .modify(transaction.kernel),
+                    proof: transaction.proof,
+                };
+                let notification: TransactionNotification = (&transaction).try_into().unwrap();
+                let notification = PeerMessage::TransactionNotification(notification);
+                let request = PeerMessage::TransactionRequest(transaction.kernel.txid());
+                let mut bob = peer_loop_at(&setup, 6, false, now);
+
+                // Alice, the node's registered peer, announces and is asked.
+                setup.peer_loop_handler.mock_now = Some(now);
+                let alice_stream = Mock::new(vec![
+                    Action::Read(notification.clone()),
+                    Action::Write(request.clone()),
+                    Action::Read(PeerMessage::Bye),
+                ]);
+                let alice_from_main = setup.peer_broadcast_tx.subscribe();
+                setup
+                    .peer_loop_handler
+                    .run(
+                        alice_stream,
+                        alice_from_main,
+                        &mut MutablePeerState::new(height),
+                    )
+                    .await
+                    .unwrap();
+
+                // Bob announces too, and is not asked while Alice's request is
+                // in flight.
+                let bob_stream = Mock::new(vec![
+                    Action::Read(notification),
+                    Action::Read(PeerMessage::Bye),
+                ]);
+                let bob_from_main = setup.peer_broadcast_tx.subscribe();
+                bob.run(
+                    bob_stream,
+                    bob_from_main,
+                    &mut MutablePeerState::new(height),
+                )
+                .await
+                .unwrap();
+
+                // Alice delivers, and is punished since the delivery is rejected.
+                let delivery_stream = Mock::new(vec![
+                    Action::Read(PeerMessage::Transaction(Box::new(
+                        (&transaction).try_into().unwrap(),
+                    ))),
+                    Action::Read(PeerMessage::Bye),
+                ]);
+                let delivery_from_main = setup.peer_broadcast_tx.subscribe();
+                setup
+                    .peer_loop_handler
+                    .run(
+                        delivery_stream,
+                        delivery_from_main,
+                        &mut MutablePeerState::new(height),
+                    )
+                    .await
+                    .unwrap();
+
+                let mut bob_stream_later = Mock::new(vec![Action::Write(request)]);
+                bob.mock_now = Some(after(now, TRANSACTION_REQUEST_TIMEOUT));
+                bob.request_due_objects(&mut bob_stream_later)
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    !kernel_is_rejected,
+                    bob_stream_later.is_done(),
+                    "asked after the timeout only when a bad proof was delivered"
+                );
+            }
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn link_transaction_is_requested_from_one_announcer_at_a_time() {
+            let cli = cli_args::Args::default_with_network(Network::Testnet(42));
+            let setup = genesis_setup(cli).await;
+            let height = setup.genesis_block.header().height;
+            let mutator_set_hash = setup
+                .genesis_block
+                .mutator_set_accumulator_after()
+                .unwrap()
+                .hash();
+            let txid = TransactionKernelId::default();
+            let notification = PeerMessage::LinkTxNotification(LinkTxNotification {
+                txid,
+                mutator_set_hash,
+                fee: NativeCurrencyAmount::coins(1),
+                num_inputs: 1,
+                num_outputs: 1,
+                num_thruputs: 1,
+            });
+            let request = PeerMessage::LinkTxRequest(txid);
+            let now = Timestamp::now();
+            let mut alice = peer_loop_at(&setup, 5, false, now);
+            let mut bob = peer_loop_at(&setup, 6, false, now);
+
+            // Alice announces first and is asked.
+            let alice_stream = Mock::new(vec![
+                Action::Read(notification.clone()),
+                Action::Write(request.clone()),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let alice_from_main = setup.peer_broadcast_tx.subscribe();
+            alice
+                .run(
+                    alice_stream,
+                    alice_from_main,
+                    &mut MutablePeerState::new(height),
+                )
+                .await
+                .unwrap();
+
+            // Bob announces the same link transaction and is not asked.
+            let bob_stream = Mock::new(vec![
+                Action::Read(notification),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let bob_from_main = setup.peer_broadcast_tx.subscribe();
+            bob.run(
+                bob_stream,
+                bob_from_main,
+                &mut MutablePeerState::new(height),
+            )
+            .await
+            .unwrap();
+
+            // Alice does not deliver. Once her request is stale, Bob is asked.
+            let mut bob_stream_later = Mock::new(vec![Action::Write(request)]);
+            bob.request_due_objects(&mut bob_stream_later)
+                .await
+                .unwrap();
+            assert!(!bob_stream_later.is_done(), "not asked before the timeout");
+            bob.mock_now = Some(after(now, TRANSACTION_REQUEST_TIMEOUT));
             bob.request_due_objects(&mut bob_stream_later)
                 .await
                 .unwrap();
