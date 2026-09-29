@@ -829,8 +829,8 @@ addition record because two orders with identical terms and identical
 randomnesses commit to the same record and both can be confirmed — which the
 node's own RPC documents, warning that a query by addition record can return
 several blocks. A leaf index is assigned by the AOCL and is unique, and it is
-what `restore_membership_proof` (`archival_mutator_set.rs:238`) needs to fill
-the order anyway.
+also the last ingredient of the order UTXO's absolute index set, which is how
+the book recognizes the block that spends it.
 
 **The composer's query is a scan.** It asks for the largest `X` among the
 orders demanding exactly this block's time-locked subsidy, and that amount is
@@ -846,7 +846,8 @@ demanded amount and keep a queue on `X` within each bucket.
 
 **Verify on insert, not on query.** An announcement is a hint (§4.3, §7.3), so
 admitting one to the index means rebuilding the lock script from it, computing
-the order UTXO's addition record, and finding that record in the AOCL. Done once
+the order UTXO's addition record, and finding that record among the outputs of
+the announcement's own block (§4.10). Done once
 when the announcement is first seen, a row in the index is a verified order, and
 the composer building a template can take the top of the queue without checking
 anything.
@@ -856,61 +857,59 @@ is work an attacker chooses: an announcement is a permissionless write, and
 checking one means building a Triton program of `K` addition records and
 hashing it. That cannot sit inside the write that sets the tip, where every
 other consumer of the node waits behind it. So the driver is a task of its own.
-It holds its own tip, and when the node's tip moves it asks the archival state
-for the path between the two — `find_path`
-(`neptune-archive/src/archival_state.rs:215`) returns the blocks to leave, the
-last common ancestor, and the blocks to take — then rolls the book back to that
-ancestor and applies the arriving blocks. The wallet already restores
-membership proofs this way.
 
-**The node tells the driver only that the tip moved.** `set_new_tip` sends the
-new tip's digest on a `tokio::sync::watch` channel, and does nothing else for
-the driver. A watch channel holds only its latest value and sending on it never
-waits, so a slow driver cannot hold up the write that sets the tip. Missed
-notifications cost nothing: if three tips go by while the driver is busy, it
-sees only the last, and one `find_path` from its own tip covers all three. The
-composer reaches the book through a handle to the same task, by sending a
-request carrying the demanded amount and awaiting the orders `demanding`
-returns. The task, and so the book, runs only on an archival node, for the
-reason given at the end of this section.
+**The node sends the driver how the tip moved.** Every time `set_new_tip` runs,
+it sends each subscribed driver a `TipMoved` event: the last block the old and
+the new tip share, the abandoned blocks above it, and the blocks after it up to
+the new tip. When the tip extends, that is the old tip and the one new block.
+After a reorganization it is the whole connecting path, both halves, which the
+node works out, since the node is what just switched branches. The order book
+needs only the shared block from the abandoned half, because it keeps closed
+orders and reopens them by height, but another protocol may need the
+abandoned blocks themselves, so the event carries them. The driver never reads a block the
+event did not bring, so it keeps no history and asks the node for none. The
+channel is unbounded and sending on it never waits, so a slow driver cannot
+hold up the write that sets the tip; an event is never dropped, because a book
+that missed the block spending an order would go on listing it. The composer
+reaches the book through a handle to the same task, by sending a query and
+awaiting the answer, which the task gives between two events.
 
 The book therefore trails the node's tip by however long verification takes. An
 order confirmed in block *h* cannot be filled before block *h+1* in any case, so
 a driver that keeps up with block time costs a composer nothing, and one that
 falls behind costs it orders it would otherwise have filled, never a wrong fill.
 
-**On a reorg, roll back the affected blocks.** The node has them. The mempool's
-answer to a reorg is to clear itself (`mempool.rs:1324-1333`), which is fine for
-transactions that will be re-broadcast, and wrong here: an order can be six
-months old, and clearing means rescanning a hundred thousand blocks to rebuild.
-Rolling back is possible because the index is derived entirely from block data —
-an order lost this way is recoverable, unlike wallet state, because its
-announcement is on the chain. A rescan remains the fallback of last resort.
+**On a reorg, roll back to the shared block.** The book only has to notice that
+a reorganization happened, which it does because the event's shared block is
+not its tip, and roll back to it. Closed entries stay in the book for that
+reason (§4.10). The mempool's answer to a reorg is to clear itself
+(`mempool.rs:1324-1333`), which is fine for transactions that will be
+re-broadcast, and wrong here: nothing re-broadcasts an order, and a book does
+not replay history to find it again.
+
+**A book knows only the orders placed after it was created.** A node that
+starts a book does not go looking for older orders. The cost is that a freshly
+started composer sees an order book that fills up over an order's shelf life of
+six months rather than at once, and what it buys is that no part of the book
+needs a block the node has not just been sent.
 
 **Everyone else asks the node.** An RPC returning open orders keeps explorers
 and third-party wallets from reimplementing any of the above.
 
-**Indexing and filling both need archival state, and it is the same
-requirement.** Verifying an order on insert means showing that the order UTXO's
-addition record is a leaf of the AOCL, and a light node holds only the MMR's
-peaks. Filling one means building a mutator-set membership proof for a UTXO the
-composer does not own, and `restore_membership_proof`
-(`archival_mutator_set.rs:238`) — which takes the item, both randomnesses and
-the AOCL leaf index, all four public for an order — is a method on the archival
-mutator set.
+**Nothing here needs archival state.** Admitting an order needs its own
+block's outputs, retiring one needs the inputs of the block that spends it, and
+both arrive in events. So a light node can index, as well as place and cancel
+orders, which are ordinary wallet operations on its own UTXOs.
 
-The alternative is for the proposer to publish a membership proof alongside the
-order. It does not help. A membership proof goes stale with every block, so
-whoever holds it must roll it forward through every subsequent mutator-set
-update, for every open order, for as long as the order stands. That trades an
-archival node for per-block work proportional to the size of the order book,
-which is a bad trade for a node that fills occasionally and no trade at all for
-one that fills often.
-
-So: a light node can place an order and cancel one, because both are ordinary
-wallet operations on its own UTXOs. It cannot fill and it cannot index. That is
-no new class of burden — a composer already carries the mempool and produces
-single proofs — but it should be said out loud.
+**Filling needs a membership proof, and the wallet keeps it.** Spending the
+order UTXO needs a mutator-set membership proof for a UTXO the composer does
+not own. Every ingredient is public — the item, both randomnesses and the AOCL
+leaf index — so a wallet can keep one from the moment the order is confirmed,
+the same way it keeps them for its own UTXOs: it proves membership against the
+accumulator of the block that confirmed the order and updates the proof with
+every block after. The driver hands the wallet each order it admits and each it
+retires. The cost is per-block work in proportion to the number of open orders,
+and it is borne only by nodes that compose.
 
 ### 4.9 How a composer executes a fill
 
@@ -981,7 +980,8 @@ special handling.
 
 **What the composer checks before proving.** The index verified the order when
 it admitted it (§4.8), but a block may have arrived since, so re-check at the
-point of spending: the membership proof against the current mutator set, the
+point of spending: the wallet's membership proof against the current mutator
+set (§4.8), the
 rebuilt lock script's hash against the UTXO's own, `Y` against this block's
 time-locked subsidy, and `k` against §4.6's bound with its headroom. These are
 cheap next to proving, and they are the boundary where the composer commits
@@ -1007,10 +1007,11 @@ building it later costs a day rather than a rewrite.
 *driver* touches the chain: it finds candidate announcements, decodes them under
 the schema `pair_id` names, and performs §7.3's check, which means rebuilding the
 lock script, deriving the order UTXO's addition record, and finding that record
-in the AOCL — whose position is the leaf index the row is then keyed by, so the
-identifier falls out of the verification rather than costing a second lookup. A
-*book* holds what survived and answers questions about it. Only the driver needs
-archival state, and only the book needs to be fast to query.
+among the outputs of the announcement's block — whose position gives the leaf
+index the row is then keyed by, so the identifier falls out of the verification
+rather than costing a second lookup. A *book* holds what survived and answers
+questions about it. Only the driver reads blocks, and only the book needs to be
+fast to query.
 
 **An announcement names a UTXO in its own block.** The driver verifies against
 the block it was handed and nothing else: it rebuilds the lock script from the
@@ -1022,13 +1023,12 @@ it.
 
 The rule costs a proposer nothing, because one transaction creates the order
 UTXO and carries the announcement. What it buys is that the book is a function
-of the blocks alone: a cold start is a replay, a reorg is a rollback, and
-neither needs an index. The alternative — an announcement free to name a UTXO
-confirmed at any earlier height — is a query by addition record, which needs
-`--utxo-index`, which is capped at `MAX_NUM_BLOCKS_IN_LOOKUP_LIST` blocks,
-which is shorter than an order's shelf life. An announcement whose record is
-not among its block's outputs is not an order, and a conforming consumer does
-not list it.
+of the blocks it is sent: a new block is an update, a reorg is a rollback, and
+neither needs an index or a block from the past. The alternative — an
+announcement free to name a UTXO confirmed at any earlier height — is a query
+by addition record against the whole AOCL, which a light node cannot answer. An
+announcement whose record is not among its block's outputs is not an order,
+and a conforming consumer does not list it.
 
 **Three types, not one, and each boundary adds information from its own
 source.** An order is written once and read twice, and what it is called at each
@@ -1054,7 +1054,7 @@ on the chain. That step *is* §7.3's check.
 
 So the type boundary and the process boundary are one boundary. The driver is
 precisely the part that turns a logical order into a row, and it is the only
-part that needs archival state. Above the line is decoding, below it is storage
+part that reads blocks. Above the line is decoding, below it is storage
 and queries, and that is why a book that performs no chain lookups is
 nonetheless correct.
 
@@ -1279,28 +1279,13 @@ incomplete, never wrong.
 Open and closed entries share one map, which makes rollback two plain steps:
 remove every entry opened above `luca`, then clear `closed_in` on every
 entry closed above it. An entry opened and closed on the abandoned branch falls
-to the first step regardless of the second. A rescan stays the fallback of last
-resort (§4.8).
+to the first step regardless of the second.
 
 **Two exits, and only one of them arrives as an announcement.** Orders enter on
 a confirmed announcement and leave when the order UTXO is spent, which is a
 removal record rather than an announcement, and covers a fill and a cancel
 alike. A driver that watches only announcements builds a book that grows and
 never shrinks.
-
-**What the driver can use today.** A node run with `--utxo-index`, which also
-requires archival mode, exposes four methods under the `Utxoindex` namespace
-(`neptune-rpc/api/src/api/rpc.rs`). `block_heights_by_flags` answers "which
-blocks carry orders for this pair", because the node's announcement-flag key is
-the first two elements of an announcement, which is precisely this design's flag
-and `pair_id`. `block_heights_by_addition_records` confirms an order UTXO was
-created, and `block_heights_by_absolute_index_sets` reports that one was spent.
-Two cautions: the flag query documents that it may return results from orphaned
-blocks, where the other two promise canonical results, so discovery yields
-candidates and the addition-record query settles them; and the per-flag block
-list is capped at `MAX_NUM_BLOCKS_IN_LOOKUP_LIST`, roughly two months of blocks,
-which is shorter than an order's shelf life, so the flag query serves live sync
-and a bounded backfill rather than a cold scan of deep history.
 
 **Two ways a driver talks to the node, and which protocol uses which.** A
 driver can run inside the node, as a tokio task the node holds a handle to, or
@@ -1316,19 +1301,65 @@ of the two parties to every SOFuN trade, and the fill has to be built into the
 coinbase transaction the composer is already assembling (§4.9), so its driver
 runs inside the node as a task.
 
-Both drivers receive the same notification, that the tip moved, and only the
-way they fetch the path differs. The task calls `find_path` on the archival
-state directly. A separate process needs two things the node does not offer
-yet: a subscription endpoint that sends the notification, and an RPC that
-returns what `find_path` returns, since the `Utxoindex` queries above cannot
-cover a cold start. Neither is worth building before a second protocol needs
-it. Everything else — decoding, §7.3's check, `apply` and `roll_back_to` — is
-the same code in both, and lives in this crate.
+Both drivers receive the same events, and only the way the events reach them
+differs. The task subscribes to `GlobalState` directly. A separate process
+needs a subscription endpoint that sends it the same events, which is not
+worth building before a second protocol needs it. Everything else is the same
+code in both, and lives in this crate.
+
+Nothing about the events or the loop that consumes them is specific to orders,
+and every protocol layered on Neptune follows the chain the same way. So both
+live in `neptune_defi::driver`, and a protocol supplies only the state the
+driver keeps in step with the chain. For standing swap orders that state is
+the book, and its `on_tip_moved` is a rollback to the event's ancestor followed by `observe` and
+`apply` on every arriving block:
+
+```rust
+// neptune_defi::driver::chain
+
+/// The tip moved from the old tip to the new one. `ancestor` is the last
+/// block they share, `leaving` the abandoned blocks above it from the old tip
+/// down, and `arriving` the blocks after it up to the new tip, oldest first.
+pub struct TipMoved {
+    pub ancestor: BlockId,
+    pub leaving: Vec<ObservedBlock>,
+    pub arriving: Vec<ObservedBlock>,
+}
+
+/// What an overlay protocol needs to know about one block.
+pub struct ObservedBlock {
+    pub id: BlockId,
+    pub parent: Digest,
+    pub first_leaf_index: u64,
+    pub announcements: Vec<Announcement>,
+    pub outputs: Vec<AdditionRecord>,
+    pub spent: Vec<AbsoluteIndexSet>,
+}
+
+// neptune_defi::driver
+
+/// State kept in step with the chain by a driver.
+pub trait Subscriber {
+    fn on_tip_moved(&mut self, event: TipMoved);
+}
+
+/// A driver that keeps `state` in step with `events`, and a handle whose
+/// `query(|state| ...)` answers between two events. The caller spawns the
+/// future.
+pub fn driver<F: Subscriber + Send + 'static>(
+    state: F,
+    events: mpsc::UnboundedReceiver<TipMoved>,
+) -> (DriverHandle<F>, impl Future<Output = ()> + Send);
+
+// neptune_defi::standing_swap_order::observe
+
+impl<C: Swappable> Subscriber for OrderBook<C> { ... }
+```
 
 **What is reversible, and what is not.** The process boundary is the cheapest
 thing here: discovery, validation, `apply` and `roll_back_to` are the same logic
-whether a local archival state drives them or a subscription does, and only the
-trigger differs. What is permanent is the wire format of §4.3 — the flag value,
+whether the node's own events drive them or a subscription does, and only the
+channel differs. What is permanent is the wire format of §4.3 — the flag value,
 how `pair_id` is derived, the 28 elements and their two readings, the reverse
 field order, and `padding` being zero. Once orders exist on mainnet
 under generic version 1 or SOFuN version 0, those cannot be changed without a
@@ -1339,8 +1370,8 @@ depends on `neptune-consensus` and `neptune-primitives` and on nothing else in
 the tree, so a separate process can link it unchanged. Never add an edge
 pointing at node internals, which in particular means block processing must not
 call into the book. `apply` and `roll_back_to` take data, not a `Block` and not
-a handle to node state, so archival state can drive them now and a subscription
-later without the book learning which.
+a handle to node state, so the node's events can drive them now and a
+subscription later without the book learning which.
 
 **Build nothing for mempool yet.** Going from "an order is in the book" to "an
 order has a state" is a mechanical change when the time comes, and a
@@ -1553,30 +1584,36 @@ randomness per order.
       own pair stated once (§4.3)
 - [x] Announcement generator: the envelope, then the body, read back by
       `recognize` in a round-trip proptest (§4.3)
-- [ ] Order-announcement / lock-script consistency check (§7.3) as a library
-      function, usable by the accepter and by any validator of a fill
-- [ ] Order index in the node: insert-time verification, and the composer's
+- [x] Order-announcement / lock-script consistency check (§7.3) as a library
+      function: `StandingSwapOrder::order_utxo`, whose addition record an
+      accepter or a validator compares with the UTXO being spent
+- [x] Order index in the node: insert-time verification, and the composer's
       query by `Y` answered by a scan (§4.8)
 - [x] The book takes `BlockUpdate` and performs no chain lookups; a row holds a
       `StandingSwapOrder` rather than repeating its fields (§4.10)
-- [ ] The driver, which is the other half of that split: candidate
+- [x] The driver, which is the other half of that split: candidate
       announcements, §7.3's check against the outputs of the announcement's own
       block, and the AOCL leaf index a row is keyed by (§4.10)
-- [ ] The driver as a task of its own, off the write that sets the tip, holding
-      its own tip and catching up through `find_path` (§4.8)
-- [ ] `set_new_tip` sends the new tip's digest on a watch channel, and never
-      waits on the driver (§4.8)
-- [ ] The composer's request for the orders demanding an amount, answered by
-      the task through its handle (§4.8)
+- [x] The driver's event loop written once, generic over any `Subscriber`, and run by the node as a task of its own, off the
+      write that sets the tip (§4.8, §4.10)
+- [x] `set_new_tip` sends every subscriber the path from the previous tip to
+      the new one, and never waits on a subscriber (§4.8)
+- [x] The composer's queries, answered by the task between events through its
+      handle (§4.8)
+- [x] No part of the book or the driver reads archival state; a book knows the
+      orders placed after it was created (§4.8)
+- [ ] The composer's wallet keeps a membership proof for every open order the
+      driver hands it, and drops it when the order closes (§4.8)
 - [ ] Deferred until a second protocol needs it: a subscription endpoint for
-      drivers in separate processes, and an RPC returning what `find_path`
-      returns (§4.10)
+      drivers in separate processes (§4.10)
 - [x] Orders retired on a spent order UTXO, not only admitted on an
       announcement (§4.10)
-- [ ] A fill and a cancel tested against chain data, which waits on the driver
+- [x] An order opened by its own block, closed by a block spending its UTXO,
+      and reopened by a reorganization abandoning that block, tested against
+      blocks set as the node's tip
+- [ ] A fill and a cancel through the lock script, tested against chain data
 - [x] Book rollback on reorg, and an update that does not extend the tip
       rejected rather than applied (§4.10)
-- [ ] Rescan fallback in the node
 - [x] Closed entries retained for rollback and pruned once their closing block
       lies deeper than a depth given when the book is built (§4.10)
 - [ ] `neptune-defi` still depends on nothing below `neptune-consensus`, checked
