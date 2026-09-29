@@ -212,18 +212,13 @@ impl PeerLoopHandler {
             peer.send(request).await?;
         }
 
-        // Punish peers for announced-but-not-delivered objects.
-        // A stalled peer that has since disconnected is not in the peer map
-        // and cannot be punished; a stalled peer that gets banned is
-        // disconnected by the main loop.
-        let stalled_peers = self
+        // Fetch the stalls this peer is responsible for
+        let stalls = self
             .global_state_lock
             .pending_requests()
-            .take_stalled_peers();
-        for stalled_peer in stalled_peers {
-            let _ = self
-                .punish_peer(stalled_peer, NegativePeerSanction::StalledRequest)
-                .await;
+            .take_stalls(self.peer_id);
+        for _ in 0..stalls {
+            self.punish(NegativePeerSanction::StalledRequest).await?;
         }
 
         Ok(())
@@ -233,23 +228,19 @@ impl PeerLoopHandler {
     ///
     /// Return `Err` if the peer in question is (now) banned.
     async fn punish(&self, reason: NegativePeerSanction) -> Result<()> {
-        self.punish_peer(self.peer_id, reason).await
-    }
-
-    /// Punish any connected peer for bad behavior.
-    ///
-    /// Return `Err` if the peer in question is (now) banned, or not connected.
-    async fn punish_peer(&self, peer_id: PeerId, reason: NegativePeerSanction) -> Result<()> {
-        warn!("Punishing peer {peer_id} for {reason}");
+        warn!("Punishing peer {} for {reason}", self.peer_id);
         let sanction_result = self
             .global_state_lock
             .peers()
-            .sanction(peer_id, PeerSanction::Negative(reason))
+            .sanction(self.peer_id, PeerSanction::Negative(reason))
             .ok_or_else(|| anyhow::anyhow!("Could not read peer map."))?;
 
         if let Err(err) = sanction_result {
             warn!("Banning peer: {err}");
-            let _ = self.to_main_tx.send(PeerTaskToMain::Ban(peer_id)).await;
+            let _ = self
+                .to_main_tx
+                .send(PeerTaskToMain::Ban(self.peer_id))
+                .await;
         }
 
         sanction_result.map_err(|err| anyhow::anyhow!("Banning peer: {err}"))
@@ -6984,7 +6975,13 @@ mod tests {
                 .unwrap();
             assert!(bob_stream_later.is_done());
 
-            // Alice's standing took the hit.
+            // Alice's standing takes the hit on her loop's next round.
+            setup.peer_loop_handler.mock_now = bob.mock_now;
+            setup
+                .peer_loop_handler
+                .request_due_objects(&mut Mock::new(vec![]))
+                .await
+                .unwrap();
             let alice_standing = setup
                 .peer_loop_handler
                 .global_state_lock
