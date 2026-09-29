@@ -700,6 +700,9 @@ pub(crate) async fn close_peer_connected_callback(
         (global_state_mut.net.sync_anchor.is_some(), peer_id)
     };
 
+    // Whatever was requested from this peer will not arrive anymore.
+    global_state_lock.pending_requests().forget_peer(peer_id);
+
     // If in sync mode, tell sync loop about dropped peer.
     if sync_mode_is_active {
         to_main_tx

@@ -76,6 +76,9 @@ use crate::application::network::observed_ips::attributable_ip;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
 use crate::state::mining::block_proposal::BlockProposalRejectError;
+use crate::state::pending_requests::AnnouncedObject;
+use crate::state::pending_requests::Announcer;
+use crate::state::pending_requests::PENDING_REQUEST_TIMEOUT;
 use crate::state::sync_status::SyncStatus;
 use crate::state::GlobalState;
 use crate::state::GlobalStateLock;
@@ -163,6 +166,15 @@ impl PeerLoopHandler {
         }
     }
 
+    /// The connected peer, as the announcer of an object it has notified us
+    /// about.
+    fn announcer(&self) -> Announcer {
+        Announcer {
+            peer: self.peer_id,
+            inbound: self.inbound_connection,
+        }
+    }
+
     fn now(&self) -> Timestamp {
         #[cfg(not(test))]
         {
@@ -172,6 +184,37 @@ impl PeerLoopHandler {
         {
             self.mock_now.unwrap_or(Timestamp::now())
         }
+    }
+
+    /// [`Self::now`] as a [`SystemTime`].
+    fn system_time(&self) -> SystemTime {
+        SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(self.now().to_millis())
+    }
+
+    /// Request all announced objects whose turn it is to be requested from this
+    /// peer.
+    async fn request_due_objects<S>(&mut self, peer: &mut S) -> Result<()>
+    where
+        S: Sink<PeerMessage> + Unpin,
+        <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
+    {
+        let due = self
+            .global_state_lock
+            .pending_requests()
+            .due_requests(self.peer_id, self.system_time());
+        for object in due {
+            debug!("Requesting {object:?}, which was announced earlier");
+            let request = match object {
+                AnnouncedObject::Block { height, .. } => PeerMessage::BlockRequestByHeight(height),
+                AnnouncedObject::BlockProposal(body_mast_hash) => {
+                    PeerMessage::BlockProposalRequest(BlockProposalRequest::new(body_mast_hash))
+                }
+                AnnouncedObject::Transaction { txid, .. } => PeerMessage::TransactionRequest(txid),
+            };
+            peer.send(request).await?;
+        }
+
+        Ok(())
     }
 
     /// Punish a peer for bad behavior.
@@ -1087,6 +1130,19 @@ impl PeerLoopHandler {
                     && sync_anchor_height.is_none()
                     && !claimed_height_and_pow_exceed_sync_mode_threshold
                 {
+                    let block = AnnouncedObject::Block {
+                        hash: block_notification.hash,
+                        height: block_notification.height,
+                    };
+                    let request_now = self
+                        .global_state_lock
+                        .pending_requests()
+                        .record_announcement(block, self.announcer(), self.system_time());
+                    if !request_now {
+                        debug!("block announcement recorded; not requesting it now");
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    }
+
                     debug!(
                         "sending BlockRequestByHeight to peer for block with height {}",
                         block_notification.height
@@ -1431,6 +1487,13 @@ impl PeerLoopHandler {
                         return Ok(KEEP_CONNECTION_ALIVE);
                     }
                 };
+
+                self.global_state_lock
+                    .pending_requests()
+                    .resolve(&AnnouncedObject::Block {
+                        hash: block.hash(),
+                        height: block.header().height,
+                    });
 
                 // If sync mode is active, incoming blocks are destined for the
                 // sync loop.
@@ -1920,6 +1983,14 @@ impl PeerLoopHandler {
                     }
                 }
 
+                self.global_state_lock
+                    .pending_requests()
+                    .resolve(&AnnouncedObject::Transaction {
+                        txid: transaction.kernel.txid(),
+                        proof_quality: transaction.proof.proof_quality(),
+                        mutator_set_hash: transaction.kernel.mutator_set_hash,
+                    });
+
                 let num_inputs: u64 = transaction.kernel.inputs.len().try_into().unwrap();
                 debug!(
                     "`peer_loop` received following transaction from peer. {num_inputs} inputs,\
@@ -2063,7 +2134,22 @@ impl PeerLoopHandler {
                     }
                 }
 
-                // 2. Request the actual `Transaction` from peer
+                // 2. Request the actual `Transaction` from peer, unless another
+                // peer task is already fetching it.
+                let transaction = AnnouncedObject::Transaction {
+                    txid: tx_notification.txid,
+                    proof_quality: tx_notification.proof_quality,
+                    mutator_set_hash: tx_notification.mutator_set_hash,
+                };
+                let request_now = self
+                    .global_state_lock
+                    .pending_requests()
+                    .record_announcement(transaction, self.announcer(), self.system_time());
+                if !request_now {
+                    debug!("transaction announcement recorded; not requesting it now");
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
                 debug!("requesting transaction from peer");
                 peer.send(PeerMessage::TransactionRequest(tx_notification.txid))
                     .await?;
@@ -2265,24 +2351,37 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockProposalNotification(block_proposal_notification) => {
-                let verdict = self
+                let verdict = match self
                     .global_state_lock
                     .cli()
-                    .accept_block_proposal_from(&self.peer_address);
-
-                // Avoid acquiring lock if ip validation failed
-                let verdict = verdict.map(async |_| {
-                    self.global_state_lock
+                    .accept_block_proposal_from(&self.peer_address)
+                {
+                    // Avoid acquiring lock if ip validation failed
+                    Err(reject_reason) => Err(reject_reason),
+                    Ok(()) => self
+                        .global_state_lock
                         .lock_guard()
                         .await
                         .favor_incoming_block_proposal_legacy(
                             block_proposal_notification.height,
                             block_proposal_notification.guesser_fee,
-                        )
-                });
+                        ),
+                };
 
                 match verdict {
                     Ok(_) => {
+                        let proposal = AnnouncedObject::BlockProposal(
+                            block_proposal_notification.body_mast_hash,
+                        );
+                        let request_now = self
+                            .global_state_lock
+                            .pending_requests()
+                            .record_announcement(proposal, self.announcer(), self.system_time());
+                        if !request_now {
+                            debug!("block proposal announcement recorded; not requesting it now");
+                            return Ok(KEEP_CONNECTION_ALIVE);
+                        }
+
                         peer.send(PeerMessage::BlockProposalRequest(
                             BlockProposalRequest::new(block_proposal_notification.body_mast_hash),
                         ))
@@ -2334,6 +2433,12 @@ impl PeerLoopHandler {
                         .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
+
+                self.global_state_lock
+                    .pending_requests()
+                    .resolve(&AnnouncedObject::BlockProposal(
+                        new_proposal.body().mast_hash(),
+                    ));
 
                 if new_proposal
                     .body()
@@ -2721,8 +2826,20 @@ impl PeerLoopHandler {
             peer.send(PeerMessage::BlockNotificationRequest).await?;
         }
 
+        // Requests that other peers fail to answer are taken over by this
+        // peer, if it announced the same object. Checked at this rate.
+        let retry_period = PENDING_REQUEST_TIMEOUT / 10;
+        let mut retry_stale_requests =
+            tokio::time::interval_at(tokio::time::Instant::now() + retry_period, retry_period);
+        retry_stale_requests.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
         loop {
             select! {
+                // Take over requests that other peers did not answer in time.
+                _ = retry_stale_requests.tick() => {
+                    self.request_due_objects(&mut peer).await?;
+                }
+
                 // Handle peer messages
                 peer_message = peer.try_next() => {
                     let peer_address = self.peer_id;
@@ -5913,7 +6030,7 @@ mod tests {
                 pseudorandom_peer_id(&peer_address),
                 socketaddr_to_multiaddr(peer_address),
                 hsd_1,
-                true,
+                false,
                 1,
                 now,
             );
@@ -6134,7 +6251,7 @@ mod tests {
                     pseudorandom_peer_id(&sa_1),
                     socketaddr_to_multiaddr(sa_1),
                     hsd_1,
-                    true,
+                    false,
                     1,
                     now,
                 );
@@ -6224,7 +6341,7 @@ mod tests {
                 pseudorandom_peer_id(&sa_1),
                 socketaddr_to_multiaddr(sa_1),
                 hsd_1,
-                true,
+                false,
                 1,
                 now,
             );
@@ -6507,17 +6624,17 @@ mod tests {
         use super::*;
         use crate::tests::shared::blocks::fake_valid_deterministic_successor;
 
-        struct TestSetup {
-            peer_loop_handler: PeerLoopHandler,
-            to_main_rx: mpsc::Receiver<PeerTaskToMain>,
-            from_main_rx: broadcast::Receiver<MainToPeerTask>,
-            peer_state: MutablePeerState,
-            to_main_tx: mpsc::Sender<PeerTaskToMain>,
-            genesis_block: Block,
-            peer_broadcast_tx: broadcast::Sender<MainToPeerTask>,
+        pub(super) struct TestSetup {
+            pub(super) peer_loop_handler: PeerLoopHandler,
+            pub(super) to_main_rx: mpsc::Receiver<PeerTaskToMain>,
+            pub(super) from_main_rx: broadcast::Receiver<MainToPeerTask>,
+            pub(super) peer_state: MutablePeerState,
+            pub(super) to_main_tx: mpsc::Sender<PeerTaskToMain>,
+            pub(super) genesis_block: Block,
+            pub(super) peer_broadcast_tx: broadcast::Sender<MainToPeerTask>,
         }
 
-        async fn genesis_setup(cli: cli_args::Args) -> TestSetup {
+        pub(super) async fn genesis_setup(cli: cli_args::Args) -> TestSetup {
             let network = cli.network;
             let peer_count = 1;
             let (peer_broadcast_tx, from_main_rx, to_main_tx, to_main_rx, _, _, alice, _hsd) =
@@ -6778,6 +6895,112 @@ mod tests {
         }
     }
 
+    /// Tests of the bookkeeping that keeps an object announced by many peers
+    /// from being requested from all of them.
+    mod pending_requests {
+        use std::time::Duration;
+
+        use neptune_p2p::peer::peer_info::pseudorandom_peer_id;
+
+        use super::block_proposals::genesis_setup;
+        use super::block_proposals::TestSetup;
+        use super::*;
+
+        /// A peer loop for another peer of the same node, at a mocked time.
+        fn peer_loop_at(
+            setup: &TestSetup,
+            peer_number: u8,
+            inbound: bool,
+            now: Timestamp,
+        ) -> PeerLoopHandler {
+            let state = setup.peer_loop_handler.global_state_lock.clone();
+            let address = get_dummy_socket_address(peer_number);
+            PeerLoopHandler::with_mocked_time(
+                setup.to_main_tx.clone(),
+                state.clone(),
+                pseudorandom_peer_id(&address),
+                socketaddr_to_multiaddr(address),
+                get_dummy_handshake_data_for_genesis(state.cli().network),
+                inbound,
+                1,
+                now,
+            )
+        }
+
+        /// A notification of a block proposal for height 1, and the request
+        /// for that proposal.
+        async fn proposal_announcement(setup: &TestSetup) -> (PeerMessage, PeerMessage) {
+            let block1 = fake_valid_block_for_tests(
+                &setup.peer_loop_handler.global_state_lock,
+                StdRng::seed_from_u64(5550002).random(),
+            )
+            .await;
+            (
+                PeerMessage::BlockProposalNotification((&block1).into()),
+                PeerMessage::BlockProposalRequest(BlockProposalRequest::new(
+                    block1.body().mast_hash(),
+                )),
+            )
+        }
+
+        fn after(now: Timestamp, delay: Duration) -> Timestamp {
+            now + Timestamp::millis(u64::try_from(delay.as_millis()).unwrap())
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn second_announcer_is_asked_only_after_the_first_stalls() {
+            let cli = cli_args::Args::default_with_network(Network::Testnet(42));
+            let setup = genesis_setup(cli).await;
+            let (notification, request) = proposal_announcement(&setup).await;
+            let height = setup.genesis_block.header().height;
+            let now = Timestamp::now();
+            let mut alice = peer_loop_at(&setup, 5, false, now);
+            let mut bob = peer_loop_at(&setup, 6, false, now);
+
+            // Alice announces first and is asked.
+            let alice_stream = Mock::new(vec![
+                Action::Read(notification.clone()),
+                Action::Write(request.clone()),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let alice_from_main = setup.peer_broadcast_tx.subscribe();
+            alice
+                .run(
+                    alice_stream,
+                    alice_from_main,
+                    &mut MutablePeerState::new(height),
+                )
+                .await
+                .unwrap();
+
+            // Bob announces the same proposal and is not asked.
+            let bob_stream = Mock::new(vec![
+                Action::Read(notification),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let bob_from_main = setup.peer_broadcast_tx.subscribe();
+            bob.run(
+                bob_stream,
+                bob_from_main,
+                &mut MutablePeerState::new(height),
+            )
+            .await
+            .unwrap();
+
+            // Alice does not deliver. Once her request is stale, Bob is asked.
+            let mut bob_stream_later = Mock::new(vec![Action::Write(request)]);
+            bob.request_due_objects(&mut bob_stream_later)
+                .await
+                .unwrap();
+            assert!(!bob_stream_later.is_done(), "not asked before the timeout");
+            bob.mock_now = Some(after(now, PENDING_REQUEST_TIMEOUT));
+            bob.request_due_objects(&mut bob_stream_later)
+                .await
+                .unwrap();
+            assert!(bob_stream_later.is_done(), "asked after the timeout");
+        }
+    }
+
     mod proof_qualities {
         use itertools::Itertools;
         use neptune_consensus::transaction::Transaction;
@@ -6902,7 +7125,7 @@ mod tests {
                     pseudorandom_peer_id(&peer_address),
                     socketaddr_to_multiaddr(peer_address),
                     handshake,
-                    true,
+                    false,
                     1,
                     now,
                 );
