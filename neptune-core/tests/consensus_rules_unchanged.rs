@@ -193,6 +193,19 @@ async fn gamma_hardfork_on_main_net() {
     .await;
 }
 
+/// Verify that the sequence of main-net blocks spanning the hardfork-delta
+/// boundary (height 55,000) is valid.
+#[tokio::test(flavor = "multi_thread")]
+async fn delta_hardfork_on_main_net() {
+    assert_hardfork_boundary_blocks_are_valid(
+        Network::Main,
+        "hf-delta-validity",
+        "blk479.dat",
+        ConsensusRuleSet::HardforkDelta,
+    )
+    .await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn delta_hardfork_on_testnet0() {
     assert_hardfork_boundary_blocks_are_valid(
