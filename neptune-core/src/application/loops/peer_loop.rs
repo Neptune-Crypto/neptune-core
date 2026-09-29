@@ -110,6 +110,17 @@ const DISCONNECT_CONNECTION: bool = true;
 
 pub type PeerStandingNumber = i32;
 
+/// Whether an error from the peer stream signals that the underlying
+/// connection is gone, as opposed to a message that could not be decoded.
+///
+/// Both codecs in use report decoding failures as
+/// [`InvalidData`](std::io::ErrorKind::InvalidData); any other I/O error stems
+/// from the transport.
+fn is_transport_error(err: &(dyn std::error::Error + 'static)) -> bool {
+    err.downcast_ref::<std::io::Error>()
+        .is_some_and(|e| e.kind() != std::io::ErrorKind::InvalidData)
+}
+
 /// Handles messages from peers via TCP
 ///
 /// also handles messages from main task over the main-to-peer-tasks broadcast
@@ -2680,7 +2691,7 @@ impl PeerLoopHandler {
     where
         S: Sink<PeerMessage> + TryStream<Ok = PeerMessage> + Unpin,
         <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
-        <S as TryStream>::Error: std::error::Error,
+        <S as TryStream>::Error: std::error::Error + 'static,
     {
         // If we are in sync mode, tell the main loop there is a new peer so
         // that it can relay the message to the sync loop. Should not happen
@@ -2718,13 +2729,15 @@ impl PeerLoopHandler {
                     let peer_message = match peer_message {
                         Ok(message) => message,
                         Err(err) => {
+                            if is_transport_error(&err) {
+                                info!("Connection to peer {peer_address} lost: {err}");
+                                break;
+                            }
+
                             // Don't disconnect if message type is unknown, as
                             // this allows the adding of new message types in
-                            // the future. Consider only keeping connection open
-                            // if this is a deserialization error, and close
-                            // otherwise.
-                            let msg = format!("Error when receiving from peer: {peer_address}");
-                            warn!("{msg}. Error: {err}");
+                            // the future.
+                            warn!("Error when receiving from peer: {peer_address}. Error: {err}");
                             self.punish(NegativePeerSanction::InvalidMessage).await?;
                             continue;
                         }
@@ -2824,7 +2837,7 @@ impl PeerLoopHandler {
     where
         S: Sink<PeerMessage> + TryStream<Ok = PeerMessage> + Unpin,
         <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
-        <S as TryStream>::Error: std::error::Error,
+        <S as TryStream>::Error: std::error::Error + 'static,
     {
         let cli_args = self.global_state_lock.cli().clone();
 
