@@ -23,7 +23,6 @@ use neptune_p2p::peer::NegativePeerSanction;
 use neptune_p2p::peer::PeerMessage;
 use neptune_p2p::peer::PeerSanction;
 use neptune_p2p::peer::PeerStanding;
-use neptune_p2p::peer::TransferConnectionStatus;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 use tokio::sync::broadcast;
@@ -140,14 +139,11 @@ pub(crate) fn precheck_incoming_connection_is_allowed(
     true
 }
 
-/// Check if connection is allowed. Used for both ingoing and outgoing connections.
+/// Check if an incoming connection is allowed.
 ///
 /// Note: this function is part of the legacy peer-to-peer stack. Therefore it
 /// is okay to use [`SocketAddr`] and
 /// [`pseudorandom_peer_id`].
-///
-/// # Locking
-///   * acquires `global_state_lock` for read
 async fn check_if_connection_is_allowed(
     global_state_lock: GlobalStateLock,
     own_handshake: &HandshakeData,
@@ -155,7 +151,6 @@ async fn check_if_connection_is_allowed(
     peer_address: &SocketAddr,
 ) -> InternalConnectionStatus {
     let cli_arguments = global_state_lock.cli();
-    let global_state = global_state_lock.lock_guard().await;
 
     // Disallow connection if peer is banned via CLI arguments
     if cli_arguments.banned_ips().contains(&peer_address.ip()) {
@@ -179,9 +174,9 @@ async fn check_if_connection_is_allowed(
     }
 
     // Disallow connection if peer is in bad standing
-    let standing = global_state
-        .net
-        .get_peer_standing_from_database(peer_address.ip())
+    let standing = global_state_lock
+        .peers()
+        .stored_standing(peer_address.ip())
         .await;
 
     // (But ignore bad standing if the peer is a CLI argument.)
@@ -196,9 +191,9 @@ async fn check_if_connection_is_allowed(
         return InternalConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
     }
 
-    if let Some(time) = global_state
-        .net
-        .last_disconnection_time_of_peer(other_handshake.instance_id)
+    if let Some(time) = global_state_lock
+        .peers()
+        .last_disconnection_time(other_handshake.instance_id)
     {
         if SystemTime::now()
             .duration_since(time)
@@ -226,28 +221,31 @@ async fn check_if_connection_is_allowed(
     // `DisconnectFromLongestLivedPeer` message should have been sent to
     // the main loop already but that message need not have been processed by
     // the time we get here.
-    if cli_arguments.max_num_peers <= global_state.net.peer_map.len() && !cli_arguments.bootstrap {
+    if cli_arguments.max_num_peers <= global_state_lock.peers().len() && !cli_arguments.bootstrap {
         return InternalConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded);
     }
 
     // Disallow connection to already connected peer.
-    if global_state.net.peer_map.values().any(|peer| {
-        peer.instance_id() == other_handshake.instance_id
-            || multiaddr_to_socketaddr(&peer.address()).is_some_and(|sa| sa == *peer_address)
-    }) {
+    let already_connected = global_state_lock.peers().with_connected(|connected| {
+        connected.values().any(|peer| {
+            peer.instance_id() == other_handshake.instance_id
+                || multiaddr_to_socketaddr(&peer.address()).is_some_and(|sa| sa == *peer_address)
+        })
+    });
+    if already_connected {
         return InternalConnectionStatus::Refused(ConnectionRefusedReason::AlreadyConnected);
     }
 
     // Cap connections per IP, if specified.
     if let Some(max_connections_per_ip) = cli_arguments.max_connections_per_ip {
         let peer_ip = peer_address.ip();
-        let num_connections_to_this_ip = global_state
-            .net
-            .peer_map
-            .values()
-            .filter_map(|info| multiaddr_to_socketaddr(&info.address()))
-            .filter(|sa| sa.ip() == peer_ip)
-            .count();
+        let num_connections_to_this_ip = global_state_lock.peers().with_connected(|connected| {
+            connected
+                .values()
+                .filter_map(|info| multiaddr_to_socketaddr(&info.address()))
+                .filter(|sa| sa.ip() == peer_ip)
+                .count()
+        });
         if num_connections_to_this_ip >= max_connections_per_ip {
             return InternalConnectionStatus::Refused(
                 ConnectionRefusedReason::MaxPeerNumberExceeded,
@@ -271,7 +269,7 @@ async fn check_if_connection_is_allowed(
 
     // If this connection touches the maximum number of peer connections, say
     // so with special OK code.
-    if cli_arguments.max_num_peers == global_state.net.peer_map.len() + 1 {
+    if cli_arguments.max_num_peers == global_state_lock.peers().len() + 1 {
         info!("ConnectionStatus::Accepted, but max # connections is now reached");
         return InternalConnectionStatus::AcceptedMaxReached;
     }
@@ -434,7 +432,6 @@ where
             .await?;
     }
 
-    let peer_distance = 1; // All incoming connections have distance 1
     let peer_id = pseudorandom_peer_id(&peer_address);
     let peer_multiaddr = socketaddr_to_multiaddr(peer_address);
     let mut peer_loop_handler = PeerLoopHandler::new(
@@ -444,177 +441,7 @@ where
         peer_multiaddr,
         *peer_handshake,
         true,
-        peer_distance,
     );
-
-    // Run peer loop.
-    peer_loop_handler
-        .run_wrapper(peer, main_to_peer_task_rx)
-        .await?;
-
-    Ok(())
-}
-
-/// Perform handshake and establish connection to a new peer while handling any
-/// panics in the peer task gracefully.
-///
-/// All* outgoing connections to peers must go through this function.
-///
-/// *: This function belongs to the legacy peer-to-peer stack, which is in the
-/// process of being deprecated. Since it is part of the legacy stack, it is
-/// okay to use [`SocketAddr`]. However, the new libp2p network stack offers an
-/// alternative way to call new peers, see
-/// [`NetworkActorCommand::Dial`](crate::application::network::channel::NetworkActorCommand::Dial).
-pub(crate) async fn call_peer(
-    peer_address: std::net::SocketAddr,
-    state: GlobalStateLock,
-    main_to_peer_task_rx: broadcast::Receiver<MainToPeerTask>,
-    peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
-    own_handshake_data: HandshakeData,
-    peer_distance: u8,
-) {
-    debug!("Attempting to initiate connection to {peer_address}");
-    match tokio::net::TcpStream::connect(peer_address).await {
-        Err(e) => {
-            let msg = format!("Failed to establish TCP connection to {peer_address}: {e}");
-            if peer_distance == 1 {
-                // outgoing connection to peer of distance 1 means user has
-                // requested a connection to this peer through CLI
-                // arguments, and should be warned if this fails.
-                warn!("{msg}");
-            } else {
-                debug!("{msg}");
-            }
-        }
-        Ok(stream) => {
-            match call_peer_inner(
-                stream,
-                state,
-                peer_address,
-                main_to_peer_task_rx,
-                peer_task_to_main_tx,
-                &own_handshake_data,
-                peer_distance,
-            )
-            .await
-            {
-                Ok(()) => (),
-                Err(e) => {
-                    let msg = format!("{e}. Failed to establish connection.");
-                    // outgoing connection to peer of distance 1 means user has
-                    // requested a connection to this peer through CLI
-                    // arguments, and should be warned if this fails.
-                    if peer_distance == 1 {
-                        warn!("{msg}");
-                    } else {
-                        debug!("{msg}");
-                    }
-                }
-            }
-        }
-    };
-
-    info!("Connection to {peer_address} closing");
-}
-
-/// Legacy peer-to-peer stack.
-async fn call_peer_inner<S>(
-    stream: S,
-    state: GlobalStateLock,
-    peer_address: std::net::SocketAddr,
-    main_to_peer_task_rx: broadcast::Receiver<MainToPeerTask>,
-    peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
-    own_handshake: &HandshakeData,
-    peer_distance: u8,
-) -> Result<()>
-where
-    S: AsyncRead + AsyncWrite + Debug + Unpin,
-{
-    debug!("Established outgoing TCP connection with {peer_address}");
-
-    // Build the communication/serialization/frame handler
-    let length_delimited = Framed::new(stream, get_codec_rules());
-    let mut peer = SymmetricallyFramed::new(length_delimited, get_bincode_codec());
-
-    // Make Neptune handshake
-    let outgoing_handshake = PeerMessage::Handshake {
-        magic_value: *MAGIC_STRING_REQUEST,
-        data: Box::new(own_handshake.to_owned()),
-    };
-    peer.send(outgoing_handshake).await?;
-    debug!("Awaiting connection status response from {peer_address}");
-
-    let Some(PeerMessage::Handshake {
-        magic_value,
-        data: other_handshake,
-    }) = peer.try_next().await?
-    else {
-        bail!("Didn't get handshake response from {peer_address}");
-    };
-    ensure!(
-        magic_value == *MAGIC_STRING_RESPONSE,
-        "Didn't get expected magic value for handshake from {peer_address}",
-    );
-
-    debug!("Got correct magic value response from {peer_address}!");
-    if other_handshake.network != own_handshake.network {
-        let other = other_handshake.network;
-        let own = own_handshake.network;
-        bail!("Cannot connect with {peer_address}: Peer runs {other}, this client runs {own}.");
-    }
-
-    match peer.try_next().await? {
-        Some(PeerMessage::ConnectionStatus(TransferConnectionStatus::Accepted)) => {
-            debug!("Outgoing connection accepted by {peer_address}");
-        }
-        Some(PeerMessage::ConnectionStatus(TransferConnectionStatus::Refused(reason))) => {
-            bail!("Outgoing connection attempt to {peer_address} refused. Reason: {reason:?}");
-        }
-        _ => {
-            bail!(
-                "Got invalid connection status response from {peer_address} on outgoing connection"
-            );
-        }
-    }
-
-    // Peer accepted us. Check if we accept the peer. Note that the protocol does not stipulate
-    // that we answer with a connection status here, so if the connection is *not* accepted, we
-    // simply hang up but log the reason for the refusal.
-    let connection_status = check_if_connection_is_allowed(
-        state.clone(),
-        own_handshake,
-        &other_handshake,
-        &peer_address,
-    )
-    .await;
-    if let InternalConnectionStatus::Refused(refused_reason) = connection_status {
-        warn!(
-            "Outgoing connection to {peer_address} refused. Reason: {:?}\nNow hanging up.",
-            refused_reason
-        );
-        peer.send(PeerMessage::Bye).await?;
-        bail!("Attempted to connect to peer ({peer_address}) that was not allowed. This connection attempt should not have been made.");
-    }
-
-    // By default, start by asking the peer for its peers. In an adversarial
-    // context, we want the network topology to be as robust as possible.
-    // Blockchain data can be obtained from other peers, if this connection
-    // fails.
-    peer.send(PeerMessage::PeerListRequest).await?;
-
-    let peer_id = pseudorandom_peer_id(&peer_address);
-    let peer_multiaddr = socketaddr_to_multiaddr(peer_address);
-    let mut peer_loop_handler = PeerLoopHandler::new(
-        peer_task_to_main_tx,
-        state.clone(),
-        peer_id,
-        peer_multiaddr,
-        *other_handshake,
-        false,
-        peer_distance,
-    );
-
-    info!("Established outgoing connection to {peer_address}");
 
     // Run peer loop.
     peer_loop_handler
@@ -633,74 +460,68 @@ where
 /// network stack.
 ///
 /// Locking:
-///   * acquires `global_state_lock` for write
+///   * acquires `global_state_lock` for read
 pub(crate) async fn close_peer_connected_callback(
-    mut global_state_lock: GlobalStateLock,
+    global_state_lock: GlobalStateLock,
     peer_address: Multiaddr,
     to_main_tx: &mpsc::Sender<PeerTaskToMain>,
 ) {
     let peer_tolerance = global_state_lock.cli().peer_tolerance;
-    let (sync_mode_is_active, peer_id) = {
-        let mut global_state_mut = global_state_lock.lock_guard_mut().await;
 
-        // Find the matching peer id
-        let Some(peer_id) = global_state_mut
-            .net
-            .peer_map
-            .iter()
-            .find(|(_peer_id, peer_info)| peer_info.address() == peer_address)
-            .map(|(peer_id, _)| peer_id)
-            .copied()
-        else {
-            error!("Could not find peer id for {peer_address}");
-            return;
-        };
-
-        // Store any new peer-standing to database
-        let peer_info_writeback = global_state_mut.net.peer_map.remove(&peer_id);
-
-        let maybe_ip = attributable_ip(&peer_address);
-        let new_standing = if let Some(new) = peer_info_writeback {
-            new.standing()
-        } else {
-            error!("Could not find peer standing for {peer_address}");
-
-            // Couldn't find an entry in the peer map. So sanction what's persisted
-            // instead of potentially clearing a negative standing.
-            let stored = match maybe_ip {
-                Some(ip) => {
-                    global_state_mut
-                        .net
-                        .get_peer_standing_from_database(ip)
-                        .await
-                }
-                None => None,
-            };
-            let mut standing = stored.unwrap_or_else(|| PeerStanding::new(peer_tolerance));
-            let sanction = NegativePeerSanction::NoStandingFoundMaybeCrash;
-
-            // Don't return early: _must_ send message to main loop at the end of this
-            // function.
-            // If the peer has now reached bad standing, the connection to it should be
-            // dropped, which is currently happening anyway.
-            let _ = standing.sanction(PeerSanction::Negative(sanction));
-            standing
-        };
-        debug!("Fetched peer info standing {new_standing} for peer {peer_address}");
-
-        if let Some(ip) = maybe_ip {
-            global_state_mut
-                .net
-                .write_peer_standing(ip, new_standing)
-                .await;
-        }
-
-        debug!("Stored peer info standing {new_standing} for peer {peer_address}");
-
-        (global_state_mut.net.sync_anchor.is_some(), peer_id)
+    // Take the peer out of the connected peers.
+    let Some((peer_id, peer_info_writeback)) =
+        global_state_lock.peers().with_connected_mut(|connected| {
+            let peer_id = connected
+                .iter()
+                .find(|(_peer_id, peer_info)| peer_info.address() == peer_address)
+                .map(|(peer_id, _)| *peer_id)?;
+            Some((peer_id, connected.remove(&peer_id)))
+        })
+    else {
+        error!("Could not find peer id for {peer_address}");
+        return;
     };
 
+    // Store any new peer-standing to database
+    let maybe_ip = attributable_ip(&peer_address);
+    let new_standing = if let Some(new) = peer_info_writeback {
+        new.standing()
+    } else {
+        error!("Could not find peer standing for {peer_address}");
+
+        // Couldn't find an entry in the peer map. So sanction what's persisted
+        // instead of potentially clearing a negative standing.
+        let stored = match maybe_ip {
+            Some(ip) => global_state_lock.peers().stored_standing(ip).await,
+            None => None,
+        };
+        let mut standing = stored.unwrap_or_else(|| PeerStanding::new(peer_tolerance));
+        let sanction = NegativePeerSanction::NoStandingFoundMaybeCrash;
+
+        // Don't return early: _must_ send message to main loop at the end of this
+        // function.
+        // If the peer has now reached bad standing, the connection to it should be
+        // dropped, which is currently happening anyway.
+        let _ = standing.sanction(PeerSanction::Negative(sanction));
+        standing
+    };
+    debug!("Fetched peer info standing {new_standing} for peer {peer_address}");
+
+    if let Some(ip) = maybe_ip {
+        global_state_lock
+            .peers()
+            .store_standing(ip, new_standing)
+            .await;
+    }
+    debug!("Stored peer info standing {new_standing} for peer {peer_address}");
+
+    // Whatever was requested from this peer will not arrive anymore.
+    global_state_lock.pending_requests().forget_peer(peer_id);
+
     // If in sync mode, tell sync loop about dropped peer.
+    let sync_mode_is_active = global_state_lock
+        .lock(|s| s.net.sync_anchor.is_some())
+        .await;
     if sync_mode_is_active {
         to_main_tx
             .send(PeerTaskToMain::DroppedPeer(peer_id))
@@ -725,6 +546,7 @@ mod tests {
     use neptune_p2p::peer::NegativePeerSanction;
     use neptune_p2p::peer::PeerMessage;
     use neptune_p2p::peer::PeerStanding;
+    use neptune_p2p::peer::TransferConnectionStatus;
     use neptune_primitives::network::Network;
     use tasm_lib::twenty_first::tip5::digest::Digest;
     use test_strategy::proptest;
@@ -750,7 +572,7 @@ mod tests {
 
         use crate::tests::shared::globalstate::mock_genesis_global_state;
 
-        let mut state =
+        let state =
             mock_genesis_global_state(0, WalletEntropy::new_random(), cli_args::Args::default())
                 .await;
 
@@ -767,7 +589,7 @@ mod tests {
             cli_args::Args::default().peer_tolerance,
         )
         .with_standing(sanctioned);
-        state.lock_guard_mut().await.net.peer_map.insert(
+        state.peers().insert(
             pseudorandom_peer_id(&get_dummy_socket_address(0)),
             peer_info,
         );
@@ -775,12 +597,7 @@ mod tests {
         let (to_main_tx, mut _to_main_rx) = tokio::sync::mpsc::channel(16);
         close_peer_connected_callback(state.clone(), address, &to_main_tx).await;
 
-        let stored = state
-            .lock_guard()
-            .await
-            .net
-            .get_peer_standing_from_database(ip)
-            .await;
+        let stored = state.peers().stored_standing(ip).await;
 
         stored
     }
@@ -830,50 +647,6 @@ mod tests {
     #[proptest]
     fn time_difference_doesnt_crash(now: SystemTime, and_now: SystemTime) {
         system_time_diff_seconds(now, and_now);
-    }
-
-    #[traced_test]
-    #[apply(shared_tokio_runtime)]
-    async fn test_outgoing_connection_succeed() -> Result<()> {
-        let network = Network::Main;
-        let other_handshake = get_dummy_handshake_data_for_genesis(network);
-        let own_handshake = get_dummy_handshake_data_for_genesis(network);
-        let mock = Builder::new()
-            .write(&to_bytes(&PeerMessage::Handshake {
-                magic_value: *MAGIC_STRING_REQUEST,
-                data: Box::new(own_handshake),
-            })?)
-            .read(&to_bytes(&PeerMessage::Handshake {
-                magic_value: *MAGIC_STRING_RESPONSE,
-                data: Box::new(other_handshake),
-            })?)
-            .read(&to_bytes(&PeerMessage::ConnectionStatus(
-                TransferConnectionStatus::Accepted,
-            ))?)
-            .write(&to_bytes(&PeerMessage::PeerListRequest)?)
-            .read(&to_bytes(&PeerMessage::Bye)?)
-            .build();
-
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, _, _, state, _hsd) =
-            get_test_genesis_setup(0, cli_args::Args::default_with_network(network)).await?;
-        call_peer_inner(
-            mock,
-            state.clone(),
-            get_dummy_socket_address(0),
-            from_main_rx_clone,
-            to_main_tx,
-            &own_handshake,
-            1,
-        )
-        .await?;
-
-        // Verify that peer map is empty after connection has been closed
-        match state.lock(|s| s.net.peer_map.keys().len()).await {
-            0 => (),
-            _ => bail!("Incorrect number of maps in peer map"),
-        };
-
-        Ok(())
     }
 
     #[test]
@@ -966,8 +739,8 @@ mod tests {
 
         // Attempt to connect to already connected peer
         let connected_peer: PeerInfo = state_lock
-            .lock(|s| s.net.peer_map.values().collect::<Vec<_>>()[0].clone())
-            .await;
+            .peers()
+            .with_connected(|connected| connected.values().next().unwrap().clone());
         let mut mutated_other_handshake = other_handshake;
         mutated_other_handshake.instance_id = connected_peer.instance_id();
         status = check_if_connection_is_allowed(
@@ -1025,10 +798,8 @@ mod tests {
         );
 
         state_lock
-            .lock_guard_mut()
-            .await
-            .net
-            .write_peer_standing(peer_sa.ip(), bad_standing)
+            .peers()
+            .store_standing(peer_sa.ip(), bad_standing)
             .await;
 
         status = check_if_connection_is_allowed(
@@ -1099,17 +870,15 @@ mod tests {
             ..Default::default()
         };
 
-        let (broadcast_tx, _broadcast_rx, to_main_tx, _to_main_rx, _, _, mut state_lock, handshake) =
+        let (broadcast_tx, _broadcast_rx, to_main_tx, _to_main_rx, _, _, state_lock, handshake) =
             get_test_genesis_setup(0, args).await?;
 
         // fake a graceful disconnect
         let node_0_address = get_dummy_socket_address(0);
         let node_0_handshake = get_dummy_handshake_data_for_genesis(network);
         state_lock
-            .lock_guard_mut()
-            .await
-            .net
-            .register_peer_disconnection(node_0_handshake.instance_id, SystemTime::now());
+            .peers()
+            .register_disconnection(node_0_handshake.instance_id, SystemTime::now());
 
         let handshake_request = PeerMessage::Handshake {
             magic_value: *MAGIC_STRING_REQUEST,
@@ -1213,7 +982,7 @@ mod tests {
         .await?;
 
         // Verify that peer map is empty after connection has been closed
-        match state_lock.lock(|s| s.net.peer_map.keys().len()).await {
+        match state_lock.peers().len() {
             0 => (),
             _ => bail!("Incorrect number of maps in peer map"),
         };
@@ -1458,10 +1227,7 @@ mod tests {
             assert_eq!(InternalConnectionStatus::Accepted, accepted);
 
             state_lock
-                .lock_guard_mut()
-                .await
-                .net
-                .peer_map
+                .peers()
                 .insert(pseudorandom_peer_id(&peer_address), peer_info.clone());
         }
 
@@ -1537,7 +1303,7 @@ mod tests {
             _to_main_rx1,
             _,
             _,
-            mut state_lock,
+            state_lock,
             _hsd,
         ) = get_test_genesis_setup(
             peer_count_before_incoming_connection_request,
@@ -1556,10 +1322,8 @@ mod tests {
         let peer_address = get_dummy_socket_address(3);
 
         state_lock
-            .lock_guard_mut()
-            .await
-            .net
-            .write_peer_standing(peer_address.ip(), bad_standing)
+            .peers()
+            .store_standing(peer_address.ip(), bad_standing)
             .await;
 
         let answer = answer_peer_inner(
@@ -1578,7 +1342,7 @@ mod tests {
         );
 
         // Verify that peer map is empty after connection has been refused
-        match state_lock.lock(|s| s.net.peer_map.keys().len()).await {
+        match state_lock.peers().len() {
             3 => (),
             _ => bail!("Incorrect number of maps in peer map"),
         };

@@ -126,7 +126,7 @@ pub struct Args {
         value_name = "COUNT",
         value_parser = clap::value_parser!(u16).map(|u| usize::from(u)),
     )]
-    pub(crate) max_num_peers: usize,
+    pub max_num_peers: usize,
 
     /// Maximum number of peers to accept from each IP address.
     ///
@@ -501,9 +501,13 @@ pub struct Args {
     /// ```text
     /// --peer /ip4/8.8.8.8 \
     /// --peer /ip4/8.8.4.4/udp/1337/quic-v1 \
-    /// --peer 139.162.193.206:9798 \
-    /// --peer [2001:bc8:17c0:41e:46a8:42ff:fe22:e8e9]:9798
+    /// --peer /ip4/51.15.139.238/udp/9800/quic-v1 \
+    /// --peer /ip4/139.162.193.206/tcp/9801 \
+    /// --peer /ip6/2001:bc8:17c0:41e:46a8:42ff:fe22:e8e9/tcp/9801
     /// ```
+    ///
+    /// Connections are made over libp2p only. An address on the legacy TCP
+    /// port (9798) is not dialed.
     ///
     /// It's easier to connect without `/p2p/...` in the end of the address.
     ///
@@ -608,6 +612,11 @@ pub struct Args {
     // to meaningfully suppress rapid reconnection attempts.
     #[clap(long, default_value = "1800", value_parser = duration_from_seconds_str)]
     pub reconnect_cooldown: Duration,
+
+    /// How often, in seconds, to reconnect to peers given as CLI arguments
+    /// whose connection was lost, and to disconnect from excess peers.
+    #[clap(long, default_value = "120", value_parser = duration_from_seconds_str)]
+    pub peer_maintenance_interval: Duration,
 
     /// Scan incoming blocks for inbound transactions.
     ///

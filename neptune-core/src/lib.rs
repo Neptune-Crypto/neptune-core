@@ -76,12 +76,10 @@ use tracing::info;
 use tracing::warn;
 
 use crate::application::config::identity::resolve_identity;
-use crate::application::config::parser::multiaddr::multiaddr_to_socketaddr;
 use crate::application::json_rpc::server::rpc::RpcServer;
 use crate::application::loops::channel::MainToMiner;
 use crate::application::loops::channel::MinerToMain;
 use crate::application::loops::channel::RPCServerToMain;
-use crate::application::loops::connect_to_peers::call_peer;
 use crate::application::loops::main_loop::MainLoopHandler;
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
 use crate::application::loops::peer_loop::channel::PeerTaskToMain;
@@ -91,6 +89,7 @@ use crate::application::network::channel::NetworkActorCommand;
 use crate::application::network::config::NetworkConfig;
 use crate::application::network::source_limits::SourceLimitsConfig;
 use crate::application::rpc::server::RPC;
+use crate::state::peers::Peers;
 use crate::state::wallet::wallet_state::WalletState;
 use crate::state::GlobalStateLock;
 
@@ -148,10 +147,12 @@ pub async fn initialize(
     )
     .await?;
 
+    let peers = Peers::initialize(&data_directory).await?;
+
     let (rpc_server_to_main_tx, rpc_server_to_main_rx) =
         mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
     let mut global_state_lock =
-        GlobalStateLock::from_global_state(global_state, rpc_server_to_main_tx.clone());
+        GlobalStateLock::from_global_state(global_state, rpc_server_to_main_tx.clone(), peers);
 
     // Ensure archival state is consistent.
     global_state_lock
@@ -240,12 +241,17 @@ pub async fn initialize(
     // Set up the libp2p NetworkActor
     info!("Setting up Network Actor");
     let legacy_marker = libp2p::multiaddr::Protocol::Tcp(9798);
-    let cli_peers_for_network_actor = cli_args
+    let (legacy_peers, cli_peers_for_network_actor): (Vec<_>, Vec<_>) = cli_args
         .peers
         .iter()
-        .filter(|addr| addr.iter().all(|p| p != legacy_marker))
         .cloned()
-        .collect_vec();
+        .partition(|addr| addr.iter().any(|p| p == legacy_marker));
+    for legacy_peer in legacy_peers {
+        warn!(
+            "Not connecting to {legacy_peer}: outgoing connections over the legacy network \
+             stack are no longer supported."
+        );
+    }
     let network_config = NetworkConfig::default()
         .with_subdirectory(data_directory.network_subdirectory())
         .with_network(cli_args.network)
@@ -317,39 +323,8 @@ pub async fn initialize(
         TcpListener::bind("127.0.0.1:0").await?
     };
 
-    // Connect to peers, and provide each peer task with a thread-safe copy of the state
-    let own_handshake_data: HandshakeData =
-        global_state_lock.lock_guard().await.get_own_handshakedata();
-    info!(
-        "Most known canonical block has height {}",
-        own_handshake_data.tip_header.height
-    );
-    let legacy_socketaddr = |multiaddr: &libp2p::Multiaddr| {
-        multiaddr_to_socketaddr(multiaddr).filter(|&sa| ![9800, 9801].contains(&sa.port()))
-    };
-    for multiaddress in &global_state_lock.cli().peers {
-        if let Some(peer_address) = legacy_socketaddr(multiaddress) {
-            let peer_state_var = global_state_lock.clone(); // bump arc refcount
-            let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerTask> =
-                main_to_peer_broadcast_tx.subscribe();
-            let peer_task_to_main_tx_clone: mpsc::Sender<PeerTaskToMain> =
-                peer_task_to_main_tx.clone();
-            let peer_join_handle = tokio::task::spawn(async move {
-                call_peer(
-                    peer_address,
-                    peer_state_var.clone(),
-                    main_to_peer_broadcast_rx_clone,
-                    peer_task_to_main_tx_clone,
-                    own_handshake_data,
-                    1, // All outgoing connections have distance 1
-                )
-                .await;
-            });
-            task_join_handles.push(peer_join_handle);
-        }
-        // Else: NetworkActor already got CLI peers via NetworkConfig.
-    }
-    debug!("Made outgoing connections to peers");
+    let tip_height = global_state_lock.lock_guard().await.chain.tip_height();
+    info!("Most known canonical block has height {tip_height}");
 
     // Start mining tasks if requested
     let (miner_to_main_tx, miner_to_main_rx) = mpsc::channel::<MinerToMain>(MINER_CHANNEL_CAPACITY);

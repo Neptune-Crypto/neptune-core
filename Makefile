@@ -1,4 +1,4 @@
-.PHONY: clean help stats bench all install run test build doc check format bench-no-run pretty-log ensure-clang
+.PHONY: clean help stats bench all install run tests build doc check format bench-no-run pretty-log ensure-clang
 
 prog :=neptune-core
 
@@ -75,12 +75,14 @@ run: ensure-clang
 	$(info RUSTFLAGS is $(RUSTFLAGS))
 	cargo run
 
-# Get a stack trace upon kernel panic (may slow down implementation)
-test: export RUST_BACKTRACE = 1
-test: ensure-clang
+# All tests: first those that may run concurrently, then, one at a time, the
+# tests that are ignored because they cannot share a machine with other tests.
+tests: export RUST_BACKTRACE = 1
+tests: ensure-clang
 	$(info RUSTFLAGS is $(RUSTFLAGS))
-	cargo nextest r
-	cargo test --doc --workspace
+	cargo nextest run --workspace --run-ignored ignored-only --test-threads 1 \
+		-E 'test(can_resume_sync_from_saved_state) | binary(concurrent_peers)'
+	cargo nextest run --workspace --no-fail-fast
 
 bench: ensure-clang
 	$(info RUSTFLAGS is $(RUSTFLAGS))

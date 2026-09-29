@@ -116,6 +116,11 @@ impl<Item> Mock<Item> {
             actions: Box::new(actions.into_iter().rev().collect()),
         }
     }
+
+    /// Whether all actions have been consumed.
+    pub fn is_done(&self) -> bool {
+        self.actions.is_empty()
+    }
 }
 
 impl<Item: PartialEq> sink::Sink<Item> for Mock<Item> {

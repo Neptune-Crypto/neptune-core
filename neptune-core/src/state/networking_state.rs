@@ -1,17 +1,7 @@
-use std::collections::HashMap;
-use std::net::IpAddr;
 use std::time::SystemTime;
 
-use anyhow::Result;
-use libp2p::PeerId;
-use neptune_database::create_db_if_missing;
-use neptune_database::NeptuneLevelDb;
-use neptune_database::WriteBatchAsync;
-use neptune_p2p::peer::peer_info::PeerInfo;
 use neptune_p2p::peer::InstanceId;
-use neptune_p2p::peer::PeerStanding;
 use neptune_primitives::block_height::BlockHeight;
-use neptune_primitives::data_directory::DataDirectory;
 use neptune_primitives::difficulty_control::ProofOfWork;
 use rand::rng;
 use rand::Rng;
@@ -21,10 +11,7 @@ use tasm_lib::twenty_first::prelude::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
 use crate::application::loops::sync_loop::sync_progress::SyncProgress;
-use crate::state::database::PeerDatabases;
 use crate::state::sync_status::SyncStatus;
-
-type PeerMap = HashMap<PeerId, PeerInfo>;
 
 /// Information about a foreign tip towards which the client is syncing.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -107,18 +94,11 @@ impl SyncAnchor {
     }
 }
 
-/// `NetworkingState` contains in-memory and persisted data for interacting
-/// with network peers.
+/// `NetworkingState` contains in-memory data related to the node's networking
+/// state: Whether it is so far behind that it must catch up through syncing,
+/// and other data.
 #[derive(Debug, Clone)]
 pub struct NetworkingState {
-    /// Stores info about the peers that the client is connected to
-    /// Peer tasks may update their own entries into this map.
-    pub peer_map: PeerMap,
-
-    /// `peer_databases` are used to persist IPs with their standing.
-    /// The peer tasks may update their own entries into this map.
-    pub peer_databases: PeerDatabases,
-
     /// This value is only Some if the instance is running an archival node
     /// that is currently in sync mode (downloading blocks in batches).
     /// Only the main task may update this flag.
@@ -135,127 +115,16 @@ pub struct NetworkingState {
     /// sent from this client, or accepted from peers.
     /// Only the RPC server may update this flag.
     pub freeze: bool,
-
-    /// Disconnection times of past peers. Can be used to determine if a connection
-    /// request should be accepted or rejected.
-    ///
-    /// Only records times of _graceful_ disconnections that were triggered by
-    /// _this_ node. That is, times of the following events are _not_ recorded:
-    /// - Graceful disconnect initiated by the peer.
-    /// - Abrupt disconnections, for example due to network failures.
-    ///
-    /// Only the peer tasks may update this map.
-    disconnection_times: HashMap<InstanceId, SystemTime>,
 }
 
 impl NetworkingState {
-    pub(crate) fn new(peer_map: PeerMap, peer_databases: PeerDatabases) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
-            peer_map,
-            peer_databases,
             sync_anchor: None,
             sync_status: SyncStatus::Unknown,
             instance_id: rng().random(),
             freeze: false,
-            disconnection_times: HashMap::new(),
         }
-    }
-
-    /// Create databases for peer standings
-    pub async fn initialize_peer_databases(data_dir: &DataDirectory) -> Result<PeerDatabases> {
-        let database_dir_path = data_dir.database_dir_path();
-        DataDirectory::create_dir_if_not_exists(&database_dir_path).await?;
-
-        let peer_standings_by_ip = NeptuneLevelDb::<IpAddr, PeerStanding>::new(
-            &data_dir.banned_ips_database_dir_path(),
-            &create_db_if_missing(),
-        )
-        .await?;
-
-        Ok(PeerDatabases {
-            peer_standings_by_ip,
-        })
-    }
-
-    /// Return a list of peer sanctions stored in the database.
-    pub fn all_peer_sanctions_in_database(&self) -> HashMap<IpAddr, PeerStanding> {
-        let mut sanctions = HashMap::default();
-
-        let mut dbiterator = self.peer_databases.peer_standings_by_ip.iter();
-        for (ip, standing) in dbiterator.by_ref() {
-            if standing.is_negative() {
-                sanctions.insert(ip, standing);
-            }
-        }
-
-        sanctions
-    }
-
-    pub async fn get_peer_standing_from_database(&self, ip: IpAddr) -> Option<PeerStanding> {
-        self.peer_databases.peer_standings_by_ip.get(ip).await
-    }
-
-    pub async fn clear_ip_standing_in_database(&mut self, ip: IpAddr) {
-        let old_standing = self.peer_databases.peer_standings_by_ip.get(ip).await;
-
-        if let Some(mut standing) = old_standing {
-            standing.clear_standing();
-
-            self.peer_databases
-                .peer_standings_by_ip
-                .put(ip, standing)
-                .await;
-        }
-    }
-
-    pub async fn clear_all_standings_in_database(&mut self) {
-        let new_entries: Vec<_> = self
-            .peer_databases
-            .peer_standings_by_ip
-            .iter()
-            .map(|(ip, mut standing)| {
-                standing.clear_standing();
-                (ip, standing)
-            })
-            .collect();
-
-        let mut batch = WriteBatchAsync::new();
-        for (ip, standing) in new_entries {
-            batch.op_write(ip, standing);
-        }
-
-        self.peer_databases
-            .peer_standings_by_ip
-            .batch_write(batch)
-            .await
-    }
-
-    // Storing IP addresses is, according to this answer, not a violation of GDPR:
-    // https://law.stackexchange.com/a/28609/45846
-    // Wayback machine: https://web.archive.org/web/20220708143841/https://law.stackexchange.com/questions/28603/how-to-satisfy-gdprs-consent-requirement-for-ip-logging/28609
-    /// Persist a peer's standing.
-    pub async fn write_peer_standing(&mut self, ip: IpAddr, current_standing: PeerStanding) {
-        self.peer_databases
-            .peer_standings_by_ip
-            .put(ip, current_standing)
-            .await
-    }
-
-    /// Register the disconnection time of a peer.
-    ///
-    /// Only use this to register disconnection times of _graceful_
-    /// disconnections that were triggered by _this_ node. That is, times of the
-    /// following events should _not_ be recorded:
-    /// - Graceful disconnect initiated by the peer.
-    /// - Abrupt disconnections, for example due to network failures.
-    ///
-    /// Only the peer tasks may call this method.
-    pub(crate) fn register_peer_disconnection(&mut self, id: InstanceId, time: SystemTime) {
-        self.disconnection_times.insert(id, time);
-    }
-
-    pub(crate) fn last_disconnection_time_of_peer(&self, id: InstanceId) -> Option<SystemTime> {
-        self.disconnection_times.get(&id).copied()
     }
 }
 
@@ -278,46 +147,5 @@ mod test_helpers {
         pub fn sync_download_is_complete(&self) -> bool {
             matches!(&self.sync_status, SyncStatus::Syncing(progress) if progress.download_is_complete())
         }
-    }
-}
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use neptune_p2p::peer::NegativePeerSanction;
-    use neptune_wallet::wallet_entropy::WalletEntropy;
-
-    use super::*;
-    use crate::application::config::cli_args;
-    use crate::tests::shared::globalstate::mock_genesis_global_state;
-
-    fn standing(value: i32) -> PeerStanding {
-        PeerStanding::init(
-            value,
-            Some((NegativePeerSanction::DifferentGenesis, SystemTime::now())),
-            None,
-            1000,
-        )
-    }
-
-    #[tokio::test]
-    async fn a_standing_above_the_stored_one_is_still_written() {
-        let cli = cli_args::Args::default();
-        let mut state = mock_genesis_global_state(0, WalletEntropy::new_random(), cli).await;
-        let ip: IpAddr = "203.0.113.10".parse().unwrap();
-
-        let mut guard = state.lock_guard_mut().await;
-        guard.net.write_peer_standing(ip, standing(-1000)).await;
-        guard.net.write_peer_standing(ip, standing(-600)).await;
-
-        assert_eq!(
-            Some(standing(-600).standing),
-            guard
-                .net
-                .get_peer_standing_from_database(ip)
-                .await
-                .map(|s| s.standing),
-            "the later, less negative standing must have been written"
-        );
     }
 }

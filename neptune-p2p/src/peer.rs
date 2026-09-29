@@ -132,6 +132,10 @@ pub enum NegativePeerSanction {
 
     /// Peer shared invalid synchronization bit mask.
     InvalidSyncCoverage,
+
+    /// Peer announced an object, was asked for it, and did not deliver it in
+    /// time.
+    StalledRequest,
 }
 
 /// The reason for improving a peer's standing
@@ -194,6 +198,7 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::MissingLustrationAnnouncement => -1,
             NegativePeerSanction::LustrationsWouldMakeCounterNegative => -1,
             NegativePeerSanction::InvalidSyncCoverage => -100,
+            NegativePeerSanction::StalledRequest => -5,
         }
     }
 }
@@ -1093,6 +1098,7 @@ impl rand::distr::Distribution<NegativePeerSanction> for rand::distr::StandardUn
             40 => NegativePeerSanction::LustrationsWouldMakeCounterNegative,
 
             41 => NegativePeerSanction::InvalidSyncCoverage,
+            42 => NegativePeerSanction::StalledRequest,
 
             _ => unreachable!(),
         }
