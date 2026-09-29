@@ -212,6 +212,7 @@ impl PeerLoopHandler {
             peer.send(request).await?;
         }
 
+        // Punish peers for announced-but-not-delivered objects.
         // A stalled peer that has since disconnected is not in the peer map
         // and cannot be punished; a stalled peer that gets banned is
         // disconnected by the main loop.
