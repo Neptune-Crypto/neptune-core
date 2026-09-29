@@ -711,12 +711,22 @@ impl PeerLoopHandler {
         // evaluate the fork choice rule
         debug!("Checking last block's canonicity ...");
         let last_block = received_blocks.last().unwrap();
-        let is_canonical = self
+        let (is_canonical, is_tip) = self
             .global_state_lock
-            .lock_guard()
-            .await
-            .incoming_block_is_more_canonical(last_block);
+            .lock(|state| {
+                (
+                    state.incoming_block_is_more_canonical(last_block),
+                    state.chain.tip().hash() == last_block.hash(),
+                )
+            })
+            .await;
         let last_block_height = last_block.header().height;
+        if is_tip {
+            // The same block may be requested from several peers, so it
+            // might arrive after another peer's copy became tip.
+            info!("Received block of height {last_block_height} that is already our tip.");
+            return Ok(None);
+        }
         if !is_canonical {
             warn!(
                 "Received {} blocks from peer but incoming blocks are less \
