@@ -1,3 +1,4 @@
+pub mod observe;
 pub mod order_book;
 pub mod sofun;
 pub mod sso_lock_script;
@@ -7,7 +8,10 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 
 use neptune_consensus::transaction::announcement::Announcement;
+use neptune_consensus::transaction::utxo_triple::UtxoTriple;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use order_book::OrderId;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
@@ -20,14 +24,14 @@ use tasm_lib::triton_vm::prelude::BFieldElement;
 /// their own -- so this is the allocation itself and not a stand-in for one.
 pub const STANDING_SWAP_ORDER_FLAG: BFieldElement = BFieldElement::new(1000);
 
-/// The domain separator for deriving the reward's sender randomness from the
+/// The domain separators for deriving an order's three randomnesses from its
 /// seed.
 ///
-/// Domains 0 and 1 belong to the offered side's `sender_randomness` and
-/// `receiver_preimage`, which the wallet derives from the same seed. They are
-/// reserved rather than used here. Reusing one of them would give two of an
-/// order's randomnesses the same value, and two orders whose rewards share an
-/// addition record can both be filled by one output.
+/// Each randomness has a domain of its own. Were two of them to share one,
+/// two of an order's randomnesses would have the same value, and two orders
+/// whose rewards share an addition record can both be filled by one output.
+const OFFERED_SENDER_RANDOMNESS_DOMAIN: u64 = 0;
+const OFFERED_RECEIVER_PREIMAGE_DOMAIN: u64 = 1;
 const REWARD_SENDER_RANDOMNESS_DOMAIN: u64 = 2;
 
 /// The hash of a type script, which is how an asset is named.
@@ -80,6 +84,14 @@ pub trait Swappable: Sized {
     /// The schema version of [`Self::EncodingFormat`], written as element 2 of
     /// the announcement envelope.
     fn version() -> u64;
+
+    /// The UTXO holding an order's offered amount under the order's lock
+    /// script.
+    ///
+    /// Its addition record is what the proposer's transaction outputs
+    /// alongside the announcement, and so it is what a driver looks for among
+    /// the outputs of the announcement's block.
+    fn order_utxo(order: &StandingSwapOrder<Self>) -> UtxoTriple;
 
     /// Extract the order from an announcement, if the message is an order of
     /// this configuration on the pair named by `pair_id`.
@@ -170,6 +182,40 @@ impl<C: Swappable> StandingSwapOrder<C> {
         self.params.clone()
     }
 
+    /// See [`Swappable::order_utxo`].
+    pub fn order_utxo(&self) -> UtxoTriple {
+        C::order_utxo(self)
+    }
+
+    /// The absolute index set of the removal record that spends the order
+    /// UTXO, which became AOCL leaf `id`.
+    ///
+    /// Every ingredient is public, so anyone can tell when an order is closed,
+    /// whether by a fill or by a cancel.
+    pub fn absolute_index_set(&self, id: OrderId) -> AbsoluteIndexSet {
+        AbsoluteIndexSet::compute(
+            Tip5::hash(&self.order_utxo().utxo),
+            self.offered_sender_randomness(),
+            self.offered_receiver_preimage(),
+            id.0,
+        )
+    }
+
+    /// The offered UTXO's sender_randomness derived from the order's public
+    /// `seed`.
+    pub fn offered_sender_randomness(&self) -> Digest {
+        self.derive_from_seed(OFFERED_SENDER_RANDOMNESS_DOMAIN)
+    }
+
+    /// The offered UTXO's receiver_preimage derived from the order's public
+    /// `seed`.
+    ///
+    /// Public, like the seed, so that anyone can compute the removal record
+    /// of the order UTXO: the lock script, not the preimage, guards it.
+    pub fn offered_receiver_preimage(&self) -> Digest {
+        self.derive_from_seed(OFFERED_RECEIVER_PREIMAGE_DOMAIN)
+    }
+
     /// The reward's sender_randomness derived from the order's public `seed`.
     ///
     /// Every configuration derives it the same way. The seed is public in all
@@ -177,10 +223,14 @@ impl<C: Swappable> StandingSwapOrder<C> {
     /// from sharing an addition record, not what the demanded UTXO happens to
     /// be, so nothing here depends on which configuration `C` is.
     pub(crate) fn reward_sender_randomness(&self) -> Digest {
+        self.derive_from_seed(REWARD_SENDER_RANDOMNESS_DOMAIN)
+    }
+
+    fn derive_from_seed(&self, domain: u64) -> Digest {
         Tip5::hash_varlen(
             &[
                 self.seed.values().to_vec(),
-                vec![BFieldElement::new(REWARD_SENDER_RANDOMNESS_DOMAIN)],
+                vec![BFieldElement::new(domain)],
             ]
             .concat(),
         )

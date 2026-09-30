@@ -1,3 +1,4 @@
+use neptune_consensus::transaction::utxo_triple::UtxoTriple;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
@@ -31,6 +32,10 @@ impl Swappable for V1Swap {
     type Params = ();
 
     type EncodingFormat = StandingSwapOrderV1;
+
+    fn order_utxo(_order: &StandingSwapOrder<Self>) -> UtxoTriple {
+        unimplemented!("what the demanded UTXO's coins look like is not settled")
+    }
 }
 
 impl StandingSwapOrder<V1Swap> {

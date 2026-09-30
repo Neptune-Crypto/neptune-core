@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use neptune_consensus::block::Block;
+use neptune_consensus::block::MINING_REWARD_TIME_LOCK_PERIOD;
 use neptune_consensus::proof_abstractions::tasm::program::TritonProgram;
 use neptune_consensus::transaction::utxo::Utxo;
 use neptune_consensus::transaction::utxo_triple::UtxoTriple;
@@ -236,6 +237,17 @@ impl Swappable for Sofun {
     type Params = SofunParams;
 
     type EncodingFormat = SofunBody;
+
+    fn order_utxo(order: &StandingSwapOrder<Self>) -> UtxoTriple {
+        UtxoTriple {
+            utxo: Utxo::new_native_currency(
+                order.lock_script().lock_script().hash(),
+                order.offered_amount,
+            ),
+            sender_randomness: order.offered_sender_randomness(),
+            receiver_digest: order.offered_receiver_preimage().hash(),
+        }
+    }
 }
 
 /// The parameters a SOFuN order carries beyond its standing swap terms.
@@ -261,8 +273,8 @@ impl OrderBook<Sofun> {
     /// filter demands the same amount, so ranking by the offered amount is
     /// ranking by price.
     ///
-    /// Callers still skip orders whose grid no longer clears `t + 3 years`,
-    /// reading [`StandingSwapOrder::params`].
+    /// Callers still skip orders that are not
+    /// [fillable](StandingSwapOrder::is_fillable_at) at their timestamp.
     //
     // ponytail: scan and sort per query, O(n log n) in the whole book. Replace
     // with a priority queue on the offered amount, bucketed by demanded amount,
@@ -275,6 +287,32 @@ impl OrderBook<Sofun> {
         matching.sort_unstable_by_key(|order| std::cmp::Reverse(order.order.offered_amount()));
 
         matching
+    }
+
+    /// The order to fill in a transaction with timestamp `timestamp` that
+    /// redirects `demanded`: of the open orders demanding exactly `demanded`
+    /// and fillable at `timestamp`, the one that offers the most. `None` if no
+    /// open order qualifies.
+    pub fn best_fill(
+        &self,
+        demanded: NativeCurrencyAmount,
+        timestamp: Timestamp,
+    ) -> Option<&Order<Sofun>> {
+        self.demanding(demanded)
+            .into_iter()
+            .find(|order| order.order.is_fillable_at(timestamp))
+    }
+}
+
+impl StandingSwapOrder<Sofun> {
+    /// Whether a fill in a transaction with timestamp `timestamp` can release
+    /// the reward at a point of this order's grid that counts toward the
+    /// composer's time-locked half, which is true if and only if the grid's
+    /// last point is at least `timestamp + 3 years`.
+    pub fn is_fillable_at(&self, timestamp: Timestamp) -> bool {
+        self.params
+            .last_release_date()
+            .is_ok_and(|d_max| d_max >= timestamp + MINING_REWARD_TIME_LOCK_PERIOD)
     }
 }
 
@@ -340,7 +378,7 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
-    use crate::standing_swap_order::order_book::BlockId;
+    use crate::chain::BlockId;
     use crate::standing_swap_order::order_book::BlockUpdate;
     use crate::standing_swap_order::order_book::OrderId;
     use crate::standing_swap_order::sso_lock_script::tests::public_input;
@@ -806,5 +844,61 @@ mod tests {
             .map(|order| order.id)
             .collect::<Vec<_>>();
         assert_eq!(vec![OrderId(0)], ids);
+    }
+
+    /// An order is fillable at `t` if and only if its last grid point is at
+    /// least `t + 3 years`, so the last fillable timestamp is exactly three
+    /// years before that point.
+    #[proptest]
+    fn fillable_until_three_years_before_the_last_grid_point(
+        #[strategy(arb())] order: StandingSwapOrder<Sofun>,
+    ) {
+        let d_max = order.params.last_release_date().unwrap();
+        prop_assume!(d_max >= MINING_REWARD_TIME_LOCK_PERIOD + Timestamp::millis(1));
+        let last =
+            Timestamp::millis(d_max.to_millis() - MINING_REWARD_TIME_LOCK_PERIOD.to_millis());
+
+        prop_assert!(order.is_fillable_at(last));
+        prop_assert!(!order.is_fillable_at(last + Timestamp::millis(1)));
+    }
+
+    /// The best fill is the richest order that is still fillable, skipping a
+    /// richer one whose grid has run out.
+    #[proptest]
+    fn best_fill_is_the_richest_fillable_order(
+        #[strategy(arb())] block: BlockId,
+        #[strategy(arb())] parent: Digest,
+    ) {
+        let t = Timestamp::years(10);
+        let order = |id, coins, d_zero| Order::<Sofun> {
+            id: OrderId(id),
+            opened_in: block,
+            closed_in: None,
+            order: StandingSwapOrder::<Sofun>::new(
+                NativeCurrencyAmount::coins(coins),
+                SofunParams { d_zero, epoch: 0 },
+                Digest::default(),
+                Digest::default(),
+                Digest::default(),
+                Digest::default(),
+            )
+            .unwrap(),
+        };
+        let expired = order(0, 3, Timestamp::years(1));
+        let fillable = order(1, 2, t + MINING_REWARD_TIME_LOCK_PERIOD);
+        let poorer = order(2, 1, t + MINING_REWARD_TIME_LOCK_PERIOD);
+        let demanded = expired.order.demanded_amount();
+
+        let mut book = OrderBook::<Sofun>::new(Sofun::asset_pair(), u64::MAX);
+        book.apply(BlockUpdate::<Sofun> {
+            block,
+            parent,
+            opened: vec![expired, fillable, poorer],
+            closed: vec![],
+        })
+        .unwrap();
+
+        let best = book.best_fill(demanded, t);
+        prop_assert_eq!(Some(OrderId(1)), best.map(|order| order.id));
     }
 }
