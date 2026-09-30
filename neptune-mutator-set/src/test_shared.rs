@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use itertools::Itertools;
 use rand::rngs::StdRng;
 use rand::Rng;
-use rand::RngCore;
+use rand::RngExt;
 use rand::SeedableRng;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::twenty_first::tip5::digest::Digest;

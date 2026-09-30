@@ -4,7 +4,7 @@ use itertools::Itertools;
 use num_traits::ConstZero;
 use num_traits::Zero;
 use rand::rngs::StdRng;
-use rand::Rng;
+use rand::RngExt;
 use rand::SeedableRng;
 use serde::Deserialize;
 use serde::Serialize;

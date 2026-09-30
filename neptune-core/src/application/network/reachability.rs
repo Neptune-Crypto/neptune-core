@@ -210,6 +210,7 @@ impl ReachabilityState {
 #[cfg(any(test, feature = "mock-rpc"))]
 impl rand::distr::Distribution<ReachabilityState> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> ReachabilityState {
+        use rand::RngExt;
         let addr = true
             .then(|| rng.random::<[u8; 4]>())
             .map(std::net::Ipv4Addr::from)
@@ -231,6 +232,7 @@ impl rand::distr::Distribution<ReachabilityState> for rand::distr::StandardUnifo
 #[cfg(any(test, feature = "mock-rpc"))]
 impl rand::distr::Distribution<RelayStrategy> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> RelayStrategy {
+        use rand::RngExt;
         let addr = true
             .then(|| rng.random::<[u8; 4]>())
             .map(std::net::Ipv4Addr::from)

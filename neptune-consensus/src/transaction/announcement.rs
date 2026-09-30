@@ -197,6 +197,7 @@ impl TryFrom<String> for Announcement {
 #[cfg(any(test, feature = "test-helpers"))]
 impl rand::distr::Distribution<Announcement> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Announcement {
+        use rand::RngExt;
         Announcement {
             message: (0..10).map(|_| rng.random()).collect_vec(),
         }

@@ -47,7 +47,7 @@ mod tests {
     use num_traits::Zero;
     use rand::random;
     use rand::rngs::StdRng;
-    use rand::Rng;
+    use rand::RngExt;
     use rand::SeedableRng;
     use tasm_lib::prelude::Digest;
     use tasm_lib::prelude::Tip5;
@@ -241,7 +241,7 @@ mod tests {
         use neptune_wallet::utxo_notification::UtxoNotificationMedium;
         use neptune_wallet::utxo_notification::UtxoNotificationMethod;
         use neptune_wallet::wallet_entropy::WalletEntropy;
-        use rand::Rng;
+        use rand::RngExt;
         use tasm_lib::prelude::Digest;
 
         use crate::application::config::cli_args;

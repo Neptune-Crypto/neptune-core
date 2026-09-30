@@ -79,7 +79,7 @@ mod tests {
     use proptest::test_runner::TestRng;
     use rand::random;
     use rand::rngs::StdRng;
-    use rand::Rng;
+    use rand::RngExt;
     use rand::SeedableRng;
     use strum::EnumCount;
     use strum::VariantArray;

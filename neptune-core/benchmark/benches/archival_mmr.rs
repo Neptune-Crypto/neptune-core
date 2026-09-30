@@ -137,7 +137,7 @@ mod mutate {
 
     mod mutate_100_of_10000 {
         use itertools::Itertools;
-        use rand::Rng;
+        use rand::RngExt;
         use tasm_lib::twenty_first::math::other::random_elements;
 
         use super::*;
@@ -185,7 +185,7 @@ mod batch_mutate_leaf_and_update_mps {
 
     mod mutate_100_of_10000 {
         use itertools::Itertools;
-        use rand::Rng;
+        use rand::RngExt;
         use tasm_lib::twenty_first::math::other::random_elements;
 
         use super::*;

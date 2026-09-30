@@ -170,8 +170,8 @@ pub fn shake256<const NUM_OUT_BYTES: usize>(randomness: impl AsRef<[u8]>) -> [u8
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) mod tests {
     use neptune_consensus::transaction::utxo::Utxo;
-    use rand::Rng;
-    use rand::TryRngCore;
+    use rand::RngExt;
+    use rand::TryRng;
 
     use super::*;
 

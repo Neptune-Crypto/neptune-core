@@ -24,12 +24,12 @@ arbitrary-impls = [
 test-helpers = ["arbitrary-impls", "dep:rand"]
 
 [dependencies]
-get-size2 = { version = "0.7", features = ["derive"] }
+get-size2 = { version = "0.9", features = ["derive"] }
 itertools = "0.14"
 num-traits = "0.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_arrays = "0.2"
-tasm-lib = "8.0.0"
+tasm-lib = "9.0.0"
 thiserror = "1.0.65"
 
 # optional: required for unit tests and the arbitrary-impls / test-helpers features.
@@ -37,7 +37,7 @@ thiserror = "1.0.65"
 arbitrary = { version = "1.4.1", features = ["derive"], optional = true }
 proptest = { version = "1.7", optional = true }
 proptest-arbitrary-interop = { version = "0.1", optional = true }
-rand = { version = "0.9", optional = true }
+rand = { version = "0.10", optional = true }
 
 [dev-dependencies]
 # the crate's own tests use archival-mmr's `mock` constructors.
@@ -49,7 +49,7 @@ bincode = "1.3"
 macro_rules_attr = "0.1.3"
 proptest = "1.7"
 proptest-arbitrary-interop = "0.1"
-rand = "0.9"
+rand = "0.10"
 serde_json = "1.0"
 statrs = "0.18.0"
 strum = { version = "0.27.0", features = ["derive"] }

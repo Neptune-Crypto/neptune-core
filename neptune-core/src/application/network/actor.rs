@@ -19,7 +19,7 @@ use libp2p::PeerId;
 use neptune_p2p::peer::handshake_data::HandshakeData;
 use neptune_primitives::network::Network;
 use rand::seq::SliceRandom;
-use rand::Rng;
+use rand::RngExt;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;

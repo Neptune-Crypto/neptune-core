@@ -22,7 +22,7 @@ use neptune_mutator_set::shared::NUM_TRIALS;
 use neptune_mutator_set::shared::WINDOW_SIZE;
 use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
-use rand::Rng;
+use rand::RngExt;
 use tasm_lib::prelude::Digest;
 
 use crate::address::generation_address;

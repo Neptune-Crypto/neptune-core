@@ -32,7 +32,7 @@ use num_traits::ToPrimitive;
 use num_traits::Zero;
 use peer_block_notifications::PeerBlockNotification;
 use rand::Rng;
-use rand::RngCore;
+use rand::RngExt;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use serde::Deserialize;
@@ -1165,7 +1165,7 @@ impl PeerStanding {
 mod tests {
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
-    use rand::Rng;
+    use rand::RngExt;
     use rand::rng;
     use test_strategy::proptest;
 

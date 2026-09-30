@@ -146,7 +146,7 @@ mod tests {
     use arbitrary::Unstructured;
     use num_traits::Zero;
     use rand::rngs::StdRng;
-    use rand::Rng;
+    use rand::RngExt;
     use rand::SeedableRng;
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::push_encodable;

@@ -126,7 +126,7 @@ mod tests {
     use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use neptune_primitives::timestamp::Timestamp;
     use rand::Rng;
-    use rand::RngCore;
+    use rand::RngExt;
     use tasm_lib::prelude::Digest;
 
     use super::CoinWithPossibleTimeLock;

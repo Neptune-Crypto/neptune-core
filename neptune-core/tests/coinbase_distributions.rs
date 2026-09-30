@@ -7,7 +7,7 @@ use neptune_primitives::timestamp::Timestamp;
 use neptune_wallet::address::ReceivingAddress;
 use neptune_wallet::coinbase_distribution::CoinbaseDistribution;
 use neptune_wallet::coinbase_distribution::CoinbaseOutput;
-use rand::Rng;
+use rand::RngExt;
 
 // #[traced_test]
 #[tokio::test(flavor = "multi_thread")]

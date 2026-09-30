@@ -19,7 +19,7 @@ use proptest_arbitrary_interop::arb;
 use rand::random;
 use rand::rngs::StdRng;
 use rand::Rng;
-use rand::RngCore;
+use rand::RngExt;
 use rand::SeedableRng;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 

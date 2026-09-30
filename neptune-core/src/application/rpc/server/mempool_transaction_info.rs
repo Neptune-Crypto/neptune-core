@@ -41,6 +41,7 @@ impl MempoolTransactionInfo {
 #[cfg(feature = "mock-rpc")]
 impl rand::distr::Distribution<MempoolTransactionInfo> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> MempoolTransactionInfo {
+        use rand::RngExt;
         MempoolTransactionInfo {
             id: rng.random(),
             proof_type: rng.random(),

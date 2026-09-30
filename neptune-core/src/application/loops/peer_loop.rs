@@ -49,7 +49,7 @@ use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::mast_hash::MastHash;
 use neptune_primitives::timestamp::Timestamp;
 use rand::rngs::StdRng;
-use rand::Rng;
+use rand::RngExt;
 use rand::SeedableRng;
 use tasm_lib::triton_vm::prelude::Digest;
 use tasm_lib::twenty_first::prelude::Mmr;
@@ -128,7 +128,7 @@ fn is_transport_error(err: &(dyn std::error::Error + 'static)) -> bool {
 ///
 /// also handles messages from main task over the main-to-peer-tasks broadcast
 /// channel.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PeerLoopHandler {
     to_main_tx: mpsc::Sender<PeerTaskToMain>,
     global_state_lock: GlobalStateLock,
@@ -3099,7 +3099,7 @@ mod tests {
     use neptune_primitives::network::Network;
     use neptune_wallet::wallet_entropy::WalletEntropy;
     use rand::rngs::StdRng;
-    use rand::Rng;
+    use rand::RngExt;
     use rand::SeedableRng;
     use tokio::sync::mpsc::error::TryRecvError;
     use tracing_test::traced_test;

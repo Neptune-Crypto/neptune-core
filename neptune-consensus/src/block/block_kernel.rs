@@ -162,6 +162,7 @@ impl MastHash for BlockKernel {
 #[cfg(any(test, feature = "test-helpers"))]
 impl rand::distr::Distribution<BlockKernel> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> BlockKernel {
+        use rand::RngExt;
         BlockKernel {
             header: rng.random(),
             body: rng.random(),

@@ -594,6 +594,7 @@ pub mod neptune_arbitrary {
 #[cfg(any(feature = "mock-rpc", feature = "test-helpers", test))]
 impl rand::distr::Distribution<NativeCurrencyAmount> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> NativeCurrencyAmount {
+        use rand::RngExt;
         NativeCurrencyAmount::from_nau(
             rng.random_range(NativeCurrencyAmount::min().0..NativeCurrencyAmount::max().0),
         )

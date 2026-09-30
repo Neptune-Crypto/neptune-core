@@ -15,7 +15,7 @@ mod tests {
     use neptune_primitives::timestamp::Timestamp;
     use rand::random;
     use rand::rngs::StdRng;
-    use rand::Rng;
+    use rand::RngExt;
     use rand::SeedableRng;
     use tracing_test::traced_test;
 

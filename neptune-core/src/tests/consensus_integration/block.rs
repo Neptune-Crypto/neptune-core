@@ -34,7 +34,7 @@ use proptest::collection;
 use proptest_arbitrary_interop::arb;
 use rand::random;
 use rand::rngs::StdRng;
-use rand::Rng;
+use rand::RngExt;
 use rand::SeedableRng;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
@@ -280,7 +280,7 @@ mod block_is_valid {
     use num_traits::Zero;
     use rand::rng;
     use rand::rngs::StdRng;
-    use rand::Rng;
+    use rand::RngExt;
     use rand::SeedableRng;
     use tasm_lib::triton_vm::proof::Proof;
     use tracing_test::traced_test;
@@ -632,7 +632,7 @@ mod guesser_fee_utxos {
     use neptune_wallet::mock_block::make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction;
     use neptune_wallet::transaction_output::TxOutput;
     use neptune_wallet::wallet_entropy::WalletEntropy;
-    use rand::Rng;
+    use rand::RngExt;
     use tracing_test::traced_test;
 
     use crate::application::config::cli_args;

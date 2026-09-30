@@ -268,10 +268,11 @@ mod test_support {
 
     impl rand::distr::Distribution<BlockBody> for rand::distr::StandardUniform {
         fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> BlockBody {
+            use rand::RngExt;
+
             let random_mmr_accumulator = |seed| {
                 use rand::rngs::StdRng;
                 use rand::Rng;
-                use rand::RngCore;
                 use rand::SeedableRng;
 
                 let mut inner_rng = StdRng::from_seed(seed);

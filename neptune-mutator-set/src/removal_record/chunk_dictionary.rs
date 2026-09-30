@@ -184,6 +184,7 @@ impl IntoIterator for ChunkDictionary {
 #[cfg(any(test, feature = "test-helpers"))]
 impl rand::distr::Distribution<ChunkDictionary> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> ChunkDictionary {
+        use rand::RngExt;
         ChunkDictionary {
             dictionary: (0..10)
                 .map(|_| {

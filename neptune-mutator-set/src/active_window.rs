@@ -178,7 +178,7 @@ impl ActiveWindow {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use rand::RngCore;
+    use rand::Rng;
     use tasm_lib::prelude::Tip5;
 
     use super::*;

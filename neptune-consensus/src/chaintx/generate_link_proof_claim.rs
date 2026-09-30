@@ -157,7 +157,7 @@ mod tests {
     use std::collections::HashMap;
 
     use rand::prelude::StdRng;
-    use rand::Rng;
+    use rand::RngExt;
     use tasm_lib::library::STATIC_MEMORY_FIRST_ADDRESS;
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::rust_shadowing_helper_functions;

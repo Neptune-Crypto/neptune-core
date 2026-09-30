@@ -589,7 +589,7 @@ mod tests {
         use neptune_mutator_set::removal_record::RemovalRecord;
         use neptune_mutator_set::shared::BATCH_SIZE;
         use neptune_mutator_set::test_shared::mock_item_and_randomnesses;
-        use rand::Rng;
+        use rand::RngExt;
 
         use super::MutatorSetUpdate;
 

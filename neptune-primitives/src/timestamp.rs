@@ -20,6 +20,7 @@ use proptest::strategy::BoxedStrategy;
 use proptest::strategy::Strategy;
 use rand::distr::Distribution;
 use rand::distr::StandardUniform;
+use rand::RngExt;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::TasmObject;

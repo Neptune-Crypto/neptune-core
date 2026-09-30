@@ -17,7 +17,7 @@ use neptune_wallet::composer_parameters::ComposerParameters;
 use neptune_wallet::transaction_details::TransactionDetails;
 use neptune_wallet::transaction_output::TxOutputList;
 use rand::rngs::StdRng;
-use rand::Rng;
+use rand::RngExt;
 use rand::SeedableRng;
 
 #[derive(Debug, Clone, Copy)]

@@ -1198,7 +1198,7 @@ mod tests {
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
     use rand::rng;
-    use rand::Rng;
+    use rand::RngExt;
     use strum::IntoEnumIterator;
     use test_strategy::proptest;
 

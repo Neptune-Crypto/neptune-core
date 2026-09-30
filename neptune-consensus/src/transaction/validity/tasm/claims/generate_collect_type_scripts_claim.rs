@@ -190,7 +190,7 @@ mod tests {
     use proptest_arbitrary_interop::arb;
     use rand::rngs::StdRng;
     use rand::Rng;
-    use rand::RngCore;
+    use rand::RngExt;
     use rand::SeedableRng;
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::rust_shadowing_helper_functions;

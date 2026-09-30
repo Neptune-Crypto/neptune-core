@@ -620,6 +620,7 @@ mod test_support {
 
     impl rand::distr::Distribution<TransactionKernel> for rand::distr::StandardUniform {
         fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> TransactionKernel {
+            use rand::RngExt;
             TransactionKernel {
                 inputs: (0..10).map(|_| rng.random()).collect_vec(),
                 outputs: (0..10).map(|_| rng.random()).collect_vec(),
@@ -674,7 +675,7 @@ pub mod tests {
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
-    use rand::Rng;
+    use rand::RngExt;
     use test_strategy::proptest;
 
     use super::*;

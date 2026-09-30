@@ -3721,7 +3721,7 @@ mod tests {
     use rand::random;
     use rand::rngs::StdRng;
     use rand::seq::SliceRandom;
-    use rand::Rng;
+    use rand::RngExt;
     use rand::SeedableRng;
     use tracing_test::traced_test;
 

@@ -3,6 +3,7 @@ use neptune_mutator_set::commit;
 use rand::distr::Distribution;
 use rand::distr::StandardUniform;
 use rand::Rng;
+use rand::RngExt;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;

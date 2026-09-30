@@ -4,6 +4,8 @@ impl<const BA: usize, const D: usize> rand::distr::Distribution<Randomness<BA, D
     for rand::distr::StandardUniform
 {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Randomness<BA, D> {
+        use rand::RngExt;
+
         let mut bytes = [[Default::default(); 32]; BA];
         let mut digests = [Default::default(); D];
         for b in &mut bytes {

@@ -5,7 +5,7 @@ use neptune_consensus::block::Block;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::network::Network;
 use rand::rng;
-use rand::RngCore;
+use rand::Rng;
 use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::prelude::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
@@ -526,7 +526,7 @@ mod tests {
     use rand::rng;
     use rand::rngs::StdRng;
     use rand::Rng;
-    use rand::RngCore;
+    use rand::RngExt;
     use rand::SeedableRng;
     use tasm_lib::prelude::Digest;
 

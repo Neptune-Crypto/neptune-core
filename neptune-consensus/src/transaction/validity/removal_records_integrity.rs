@@ -10,7 +10,7 @@ use neptune_mutator_set::removal_record::RemovalRecord;
 use neptune_primitives::mast_hash::MastHash;
 use rand::rngs::StdRng;
 use rand::Rng;
-use rand::RngCore;
+use rand::RngExt;
 use rand::SeedableRng;
 use serde::Deserialize;
 use serde::Serialize;

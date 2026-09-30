@@ -166,6 +166,7 @@ pub enum TransactionProofError {
 #[cfg(feature = "mock-rpc")]
 impl rand::distr::Distribution<TransactionProofType> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> TransactionProofType {
+        use rand::RngExt;
         match rng.random_range(0..3) {
             0 => TransactionProofType::PrimitiveWitness,
             1 => TransactionProofType::ProofCollection,

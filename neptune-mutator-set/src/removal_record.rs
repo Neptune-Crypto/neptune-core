@@ -469,6 +469,7 @@ pub enum RemovalRecordValidityError {
 #[cfg(any(test, feature = "test-helpers"))]
 impl rand::distr::Distribution<RemovalRecord> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> RemovalRecord {
+        use rand::RngExt;
         RemovalRecord {
             absolute_indices: rng.random(),
             target_chunks: rng.random(),
@@ -483,7 +484,7 @@ mod tests {
     use proptest::prelude::*;
     use proptest_arbitrary_interop::arb;
     use rand::prelude::IndexedRandom;
-    use rand::Rng;
+    use rand::RngExt;
     use tasm_lib::prelude::Tip5;
     use tasm_lib::triton_vm::prelude::BFieldCodec;
 

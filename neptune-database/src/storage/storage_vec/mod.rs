@@ -28,7 +28,7 @@ mod tests {
     use itertools::Itertools;
     use macro_rules_attr::apply;
     use rand::Rng;
-    use rand::RngCore;
+    use rand::RngExt;
 
     use super::traits::*;
     use super::*;

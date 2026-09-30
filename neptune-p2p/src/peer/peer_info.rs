@@ -214,17 +214,17 @@ fn generate_pseudorandom_multiaddr(seed: u64) -> Multiaddr {
     let mut addr = Multiaddr::empty();
 
     // transport protocol
-    match <rand::rngs::StdRng as rand::Rng>::random_range(&mut rng, 0..3) {
+    match <rand::rngs::StdRng as rand::RngExt>::random_range(&mut rng, 0..3) {
         0 => {
-            let ip = std::net::Ipv4Addr::from(
-                <rand::rngs::StdRng as rand::Rng>::random::<[u8; 4]>(&mut rng),
-            );
+            let ip = std::net::Ipv4Addr::from(<rand::rngs::StdRng as rand::RngExt>::random::<
+                [u8; 4],
+            >(&mut rng));
             addr.push(Protocol::Ip4(ip));
         }
         1 => {
-            let ip = std::net::Ipv6Addr::from(
-                <rand::rngs::StdRng as rand::Rng>::random::<[u8; 16]>(&mut rng),
-            );
+            let ip = std::net::Ipv6Addr::from(<rand::rngs::StdRng as rand::RngExt>::random::<
+                [u8; 16],
+            >(&mut rng));
             addr.push(Protocol::Ip6(ip));
         }
         _ => {
@@ -234,7 +234,7 @@ fn generate_pseudorandom_multiaddr(seed: u64) -> Multiaddr {
 
     // port
     addr.push(Protocol::Tcp(
-        <rand::rngs::StdRng as rand::Rng>::random_range(&mut rng, 1024..65535),
+        <rand::rngs::StdRng as rand::RngExt>::random_range(&mut rng, 1024..65535),
     ));
 
     addr
@@ -243,6 +243,7 @@ fn generate_pseudorandom_multiaddr(seed: u64) -> Multiaddr {
 #[cfg(any(feature = "mock-rpc", test))]
 impl rand::distr::Distribution<PeerConnectionInfo> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> PeerConnectionInfo {
+        use rand::RngExt;
         PeerConnectionInfo {
             listen_port: if rng.random_bool(0.5) {
                 Some(rng.random())
@@ -258,6 +259,7 @@ impl rand::distr::Distribution<PeerConnectionInfo> for rand::distr::StandardUnif
 #[cfg(any(feature = "mock-rpc", test))]
 impl rand::distr::Distribution<PeerInfo> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> PeerInfo {
+        use rand::RngExt;
         let own_timestamp_connection_established =
             SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(rng.next_u64() >> 20);
         let peer_timestamp_connection_established =
@@ -269,7 +271,7 @@ impl rand::distr::Distribution<PeerInfo> for rand::distr::StandardUniform {
             own_timestamp_connection_established,
             peer_timestamp_connection_established,
             standing: rng.random(),
-            version: <rand::rngs::StdRng as rand::Rng>::sample_iter(
+            version: <rand::rngs::StdRng as rand::RngExt>::sample_iter(
                 local_rng,
                 &rand::distr::Alphanumeric,
             )

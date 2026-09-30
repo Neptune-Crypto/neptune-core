@@ -109,6 +109,7 @@ impl Display for MiningStatus {
 #[cfg(feature = "mock-rpc")]
 impl rand::distr::Distribution<MiningStatus> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> MiningStatus {
+        use rand::RngExt;
         let random_time = SystemTime::UNIX_EPOCH + Duration::from_millis(rng.next_u64() >> 20);
         match rng.random_range(0..3) {
             0 => MiningStatus::Inactive,

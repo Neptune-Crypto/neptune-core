@@ -266,6 +266,7 @@ mod neptune_arbitrary {
 #[cfg(any(test, feature = "test-helpers"))]
 impl rand::distr::Distribution<AbsoluteIndexSet> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> AbsoluteIndexSet {
+        use rand::RngExt;
         AbsoluteIndexSet {
             minimum: rng.random(),
             distances: rng.random(),

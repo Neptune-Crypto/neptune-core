@@ -110,7 +110,7 @@ mod tests {
     use neptune_mutator_set::shared::BATCH_SIZE;
     use neptune_mutator_set::test_shared::*;
     use rand::random;
-    use rand::RngCore;
+    use rand::Rng;
 
     use super::*;
     use crate::test_utils::shared_tokio_runtime;

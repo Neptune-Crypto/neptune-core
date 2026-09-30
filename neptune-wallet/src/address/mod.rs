@@ -26,7 +26,7 @@ mod tests {
     use neptune_primitives::network::Network;
     use proptest_arbitrary_interop::arb;
     use rand::random;
-    use rand::Rng;
+    use rand::RngExt;
     use strum::IntoEnumIterator;
     use tasm_lib::prelude::Digest;
     use test_strategy::proptest;

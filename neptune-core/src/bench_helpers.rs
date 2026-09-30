@@ -31,7 +31,7 @@ use neptune_wallet::wallet_entropy::WalletEntropy;
 use num_traits::CheckedSub;
 use rand::distr::Alphanumeric;
 use rand::distr::SampleString;
-use rand::Rng;
+use rand::RngExt;
 use tokio::sync::mpsc;
 
 use crate::api::export::GlobalStateLock;

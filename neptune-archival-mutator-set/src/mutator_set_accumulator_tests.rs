@@ -12,7 +12,7 @@ use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_mutator_set::removal_record::RemovalRecord;
 use neptune_mutator_set::test_shared::mock_item_and_randomnesses;
-use rand::Rng;
+use rand::RngExt;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
 use crate::test_shared::empty_rusty_mutator_set;

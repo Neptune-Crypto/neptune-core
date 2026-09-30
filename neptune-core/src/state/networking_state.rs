@@ -4,7 +4,7 @@ use neptune_p2p::peer::InstanceId;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::difficulty_control::ProofOfWork;
 use rand::rng;
-use rand::Rng;
+use rand::RngExt;
 use tasm_lib::prelude::Digest;
 use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::prelude::MmrMembershipProof;

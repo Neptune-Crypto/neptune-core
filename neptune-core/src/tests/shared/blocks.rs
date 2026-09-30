@@ -20,7 +20,7 @@ use neptune_wallet::composer_parameters::ComposerParameters;
 use neptune_wallet::fee_notification_policy::FeeNotificationPolicy;
 use neptune_wallet::mock_block::make_mock_block_with_puts_and_guesser_preimage_and_guesser_fraction;
 use rand::rngs::StdRng;
-use rand::Rng;
+use rand::RngExt;
 use rand::SeedableRng;
 
 use crate::api::export::GlobalStateLock;
@@ -63,7 +63,7 @@ pub(crate) async fn next_block(
         println!("Before guess: Lustration status, height {height}: {status}");
     }
 
-    let deterministic_guesser_rng = StdRng::seed_from_u64(55512345);
+    let deterministic_guesser_rng_seed = 55512345;
 
     let (guesser_address, _) = global_state_lock
         .lock_guard()
@@ -80,7 +80,7 @@ pub(crate) async fn next_block(
         GuessingConfiguration {
             num_guesser_threads: global_state_lock.cli().guesser_threads,
             address: guesser_address,
-            override_rng: Some(deterministic_guesser_rng),
+            override_rng_seed: Some(deterministic_guesser_rng_seed),
             override_timestamp: Some(new_timestamp),
         },
     )

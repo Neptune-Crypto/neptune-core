@@ -291,6 +291,7 @@ impl BlockHeaderWithBlockHashWitness {
 #[cfg(any(feature = "mock-rpc", feature = "test-helpers", test))]
 impl rand::distr::Distribution<BlockHeader> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> BlockHeader {
+        use rand::RngExt;
         BlockHeader {
             version: rng.random(),
             height: rng.random(),
@@ -364,7 +365,7 @@ impl BlockHeader {
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
     use rand::rng;
-    use rand::Rng;
+    use rand::RngExt;
 
     use super::*;
     use crate::block::test_helpers::invalid_empty_block_with_proof_size;

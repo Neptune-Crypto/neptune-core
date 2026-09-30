@@ -26,14 +26,14 @@ test-helpers = ["arbitrary-impls"]
 anyhow = "1.0"
 chrono = "0.4"
 directories = "5.0"
-get-size2 = { version = "0.7", features = ["derive"] }
+get-size2 = { version = "0.9", features = ["derive"] }
 itertools = "0.14"
 num-bigint = { version = "0.4", features = ["serde"] }
 num-traits = "0.2"
-rand = "0.9"
+rand = "0.10"
 serde = { version = "1.0", features = ["derive"] }
 strum = { version = "0.27.0", features = ["derive"] }
-tasm-lib = "8.0.0"
+tasm-lib = "9.0.0"
 thiserror = "1.0.65"
 tokio = { version = "1.47", features = ["fs"] }
 
@@ -49,7 +49,7 @@ num-rational = "0.4"
 serde_json = "1.0"
 proptest = "1.7"
 proptest-arbitrary-interop = "0.1"
-rand_distr = "0.5"
+rand_distr = "0.6"
 test-strategy = "0.3"
 
 [lints]

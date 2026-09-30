@@ -2467,7 +2467,7 @@ mod tests {
     use neptune_wallet::mock_block::make_mock_block;
     use neptune_wallet::wallet_entropy::WalletEntropy;
     use rand::Rng;
-    use rand::RngCore;
+    use rand::RngExt;
     use rand::SeedableRng;
     use rand::distr::Alphanumeric;
     use rand::distr::SampleString;
@@ -5180,7 +5180,7 @@ mod tests {
     mod utxo_index {
         use neptune_wallet::mock_block::block_with_num_puts;
         use neptune_wallet::mock_block::block_with_puts;
-        use rand::Rng;
+        use rand::RngExt;
 
         use super::*;
 

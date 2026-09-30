@@ -47,7 +47,7 @@ use neptune_wallet::utxo_notification::UtxoNotificationMedium;
 use neptune_wallet::wallet_entropy::WalletEntropy;
 use neptune_wallet::wallet_file::WalletFile;
 use neptune_wallet::wallet_file::WalletFileContext;
-use rand::Rng;
+use rand::RngExt;
 use regex::Regex;
 use tarpc::client;
 use tarpc::context;

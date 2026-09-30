@@ -621,7 +621,7 @@ mod tests {
     use neptune_mutator_set::shared::NUM_TRIALS;
     use neptune_mutator_set::test_shared::mock_item_and_randomnesses;
     use rand::rngs::StdRng;
-    use rand::Rng;
+    use rand::RngExt;
     use rand::SeedableRng;
 
     use super::*;

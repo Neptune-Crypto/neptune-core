@@ -86,7 +86,7 @@ mod tests {
     use proptest::test_runner::TestRng;
     use proptest::test_runner::TestRunner;
     use rand::rngs::StdRng;
-    use rand::Rng;
+    use rand::RngExt;
     use rand::SeedableRng;
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::rust_shadowing_helper_functions;

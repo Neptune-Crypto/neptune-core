@@ -29,6 +29,7 @@ impl Display for SyncStatus {
 #[cfg(feature = "mock-rpc")]
 impl rand::distr::Distribution<SyncStatus> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> SyncStatus {
+        use rand::RngExt;
         match rng.random_range(0usize..<SyncStatus as strum::EnumCount>::COUNT) {
             0 => SyncStatus::Unknown,
             1 => SyncStatus::Challenges(rng.random_range(0..1000)),

@@ -29,7 +29,7 @@ use neptune_wallet::utxo_notification::UtxoNotificationMedium;
 use neptune_wallet::wallet_entropy::WalletEntropy;
 use num_traits::Zero;
 use rand::rngs::StdRng;
-use rand::Rng;
+use rand::RngExt;
 use rand::SeedableRng;
 use tasm_lib::prelude::Digest;
 use tracing_test::traced_test;

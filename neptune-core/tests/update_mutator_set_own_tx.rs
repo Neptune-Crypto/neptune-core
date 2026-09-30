@@ -8,7 +8,7 @@ use neptune_mempool::transaction_kernel_id::Txid;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::timestamp::Timestamp;
 use neptune_wallet::address::KeyType;
-use rand::Rng;
+use rand::RngExt;
 use tracing_test::traced_test;
 
 enum SourceOfNewBlocks {

@@ -1165,7 +1165,7 @@ impl MainLoopHandler {
         let peers_to_disconnect = connected_peers
             .into_iter()
             .filter(|(_, peer)| !cli_peers.contains(&peer.address()))
-            .choose_multiple(&mut rand::rng(), num_peers_to_disconnect);
+            .sample(&mut rand::rng(), num_peers_to_disconnect);
         match peers_to_disconnect.len() {
             0 => warn!("Not disconnecting from any peer because of manual override."),
             i => info!("Disconnecting from {i} peers."),
@@ -3219,7 +3219,7 @@ mod tests {
 
         use neptune_p2p::peer::PeerMessage;
         use neptune_p2p::peer::TransferConnectionStatus;
-        use rand::Rng;
+        use rand::RngExt;
 
         use super::*;
         use crate::tests::shared::globalstate::get_dummy_peer_connection_data_genesis;

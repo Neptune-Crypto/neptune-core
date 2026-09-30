@@ -561,10 +561,11 @@ impl MutatorSetAccumulator {
 #[cfg(any(test, feature = "test-helpers"))]
 impl rand::distr::Distribution<MutatorSetAccumulator> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> MutatorSetAccumulator {
+        use rand::RngExt;
+
         let random_mmr_accumulator = |seed| {
             use rand::rngs::StdRng;
             use rand::Rng;
-            use rand::RngCore;
             use rand::SeedableRng;
 
             let mut inner_rng = StdRng::from_seed(seed);
@@ -593,7 +594,7 @@ mod tests {
     use macro_rules_attr::apply;
     use proptest::prelude::*;
     use proptest::prop_assert_eq;
-    use rand::Rng;
+    use rand::RngExt;
     use test_strategy::proptest;
 
     use super::*;

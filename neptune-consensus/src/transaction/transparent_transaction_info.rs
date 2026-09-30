@@ -4,6 +4,7 @@ use itertools::Itertools;
 use rand::distr::Distribution;
 use rand::distr::StandardUniform;
 use rand::Rng;
+use rand::RngExt;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 
 use crate::transaction::announcement::Announcement;

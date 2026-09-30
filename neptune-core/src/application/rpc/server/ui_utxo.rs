@@ -46,6 +46,7 @@ pub struct UiUtxo {
 #[cfg(feature = "mock-rpc")]
 impl rand::distr::Distribution<UtxoStatusEvent> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> UtxoStatusEvent {
+        use rand::RngExt;
         let block_height = rng.random();
         let timestamp = rng.random();
         match rng.random_range(0..5) {
@@ -65,6 +66,7 @@ impl rand::distr::Distribution<UtxoStatusEvent> for rand::distr::StandardUniform
 #[cfg(feature = "mock-rpc")]
 impl rand::distr::Distribution<UiUtxo> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> UiUtxo {
+        use rand::RngExt;
         UiUtxo {
             received: rng.random(),
             spent: rng.random(),

@@ -12,7 +12,7 @@ use neptune_primitives::timestamp::Timestamp;
 use neptune_wallet::transaction_output::TxOutput;
 use neptune_wallet::wallet_entropy::WalletEntropy;
 use rand::rngs::StdRng;
-use rand::Rng;
+use rand::RngExt;
 use rand::SeedableRng;
 use tracing_test::traced_test;
 

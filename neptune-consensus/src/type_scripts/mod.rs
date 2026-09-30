@@ -153,7 +153,7 @@ impl std::hash::Hash for TypeScriptAndWitness {
 pub(crate) mod tests {
     use itertools::Itertools;
     use rand::rngs::StdRng;
-    use rand::Rng;
+    use rand::RngExt;
     use rand::SeedableRng;
 
     use super::*;

@@ -124,7 +124,7 @@ mod tests {
     use std::collections::HashMap;
 
     use rand::rngs::StdRng;
-    use rand::Rng;
+    use rand::RngExt;
     use rand::SeedableRng;
     use tasm_lib::prelude::BasicSnippet;
     use tasm_lib::prelude::Digest;

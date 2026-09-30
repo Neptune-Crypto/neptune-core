@@ -44,6 +44,7 @@ impl Display for AdditionRecord {
 #[cfg(any(test, feature = "test-helpers"))]
 impl rand::distr::Distribution<AdditionRecord> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> AdditionRecord {
+        use rand::RngExt;
         AdditionRecord {
             canonical_commitment: rng.random(),
         }

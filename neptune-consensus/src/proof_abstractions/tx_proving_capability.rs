@@ -80,6 +80,7 @@ impl FromStr for TxProvingCapability {
 #[cfg(feature = "mock-rpc")]
 impl rand::distr::Distribution<TxProvingCapability> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> TxProvingCapability {
+        use rand::RngExt;
         match rng.random_range(0..4) {
             0 => TxProvingCapability::PrimitiveWitness,
             1 => TxProvingCapability::LockScript,

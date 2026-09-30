@@ -83,6 +83,7 @@ impl Deref for BlockAppendix {
 
 impl rand::distr::Distribution<BlockAppendix> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> BlockAppendix {
+        use rand::RngExt;
         BlockAppendix {
             claims: (0..10)
                 .map(|_| {

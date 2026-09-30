@@ -9,7 +9,7 @@ use neptune_consensus::block::Block;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::network::Network;
 use rand::rng;
-use rand::Rng;
+use rand::RngExt;
 use tasm_lib::twenty_first::prelude::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tokio::sync::mpsc;
@@ -993,7 +993,7 @@ mod tests {
     use neptune_consensus::block::Block;
     use neptune_primitives::network::Network;
     use rand::rngs::StdRng;
-    use rand::RngCore;
+    use rand::Rng;
     use rand::SeedableRng;
     use tokio::sync::Mutex;
 
@@ -1705,7 +1705,7 @@ mod tests {
             tip_control_sender: Sender<BlockchainTipControl>,
             rng: &mut StdRng,
         ) {
-            let mut moved_rng = rng.clone();
+            let mut moved_rng = StdRng::from_rng(rng);
             let mut block = tokio::task::spawn_blocking(move || moved_rng.random::<Block>())
                 .await
                 .unwrap();
@@ -1858,7 +1858,7 @@ mod tests {
             tip_control_sender: Sender<BlockchainTipControl>,
             rng: &mut StdRng,
         ) {
-            let mut moved_rng = rng.clone();
+            let mut moved_rng = StdRng::from_rng(rng);
             let mut block = tokio::task::spawn_blocking(move || moved_rng.random::<Block>())
                 .await
                 .unwrap();

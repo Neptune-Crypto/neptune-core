@@ -166,7 +166,7 @@ mod tests {
     use proptest::prelude::*;
     use rand::random;
     use rand::rngs::StdRng;
-    use rand::Rng;
+    use rand::RngExt;
     use rand::SeedableRng;
     use tasm_lib::hashing::merkle_verify::MerkleVerify;
     use tasm_lib::memory::encode_to_memory;

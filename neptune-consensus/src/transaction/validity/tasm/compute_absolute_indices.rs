@@ -243,7 +243,7 @@ mod tests {
 
     use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
     use rand::rngs::StdRng;
-    use rand::Rng;
+    use rand::RngExt;
     use rand::SeedableRng;
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::pop_encodable;

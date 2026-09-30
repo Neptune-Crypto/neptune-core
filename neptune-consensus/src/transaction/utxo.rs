@@ -11,6 +11,7 @@ use num_traits::Zero;
 use rand::distr::Distribution;
 use rand::distr::StandardUniform;
 use rand::Rng;
+use rand::RngExt;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::TasmObject;

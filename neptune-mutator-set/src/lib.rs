@@ -126,7 +126,7 @@ pub fn aocl_to_swbfi_leaf_counts(aocl_leaf_count: u64) -> u64 {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use macro_rules_attr::apply;
-    use rand::Rng;
+    use rand::RngExt;
     use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
     use tests::ms_membership_proof::MsMembershipProof;
     use tests::removal_record::RemovalRecord;

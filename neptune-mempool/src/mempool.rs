@@ -2133,7 +2133,7 @@ mod tests {
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
-    use rand::Rng;
+    use rand::RngExt;
     use tasm_lib::prelude::Digest;
     use tasm_lib::twenty_first::prelude::BFieldCodec;
     use tracing_test::traced_test;

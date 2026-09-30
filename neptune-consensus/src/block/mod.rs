@@ -44,7 +44,7 @@ use neptune_primitives::timestamp::Timestamp;
 use num_traits::CheckedSub;
 use num_traits::Zero;
 use rand::rngs::StdRng;
-use rand::Rng;
+use rand::RngExt;
 use rand::SeedableRng;
 use serde::Deserialize;
 use serde::Serialize;
@@ -1295,7 +1295,7 @@ impl Block {
 
 #[cfg(any(test, feature = "test-helpers"))]
 impl rand::distr::Distribution<Block> for rand::distr::StandardUniform {
-    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Block {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Block {
         use crate::transaction::validity::neptune_proof::NeptuneProof;
 
         let kernel = rng.random::<BlockKernel>();
@@ -1543,7 +1543,7 @@ pub(crate) mod tests {
     use proptest::prop_assume;
     use proptest_arbitrary_interop::arb;
     use rand::rng;
-    use rand::Rng;
+    use rand::RngExt;
     use test_strategy::proptest;
 
     use super::*;

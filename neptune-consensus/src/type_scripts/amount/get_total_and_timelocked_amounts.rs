@@ -97,7 +97,7 @@ mod test {
     use num_traits::CheckedAdd;
     use rand::rng;
     use rand::rngs::StdRng;
-    use rand::Rng;
+    use rand::RngExt;
     use rand::SeedableRng;
     use tasm_lib::empty_stack;
     use tasm_lib::library::STATIC_MEMORY_FIRST_ADDRESS;

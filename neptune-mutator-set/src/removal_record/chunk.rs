@@ -448,7 +448,7 @@ mod tests {
     use proptest::prop_assert_eq;
     use proptest_arbitrary_interop::arb;
     use rand::rng;
-    use rand::RngCore;
+    use rand::Rng;
     use statrs::distribution::ContinuousCDF;
     use statrs::distribution::Normal;
     use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
@@ -465,7 +465,7 @@ mod tests {
         /// Lengths above 4095 are unreachable without grinding
         /// `sender_randomness`, but must still pack and unpack.
         pub(crate) fn random_of_length(length: usize) -> Self {
-            use rand::Rng;
+            use rand::RngExt;
 
             let mut rng = rand::rng();
             let mut relative_indices = (0..length)
@@ -771,7 +771,7 @@ mod tests {
     }
 
     mod packing {
-        use rand::Rng;
+        use rand::RngExt;
 
         use super::*;
 

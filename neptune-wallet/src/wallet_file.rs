@@ -6,7 +6,7 @@ use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Result;
 use rand::rng;
-use rand::Rng;
+use rand::RngExt;
 use serde::Deserialize;
 use serde::Serialize;
 use tracing::info;

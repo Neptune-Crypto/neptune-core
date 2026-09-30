@@ -70,6 +70,7 @@ mod test_helpers {
 #[cfg(feature = "mock-rpc")]
 impl rand::distr::Distribution<SyncProgress> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> SyncProgress {
+        use rand::RngExt;
         let total_span = rng.next_u64();
         let num_blocks_downloaded = rng.random_range(0u64..total_span);
         SyncProgress {

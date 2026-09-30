@@ -18,7 +18,7 @@ use itertools::Itertools;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use num_traits::Zero;
 use rand::rng;
-use rand::RngCore;
+use rand::Rng;
 use serde::Deserialize;
 use serde::Serialize;
 

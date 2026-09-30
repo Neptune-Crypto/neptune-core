@@ -24,7 +24,7 @@ use neptune_wallet::address::SpendingKey;
 use neptune_wallet::change_policy::ChangePolicy;
 use rand::rng;
 use rand::rngs::StdRng;
-use rand::Rng;
+use rand::RngExt;
 use rand::SeedableRng;
 use tasm_lib::prelude::Digest;
 

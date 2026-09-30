@@ -172,6 +172,7 @@ impl Txid for LinkTx {
 #[cfg(any(feature = "mock-rpc", test))]
 impl rand::distr::Distribution<TransactionKernelId> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> TransactionKernelId {
+        use rand::RngExt;
         TransactionKernelId(rng.random())
     }
 }

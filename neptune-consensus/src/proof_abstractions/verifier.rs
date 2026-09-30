@@ -179,7 +179,7 @@ pub(crate) mod tests {
 
     use itertools::Itertools;
     use macro_rules_attr::apply;
-    use rand::Rng;
+    use rand::RngExt;
     use tasm_lib::prelude::Tip5;
     use tasm_lib::triton_vm::isa::triton_asm;
     use tasm_lib::triton_vm::isa::triton_program;

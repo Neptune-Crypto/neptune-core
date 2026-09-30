@@ -5,7 +5,7 @@ use std::ops::Not;
 use itertools::Itertools;
 use neptune_p2p::peer::transfer_sync_bit_mask::TransferSyncBitMask;
 use rand::rngs::StdRng;
-use rand::Rng;
+use rand::RngExt;
 use rand::SeedableRng;
 
 /// A [`SynchronizationBitMask`] is a representation of the synchronization
@@ -536,7 +536,7 @@ impl SynchronizationBitMask {
 #[cfg(any(test, feature = "test-helpers"))]
 impl SynchronizationBitMask {
     pub fn random(lower_bound: u64, upper_bound: u64) -> Self {
-        use rand::RngCore;
+        use rand::Rng;
 
         assert!(upper_bound >= lower_bound);
 

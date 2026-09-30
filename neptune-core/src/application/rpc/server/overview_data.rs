@@ -51,6 +51,7 @@ pub struct OverviewData {
 #[cfg(feature = "mock-rpc")]
 impl rand::distr::Distribution<OverviewData> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> OverviewData {
+        use rand::RngExt;
         fn random_option<D, R: rand::Rng + ?Sized>(rng: &mut R) -> Option<D>
         where
             rand::distr::StandardUniform: rand::distr::Distribution<D>,

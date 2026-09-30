@@ -4,6 +4,7 @@ use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use rand::distr::Distribution;
 use rand::distr::StandardUniform;
 use rand::Rng;
+use rand::RngExt;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::triton_vm::prelude::BFieldCodec;

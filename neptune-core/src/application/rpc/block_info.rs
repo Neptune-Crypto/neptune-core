@@ -12,6 +12,7 @@ use neptune_primitives::timestamp::Timestamp;
 use rand::distr::Distribution;
 use rand::distr::StandardUniform;
 use rand::Rng;
+use rand::RngExt;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::twenty_first::tip5::digest::Digest;
