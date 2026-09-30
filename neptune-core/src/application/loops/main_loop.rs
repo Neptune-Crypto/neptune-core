@@ -29,6 +29,7 @@ use neptune_mempool::upgrade_priority::UpgradePriority;
 use neptune_p2p::peer::handshake_data::HandshakeData;
 use neptune_p2p::peer::link_tx_notification::LinkTxNotification;
 use neptune_p2p::peer::transaction_notification::TransactionNotification;
+use neptune_primitives::mast_hash::MastHash;
 use neptune_primitives::timestamp::Timestamp;
 use proof_upgrader::get_upgrade_task_from_mempool;
 use proof_upgrader::UpgradeJob;
@@ -609,6 +610,10 @@ impl MainLoopHandler {
                         BlockProposal::own_proposal(block.clone(), expected_utxos.clone());
                     state.wallet_state.add_expected_utxos(expected_utxos).await;
                 }
+                spawn_notify_command(
+                    &self.global_state_lock.cli().proposal_notify,
+                    &block.body().mast_hash().to_hex(),
+                );
 
                 // Share on network!
                 if !self.global_state_lock.cli().secret_compositions {
@@ -980,6 +985,10 @@ impl MainLoopHandler {
 
                     global_state_mut.block_proposal_warrants_guess_restart(&block)
                 };
+                spawn_notify_command(
+                    &self.global_state_lock.cli().proposal_notify,
+                    &block.body().mast_hash().to_hex(),
+                );
 
                 // Notify all peers of the block proposal we just accepted. Do
                 // this regardless of the difference in guesser fee relative to
@@ -3074,6 +3083,61 @@ mod tests {
 
     #[traced_test]
     #[apply(shared_tokio_runtime)]
+    async fn own_block_proposal_invokes_proposal_notify() {
+        use neptune_consensus::proof_abstractions::test_helpers::test_helper_data_dir;
+
+        use crate::tests::shared::blocks::fake_valid_block_proposal_successor_for_test;
+        use crate::tests::shared::files::unit_test_data_directory;
+        use crate::tests::shared::files::wait_for_file_to_exist;
+
+        #[cfg(not(windows))]
+        const NOTIFY_SCRIPT_NAME: &str = "block_notify_dummy.py";
+        #[cfg(windows)]
+        const NOTIFY_SCRIPT_NAME: &str = "block_notify_dummy.bat";
+
+        let network = Network::Main;
+        let genesis = Block::genesis(network);
+        let proposal = fake_valid_block_proposal_successor_for_test(
+            &genesis,
+            genesis.header().timestamp + Timestamp::hours(1),
+            rand::random(),
+            network,
+        )
+        .await;
+
+        // The script creates an empty file named after its first argument, in
+        // the directory given as its second.
+        let tmp_dir = unit_test_data_directory(network).unwrap().root_dir_path();
+        let expected_file = tmp_dir.join(format!("{}.block", proposal.body().mast_hash().to_hex()));
+        let cli = cli_args::Args {
+            proposal_notify: Some(format!(
+                "{}{NOTIFY_SCRIPT_NAME} %s {}",
+                test_helper_data_dir().to_string_lossy(),
+                tmp_dir.to_string_lossy()
+            )),
+            network,
+            ..Default::default()
+        };
+        let TestSetup {
+            mut main_loop_handler,
+            ..
+        } = setup(1, 0, cli).await;
+        let mut mutable_main_loop_state = main_loop_handler.mutable();
+
+        main_loop_handler
+            .handle_miner_task_message(
+                MinerToMain::BlockProposal(Box::new((proposal, vec![]))),
+                &mut mutable_main_loop_state,
+            )
+            .await
+            .unwrap();
+
+        wait_for_file_to_exist(&expected_file).await.unwrap();
+        let _ = std::fs::remove_file(&expected_file);
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
     async fn should_switch_guessing_proposal_iff_sufficient_delta() {
         let network = Network::Main;
         let cli = cli_args::Args {
@@ -3503,6 +3567,55 @@ mod tests {
                 .await
                 .unwrap();
             let _ = fs::remove_file(&expected_file_location);
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn block_proposal_from_peer_invokes_proposal_notify() {
+            use neptune_consensus::proof_abstractions::test_helpers::test_helper_data_dir;
+
+            use crate::tests::shared::blocks::invalid_empty_block1_with_guesser_fraction;
+            use crate::tests::shared::files::unit_test_data_directory;
+            use crate::tests::shared::files::wait_for_file_to_exist;
+
+            #[cfg(not(windows))]
+            const NOTIFY_SCRIPT_NAME: &str = "block_notify_dummy.py";
+            #[cfg(windows)]
+            const NOTIFY_SCRIPT_NAME: &str = "block_notify_dummy.bat";
+
+            let network = Network::Main;
+            let proposal = invalid_empty_block1_with_guesser_fraction(network, 0.5).await;
+
+            // The script creates an empty file named after its first argument,
+            // in the directory given as its second.
+            let tmp_dir = unit_test_data_directory(network).unwrap().root_dir_path();
+            let expected_file =
+                tmp_dir.join(format!("{}.block", proposal.body().mast_hash().to_hex()));
+            let cli = cli_args::Args {
+                proposal_notify: Some(format!(
+                    "{}{NOTIFY_SCRIPT_NAME} %s {}",
+                    test_helper_data_dir().to_string_lossy(),
+                    tmp_dir.to_string_lossy()
+                )),
+                network,
+                ..Default::default()
+            };
+            let TestSetup {
+                mut main_loop_handler,
+                ..
+            } = setup(1, 0, cli).await;
+            let mut mutable_main_loop_state = main_loop_handler.mutable();
+
+            main_loop_handler
+                .handle_peer_task_message(
+                    PeerTaskToMain::BlockProposal(Box::new(proposal)),
+                    &mut mutable_main_loop_state,
+                )
+                .await
+                .unwrap();
+
+            wait_for_file_to_exist(&expected_file).await.unwrap();
+            let _ = std::fs::remove_file(&expected_file);
         }
     }
 }

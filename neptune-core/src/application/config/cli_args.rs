@@ -97,6 +97,17 @@ pub struct Args {
     #[clap(long, value_name = "CMD")]
     pub(crate) tx_notify: Option<String>,
 
+    /// Execute command when the node adopts a new block proposal (%s in cmd is
+    /// replaced by the hash of the proposal's block body).
+    ///
+    /// A block proposal is a block that lacks only its proof-of-work. The node
+    /// adopts one when it composes it, and when a peer sends one that builds on
+    /// the tip and pays guessers more than the current one, unless the node has
+    /// a proposal of its own. Otherwise, it behaves like the block-notify
+    /// command.
+    #[clap(long, value_name = "CMD")]
+    pub(crate) proposal_notify: Option<String>,
+
     /// Ban connections to and from the given IP address.
     ///
     /// If a libp2p Multiaddr is supplied, the underlying IP address will be
@@ -1252,6 +1263,18 @@ mod tests {
 
     #[test]
     fn tx_notify_command_is_not_a_positional_argument() {
+        assert!(Args::try_parse_from(["neptune-core", "notify.sh %s"]).is_err());
+    }
+
+    #[test]
+    fn proposal_notify_is_a_flag() {
+        let args =
+            Args::try_parse_from(["neptune-core", "--proposal-notify", "notify.sh %s"]).unwrap();
+        assert_eq!(Some("notify.sh %s".to_string()), args.proposal_notify);
+    }
+
+    #[test]
+    fn proposal_notify_command_is_not_a_positional_argument() {
         assert!(Args::try_parse_from(["neptune-core", "notify.sh %s"]).is_err());
     }
 

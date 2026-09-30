@@ -1,5 +1,5 @@
-//! The external programs a node runs when something happens: `--block-notify`
-//! and `--tx-notify`.
+//! The external programs a node runs when something happens: `--block-notify`,
+//! `--tx-notify` and `--proposal-notify`.
 
 use std::process::Command;
 use std::process::Stdio;
