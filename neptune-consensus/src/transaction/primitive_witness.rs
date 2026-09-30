@@ -225,7 +225,7 @@ impl PrimitiveWitness {
         for lock_script_and_witness in &self.lock_scripts_and_witnesses {
             let lock_script = lock_script_and_witness.program.clone();
             let secret_input = lock_script_and_witness.nondeterminism();
-            let public_input = Tip5::hash(self).reversed().encode().into();
+            let public_input = self.kernel.mast_hash().reversed().values().into();
 
             // This could be a lengthy, CPU intensive call.
             // Also, the lock script is satisfied if it halts gracefully (i.e., without crashing).
@@ -1871,6 +1871,35 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A lock script that halts if and only if the digest on its public input
+    /// equals the digest its witness divines.
+    fn echo_lock_script() -> Program {
+        triton_program!(read_io 5 divine 5 assert_vector pop 5 halt)
+    }
+
+    /// A lock script's public input is the kernel MAST hash, as in the claim
+    /// that proves it. So a lock script that compares its public input with
+    /// the kernel MAST hash, divined, is satisfied.
+    #[proptest(cases = 3, async = "tokio")]
+    async fn lock_script_reads_kernel_mast_hash(
+        #[strategy(arb())] _output_lock_script_hash: Digest,
+        #[strategy(PrimitiveWitness::arbitrary_primitive_witness_with(
+            &[Utxo::new_native_currency(echo_lock_script().hash(), NativeCurrencyAmount::coins(1))],
+            &[LockScriptAndWitness::new(echo_lock_script())],
+            &[Utxo::new_native_currency(#_output_lock_script_hash, NativeCurrencyAmount::coins(1))],
+            &[],
+            NativeCurrencyAmount::coins(0),
+            None,
+        ))]
+        mut primitive_witness: PrimitiveWitness,
+    ) {
+        let kernel_mast_hash = primitive_witness.kernel.mast_hash().reversed();
+        primitive_witness.lock_scripts_and_witnesses[0]
+            .set_nd_tokens(kernel_mast_hash.values().to_vec());
+
+        prop_assert!(primitive_witness.validate().await.is_ok());
     }
 
     #[proptest(cases = 5, async = "tokio")]
