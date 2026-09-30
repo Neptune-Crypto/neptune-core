@@ -3,15 +3,15 @@
 //! The book is a container, not a chain consumer. Its entries are the
 //! end-product of a long chain of events: finding the announcement, decoding it
 //! under the schema `pair_id` names, rebuilding the lock script, deriving the
-//! order UTXO's addition record and finding that record in the AOCL, whose
-//! position is the leaf index that identifies the order. Every [`Order`] in
-//! the book has therefore already been verified, and no method below performs
-//! a lookup of any kind.
+//! order UTXO's addition record and finding that record among the outputs of
+//! the announcement's block, whose position gives the leaf index that
+//! identifies the order. Every [`Order`] in the book has therefore already been
+//! verified, and no method below performs a lookup of any kind.
 //!
 //! The order book is *driven*, never driving. It is told what a block
 //! changed through [`OrderBook::apply`], and told to forget a branch through
-//! [`OrderBook::roll_back_to`]. Whether those calls come from a local archival
-//! state or from a subscription to a remote node is not visible from here.
+//! [`OrderBook::roll_back_to`]. Who makes those calls is not visible from
+//! here.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -22,6 +22,7 @@ use tasm_lib::prelude::Digest;
 use super::AssetPair;
 use super::StandingSwapOrder;
 use super::Swappable;
+use crate::chain::BlockId;
 
 /// Identity of an order: the AOCL leaf index of the order UTXO.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -46,18 +47,6 @@ pub struct Order<C: Swappable> {
 
     /// The order's terms and its configuration's parameters.
     pub order: StandingSwapOrder<C>,
-}
-
-/// A block identifier: its height and its hash.
-///
-/// The height orders blocks, which rollback and pruning need. The hash
-/// distinguishes blocks at the same height on different branches, which is how
-/// the order book knows it's on the wrong branch (or its update is).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(any(test, feature = "arbitrary-impls"), derive(arbitrary::Arbitrary))]
-pub struct BlockId {
-    pub height: BlockHeight,
-    pub hash: Digest,
 }
 
 /// What one block did to the book, as the driver observed it.
