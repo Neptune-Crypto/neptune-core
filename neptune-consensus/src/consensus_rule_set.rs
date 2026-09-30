@@ -413,8 +413,8 @@ impl ConsensusRuleSet {
 
     pub fn latest_checkpoint(network: Network) -> BlockHeight {
         match network {
-            Network::Main => BLOCK_HEIGHT_HARDFORK_GAMMA_MAIN_NET.previous().unwrap(),
-            Network::Testnet(0) => BLOCK_HEIGHT_HARDFORK_GAMMA_TESTNET.previous().unwrap(),
+            Network::Main => BLOCK_HEIGHT_HARDFORK_DELTA_MAIN_NET.previous().unwrap(),
+            Network::Testnet(0) => BLOCK_HEIGHT_HARDFORK_DELTA_TESTNET.previous().unwrap(),
             _ => BlockHeight::genesis(),
         }
     }

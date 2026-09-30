@@ -223,6 +223,7 @@ pub(crate) mod tests {
     use triton_vm::prelude::BFieldCodec;
 
     use super::*;
+    use crate::consensus_rule_set::ConsensusRuleSet;
     use crate::proof_abstractions::tasm::legacy_stark_verify::LegacyProverPipeline;
     use crate::proof_abstractions::test_runtime::shared_tokio_runtime;
 
@@ -366,5 +367,33 @@ pub(crate) mod tests {
 
         // verification must succeed
         assert!(verify(some_claim, some_proof, network).await);
+    }
+
+    #[test]
+    fn checkpoints_hold_one_claim_per_block_up_to_latest_checkpoint_and_no_more() {
+        for (network, checkpoint) in [
+            (Network::Main, CHECKPOINT_MAIN),
+            (Network::Testnet(0), CHECKPOINT_TESTNET_0),
+        ] {
+            let latest_checkpoint = ConsensusRuleSet::latest_checkpoint(network).value();
+            let (heights, claims): (Vec<u64>, Vec<Claim>) = checkpoint
+                .lines()
+                .map(|line| {
+                    let (height, claim) = line.split_once(' ').unwrap();
+                    let claim = bincode::deserialize(&hex::decode(claim).unwrap()).unwrap();
+                    (height.parse::<u64>().unwrap(), claim)
+                })
+                .unzip();
+            assert_eq!((0..=latest_checkpoint).collect_vec(), heights, "{network}");
+
+            for (height, claim) in heights.into_iter().zip(claims) {
+                let consensus_rule_set = ConsensusRuleSet::infer_from(network, height.into());
+                assert_eq!(
+                    consensus_rule_set.triton_proof_version().version(),
+                    claim.version,
+                    "{network} block {height}"
+                );
+            }
+        }
     }
 }
