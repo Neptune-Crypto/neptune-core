@@ -85,6 +85,7 @@ pub struct Args {
     ///
     /// Anything after the 1st space is interpreted as an argument. So the file
     /// used here may not contain spaces.
+    #[clap(long, value_name = "CMD")]
     pub(crate) block_notify: Option<String>,
 
     /// Ban connections to and from the given IP address.
@@ -1220,6 +1221,18 @@ mod tests {
         );
         assert_eq!(1, default_args.max_num_compose_mergers.get());
         assert_eq!(TxUpgradeFilter::match_all(), default_args.tx_upgrade_filter);
+    }
+
+    #[test]
+    fn block_notify_is_a_flag() {
+        let args =
+            Args::try_parse_from(["neptune-core", "--block-notify", "notify.sh %s"]).unwrap();
+        assert_eq!(Some("notify.sh %s".to_string()), args.block_notify);
+    }
+
+    #[test]
+    fn block_notify_command_is_not_a_positional_argument() {
+        assert!(Args::try_parse_from(["neptune-core", "notify.sh %s"]).is_err());
     }
 
     #[test]
