@@ -88,6 +88,15 @@ pub struct Args {
     #[clap(long, value_name = "CMD")]
     pub(crate) block_notify: Option<String>,
 
+    /// Execute command when a transaction enters the mempool (%s in cmd is
+    /// replaced by the transaction's id).
+    ///
+    /// A transaction whose proof is upgraded, or which is updated to a new
+    /// block, enters the mempool anew, so the command may run more than once
+    /// for the same id. Otherwise, it behaves like the block-notify command.
+    #[clap(long, value_name = "CMD")]
+    pub(crate) tx_notify: Option<String>,
+
     /// Ban connections to and from the given IP address.
     ///
     /// If a libp2p Multiaddr is supplied, the underlying IP address will be
@@ -1232,6 +1241,17 @@ mod tests {
 
     #[test]
     fn block_notify_command_is_not_a_positional_argument() {
+        assert!(Args::try_parse_from(["neptune-core", "notify.sh %s"]).is_err());
+    }
+
+    #[test]
+    fn tx_notify_is_a_flag() {
+        let args = Args::try_parse_from(["neptune-core", "--tx-notify", "notify.sh %s"]).unwrap();
+        assert_eq!(Some("notify.sh %s".to_string()), args.tx_notify);
+    }
+
+    #[test]
+    fn tx_notify_command_is_not_a_positional_argument() {
         assert!(Args::try_parse_from(["neptune-core", "notify.sh %s"]).is_err());
     }
 

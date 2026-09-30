@@ -4,8 +4,6 @@ pub mod proof_upgrader;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::net::IpAddr;
-use std::process::Command;
-use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -70,6 +68,7 @@ use crate::application::loops::sync_loop::handle::SyncLoopHandle;
 use crate::application::loops::sync_loop::SYNC_LOOP_CHANNEL_CAPACITY;
 use crate::application::network::channel::NetworkActorCommand;
 use crate::application::network::channel::NetworkEvent;
+use crate::application::notify::spawn_notify_command;
 use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
 use crate::state::mining::block_proposal::BlockProposal;
@@ -481,28 +480,7 @@ impl MainLoopHandler {
     /// reorganization, the block height will fall compared to the previous
     /// invocation.
     fn spawn_block_notify_command(block_notify: &Option<String>, block_hash: Digest) {
-        if let Some(block_notify) = block_notify {
-            let cmd = block_notify.to_owned();
-            let cmd = cmd.replace("%s", &block_hash.to_hex());
-
-            debug!("Invoking block notify cmd:\"{cmd}\"");
-            let args = cmd.split(' ').collect_vec();
-            trace!("args[0]=\"{}\"", args[0]);
-            trace!("args[1..]=[{}]", args[1..].iter().join(","));
-            let child = Command::new(args[0])
-                .args(&args[1..])
-                .stdin(Stdio::null()) // detach from our stdin
-                .stdout(Stdio::null()) // discard output
-                .stderr(Stdio::null()) // discard errors
-                .spawn()
-                .unwrap_or_else(|e| {
-                    error!("Failed to start external program \"{cmd}\": {e}");
-                    std::process::exit(1);
-                });
-
-            // Don't wait on `child`, just drop it:
-            drop(child);
-        }
+        spawn_notify_command(block_notify, &block_hash.to_hex());
     }
 
     /// Process a block whose PoW solution was solved by this client (or an
