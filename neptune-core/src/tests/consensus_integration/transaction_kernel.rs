@@ -8,7 +8,7 @@ use crate::tests::shared_tokio_runtime;
 
 #[apply(shared_tokio_runtime)]
 async fn txid_is_constant_under_tx_updates_only_additions() {
-    let consensus_rule_set = ConsensusRuleSet::HardforkGamma;
+    let consensus_rule_set = ConsensusRuleSet::HardforkDelta;
     let update_witness =
         deterministic_update_witness_only_additions_to_mutator_set(4, 4, 4, consensus_rule_set)
             .await;
@@ -21,7 +21,7 @@ async fn txid_is_constant_under_tx_updates_only_additions() {
 
 #[apply(shared_tokio_runtime)]
 async fn txid_is_constant_under_tx_updates_additions_and_removals() {
-    let consensus_rule_set = ConsensusRuleSet::HardforkGamma;
+    let consensus_rule_set = ConsensusRuleSet::HardforkDelta;
     let update_witness =
         deterministic_update_witness_additions_and_removals(4, 4, 4, consensus_rule_set).await;
     assert_eq!(

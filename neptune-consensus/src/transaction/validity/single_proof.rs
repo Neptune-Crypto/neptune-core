@@ -12,8 +12,10 @@ use tasm_lib::prelude::Library;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
+use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::twenty_first::error::BFieldCodecError;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
+use tasm_lib::verifier::stark_verify::StarkVerify;
 use tracing::info;
 
 use super::tasm::single_proof::fix_branch::FixBranch;
@@ -24,8 +26,6 @@ use crate::chaintx::link_tx::LinkTx;
 use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::proof_abstractions::error::CreateProofError;
 use crate::proof_abstractions::proof_builder::ProofBuilder;
-use crate::proof_abstractions::tasm::legacy_stark_verify::import_stark_verify;
-use crate::proof_abstractions::tasm::legacy_stark_verify::update_nondeterminism_for_stark_verification;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
@@ -229,6 +229,7 @@ impl SingleProofWitness {
 
         let mut nondeterminism = NonDeterminism::default().with_ram(memory);
         let single_proof_program_hash = SingleProof::new(consensus_rule_set).hash();
+        let stark_verify_snippet = StarkVerify::new_with_dynamic_layout(Stark::default());
 
         match self {
             SingleProofWitness::Collection(proof_collection) => {
@@ -240,7 +241,7 @@ impl SingleProofWitness {
                 let rri_claim =
                     proof_collection.removal_records_integrity_claim(consensus_rule_set);
                 let rri_proof = &proof_collection.removal_records_integrity;
-                update_nondeterminism_for_stark_verification(
+                stark_verify_snippet.update_nondeterminism(
                     &mut nondeterminism,
                     rri_proof,
                     &rri_claim,
@@ -249,7 +250,7 @@ impl SingleProofWitness {
                 // kernel to outputs
                 let k2o_claim = proof_collection.kernel_to_outputs_claim(consensus_rule_set);
                 let k2o_proof = &proof_collection.kernel_to_outputs;
-                update_nondeterminism_for_stark_verification(
+                stark_verify_snippet.update_nondeterminism(
                     &mut nondeterminism,
                     k2o_proof,
                     &k2o_claim,
@@ -258,7 +259,7 @@ impl SingleProofWitness {
                 // collect lock scripts
                 let cls_claim = proof_collection.collect_lock_scripts_claim(consensus_rule_set);
                 let cls_proof = &proof_collection.collect_lock_scripts;
-                update_nondeterminism_for_stark_verification(
+                stark_verify_snippet.update_nondeterminism(
                     &mut nondeterminism,
                     cls_proof,
                     &cls_claim,
@@ -267,7 +268,7 @@ impl SingleProofWitness {
                 // collect type scripts
                 let cts_claim = proof_collection.collect_type_scripts_claim(consensus_rule_set);
                 let cts_proof = &proof_collection.collect_type_scripts;
-                update_nondeterminism_for_stark_verification(
+                stark_verify_snippet.update_nondeterminism(
                     &mut nondeterminism,
                     cts_proof,
                     &cts_claim,
@@ -279,11 +280,7 @@ impl SingleProofWitness {
                     .into_iter()
                     .zip(&proof_collection.lock_scripts_halt)
                 {
-                    update_nondeterminism_for_stark_verification(
-                        &mut nondeterminism,
-                        proof,
-                        &claim,
-                    );
+                    stark_verify_snippet.update_nondeterminism(&mut nondeterminism, proof, &claim);
                 }
 
                 // type scripts
@@ -292,11 +289,7 @@ impl SingleProofWitness {
                     .into_iter()
                     .zip(&proof_collection.type_scripts_halt)
                 {
-                    update_nondeterminism_for_stark_verification(
-                        &mut nondeterminism,
-                        proof,
-                        &claim,
-                    );
+                    stark_verify_snippet.update_nondeterminism(&mut nondeterminism, proof, &claim);
                 }
             }
             SingleProofWitness::Update(witness) => {
@@ -393,7 +386,7 @@ pub async fn produce_single_proof(
     consensus_rule_set: ConsensusRuleSet,
 ) -> Result<Proof, CreateProofError> {
     match consensus_rule_set {
-        ConsensusRuleSet::HardforkGamma | ConsensusRuleSet::HardforkDelta => {
+        ConsensusRuleSet::HardforkDelta => {
             SingleProof::new(consensus_rule_set)
                 .produce(primitive_witness, triton_vm_job_queue, proof_job_options)
                 .await
@@ -413,6 +406,8 @@ pub fn single_proof_claim(
         "9ed47e4aff83681ce46618c59971cc5eca2ef5a063b3f35828946f4810295871338072751af633e0";
     const SINGLE_PROOF_PROGRAM_DIGEST_PRE_HF_GAMMA: &str =
         "151b31a62b85f6c4e1c792c7c1e7934ecc44430eb1209e816a47a7f0d2c10d1002f74f8cda8e4f8a";
+    const SINGLE_PROOF_PROGRAM_DIGEST_HF_GAMMA: &str =
+        "54389bce28ce2eee0e8b554be47542b1da1f8f56179f0367e01d11bb5f136ac82a507451ca93b5bc";
     let claim = match consensus_rule_set {
         ConsensusRuleSet::Reboot | ConsensusRuleSet::HardforkAlpha => {
             Claim::new(Digest::try_from_hex(V0_SINGLE_PROOF_PROGRAM_DIGEST).unwrap())
@@ -422,7 +417,11 @@ pub fn single_proof_claim(
             Claim::new(Digest::try_from_hex(SINGLE_PROOF_PROGRAM_DIGEST_PRE_HF_GAMMA).unwrap())
                 .with_input(tx_kernel_mast_hash.reversed().values().to_vec())
         }
-        ConsensusRuleSet::HardforkGamma | ConsensusRuleSet::HardforkDelta => {
+        ConsensusRuleSet::HardforkGamma => {
+            Claim::new(Digest::try_from_hex(SINGLE_PROOF_PROGRAM_DIGEST_HF_GAMMA).unwrap())
+                .with_input(tx_kernel_mast_hash.reversed().values().to_vec())
+        }
+        ConsensusRuleSet::HardforkDelta => {
             SingleProof::new(consensus_rule_set).claim(tx_kernel_mast_hash)
         }
     };
@@ -492,7 +491,9 @@ impl TritonProgram for SingleProof {
         let mut library = Library::new();
 
         // imports
-        let stark_verify = import_stark_verify(&mut library, self.consensus_rule_set);
+        let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
+            Stark::default(),
+        )));
         let assemble_rri_claim =
             library.import(Box::new(GenerateRriClaim::new(self.consensus_rule_set)));
         let assemble_k2o_claim =
@@ -1601,18 +1602,6 @@ pub(crate) mod tests {
                 test_result.unwrap();
             }
         }
-    }
-
-    /// The pre-delta program, pinned. Adding the `Fix` and `Weld` branches must
-    /// leave it untouched: it is the program every block up to the activation
-    /// height is validated against.
-    mod gamma_program {
-        use super::*;
-
-        test_program_snapshot!(
-            SingleProof::new(ConsensusRuleSet::HardforkGamma),
-            "54389bce28ce2eee0e8b554be47542b1da1f8f56179f0367e01d11bb5f136ac82a507451ca93b5bc"
-        );
     }
 
     /// The program from hardfork delta onwards: the same three branches plus

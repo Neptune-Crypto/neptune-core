@@ -337,8 +337,6 @@ pub(crate) mod proof_cache {
     use tracing::debug;
 
     use super::*;
-    use crate::proof_abstractions::tasm::legacy_stark_verify::claim_uses_legacy_proof_system;
-    use crate::proof_abstractions::tasm::legacy_stark_verify::LegacyProverPipeline;
     use crate::proof_abstractions::test_helpers::test_helper_data_dir;
     use crate::proof_abstractions::test_helpers::try_fetch_file;
     use crate::proof_abstractions::test_helpers::try_load_file_from_disk;
@@ -491,11 +489,6 @@ pub(crate) mod proof_cache {
             .collect_vec()
             .try_into()
             .unwrap();
-
-        if claim_uses_legacy_proof_system(claim) {
-            let pipeline = LegacyProverPipeline::trace(&program, claim, nondeterminism);
-            return pipeline.prove().into();
-        }
 
         let (aet, public_output) =
             VM::trace_execution(program, (&claim.input).into(), nondeterminism.clone())

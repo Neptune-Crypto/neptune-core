@@ -2,8 +2,6 @@
 
 use std::io::Write;
 
-use neptune_consensus::proof_abstractions::tasm::legacy_stark_verify::claim_uses_legacy_proof_system;
-use neptune_consensus::proof_abstractions::tasm::legacy_stark_verify::LegacyProverPipeline;
 use neptune_consensus::proof_abstractions::tasm::neptune_prover_job::NeptuneProverJob;
 use neptune_consensus::proof_abstractions::tasm::prover_job::PROOF_PADDED_HEIGHT_TOO_BIG_PROCESS_OFFSET_ERROR_CODE;
 use tasm_lib::triton_vm::aet::AlgebraicExecutionTrace;
@@ -123,14 +121,6 @@ fn prepare_for_proving_at(log2_padded_height: u8, job: &NeptuneProverJob) {
 /// Execute the proof job in the current process (as opposed to delegating it to
 /// another one).
 fn execute_prover_job(job: NeptuneProverJob) -> Proof {
-    if claim_uses_legacy_proof_system(&job.claim) {
-        let pipeline =
-            LegacyProverPipeline::trace(&job.program, &job.claim, job.non_determinism.clone());
-        prepare_for_proving_at(pipeline.log2_padded_height(), &job);
-
-        return pipeline.prove();
-    }
-
     let claim = job.claim.clone();
     let aet = triton_vm_aet(job.program.clone(), &job.claim, job.non_determinism.clone());
     prepare_for_proving_at(aet.padded_height().ilog2() as u8, &job);

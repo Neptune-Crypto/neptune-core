@@ -41,7 +41,7 @@ async fn disallow_empty_transaction_with_non_zero_fee() {
     );
 
     let fee_tx = fee_tx.primitive_witness();
-    let consensus_rule_set = ConsensusRuleSet::HardforkGamma;
+    let consensus_rule_set = ConsensusRuleSet::HardforkDelta;
     let fee_sp_error = produce_single_proof(
         &fee_tx,
         vm_job_queue(),

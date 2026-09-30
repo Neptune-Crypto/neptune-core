@@ -146,9 +146,7 @@ mod tests {
         }
 
         let all_consensus_critical_imports = name_and_lib![
-            block::validity::block_program::BlockProgram::new(
-                crate::consensus_rule_set::ConsensusRuleSet::HardforkDelta
-            ),
+            block::validity::block_program::BlockProgram,
             transaction::validity::collect_lock_scripts::CollectLockScripts,
             transaction::validity::collect_type_scripts::CollectTypeScripts,
             transaction::validity::kernel_to_outputs::KernelToOutputs,

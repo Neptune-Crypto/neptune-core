@@ -13,13 +13,13 @@ use tasm_lib::prelude::Library;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
+use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::twenty_first::prelude::*;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
+use tasm_lib::verifier::stark_verify::StarkVerify;
 
 use crate::consensus_rule_set::ConsensusRuleSet;
-use crate::proof_abstractions::tasm::legacy_stark_verify::import_stark_verify;
-use crate::proof_abstractions::tasm::legacy_stark_verify::update_nondeterminism_for_stark_verification;
 use crate::proof_abstractions::verifier::verify_sync;
 use crate::transaction::transaction_kernel::TransactionKernelField;
 use crate::transaction::validity::single_proof::single_proof_claim;
@@ -124,7 +124,11 @@ impl UpdateWitness {
             tracing::warn!("attempting to update invalid transaction ...");
             return;
         }
-        update_nondeterminism_for_stark_verification(nondeterminism, &self.old_proof, &claim);
+        StarkVerify::new_with_dynamic_layout(Stark::default()).update_nondeterminism(
+            nondeterminism,
+            &self.old_proof,
+            &claim,
+        );
 
         nondeterminism.digests.extend(
             [
@@ -217,7 +221,9 @@ impl BasicSnippet for UpdateBranch {
     fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
         let load_digest = triton_asm!(push {Digest::LEN - 1} add read_mem {Digest::LEN} pop 1);
 
-        let stark_verify = import_stark_verify(library, self.consensus_rule_set);
+        let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
+            Stark::default(),
+        )));
         let authenticate_msa = library.import(Box::new(AuthenticateMsaAgainstTxk {
             mast_height: TransactionKernel::MAST_HEIGHT as u32,
         }));

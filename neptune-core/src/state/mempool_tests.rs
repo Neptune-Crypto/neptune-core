@@ -675,7 +675,7 @@ mod tests {
             &genesis_block,
         );
 
-        let consensus_rule_set = ConsensusRuleSet::HardforkGamma;
+        let consensus_rule_set = ConsensusRuleSet::HardforkDelta;
         let (((left, right), merged), _) = merge_tx_triplet(consensus_rule_set).await;
         mempool.insert(left.clone(), UpgradePriority::Irrelevant);
         mempool.insert(right.clone(), UpgradePriority::Irrelevant);
@@ -749,7 +749,7 @@ mod tests {
             TxProvingCapability::SingleProof,
             &Block::genesis(network),
         );
-        let (bottom, middle, final_tx, _) = nested_mergers(ConsensusRuleSet::HardforkGamma).await;
+        let (bottom, middle, final_tx, _) = nested_mergers(ConsensusRuleSet::HardforkDelta).await;
         let tx_msa_hash = final_tx.kernel.mutator_set_hash;
 
         for tx in bottom.clone() {
@@ -850,7 +850,7 @@ mod tests {
         let mut mempool =
             Mempool::new(ByteSize::gb(1), TxProvingCapability::SingleProof, &block_1a);
 
-        let consensus_rule_set = ConsensusRuleSet::HardforkGamma;
+        let consensus_rule_set = ConsensusRuleSet::HardforkDelta;
         let (((a, b), c), _) = merge_tx_triplet(consensus_rule_set).await;
         mempool.insert(a.clone(), UpgradePriority::Irrelevant);
         mempool.insert(b.clone(), UpgradePriority::Irrelevant);
@@ -1164,7 +1164,7 @@ mod tests {
             // merge: (a, b) -> c
             // Scenario: a is mined => b is in mempool after block update
             let network = Network::Main;
-            let consensus_rule_set = ConsensusRuleSet::HardforkGamma;
+            let consensus_rule_set = ConsensusRuleSet::HardforkDelta;
             let (((a, b), c), mutator_set) = merge_tx_triplet(consensus_rule_set).await;
             let block1 = invalid_block_with_kernel_and_mutator_set(b.kernel.clone(), mutator_set);
 
@@ -1200,7 +1200,7 @@ mod tests {
             // merge: (a, b) -> c
             // Scenario: c is mined => mempool is empty after block update
             let network = Network::Main;
-            let consensus_rule_set = ConsensusRuleSet::HardforkGamma;
+            let consensus_rule_set = ConsensusRuleSet::HardforkDelta;
             let (((a, b), c), mutator_set) = merge_tx_triplet(consensus_rule_set).await;
             let block1 = invalid_block_with_kernel_and_mutator_set(c.kernel.clone(), mutator_set);
 
@@ -1234,7 +1234,7 @@ mod tests {
         async fn nested_mergers_behave() {
             let network = Network::Testnet(42);
             let (bottom, [left, right], final_tx, mutator_set) =
-                nested_mergers(ConsensusRuleSet::HardforkGamma).await;
+                nested_mergers(ConsensusRuleSet::HardforkDelta).await;
             let block_bottom = invalid_block_with_kernel_and_mutator_set(
                 bottom[0].kernel.clone(),
                 mutator_set.clone(),

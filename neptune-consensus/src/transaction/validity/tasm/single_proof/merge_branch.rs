@@ -33,6 +33,8 @@ use tasm_lib::prelude::TasmObject;
 use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::NonDeterminism;
 use tasm_lib::triton_vm::prelude::*;
+use tasm_lib::triton_vm::stark::Stark;
+use tasm_lib::verifier::stark_verify::StarkVerify;
 use tracing::info;
 
 use crate::block::block_transaction::BlockOrRegularTransaction;
@@ -40,8 +42,6 @@ use crate::block::block_transaction::BlockOrRegularTransactionKernel;
 use crate::block::block_transaction::BlockTransactionKernel;
 use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::prelude::triton_vm::prelude::triton_asm;
-use crate::proof_abstractions::tasm::legacy_stark_verify::import_stark_verify;
-use crate::proof_abstractions::tasm::legacy_stark_verify::update_nondeterminism_for_stark_verification;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
@@ -300,8 +300,12 @@ impl MergeWitness {
         let left_claim = single_proof_claim(self.left_kernel.mast_hash(), consensus_rule_set);
         let right_claim = single_proof_claim(self.right_kernel.mast_hash(), consensus_rule_set);
 
-        update_nondeterminism_for_stark_verification(nondeterminism, &self.left_proof, &left_claim);
-        update_nondeterminism_for_stark_verification(
+        StarkVerify::new_with_dynamic_layout(Stark::default()).update_nondeterminism(
+            nondeterminism,
+            &self.left_proof,
+            &left_claim,
+        );
+        StarkVerify::new_with_dynamic_layout(Stark::default()).update_nondeterminism(
             nondeterminism,
             &self.right_proof,
             &right_claim,
@@ -392,7 +396,9 @@ impl BasicSnippet for MergeBranch {
         let generate_single_proof_claim = library.import(Box::new(GenerateSingleProofClaim::new(
             self.consensus_rule_set,
         )));
-        let stark_verify = import_stark_verify(library, self.consensus_rule_set);
+        let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
+            Stark::default(),
+        )));
         let authenticate_txk_input_field = library.import(Box::new(AuthenticateTxkField(
             TransactionKernelField::Inputs,
         )));

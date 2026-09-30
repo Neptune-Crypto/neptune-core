@@ -232,7 +232,7 @@ impl Block {
             let claim = BlockProgram::claim(&body, &appendix, consensus_rule_set);
 
             let proof = ProofBuilder::new()
-                .program(BlockProgram::new(consensus_rule_set).program())
+                .program(BlockProgram.program())
                 .claim(claim)
                 .nondeterminism(|| block_proof_witness.nondeterminism())
                 .job_queue(triton_vm_job_queue)

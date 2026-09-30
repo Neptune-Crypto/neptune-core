@@ -10,8 +10,10 @@ use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::triton_vm::prelude::Program;
 use tasm_lib::triton_vm::proof::Claim;
+use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::triton_vm::vm::NonDeterminism;
 use tasm_lib::triton_vm::vm::PublicInput;
+use tasm_lib::verifier::stark_verify::StarkVerify;
 
 use super::block_primitive_witness::BlockPrimitiveWitness;
 use super::block_program::BlockProgram;
@@ -19,7 +21,6 @@ use crate::block::block_body::BlockBody;
 use crate::block::block_body::BlockBodyField;
 use crate::block::BlockAppendix;
 use crate::consensus_rule_set::ConsensusRuleSet;
-use crate::proof_abstractions::tasm::legacy_stark_verify::update_nondeterminism_for_stark_verification;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::transaction::transaction_kernel::TransactionKernelField;
 use crate::transaction::validity::neptune_proof::Proof;
@@ -113,8 +114,8 @@ impl BlockProofWitness {
         self.claims().encode()
     }
 
-    pub fn program(&self, consensus_rule_set: ConsensusRuleSet) -> Program {
-        BlockProgram::new(consensus_rule_set).program()
+    pub fn program(&self) -> Program {
+        BlockProgram.program()
     }
 
     pub fn nondeterminism(&self) -> NonDeterminism {
@@ -152,7 +153,11 @@ impl BlockProofWitness {
 
         // modify nodeterminism in whichever way is necessary for verifying STARK proofs
         for (claim, proof) in self.claims.iter().zip_eq(&self.proofs) {
-            update_nondeterminism_for_stark_verification(&mut nondeterminism, proof, claim);
+            StarkVerify::new_with_dynamic_layout(Stark::default()).update_nondeterminism(
+                &mut nondeterminism,
+                proof,
+                claim,
+            );
         }
 
         nondeterminism

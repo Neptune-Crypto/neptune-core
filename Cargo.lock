@@ -3713,7 +3713,7 @@ dependencies = [
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.9.5",
- "tasm-lib 8.0.0",
+ "tasm-lib",
  "test-strategy 0.3.1",
  "tokio",
 ]
@@ -3730,7 +3730,7 @@ dependencies = [
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.9.5",
- "tasm-lib 8.0.0",
+ "tasm-lib",
  "test-strategy 0.3.1",
  "tokio",
 ]
@@ -3759,7 +3759,7 @@ dependencies = [
  "rand 0.9.5",
  "regex",
  "serde",
- "tasm-lib 8.0.0",
+ "tasm-lib",
  "test-strategy 0.3.1",
  "tokio",
  "tracing",
@@ -3838,7 +3838,7 @@ dependencies = [
  "sysinfo",
  "systemstat",
  "tarpc",
- "tasm-lib 8.0.0",
+ "tasm-lib",
  "test-strategy 0.3.1",
  "thiserror 1.0.69",
  "thread-priority",
@@ -3892,8 +3892,7 @@ dependencies = [
  "serde_json",
  "statrs",
  "strum 0.27.2",
- "tasm-lib 7.0.0",
- "tasm-lib 8.0.0",
+ "tasm-lib",
  "test-strategy 0.3.1",
  "thiserror 1.0.69",
  "tokio",
@@ -3953,7 +3952,7 @@ dependencies = [
  "ratatui",
  "strum 0.27.2",
  "tarpc",
- "tasm-lib 8.0.0",
+ "tasm-lib",
  "tokio",
  "unicode-width 0.1.14",
 ]
@@ -4032,7 +4031,7 @@ dependencies = [
  "rand 0.9.5",
  "serde",
  "strum 0.27.2",
- "tasm-lib 8.0.0",
+ "tasm-lib",
  "test-strategy 0.3.1",
  "tokio",
  "tracing",
@@ -4058,7 +4057,7 @@ dependencies = [
  "serde_json",
  "statrs",
  "strum 0.27.2",
- "tasm-lib 8.0.0",
+ "tasm-lib",
  "test-strategy 0.3.1",
  "thiserror 1.0.69",
  "tokio",
@@ -4089,7 +4088,7 @@ dependencies = [
  "serde",
  "sha2 0.10.9",
  "strum 0.27.2",
- "tasm-lib 8.0.0",
+ "tasm-lib",
  "test-strategy 0.3.1",
  "thiserror 1.0.69",
  "tracing",
@@ -4116,7 +4115,7 @@ dependencies = [
  "serde",
  "serde_json",
  "strum 0.27.2",
- "tasm-lib 8.0.0",
+ "tasm-lib",
  "test-strategy 0.3.1",
  "thiserror 1.0.69",
  "tokio",
@@ -4143,7 +4142,7 @@ dependencies = [
  "serde_json",
  "serde_tuple",
  "strum 0.27.2",
- "tasm-lib 8.0.0",
+ "tasm-lib",
  "test-strategy 0.3.1",
  "thiserror 1.0.69",
 ]
@@ -4204,7 +4203,7 @@ dependencies = [
  "serde_json",
  "sha3",
  "strum 0.27.2",
- "tasm-lib 8.0.0",
+ "tasm-lib",
  "test-strategy 0.3.1",
  "thiserror 1.0.69",
  "tiny-bip39",
@@ -6417,29 +6416,6 @@ dependencies = [
 
 [[package]]
 name = "tasm-lib"
-version = "7.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db7abc899995c0d6b41d82180e1e6cce607916b1677857326c37a28514dcfb87"
-dependencies = [
- "anyhow",
- "arbitrary",
- "const_format",
- "hex",
- "itertools",
- "ndarray",
- "num",
- "num-traits",
- "rand 0.9.5",
- "serde",
- "serde_json",
- "strum 0.27.2",
- "tasm-object-derive 7.0.0",
- "triton-vm 7.0.0",
- "web-time",
-]
-
-[[package]]
-name = "tasm-lib"
 version = "8.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "220f9142761ca19d366f15e6d874bcfee1626fb5ee384d0ebba5ac725155a7a3"
@@ -6456,20 +6432,9 @@ dependencies = [
  "serde",
  "serde_json",
  "strum 0.27.2",
- "tasm-object-derive 8.0.0",
- "triton-vm 8.0.0",
+ "tasm-object-derive",
+ "triton-vm",
  "web-time",
-]
-
-[[package]]
-name = "tasm-object-derive"
-version = "7.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2dd2733bd907d9dcd39df837cfe4feba2ef10aeba6547e8688e6b35efafdd3d7"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
 ]
 
 [[package]]
@@ -7061,20 +7026,6 @@ dependencies = [
 
 [[package]]
 name = "triton-air"
-version = "7.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05100018626561a14bdfee44f9e47c767bbec7c645f4707ac5a3541ec648d49f"
-dependencies = [
- "arbitrary",
- "itertools",
- "strum 0.27.2",
- "triton-constraint-circuit 7.0.0",
- "triton-isa 7.0.0",
- "twenty-first",
-]
-
-[[package]]
-name = "triton-air"
 version = "8.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "886622ddb82850963941f45c815530d5e24ee860b8eeacc5082308a74e087d75"
@@ -7082,26 +7033,8 @@ dependencies = [
  "arbitrary",
  "itertools",
  "strum 0.27.2",
- "triton-constraint-circuit 8.0.0",
- "triton-isa 8.0.0",
- "twenty-first",
-]
-
-[[package]]
-name = "triton-constraint-builder"
-version = "7.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ceb01697a5d694084a6cb889cd543b86c6f7d8bf972f0f7ccac249a4aae63390"
-dependencies = [
- "itertools",
- "prettyplease",
- "proc-macro2",
- "quote",
- "strum 0.27.2",
- "syn 2.0.119",
- "triton-air 7.0.0",
- "triton-constraint-circuit 7.0.0",
- "triton-isa 7.0.0",
+ "triton-constraint-circuit",
+ "triton-isa",
  "twenty-first",
 ]
 
@@ -7117,24 +7050,9 @@ dependencies = [
  "quote",
  "strum 0.27.2",
  "syn 2.0.119",
- "triton-air 8.0.0",
- "triton-constraint-circuit 8.0.0",
- "triton-isa 8.0.0",
- "twenty-first",
-]
-
-[[package]]
-name = "triton-constraint-circuit"
-version = "7.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "961bfa562c091b39f65b8fa0c27890db36ed8968ff9cf1c842db548c76941536"
-dependencies = [
- "arbitrary",
- "itertools",
- "ndarray",
- "num-traits",
- "proc-macro2",
- "quote",
+ "triton-air",
+ "triton-constraint-circuit",
+ "triton-isa",
  "twenty-first",
 ]
 
@@ -7155,25 +7073,6 @@ dependencies = [
 
 [[package]]
 name = "triton-isa"
-version = "7.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee155aabdd118aa503e9bfe46e67c67a46d3c06b57b3ff94fa5a6ebf149e2371"
-dependencies = [
- "arbitrary",
- "get-size2",
- "itertools",
- "lazy_static",
- "nom 8.0.0",
- "nom-language",
- "num-traits",
- "serde",
- "strum 0.27.2",
- "thiserror 2.0.20",
- "twenty-first",
-]
-
-[[package]]
-name = "triton-isa"
 version = "8.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f615af2a98eabdaac7cc95f7330fc2105f6380ac8fc34cf5b7c1e9edb122dbd9"
@@ -7189,38 +7088,6 @@ dependencies = [
  "strum 0.27.2",
  "thiserror 2.0.20",
  "twenty-first",
-]
-
-[[package]]
-name = "triton-vm"
-version = "7.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b7f98e447c631135092a38c29a5ba286e77540759560287f6798e2e840a3c79"
-dependencies = [
- "arbitrary",
- "colored 3.1.1",
- "get-size2",
- "indexmap 2.14.2",
- "itertools",
- "lazy_static",
- "memory-stats",
- "ndarray",
- "num-traits",
- "prettyplease",
- "proc-macro2",
- "rand 0.9.5",
- "rayon",
- "serde",
- "strum 0.27.2",
- "syn 2.0.119",
- "thiserror 2.0.20",
- "triton-air 7.0.0",
- "triton-constraint-builder 7.0.0",
- "triton-constraint-circuit 7.0.0",
- "triton-isa 7.0.0",
- "twenty-first",
- "unicode-width 0.2.2",
- "web-time",
 ]
 
 [[package]]
@@ -7246,10 +7113,10 @@ dependencies = [
  "strum 0.27.2",
  "syn 2.0.119",
  "thiserror 2.0.20",
- "triton-air 8.0.0",
- "triton-constraint-builder 8.0.0",
- "triton-constraint-circuit 8.0.0",
- "triton-isa 8.0.0",
+ "triton-air",
+ "triton-constraint-builder",
+ "triton-constraint-circuit",
+ "triton-isa",
  "twenty-first",
  "unicode-width 0.2.2",
  "web-time",

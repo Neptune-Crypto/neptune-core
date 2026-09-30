@@ -109,9 +109,9 @@ async fn assert_hardfork_boundary_blocks_are_valid(
 ) {
     logging::tracing_logger();
 
-    // Pre-gamma proofs were retroactively found unsound, so their validity is
-    // asserted via the checkpoint rather than re-verification. Without it,
-    // pre-hardfork blocks fail.
+    // To avoid having to rely on multiple Triton VM versions, older versions
+    // are checkpointed, taken on faith, by this software. Only older versions
+    // of this program can verify the proofs of those blocks.
     ArchivalState::accept_checkpoint(network).await;
 
     // Keep the file in its own subdirectory so it does not interfere with other

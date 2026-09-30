@@ -728,7 +728,7 @@ pub mod tests {
         prop_assert!(ProofCollection::can_produce(&primitive_witness));
         let pc = ProofCollection::produce(
             &primitive_witness,
-            ConsensusRuleSet::HardforkGamma,
+            ConsensusRuleSet::HardforkDelta,
             vm_job_queue(),
             TritonVmProofJobOptions::default(),
         )
@@ -738,7 +738,7 @@ pub mod tests {
             pc.verify(
                 primitive_witness.kernel.mast_hash(),
                 Network::Main,
-                ConsensusRuleSet::HardforkGamma
+                ConsensusRuleSet::HardforkDelta
             )
             .await
         );

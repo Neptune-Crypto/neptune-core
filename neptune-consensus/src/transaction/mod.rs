@@ -376,7 +376,7 @@ pub(crate) mod tests {
             assert!(updated_tx.is_valid(network, consensus_rule_set).await)
         }
 
-        let consensus_rule_set = ConsensusRuleSet::HardforkGamma;
+        let consensus_rule_set = ConsensusRuleSet::HardforkDelta;
         for (to_be_updated_params, mined_params) in [
             ((4, 4, 4), (3, 3, 3)),
             ((1, 0, 1), (1, 1, 0)),

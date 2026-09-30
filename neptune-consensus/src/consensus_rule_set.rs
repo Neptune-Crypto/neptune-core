@@ -91,7 +91,6 @@ pub enum ConsensusRuleSet {
     ///
     /// Also restarts the lustration counting since all past proofs have been
     /// found to be unsound.
-    #[default]
     HardforkGamma,
 
     /// Activate transaction chaining: `SingleProof` gains the `Fix` and `Weld`
@@ -103,6 +102,7 @@ pub enum ConsensusRuleSet {
     /// [`Self::has_chain_branches`].
     ///
     /// Also bumps the Triton VM version.
+    #[default]
     HardforkDelta,
 }
 
@@ -668,8 +668,8 @@ pub(crate) mod tests {
     #[traced_test]
     #[test]
     fn allow_non_zero_version() {
-        // Start well into hardfork gamma
-        let init_block_heigth = BlockHeight::from(49998u64);
+        // Start well into hardfork delta
+        let init_block_heigth = BlockHeight::from(110_000u64);
         let network = Network::Main;
         let bpw = BlockPrimitiveWitness::deterministic_with_block_height_and_difficulty(
             init_block_heigth,
@@ -700,7 +700,7 @@ pub(crate) mod tests {
                     .await
             );
 
-            let consensus_rule_set = ConsensusRuleSet::HardforkGamma;
+            let consensus_rule_set = ConsensusRuleSet::HardforkDelta;
             assert_eq!(
                 consensus_rule_set,
                 ConsensusRuleSet::infer_from(network, valid_successor.header().height)
