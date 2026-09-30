@@ -173,7 +173,7 @@ pub(crate) async fn get_test_genesis_setup(
     mpsc::Sender<PeerTaskToMain>,
     mpsc::Receiver<PeerTaskToMain>,
     mpsc::Sender<NetworkActorCommand>,
-    mpsc::Receiver<NetworkEvent>,
+    mpsc::UnboundedReceiver<NetworkEvent>,
     GlobalStateLock,
     HandshakeData,
 )> {
@@ -192,7 +192,7 @@ pub(crate) async fn test_setup_custom_genesis_block(
     mpsc::Sender<PeerTaskToMain>,
     mpsc::Receiver<PeerTaskToMain>,
     mpsc::Sender<NetworkActorCommand>,
-    mpsc::Receiver<NetworkEvent>,
+    mpsc::UnboundedReceiver<NetworkEvent>,
     GlobalStateLock,
     HandshakeData,
 )> {
@@ -201,8 +201,7 @@ pub(crate) async fn test_setup_custom_genesis_block(
     let (to_main_tx, to_main_rx) = mpsc::channel::<PeerTaskToMain>(PEER_CHANNEL_CAPACITY);
     let (network_command_tx, _network_command_rx) =
         mpsc::channel::<NetworkActorCommand>(PEER_CHANNEL_CAPACITY);
-    let (_network_event_tx, network_event_rx) =
-        mpsc::channel::<NetworkEvent>(PEER_CHANNEL_CAPACITY);
+    let (_network_event_tx, network_event_rx) = mpsc::unbounded_channel::<NetworkEvent>();
 
     let network = cli.network;
     let wallet = WalletEntropy::devnet_wallet();

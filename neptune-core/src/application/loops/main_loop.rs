@@ -142,7 +142,7 @@ pub struct MainLoopHandler {
     peer_task_to_main_rx: mpsc::Receiver<PeerTaskToMain>,
     miner_to_main_rx: mpsc::Receiver<MinerToMain>,
     rpc_server_to_main_rx: mpsc::Receiver<RPCServerToMain>,
-    network_event_rx: mpsc::Receiver<NetworkEvent>,
+    network_event_rx: mpsc::UnboundedReceiver<NetworkEvent>,
     task_handles: Vec<JoinHandle<()>>,
 }
 
@@ -195,7 +195,7 @@ impl MainLoopHandler {
         peer_task_to_main_rx: mpsc::Receiver<PeerTaskToMain>,
         miner_to_main_rx: mpsc::Receiver<MinerToMain>,
         rpc_server_to_main_rx: mpsc::Receiver<RPCServerToMain>,
-        network_event_rx: mpsc::Receiver<NetworkEvent>,
+        network_event_rx: mpsc::UnboundedReceiver<NetworkEvent>,
         task_handles: Vec<JoinHandle<()>>,
     ) -> Self {
         let maybe_main_to_miner_tx = if global_state_lock.cli().mine() {

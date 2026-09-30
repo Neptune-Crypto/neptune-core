@@ -131,7 +131,7 @@ pub(crate) struct NetworkActor {
 
     // Channels for the Actor's own life
     command_rx: mpsc::Receiver<NetworkActorCommand>,
-    event_tx: mpsc::Sender<NetworkEvent>,
+    event_tx: mpsc::UnboundedSender<NetworkEvent>,
 
     /// Lookup table to find the current address of connected peers or how long
     /// they have been connected for.
@@ -205,7 +205,7 @@ pub(crate) struct NetworkActorChannels {
     peer_to_main_loop_tx: mpsc::Sender<PeerTaskToMain>,
     main_to_peer_broadcast: tokio::sync::broadcast::Sender<MainToPeerTask>,
     command_rx: mpsc::Receiver<NetworkActorCommand>,
-    event_tx: mpsc::Sender<NetworkEvent>,
+    event_tx: mpsc::UnboundedSender<NetworkEvent>,
 }
 
 impl NetworkActorChannels {
@@ -234,9 +234,11 @@ impl NetworkActorChannels {
     ///    constructor for [`NetworkActor`].
     ///  - `mpsc::Sender<NetworkActorCommand>` -- the sender channel for the
     ///    main loop to send messages (commands) to the [`NetworkActor`].
-    ///  - `mpsc::Receiver<NetworkEvent>` -- the receiver channel for the
-    ///    main loop to receive notifications from the [`NetworkActor`]
-    ///    (notifications of events).
+    ///  - `mpsc::UnboundedReceiver<NetworkEvent>` -- the receiver channel for
+    ///    the main loop to receive notifications from the [`NetworkActor`]
+    ///    (notifications of events). Unbounded, such that the actor never
+    ///    waits on the main loop, which itself waits on the actor when the
+    ///    command channel is full.
     ///
     /// # Example
     ///
@@ -273,10 +275,10 @@ impl NetworkActorChannels {
     ) -> (
         Self,
         mpsc::Sender<NetworkActorCommand>,
-        mpsc::Receiver<NetworkEvent>,
+        mpsc::UnboundedReceiver<NetworkEvent>,
     ) {
         let (network_command_tx, network_command_rx) = mpsc::channel(100);
-        let (network_event_tx, network_event_rx) = mpsc::channel(100);
+        let (network_event_tx, network_event_rx) = mpsc::unbounded_channel();
 
         let channels = Self {
             peer_to_main_loop_tx,
@@ -633,11 +635,9 @@ impl NetworkActor {
                 // with it. Don't allow unbounded, repeated panics though.
                 polled = AssertUnwindSafe(self.swarm.select_next_some()).catch_unwind() => {
                     let outcome = match polled {
-                        Ok(event) => {
-                            AssertUnwindSafe(self.handle_swarm_event(event))
-                                .catch_unwind()
-                                .await
-                        }
+                        Ok(event) => std::panic::catch_unwind(AssertUnwindSafe(|| {
+                            self.handle_swarm_event(event);
+                        })),
                         Err(panic) => Err(panic),
                     };
                     if let Err(panic) = outcome {
@@ -787,7 +787,7 @@ impl NetworkActor {
     }
 
     /// Handle an event coming from the libp2p Swarm.
-    async fn handle_swarm_event(&mut self, event: SwarmEvent<NetworkStackEvent>) {
+    fn handle_swarm_event(&mut self, event: SwarmEvent<NetworkStackEvent>) {
         match event {
             // An event from our own network stack bubbles up.
             SwarmEvent::Behaviour(network_stack_event) => {
@@ -819,7 +819,7 @@ impl NetworkActor {
 
                     // StreamGateway successfully hijacked a stream.
                     NetworkStackEvent::StreamGateway(gateway_event) => {
-                        self.handle_stream_gateway_event(*gateway_event).await;
+                        self.handle_stream_gateway_event(*gateway_event);
                     }
                 }
             }
@@ -1580,7 +1580,7 @@ impl NetworkActor {
     ///
     /// If the peer is not present in the address map, the stream is dropped,
     /// which closes the connection to that peer. The actor keeps running.
-    async fn handle_stream_gateway_event(&mut self, event: GatewayEvent) {
+    fn handle_stream_gateway_event(&mut self, event: GatewayEvent) {
         let GatewayEvent::HandshakeReceived {
             peer_id,
             remote_handshake,
@@ -1626,8 +1626,7 @@ impl NetworkActor {
             // Notify the rest of the application that a peer is ready.
             let _ = self
                 .event_tx
-                .send(NetworkEvent::NewPeerLoop { loop_handle })
-                .await;
+                .send(NetworkEvent::NewPeerLoop { loop_handle });
         }
     }
 
@@ -2584,6 +2583,36 @@ mod tests {
             config,
         )
         .expect("test actor must build")
+    }
+
+    #[tokio::test]
+    async fn actor_handles_commands_while_main_loop_reads_no_events() {
+        let mut actor = test_actor().await;
+        let (command_tx, command_rx) = mpsc::channel(1);
+        let (event_tx, _event_rx) = mpsc::unbounded_channel();
+        actor.command_rx = command_rx;
+        actor.event_tx = event_tx;
+
+        for _ in 0..1_000 {
+            let loop_handle = tokio::spawn(async {});
+            actor
+                .event_tx
+                .send(NetworkEvent::NewPeerLoop { loop_handle })
+                .unwrap();
+        }
+
+        let actor_task = tokio::spawn(actor.run());
+        let (overview_tx, overview_rx) = tokio::sync::oneshot::channel();
+        command_tx
+            .send(NetworkActorCommand::GetNetworkOverview(overview_tx))
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(10), overview_rx)
+            .await
+            .expect("actor must answer while events are unread")
+            .unwrap();
+
+        actor_task.abort();
     }
 
     #[tokio::test]
