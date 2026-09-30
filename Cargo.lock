@@ -3735,7 +3735,7 @@ checksum = "27b02d87554356db9e9a873add8782d4ea6e3e58ea071a9adb9a2e8ddb884a8b"
 
 [[package]]
 name = "neptune-archival-mmr"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "futures",
  "itertools",
@@ -3751,7 +3751,7 @@ dependencies = [
 
 [[package]]
 name = "neptune-archival-mutator-set"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "itertools",
  "macro_rules_attr",
@@ -3768,7 +3768,7 @@ dependencies = [
 
 [[package]]
 name = "neptune-archive"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "anyhow",
  "bincode",
@@ -3799,7 +3799,7 @@ dependencies = [
 
 [[package]]
 name = "neptune-cash"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "aead",
  "aes-gcm",
@@ -3889,7 +3889,7 @@ dependencies = [
 
 [[package]]
 name = "neptune-consensus"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "anyhow",
  "arbitrary",
@@ -3934,7 +3934,7 @@ dependencies = [
 
 [[package]]
 name = "neptune-core-cli"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "anyhow",
  "arbitrary",
@@ -3964,7 +3964,7 @@ dependencies = [
 
 [[package]]
 name = "neptune-dashboard"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "anyhow",
  "bytesize",
@@ -3991,7 +3991,7 @@ dependencies = [
 
 [[package]]
 name = "neptune-database"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -4013,7 +4013,7 @@ dependencies = [
 
 [[package]]
 name = "neptune-job-queue"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4028,7 +4028,7 @@ dependencies = [
 
 [[package]]
 name = "neptune-locks"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "futures",
  "macro_rules_attr",
@@ -4040,7 +4040,7 @@ dependencies = [
 
 [[package]]
 name = "neptune-mempool"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "anyhow",
  "arbitrary",
@@ -4072,7 +4072,7 @@ dependencies = [
 
 [[package]]
 name = "neptune-mutator-set"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "arbitrary",
  "bincode",
@@ -4097,7 +4097,7 @@ dependencies = [
 
 [[package]]
 name = "neptune-p2p"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "anyhow",
  "arbitrary",
@@ -4129,7 +4129,7 @@ dependencies = [
 
 [[package]]
 name = "neptune-primitives"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "anyhow",
  "arbitrary",
@@ -4155,7 +4155,7 @@ dependencies = [
 
 [[package]]
 name = "neptune-rpc-api"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "async-trait",
  "hex",
@@ -4181,7 +4181,7 @@ dependencies = [
 
 [[package]]
 name = "neptune-rpc-client"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "async-trait",
  "itertools",
@@ -4201,7 +4201,7 @@ dependencies = [
 
 [[package]]
 name = "neptune-rpc-macros"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "convert_case 0.9.0",
  "quote",
@@ -4210,7 +4210,7 @@ dependencies = [
 
 [[package]]
 name = "neptune-wallet"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "aead",
  "aes-gcm",

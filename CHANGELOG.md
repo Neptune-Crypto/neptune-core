@@ -1,5 +1,44 @@
 Note: (!) indicates a breaking change.
 
+## [0.19.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.18.0..v0.19.0) - 2026-09-30
+
+### ✨ Features
+
+- *(peer_loop)* Request each announced object from one peer at a time ([7cc7ddba](https://github.com/Neptune-Crypto/neptune-core/commit/7cc7ddba))
+- *(peer_loop)* Punish peer for delivery failure ([99cd5882](https://github.com/Neptune-Crypto/neptune-core/commit/99cd5882))
+
+### 🐛 Bug Fixes
+
+- *(libp2p)* Early check if peer is already connected ([0cc1035f](https://github.com/Neptune-Crypto/neptune-core/commit/0cc1035f))
+- *(peer_loop)* End the peer loop when the connection is lost ([88e7d0da](https://github.com/Neptune-Crypto/neptune-core/commit/88e7d0da))
+- *(libp2p)* Never let network actor wait on main loop ([79c7e042](https://github.com/Neptune-Crypto/neptune-core/commit/79c7e042))
+
+### ♻️ Refactor
+
+- *(peer_loop)* Be more patient with tx requests than block requests ([89ea90a2](https://github.com/Neptune-Crypto/neptune-core/commit/89ea90a2))
+- (!) *(libp2p)* Make DHT identifier network specific ([ec10b4bb](https://github.com/Neptune-Crypto/neptune-core/commit/ec10b4bb))
+- (!) *(network)* Delete legacy outgoing peer dialer ([83eaf864](https://github.com/Neptune-Crypto/neptune-core/commit/83eaf864))
+- (!) *(GlobalState)* Move `peers` out from global state ([0f6f924d](https://github.com/Neptune-Crypto/neptune-core/commit/0f6f924d))
+- (!) Extend checkpoint to all blocks before HF-delta activation ([1c5a7f15](https://github.com/Neptune-Crypto/neptune-core/commit/1c5a7f15))
+- (!) Drop reliance on legacy v7 tasm-lib/triton-vm ([c796fa62](https://github.com/Neptune-Crypto/neptune-core/commit/c796fa62))
+- (!) Refuse to connect to pre-hardfork-delta nodes, nodes earlier than v0.17.0
+
+### ✅ Testing
+
+- *(peer_loop)* Add concurrency/deadlock test ([502b6660](https://github.com/Neptune-Crypto/neptune-core/commit/502b6660))
+- Add integration test intended to catch deadlocks ([23daa109](https://github.com/Neptune-Crypto/neptune-core/commit/23daa109))
+- Verify main-net blocks around hardfork delta ([8f0436d1](https://github.com/Neptune-Crypto/neptune-core/commit/8f0436d1))
+- Don't require old TVM versions for tests ([2adb41b5](https://github.com/Neptune-Crypto/neptune-core/commit/2adb41b5))
+
+### ⚙️ Miscellaneous
+
+- Upgrade to latest version of triton-vm ([a89f0507](https://github.com/Neptune-Crypto/neptune-core/commit/a89f0507))
+
+### 🪢 Merge
+
+- Merge([#978](https://github.com/Neptune-Crypto/neptune-core/issues/978)): Neptune-Crypto/thv/fix-networking-problems ([38793825](https://github.com/Neptune-Crypto/neptune-core/commit/38793825))
+
+
 ## [0.18.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.17.1..v0.18.0) - 2026-09-23
 
 ### ✨ Features
@@ -1659,7 +1698,6 @@ Note: (!) indicates a breaking change.
 
 - Verify that only 0.0.x versions are incompatible ([3fcc82ad](https://github.com/Neptune-Crypto/neptune-core/commit/3fcc82ad))
 
-Note: (!) indicates a breaking change.
 
 ## [0.1.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.0.12..v0.1.0) - 2025-02-11
 
@@ -1713,8 +1751,6 @@ Note: (!) indicates a breaking change.
 ### Log
 
 - Reduce severity of duration-check log message ([86076b02](https://github.com/Neptune-Crypto/neptune-core/commit/86076b02))
-
-Note: (!) indicates a breaking change.
 
 ## [0.0.12](https://github.com/Neptune-Crypto/neptune-core/compare/v0.0.11..v0.0.12) - 2025-02-09
 
@@ -1794,7 +1830,6 @@ Note: (!) indicates a breaking change.
 
 - *(ProverJob)* More info about job complexity ([#366](https://github.com/Neptune-Crypto/neptune-core/issues/366)) ([557688e1](https://github.com/Neptune-Crypto/neptune-core/commit/557688e1))
 
-Note: (!) indicates a breaking change.
 
 ## [0.0.11](https://github.com/Neptune-Crypto/neptune-core/compare/v0.0.10..v0.0.11) - 2025-01-31
 
@@ -2117,4 +2152,3 @@ Note: (!) indicates a breaking change.
 
 - *(`neptune-cli`)* Avoid stack trace dump ([1e6833ac](https://github.com/Neptune-Crypto/neptune-core/commit/1e6833ac))
 
-Note: (!) indicates a breaking change.
