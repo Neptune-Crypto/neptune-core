@@ -353,7 +353,7 @@ mod tests {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn most_dense_proof_collection_test() {
-        let network = Network::Main;
+        let network = Network::Testnet(42);
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
         let sync_block = Block::genesis(network);
         let num_txs = 0;
@@ -1041,7 +1041,7 @@ mod tests {
     #[apply(shared_tokio_runtime)]
     async fn conflicting_txs_preserve_highest_fee() {
         // Create a global state object, controlled by a preminer who receives a premine-UTXO.
-        let network = Network::Main;
+        let network = Network::Testnet(42);
         let mut preminer = mock_genesis_global_state(
             2,
             WalletEntropy::devnet_wallet(),
@@ -1672,7 +1672,7 @@ mod tests {
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn proof_collection_always_replaces_primitive_witness() {
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let pc_high_fee = genesis_tx_with_proof_type(
                 TxProvingCapability::PrimitiveWitness,
                 network,

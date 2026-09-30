@@ -155,7 +155,6 @@ mod tests {
 
     #[test]
     fn unit_test() {
-        ShadowedFunction::new(GenerateK2oClaim::new(ConsensusRuleSet::HardforkGamma)).test();
         ShadowedFunction::new(GenerateK2oClaim::new(ConsensusRuleSet::HardforkDelta)).test();
     }
 

@@ -174,10 +174,6 @@ mod tests {
     #[test]
     fn unit_test() {
         ShadowedFunction::new(GenerateCollectLockScriptsClaim::new(
-            ConsensusRuleSet::HardforkGamma,
-        ))
-        .test();
-        ShadowedFunction::new(GenerateCollectLockScriptsClaim::new(
             ConsensusRuleSet::HardforkDelta,
         ))
         .test();

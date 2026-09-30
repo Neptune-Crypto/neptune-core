@@ -4583,7 +4583,7 @@ mod tests {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn premine_recipient_cannot_spend_premine_before_and_can_after_release_date() {
-        let network = Network::Main;
+        let network = Network::Testnet(42);
         let mut rng = StdRng::seed_from_u64(u64::from_str_radix("3014221", 6).unwrap());
 
         let alice = WalletEntropy::new_pseudorandom(rng.random());

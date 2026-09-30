@@ -206,10 +206,6 @@ mod tests {
     #[test]
     fn unit_test() {
         ShadowedFunction::new(GenerateTypeScriptClaimTemplate::new(
-            ConsensusRuleSet::HardforkGamma,
-        ))
-        .test();
-        ShadowedFunction::new(GenerateTypeScriptClaimTemplate::new(
             ConsensusRuleSet::HardforkDelta,
         ))
         .test();

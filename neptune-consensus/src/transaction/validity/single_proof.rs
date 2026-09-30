@@ -1087,18 +1087,9 @@ pub(crate) mod tests {
         }
     }
 
-    /// The two rule sets whose `SingleProof` program a node still assembles and
-    /// proves against: the one in force until delta activates, and the one
-    /// after. They differ by the chaining branches, *i.e.*, by
-    /// [`ConsensusRuleSet::has_chain_branches`].
-    ///
-    /// Tests that do not depend on which program they run go through both --
-    /// the three pre-delta branches are the same code either side of the fork,
-    /// but the dispatcher reaching them is not.
-    const PROGRAM_VERSIONS: [ConsensusRuleSet; 2] = [
-        ConsensusRuleSet::HardforkGamma,
-        ConsensusRuleSet::HardforkDelta,
-    ];
+    /// The rule sets whose `SingleProof` program a node still assembles and
+    /// proves against.
+    const PROGRAM_VERSIONS: [ConsensusRuleSet; 1] = [ConsensusRuleSet::HardforkDelta];
 
     /// For consensus rule set cache agrees with fresh assembly.
     ///

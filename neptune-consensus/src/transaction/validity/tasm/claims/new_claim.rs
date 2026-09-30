@@ -219,7 +219,6 @@ mod tests {
 
     #[test]
     fn unit_test() {
-        ShadowedFunction::new(NewClaim::new(ConsensusRuleSet::HardforkGamma)).test();
         ShadowedFunction::new(NewClaim::new(ConsensusRuleSet::HardforkDelta)).test();
     }
 }

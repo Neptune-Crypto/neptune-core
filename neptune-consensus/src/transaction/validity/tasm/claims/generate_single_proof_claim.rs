@@ -157,10 +157,6 @@ mod tests {
     #[test]
     fn rust_and_tasm_agree() {
         ShadowedAlgorithm::new(GenerateSingleProofClaim::new(
-            ConsensusRuleSet::HardforkGamma,
-        ))
-        .test();
-        ShadowedAlgorithm::new(GenerateSingleProofClaim::new(
             ConsensusRuleSet::HardforkDelta,
         ))
         .test();

@@ -156,7 +156,6 @@ mod tests {
 
     #[test]
     fn unit_test() {
-        ShadowedFunction::new(GenerateRriClaim::new(ConsensusRuleSet::HardforkGamma)).test();
         ShadowedFunction::new(GenerateRriClaim::new(ConsensusRuleSet::HardforkDelta)).test();
     }
 

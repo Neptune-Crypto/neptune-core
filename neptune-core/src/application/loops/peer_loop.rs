@@ -5960,7 +5960,7 @@ mod tests {
             // In this scenario the client receives a transaction notification from
             // a peer of a transaction it doesn't know; the client must then request it.
 
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let (
                 _peer_broadcast_tx,
                 from_main_rx_clone,
@@ -6056,7 +6056,7 @@ mod tests {
         async fn populated_mempool_request_tx_test() -> Result<()> {
             // In this scenario the peer is informed of a transaction that it already knows
 
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let (
                 _peer_broadcast_tx,
                 from_main_rx_clone,
@@ -6272,7 +6272,7 @@ mod tests {
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn requests_and_admits_tx_synced_to_recent_ancestor() {
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let (
                 main_to_peer_tx,
                 from_main_rx_clone,
@@ -6420,7 +6420,7 @@ mod tests {
 
         #[apply(shared_tokio_runtime)]
         async fn dont_request_pctx_with_low_fee() {
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let (
                 main_to_peer_tx,
                 from_main_rx_clone,
@@ -6470,7 +6470,7 @@ mod tests {
         async fn zero_input_pctx_pays_the_one_input_floor() {
             use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier;
 
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let (
                 main_to_peer_tx,
                 from_main_rx_clone,
@@ -6536,7 +6536,7 @@ mod tests {
         #[traced_test]
         #[apply(shared_tokio_runtime)]
         async fn dont_accept_pctx_with_low_fee() {
-            let network = Network::Main;
+            let network = Network::Testnet(42);
             let (
                 main_to_peer_tx,
                 from_main_rx_clone,
