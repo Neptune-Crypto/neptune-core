@@ -1326,6 +1326,33 @@ impl TritonProgram for PredecessorIsValid {
 
         // BEFORE: _ *w [prev_block_hash]
         // AFTER:  _ *w [prev_block_hash]
+        let rule_2f_prev = triton_asm!(
+            push {prev_epoch_alloc.read_address()} read_mem 1 pop 1
+            // _ *w [prev_block_hash] *epoch
+
+            dup 6 {&prev_block_txk} {&field!(TransactionKernel::timestamp)} read_mem 1 pop 1
+            dup 7 {&read_prev_block_timestamp}
+            // _ *w [prev_block_hash] *epoch tx_timestamp prev_block_timestamp
+
+            dup 1 split dup 2 split
+            // _ *w [prev_block_hash] *epoch tx_timestamp prev_block_timestamp [tx_timestamp] [prev_block_timestamp]
+
+            call {u64_lt}
+            push 0 eq assert error_id {BlockValidationRule::TransactionTimestamp.error_id()}
+            // _ *w [prev_block_hash] *epoch tx_timestamp prev_block_timestamp
+
+            pick 1 push -1 mul add split
+            // _ *w [prev_block_hash] *epoch [prev_block_timestamp - tx_timestamp]
+
+            dup 2 {&field!(Epoch::transaction_backdating_threshold)} read_mem 1 pop 1 split
+            // _ *w [prev_block_hash] *epoch [prev_block_timestamp - tx_timestamp] [backdating_threshold]
+
+            call {u64_lt}
+            push 0 eq assert error_id {BlockValidationRule::TransactionTimestamp.error_id()}
+            pop 1
+            // _ *w [prev_block_hash]
+        );
+
         // BEFORE: _ *w [prev_block_hash]
         // AFTER:  _ *w [prev_block_hash]
         // BEFORE: _ *w [prev_block_hash]
@@ -1347,6 +1374,7 @@ impl TritonProgram for PredecessorIsValid {
             subroutine("mutator_set_update_prev", mutator_set_update_prev);
 
         let (rule_1e_prev, rule_1e_prev_code) = subroutine("rule_1e_prev", rule_1e_prev);
+        let (rule_2f_prev, rule_2f_prev_code) = subroutine("rule_2f_prev", rule_2f_prev);
 
         let prev_block_epoch_rules = "predecessor_is_valid_prev_block_epoch_rules".to_string();
         let prev_block_epoch_rules_code = triton_asm!(
@@ -1406,6 +1434,9 @@ impl TritonProgram for PredecessorIsValid {
                 // _ *w [prev_block_hash]
 
                 call {rule_1e_prev}
+                // _ *w [prev_block_hash]
+
+                call {rule_2f_prev}
                 // _ *w [prev_block_hash]
 
                 return
@@ -1856,6 +1887,7 @@ impl TritonProgram for PredecessorIsValid {
             {&swbfi_claim_input_matches_code}
             {&find_swbfi_claim_code}
             {&rule_1e_prev_code}
+            {&rule_2f_prev_code}
             {&write_output_code}
             {&library.all_imports()}
         );
@@ -2176,6 +2208,14 @@ mod tests {
                 assert!(
                     u64::try_from(witness.prev_block_size()).unwrap()
                         <= prev_epoch.max_block_size.value()
+                );
+
+                // 2.f)
+                let prev_transaction_timestamp = prev_transaction_kernel.timestamp;
+                assert!(prev_transaction_timestamp <= witness.prev_block_header.timestamp);
+                assert!(
+                    witness.prev_block_header.timestamp - prev_transaction_timestamp
+                        <= prev_epoch.transaction_backdating_threshold
                 );
             }
 
@@ -4135,6 +4175,71 @@ mod tests {
                 &next_body,
                 &next_header,
                 BlockValidationRule::RemovalRecordsUniqueness.error_id(),
+            );
+        }
+
+        /// The timestamp `prev_block_with_transaction_kernel` gives the
+        /// previous block's header.
+        fn prev_block_timestamp() -> Timestamp {
+            next_body_and_header(&random_unproven_block(0), 0)
+                .1
+                .timestamp
+        }
+
+        fn prev_block_with_transaction_timestamp(
+            timestamp: Timestamp,
+        ) -> (Block, BlockBody, BlockHeader) {
+            let transaction_kernel = TransactionKernelModifier::default()
+                .timestamp(timestamp)
+                .modify(transaction_kernel_and_proof().0.clone());
+            prev_block_with_transaction_kernel(transaction_kernel, &epochs())
+        }
+
+        #[test]
+        fn prev_block_with_transaction_from_its_future_fails() {
+            let (prev_block, next_body, next_header) = prev_block_with_transaction_timestamp(
+                prev_block_timestamp() + Timestamp::millis(1),
+            );
+
+            assert_rejects(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::TransactionTimestamp.error_id(),
+            );
+        }
+
+        #[test]
+        fn prev_block_with_transaction_from_its_own_time_passes() {
+            let (prev_block, next_body, next_header) =
+                prev_block_with_transaction_timestamp(prev_block_timestamp());
+
+            assert_accepts(&skipping(), &prev_block, &next_body, &next_header);
+        }
+
+        #[test]
+        fn prev_block_with_transaction_backdated_to_the_threshold_passes() {
+            let threshold = activation_epoch().transaction_backdating_threshold;
+            let (prev_block, next_body, next_header) =
+                prev_block_with_transaction_timestamp(prev_block_timestamp() - threshold);
+
+            assert_accepts(&skipping(), &prev_block, &next_body, &next_header);
+        }
+
+        #[test]
+        fn prev_block_with_transaction_backdated_beyond_the_threshold_fails() {
+            let threshold = activation_epoch().transaction_backdating_threshold;
+            let (prev_block, next_body, next_header) = prev_block_with_transaction_timestamp(
+                prev_block_timestamp() - threshold - Timestamp::millis(1),
+            );
+
+            assert_rejects(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::TransactionTimestamp.error_id(),
             );
         }
 
