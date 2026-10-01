@@ -44,6 +44,9 @@ mod removal_index_commitment;
 mod removal_record_pointers;
 mod removal_records_are_unspent;
 mod resolve_chunk_indices;
+// Kept for the benchmark in `update_tree_leaf`; no program uses it.
+#[cfg(test)]
+mod roots_from_authentication_struct;
 mod sorted_window_indices;
 mod swbfi_peaks_after_removals;
 mod update_tree_leaf;
