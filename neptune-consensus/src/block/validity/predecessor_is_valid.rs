@@ -1440,6 +1440,23 @@ impl TritonProgram for PredecessorIsValid {
 
         // BEFORE: _ *w [prev_block_hash]
         // AFTER:  _ *w [prev_block_hash]
+        let rule_2j_prev = triton_asm!(
+            push {prev_epoch_alloc.read_address()} read_mem 1 pop 1
+            // _ *w [prev_block_hash] *epoch
+
+            dup 6 {&prev_block_txk} {&field!(TransactionKernel::inputs)}
+            read_mem 1 pop 1
+            // _ *w [prev_block_hash] *epoch num_inputs
+
+            dup 1 {&field!(Epoch::max_num_inputs)} read_mem 1 pop 1
+            addi 1 swap 1 lt
+            // _ *w [prev_block_hash] *epoch (num_inputs <= max_num_inputs)
+
+            assert error_id {BlockValidationRule::TooManyInputs.error_id()}
+            pop 1
+            // _ *w [prev_block_hash]
+        );
+
         // BEFORE: _ *w [prev_block_hash]
         // AFTER:  _ *w [prev_block_hash]
         // BEFORE: _ *w [prev_block_hash]
@@ -1460,6 +1477,7 @@ impl TritonProgram for PredecessorIsValid {
 
         let (rule_1e_prev, rule_1e_prev_code) = subroutine("rule_1e_prev", rule_1e_prev);
         let (rule_2f_prev, rule_2f_prev_code) = subroutine("rule_2f_prev", rule_2f_prev);
+        let (rule_2j_prev, rule_2j_prev_code) = subroutine("rule_2j_prev", rule_2j_prev);
 
         let prev_block_epoch_rules = "predecessor_is_valid_prev_block_epoch_rules".to_string();
         let prev_block_epoch_rules_code = triton_asm!(
@@ -1522,6 +1540,9 @@ impl TritonProgram for PredecessorIsValid {
                 // _ *w [prev_block_hash]
 
                 call {rule_2f_prev}
+                // _ *w [prev_block_hash]
+
+                call {rule_2j_prev}
                 // _ *w [prev_block_hash]
 
                 return
@@ -1993,6 +2014,7 @@ impl TritonProgram for PredecessorIsValid {
             {&find_swbfi_claim_code}
             {&rule_1e_prev_code}
             {&rule_2f_prev_code}
+            {&rule_2j_prev_code}
             {&write_output_code}
             {&library.all_imports()}
         );
@@ -2335,6 +2357,12 @@ mod tests {
                 assert!(
                     witness.prev_block_header.timestamp - prev_transaction_timestamp
                         <= prev_epoch.transaction_backdating_threshold
+                );
+
+                // 2.j)
+                assert!(
+                    u64::try_from(prev_transaction_kernel.inputs.len()).unwrap()
+                        <= prev_epoch.max_num_inputs.value()
                 );
             }
 
@@ -4464,6 +4492,36 @@ mod tests {
                 &next_body,
                 &next_header,
                 BlockValidationRule::TransactionTimestamp.error_id(),
+            );
+        }
+
+        #[test]
+        fn prev_block_with_too_many_inputs_fails() {
+            let transaction_kernel = transaction_kernel_and_proof().0.clone();
+            let num_inputs = u64::try_from(transaction_kernel.inputs.len()).unwrap();
+            assert!(num_inputs > 0, "fixture transaction must have inputs");
+            let limits = |max_num_inputs| {
+                EpochTable::new(&[Epoch {
+                    max_num_inputs: bfe!(max_num_inputs),
+                    ..activation_epoch()
+                }])
+            };
+
+            let epochs = limits(num_inputs);
+            let (prev_block, next_body, next_header) =
+                prev_block_with_transaction_kernel(transaction_kernel.clone(), &epochs);
+            assert_accepts_with_epochs(&skipping(), &prev_block, &next_body, &next_header, &epochs);
+
+            let epochs = limits(num_inputs - 1);
+            let (prev_block, next_body, next_header) =
+                prev_block_with_transaction_kernel(transaction_kernel, &epochs);
+            assert_rejects_with_epochs(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                &epochs,
+                BlockValidationRule::TooManyInputs.error_id(),
             );
         }
 
