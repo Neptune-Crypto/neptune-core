@@ -1592,6 +1592,26 @@ impl TritonProgram for PredecessorIsValid {
             // _ *w [prev_block_hash]
         );
 
+        // BEFORE: _ *w [prev_block_hash]
+        // AFTER:  _ *w [prev_block_hash]
+        let rule_2s_prev = triton_asm!(
+            dup 5 {&prev_lustration_status} {&field!(LustrationStatus::counter)}
+            addi {amount_size - 1} read_mem {amount_size} pop 1
+            // _ *w [prev_block_hash] [prev_lustration_counter]
+
+            push {prev_epoch_alloc.read_address()} read_mem 1 pop 1
+            {&field!(Epoch::lustration_counter_initial)}
+            addi {amount_size - 1} read_mem {amount_size} pop 1
+            // _ *w [prev_block_hash] [prev_lustration_counter] [lustration_counter_initial]
+
+            call {i128_lt}
+            // _ *w [prev_block_hash] (lustration_counter_initial < prev_lustration_counter)
+
+            push 0 eq
+            assert error_id {BlockValidationRule::LustrationCounterExceedsInitialValue.error_id()}
+            // _ *w [prev_block_hash]
+        );
+
         // BEFORE: _ *w [prev_block_hash] *prev_claim_output
         // AFTER:  _ *w [prev_block_hash] *prev_claim_output
         let rule_2q_prev = triton_asm!(
@@ -1724,6 +1744,7 @@ impl TritonProgram for PredecessorIsValid {
         let (rule_2j_prev, rule_2j_prev_code) = subroutine("rule_2j_prev", rule_2j_prev);
         let (rule_2k_prev, rule_2k_prev_code) = subroutine("rule_2k_prev", rule_2k_prev);
         let (rule_2l_prev, rule_2l_prev_code) = subroutine("rule_2l_prev", rule_2l_prev);
+        let (rule_2s_prev, rule_2s_prev_code) = subroutine("rule_2s_prev", rule_2s_prev);
 
         let prev_block_epoch_rules = "predecessor_is_valid_prev_block_epoch_rules".to_string();
         let prev_block_epoch_rules_code = triton_asm!(
@@ -1802,6 +1823,9 @@ impl TritonProgram for PredecessorIsValid {
                 // _ *w [prev_block_hash]
 
                 call {rule_2l_prev}
+                // _ *w [prev_block_hash]
+
+                call {rule_2s_prev}
                 // _ *w [prev_block_hash]
 
                 return
@@ -2313,6 +2337,7 @@ impl TritonProgram for PredecessorIsValid {
             {&rule_2j_prev_code}
             {&rule_2k_prev_code}
             {&rule_2l_prev_code}
+            {&rule_2s_prev_code}
             {&write_output_code}
             {&library.all_imports()}
         );
@@ -2737,6 +2762,9 @@ mod tests {
                     // 2.p)
                     assert_eq!(expected_counter, prev_lustration_status.counter);
                 }
+
+                // 2.s)
+                assert!(prev_lustration_status.counter <= prev_epoch.lustration_counter_initial);
             }
 
             tasm::tasmlib_io_write_to_stdout___digest(prev_block_hash);
@@ -4133,6 +4161,34 @@ mod tests {
                 &next_body,
                 &next_header,
                 BlockValidationRule::MissingLustrationAnnouncement.error_id(),
+            );
+        }
+
+        #[test]
+        fn prev_block_with_lustration_counter_at_its_initial_value_passes() {
+            let status = LustrationStatus {
+                counter: lustration_counter_initial(),
+                max_lustrating_aocl_leaf_index: 0,
+            };
+            let ((prev_block, next_body, next_header), _) = lustration_chain(status, |_| vec![]);
+
+            assert_accepts(&skipping(), &prev_block, &next_body, &next_header);
+        }
+
+        #[test]
+        fn prev_block_with_lustration_counter_above_its_initial_value_fails() {
+            let status = LustrationStatus {
+                counter: lustration_counter_initial() + NativeCurrencyAmount::one_nau(),
+                max_lustrating_aocl_leaf_index: 0,
+            };
+            let ((prev_block, next_body, next_header), _) = lustration_chain(status, |_| vec![]);
+
+            assert_rejects(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::LustrationCounterExceedsInitialValue.error_id(),
             );
         }
 
