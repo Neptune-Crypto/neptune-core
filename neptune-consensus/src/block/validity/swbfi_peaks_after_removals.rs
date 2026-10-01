@@ -1,10 +1,11 @@
-//! Rules 2.a and 2.b and the inactive-SWBF half of 2.e, in the design
+//! Rules 2.a, 2.b and 2.d and the inactive-SWBF half of 2.e, in the design
 //! where the witness supplies the chunks of the inactive SWBF that the
 //! inputs' indices fall in.
 //!
 //! From the mutator set the transaction is built on: the witness's inputs
-//! must hold exactly the chunks their indices need (2.a, 2.b), and setting
-//! the indices in the chunks yields the inactive SWBF's new peaks.
+//! must hold exactly the chunks their indices need (2.a, 2.b), every input
+//! has an unset index (2.b, 2.d), and setting the indices in the chunks
+//! yields the inactive SWBF's new peaks.
 //!
 //! This is the part of the update that dominates its cost. It is the body of
 //! [`CorrectSwbfiUpdate`](super::correct_swbfi_update::CorrectSwbfiUpdate),
@@ -30,11 +31,13 @@ use super::chunk_insertions::ChunkInsertions;
 use super::chunk_witness::ChunkWitness;
 use super::divined_chunk_indices::DivinedChunkIndices;
 use super::mutate_swbfi_peaks::MutateSwbfiPeaks;
+use super::removal_records_are_unspent::RemovalRecordsAreUnspent;
 use super::resolve_chunk_indices::ResolveChunkIndices;
 use crate::consensus_rule_set::ConsensusRuleSet;
 
 /// Computes the inactive SWBF's peaks after a transaction's removals, from
-/// the chunks the witness supplies: rules 2.a and 2.b, then the insertions.
+/// the chunks the witness supplies: rules 2.a, 2.b and 2.d, then the
+/// insertions.
 ///
 /// ```text
 /// BEFORE: _ *inputs *mutator_set
@@ -68,6 +71,7 @@ impl BasicSnippet for SwbfiPeaksAfterRemovals {
         let chunk_witness = library.import(Box::new(ChunkWitness));
         let divined_chunk_indices = library.import(Box::new(DivinedChunkIndices));
         let resolve_chunk_indices = library.import(Box::new(ResolveChunkIndices));
+        let removal_records_are_unspent = library.import(Box::new(RemovalRecordsAreUnspent));
         let chunk_insertions = library.import(Box::new(ChunkInsertions));
         let mutate_swbfi_peaks = library.import(Box::new(MutateSwbfiPeaks));
         let to_window_start =
@@ -84,6 +88,7 @@ impl BasicSnippet for SwbfiPeaksAfterRemovals {
 
         let entrypoint = self.entrypoint();
         let rule_2a = format!("{entrypoint}_rule_2a");
+        let rules_2b_2d = format!("{entrypoint}_rules_2b_2d");
         let removals = format!("{entrypoint}_removals");
 
         let read_u64 = triton_asm!(addi 1 read_mem 2 pop 1);
@@ -118,6 +123,7 @@ impl BasicSnippet for SwbfiPeaksAfterRemovals {
             // AFTER:  _ *swbfi_peaks_after
             {entrypoint}:
                 call {rule_2a}
+                call {rules_2b_2d}
                 call {removals}
                 // _ *inputs *mutator_set *swbfi_peaks_after
 
@@ -152,6 +158,28 @@ impl BasicSnippet for SwbfiPeaksAfterRemovals {
                 // _ [base] *inputs *chunk_indices [swbfi_leaf_count_estimate] [swbfi_leaf_count]
 
                 call {resolve_chunk_indices}
+                // _ [base]
+
+                return
+
+            // No input is spent: each record has an index that is unset in
+            // the mutator set, shown absent from its chunk or from the active
+            // window.
+            // BEFORE: _ *inputs *mutator_set
+            // AFTER:  _ *inputs *mutator_set
+            {rules_2b_2d}:
+                dup 1
+                push {chunk_indices_alloc.read_address()} read_mem 1 pop 1
+                push {chunks_alloc.read_address()} read_mem 1 pop 1
+                // _ [base] *inputs *chunk_indices *chunks
+
+                dup 3 {&field!(MutatorSetAccumulator::swbf_active)}
+                // _ [base] *inputs *chunk_indices *chunks *active_window
+
+                dup 4 {&swbfi_leaf_count}
+                // _ [base] *inputs *chunk_indices *chunks *active_window [swbfi_leaf_count]
+
+                call {removal_records_are_unspent}
                 // _ [base]
 
                 return
@@ -195,9 +223,10 @@ impl BasicSnippet for SwbfiPeaksAfterRemovals {
 impl SwbfiPeaksAfterRemovals {
     /// The tokens for the witness's inputs: the parts of the fields of
     /// their chunks, the chunk indices, then the position of the chunk
-    /// of every index that lies in the inactive SWBF, then the sorted
-    /// indices inserted into each chunk with their positions, then the
-    /// tokens that recompute the inactive SWBF's peaks. A witness with more or fewer chunks than its indices need gets
+    /// of every index that lies in the inactive SWBF, then the unset index of
+    /// every record, then the sorted indices inserted into each chunk with
+    /// their positions, then the tokens that recompute the inactive SWBF's
+    /// peaks. A witness with more or fewer chunks than its indices need gets
     /// a list padded or cut to its number of chunks, which the program then
     /// rejects.
     pub(super) fn divined_tokens(
@@ -222,6 +251,13 @@ impl SwbfiPeaksAfterRemovals {
         [
             DivinedChunkIndices::divined_tokens(&chunk_indices),
             ResolveChunkIndices::divined_tokens(inputs, &chunk_indices, estimate, swbfi_leaf_count),
+            RemovalRecordsAreUnspent::divined_tokens(
+                inputs,
+                &chunk_indices,
+                &chunks,
+                &mutator_set.swbf_active,
+                swbfi_leaf_count,
+            ),
             ChunkInsertions::divined_tokens(inputs, &chunk_indices, window_start),
             MutateSwbfiPeaks::divined_tokens(estimate, &chunk_indices, &chunks, &insertions),
         ]
@@ -329,6 +365,7 @@ impl SwbfiPeaksAfterRemovals {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) mod tests {
+    use neptune_mutator_set::shared::NUM_TRIALS;
 
     use super::super::chunk_witness::tests::packed_entries;
     use super::super::chunk_witness::tests::PackedEntry;
@@ -403,9 +440,38 @@ pub(super) mod tests {
             }
             assert!(used.iter().all(|&used| used), "every chunk must be used");
 
+            // 2.b, 2.d) Every record has an unset index: the prover points
+            // at it, and at the gap around it in its sorted chunk or in the
+            // sorted active window.
+            let chunks = ChunkWitness::chunks(inputs);
+            let window = &mutator_set.swbf_active.sbf;
+            assert!(window.windows(2).all(|pair| pair[0] <= pair[1]));
+            assert!(window.iter().all(|&set| set < WINDOW_SIZE));
+            let gap_encloses = |sorted: &[u32], index: u32| {
+                let gap = tasm::tasmlib_io_read_secin___bfe().value() as usize;
+                assert!(gap <= sorted.len());
+                assert!(gap == 0 || sorted[gap - 1] < index);
+                assert!(gap == sorted.len() || index < sorted[gap]);
+            };
+            for record in inputs {
+                let position = tasm::tasmlib_io_read_secin___bfe().value() as usize;
+                assert!(position < NUM_TRIALS as usize);
+                let index = record.absolute_indices.to_array()[position];
+                if index < true_window_start {
+                    let chunk_position = tasm::tasmlib_io_read_secin___bfe().value() as usize;
+                    let chunk_index = (index >> CHUNK_SIZE.ilog2()) as u64;
+                    assert_eq!(Some(&chunk_index), chunk_indices.get(chunk_position));
+                    let relative_index = (index % u128::from(CHUNK_SIZE)) as u32;
+                    gap_encloses(&chunks[chunk_position], relative_index);
+                } else {
+                    let relative_index = index - true_window_start;
+                    assert!(relative_index < u128::from(WINDOW_SIZE));
+                    gap_encloses(window, relative_index as u32);
+                }
+            }
+
             // The insertions and peak tokens are read and ignored; the peaks
             // are computed directly from the unpacked records.
-            let chunks = ChunkWitness::chunks(inputs);
             let insertions = ChunkInsertions::insertions(inputs, &chunk_indices, true_window_start);
             let num_tokens =
                 ChunkInsertions::divined_tokens(inputs, &chunk_indices, true_window_start).len()

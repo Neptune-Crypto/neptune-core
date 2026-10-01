@@ -1,7 +1,8 @@
 //! Rule 2.e for the current block, restricted to the removals: from the
 //! mutator set the block's transaction is built on, setting the indices of
-//! its inputs yields the mutator set with this hash. Rules 2.a and 2.b come
-//! along: the chunks the witness supplies are exactly what they are about.
+//! its inputs yields the mutator set with this hash. Rules 2.a, 2.b and 2.d
+//! come along: the chunks the witness supplies are exactly what they are
+//! about.
 //!
 //! The claim goes in the block's appendix, so its proof is consumed by the
 //! block proof. Its public input binds the mutator set by hash and its
@@ -1067,6 +1068,47 @@ pub(super) mod tests {
             output[2..2 + Digest::LEN]
         );
         assert_ne!(honest_output[2 + Digest::LEN..], output[2 + Digest::LEN..]);
+    }
+
+    /// spent. The chunks are not yet authenticated, so the unspent rule
+    /// alone must catch this.
+    fn witness_with_a_spent_input() -> CorrectSwbfiUpdateWitness {
+        let mut witness = witness_with_chunks();
+        let swbfi_leaf_count = witness.mutator_set.swbf_inactive.num_leafs();
+        let window_start = u128::from(swbfi_leaf_count) << CHUNK_SIZE.ilog2();
+        let chunk_indices =
+            ResolveChunkIndices::chunk_indices_below(&witness.inputs, swbfi_leaf_count);
+        let indices = witness
+            .inputs
+            .iter()
+            .map(|input| input.absolute_indices.to_array())
+            .find(|indices| indices.iter().all(|index| *index < window_start))
+            .expect("some input must lie in the inactive SWBF");
+
+        let mut entries = witness.inputs[0].target_chunks.clone().into_inner();
+        let mut chunk_entries = entries
+            .iter_mut()
+            .filter(|(height, _)| {
+                *height < RemovalRecordList::ENCODING_TREE_HEIGHT_OFFSET
+                    || *height == RemovalRecordList::ENCODING_DELIMITER_IGNORE_TREE_HEIGHT
+            })
+            .map(|(_, (_, chunk))| chunk)
+            .collect::<Vec<_>>();
+        for index in indices {
+            let chunk_index = (index >> CHUNK_SIZE.ilog2()) as u64;
+            let position = chunk_indices.binary_search(&chunk_index).unwrap();
+            chunk_entries[position].insert((index % u128::from(CHUNK_SIZE)) as u32);
+        }
+        witness.inputs[0].target_chunks = ChunkDictionary::new_in_given_order(entries);
+        witness
+    }
+
+    #[test]
+    fn spent_input_is_rejected() {
+        assert_rejects(
+            &witness_with_a_spent_input(),
+            BlockValidationRule::RemovalRecordsValidity.error_id(),
+        );
     }
 
     /// Prints how the program's cycles and table rows distribute over its
