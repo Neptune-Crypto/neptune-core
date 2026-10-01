@@ -275,7 +275,7 @@ async fn block_with_appendix_too_large_fails_1b(
 
     let mut b_new = fake_valid_successor_for_tests(&b_prev, ts, rness, network).await;
 
-    let mut large_claims = b_new.kernel.appendix()._claims().clone();
+    let mut large_claims = b_new.kernel.appendix().claims().to_vec();
     large_claims.append(&mut vec![Claim::new(Default::default()); MAX_NUM_CLAIMS]);
     b_new.set_appendix(BlockAppendix::new(large_claims));
 

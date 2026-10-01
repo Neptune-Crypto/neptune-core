@@ -6,7 +6,8 @@ use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
 /// invalid.
 ///
 /// Conversely, defines what it means for a block to be "valid".
-#[derive(Debug, Clone, Copy, thiserror::Error, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, thiserror::Error, PartialEq, Eq, strum::EnumDiscriminants)]
+#[strum_discriminants(name(BlockValidationRule))]
 pub enum BlockValidationError {
     // 0. `previous_block` is consistent with current block
     ///   0.a) Block height is previous plus one
@@ -148,5 +149,13 @@ pub enum BlockValidationError {
 impl From<RemovalRecordListUnpackError> for BlockValidationError {
     fn from(_: RemovalRecordListUnpackError) -> Self {
         Self::RemovalRecordsUnpackFailure
+    }
+}
+
+impl BlockValidationRule {
+    /// The error ID reported by Triton VM's crash if this rule is not
+    /// satisfied.
+    pub(in crate::block) fn error_id(self) -> i128 {
+        1_000_300 + self as i128
     }
 }
