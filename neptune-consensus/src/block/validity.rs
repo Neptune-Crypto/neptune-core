@@ -20,15 +20,33 @@ use crate::proof_abstractions::SecretWitness;
 pub mod block_primitive_witness;
 pub mod block_program;
 pub mod block_proof_witness;
+mod chunk_insertions;
+mod chunk_witness;
 pub mod coinbase_is_valid;
+mod copy_words;
 pub mod correct_control_parameter_update;
 pub mod correct_mmr_update;
 pub mod correct_mutator_set_update;
+pub mod correct_swbfi_update;
 pub mod difficulty_control;
+mod divined_chunk_indices;
 pub mod epoch_table;
+mod hash_chunk_with_insertions;
+mod hash_words;
+mod insert_into_window;
 mod meets_threshold;
 pub mod mmr_membership;
+mod mutate_swbfi_peaks;
+mod mutator_set_hash;
+mod mutator_set_hash_after_removals;
 pub mod predecessor_is_valid;
+mod removal_index_commitment;
+mod removal_record_pointers;
+mod resolve_chunk_indices;
+mod sorted_window_indices;
+mod swbfi_peaks_after_removals;
+mod update_tree_leaf;
+mod window_after_removals;
 
 /// The validity of a block, in the principal case, decomposes into these subclaims.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
