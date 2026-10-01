@@ -190,6 +190,11 @@ pub(crate) struct NetworkActor {
     /// this information is allowed.
     accept_new_external_addresses: bool,
 
+    /// Hold a relay reservation even though reachability does not call for
+    /// one. Tests have no NAT to put the node behind.
+    #[cfg(test)]
+    force_relay_reservation: bool,
+
     /// Whether peers may be reached at loopback and private addresses.
     ///
     /// Only used on the regtest network since on that network, multiple nodes
@@ -546,6 +551,8 @@ impl NetworkActor {
             ),
             active_protocols: None,
             accept_new_external_addresses: !neuter_autonat,
+            #[cfg(test)]
+            force_relay_reservation: false,
             accepts_local_addresses: config.network.is_reg_test(),
         })
     }
@@ -1148,6 +1155,11 @@ impl NetworkActor {
 
                 // Note: Identify and Kademlia will now automatically start
                 // their handshakes over this new "open line."
+
+                #[cfg(test)]
+                if self.force_relay_reservation && self.relays.is_empty() {
+                    self.request_peer_relays(1);
+                }
             }
 
             _ => {}
@@ -2683,5 +2695,242 @@ mod tests {
                 .is_banned(&IpAddr::V4("203.0.113.8".parse().unwrap())),
             "a peer that has gone must still be bannable"
         );
+    }
+
+    /// A node under test: its actor runs in the background, and the test
+    /// drives it over the command channel and watches the event channel.
+    struct TestNode {
+        peer_id: PeerId,
+        command_tx: mpsc::Sender<NetworkActorCommand>,
+        event_rx: mpsc::UnboundedReceiver<NetworkEvent>,
+        _peer_to_main_rx: mpsc::Receiver<PeerTaskToMain>,
+        task: JoinHandle<Result<(), ActorError>>,
+    }
+
+    impl TestNode {
+        async fn start(
+            keypair: Keypair,
+            external_addresses: Vec<Multiaddr>,
+            force_relay_reservation: bool,
+        ) -> Self {
+            let network = Network::RegTest;
+            let cli = cli_args::Args {
+                network,
+                ..Default::default()
+            };
+            let global_state_lock =
+                mock_genesis_global_state(0, WalletEntropy::new_random(), cli).await;
+            let (peer_to_main_tx, peer_to_main_rx) = mpsc::channel(16);
+            let (main_to_peer_broadcast_tx, _) = broadcast::channel(16);
+            let (channels, command_tx, event_rx) =
+                NetworkActorChannels::setup(peer_to_main_tx, main_to_peer_broadcast_tx);
+            let config = NetworkConfig::default()
+                .with_network(network)
+                .with_subdirectory(unit_test_path())
+                .with_external_addresses(external_addresses);
+            let peer_id = keypair.public().to_peer_id();
+            let mut actor = NetworkActor::new(keypair, channels, global_state_lock, config)
+                .expect("test actor must build");
+            actor.force_relay_reservation = force_relay_reservation;
+
+            Self {
+                peer_id,
+                command_tx,
+                event_rx,
+                _peer_to_main_rx: peer_to_main_rx,
+                task: tokio::spawn(actor.run()),
+            }
+        }
+
+        async fn command(&self, command: NetworkActorCommand) {
+            self.command_tx.send(command).await.unwrap();
+        }
+
+        /// Dial until the node has at least `connections` peers. A dial that
+        /// lands before the other side listens fails for good, so retry.
+        async fn dial_until_connected(&self, address: Multiaddr, connections: usize) {
+            let deadline = Instant::now() + Duration::from_secs(60);
+            loop {
+                self.command(NetworkActorCommand::Dial(address.clone()))
+                    .await;
+                for _ in 0..4 {
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                    if self.overview().await.connection_count >= connections {
+                        return;
+                    }
+                }
+                assert!(Instant::now() < deadline, "timed out dialing {address}");
+            }
+        }
+
+        async fn overview(&self) -> NetworkOverview {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            self.command(NetworkActorCommand::GetNetworkOverview(tx))
+                .await;
+            rx.await.unwrap()
+        }
+
+        /// Poll the overview until `done` accepts it.
+        async fn wait_until(&self, what: &str, done: impl Fn(&NetworkOverview) -> bool) {
+            let deadline = Instant::now() + Duration::from_secs(60);
+            loop {
+                if done(&self.overview().await) {
+                    return;
+                }
+                assert!(Instant::now() < deadline, "timed out waiting until {what}");
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+        }
+
+        async fn wait_for_peer_loops(&mut self, count: usize) {
+            for _ in 0..count {
+                tokio::time::timeout(Duration::from_secs(60), self.event_rx.recv())
+                    .await
+                    .expect("a peer loop must start")
+                    .expect("actor must still be running");
+            }
+        }
+
+        /// Asserts that no peer loop starts within the given time.
+        async fn assert_no_peer_loop_for(&mut self, duration: Duration) {
+            assert!(
+                tokio::time::timeout(duration, self.event_rx.recv())
+                    .await
+                    .is_err(),
+                "a peer loop started over a relayed connection"
+            );
+        }
+    }
+
+    fn free_localhost_tcp_address() -> Multiaddr {
+        let port = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        format!("/ip4/127.0.0.1/tcp/{port}").parse().unwrap()
+    }
+
+    fn has_circuit(address: &Multiaddr) -> bool {
+        address
+            .iter()
+            .any(|p| matches!(p, libp2p::multiaddr::Protocol::P2pCircuit))
+    }
+
+    /// A relay and a node holding a reservation on it, plus the relay's
+    /// address and the circuit address at which the reserved node can be
+    /// reached. If `listener` is
+    /// set, the reserved node also listens directly and advertises that
+    /// address, so a hole punch towards it has somewhere to land.
+    async fn relay_and_reserved_node(
+        reserved_keypair: Keypair,
+        listener: Option<Multiaddr>,
+    ) -> (TestNode, TestNode, Multiaddr, Multiaddr) {
+        // The relay server only serves peers once it knows it is reachable.
+        let relay_address = free_localhost_tcp_address();
+        let relay = TestNode::start(
+            Keypair::generate_ed25519(),
+            vec![relay_address.clone()],
+            false,
+        )
+        .await;
+        relay
+            .command(NetworkActorCommand::Listen(relay_address.clone()))
+            .await;
+
+        let external_addresses = listener.iter().cloned().collect();
+        let reserved = TestNode::start(reserved_keypair, external_addresses, true).await;
+        if let Some(listener) = listener {
+            reserved
+                .command(NetworkActorCommand::Listen(listener))
+                .await;
+        }
+        reserved
+            .dial_until_connected(relay_address.clone(), 1)
+            .await;
+        reserved
+            .wait_until("the reservation is accepted", |overview| {
+                overview.external_addresses.iter().any(has_circuit)
+            })
+            .await;
+
+        let circuit = relay_address
+            .clone()
+            .with_p2p(relay.peer_id)
+            .unwrap()
+            .with(libp2p::multiaddr::Protocol::P2pCircuit)
+            .with_p2p(reserved.peer_id)
+            .unwrap();
+        (relay, reserved, relay_address, circuit)
+    }
+
+    /// Two keypairs ordered so that the second node initiates handshakes
+    /// towards the first, which is the direction the gateway must hold back
+    /// on a relayed connection.
+    fn ordered_keypairs() -> (Keypair, Keypair) {
+        let dialer = Keypair::generate_ed25519();
+        loop {
+            let reserved = Keypair::generate_ed25519();
+            if reserved.public().to_peer_id() < dialer.public().to_peer_id() {
+                return (dialer, reserved);
+            }
+        }
+    }
+
+    /// The hole punch runs on loopback, so the direct dial trivially succeeds.
+    /// What this checks is the coordination around it: a relayed connection
+    /// is upgraded through DCUtR, and the peer loop comes up on the direct
+    /// connection that results.
+    #[tokio::test]
+    async fn relayed_connection_is_upgraded_and_then_admitted() {
+        let (dialer_keypair, reserved_keypair) = ordered_keypairs();
+        let listener = free_localhost_tcp_address();
+        let (_relay, mut reserved, relay_address, circuit) =
+            relay_and_reserved_node(reserved_keypair, Some(listener)).await;
+
+        // A node behind a NAT learns its observed address from peers before
+        // it ever needs a relay. The dialer gets that head start too, since
+        // DCUtR offers the dialer's observed addresses during the punch.
+        let dialer_listener = free_localhost_tcp_address();
+        let mut dialer =
+            TestNode::start(dialer_keypair, vec![dialer_listener.clone()], false).await;
+        dialer
+            .command(NetworkActorCommand::Listen(dialer_listener))
+            .await;
+        dialer.dial_until_connected(relay_address, 1).await;
+        dialer.wait_for_peer_loops(1).await;
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        dialer.dial_until_connected(circuit, 2).await;
+
+        // The dialer's loop with the reserved node; the reserved node's with
+        // the relay and the dialer.
+        dialer.wait_for_peer_loops(1).await;
+        reserved.wait_for_peer_loops(2).await;
+
+        dialer.task.abort();
+        reserved.task.abort();
+    }
+
+    /// Without a direct address to punch towards, the connection stays
+    /// relayed, and a relayed connection must never carry a peer loop.
+    #[tokio::test]
+    async fn relayed_connection_alone_admits_no_peer_loop() {
+        let (dialer_keypair, reserved_keypair) = ordered_keypairs();
+        let (_relay, mut reserved, _relay_address, circuit) =
+            relay_and_reserved_node(reserved_keypair, None).await;
+
+        let mut dialer = TestNode::start(dialer_keypair, vec![], false).await;
+        dialer.dial_until_connected(circuit, 2).await;
+
+        // Both have a peer loop with the relay, and must get no other.
+        reserved.wait_for_peer_loops(1).await;
+        dialer.wait_for_peer_loops(1).await;
+        reserved
+            .assert_no_peer_loop_for(Duration::from_secs(5))
+            .await;
+        dialer.assert_no_peer_loop_for(Duration::from_secs(1)).await;
+
+        dialer.task.abort();
+        reserved.task.abort();
     }
 }
