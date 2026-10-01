@@ -42,6 +42,7 @@ pub mod mmr_membership;
 mod mutate_swbfi_peaks;
 mod mutator_set_hash;
 mod mutator_set_hash_after_removals;
+mod mutator_set_update_from_state_hash;
 pub mod predecessor_is_valid;
 mod removal_index_commitment;
 mod removal_record_pointers;

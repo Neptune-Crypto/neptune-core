@@ -12,6 +12,7 @@ use serde::Serialize;
 use tasm_lib::arithmetic::u160::lt::Lt as U160Lt;
 use tasm_lib::arithmetic::u192::safe_add::SafeAdd as U192SafeAdd;
 use tasm_lib::arithmetic::u64::lt::Lt as U64Lt;
+use tasm_lib::data_type::Literal;
 use tasm_lib::field;
 use tasm_lib::field_with_size;
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
@@ -36,6 +37,7 @@ use tasm_lib::verifier::stark_verify::StarkVerify;
 
 use super::apply_addition_records::ApplyAdditionRecords;
 use super::block_program::BlockProgram;
+use super::correct_swbfi_update::CorrectSwbfiUpdate;
 use super::difficulty_control::DifficultyControl;
 use super::epoch_table::Epoch;
 use super::epoch_table::EpochTable;
@@ -44,6 +46,8 @@ use super::guesser_fee_addition_records::GuesserFeeAdditionRecords;
 use super::meets_threshold::MeetsThreshold;
 use super::mutator_set_hash::MutatorSetHash;
 use super::mutator_set_hash::MutatorSetHashFromComponents;
+use super::mutator_set_update_from_state_hash::MutatorSetUpdateFromStateHash;
+use super::removal_index_commitment::RemovalIndexCommitment;
 use super::removal_records_are_unique::RemovalRecordsAreUnique;
 use crate::block::block_appendix::BlockAppendix;
 use crate::block::block_appendix::MAX_NUM_CLAIMS;
@@ -142,6 +146,14 @@ impl PredecessorIsValidWitness {
                 .extend(DifficultyControl::divined_tokens(
                     epochs.in_force_at(prev_block_height).target_block_interval,
                     prev_block_height.previous().unwrap(),
+                ));
+
+            // 2.a, 2.b, 2.e)
+            nondeterminism
+                .individual_tokens
+                .extend(MutatorSetUpdateFromStateHash::divined_tokens(
+                    &self.prev_block.body().transaction_kernel.inputs,
+                    &self.prev_block_transaction_mutator_set,
                 ));
         }
 
@@ -384,6 +396,14 @@ impl TritonProgram for PredecessorIsValid {
         let mutator_set_hash_from_components =
             library.import(Box::new(MutatorSetHashFromComponents));
         let mutator_set_hash = library.import(Box::new(MutatorSetHash));
+        let mutator_set_update = library.import(Box::new(MutatorSetUpdateFromStateHash));
+        let removal_index_commitment = library.import(Box::new(RemovalIndexCommitment));
+        // What the SWBFI update claim in the previous block's appendix must
+        // bind: the mutator set after the previous block's predecessor, and
+        // the previous block's inputs.
+        let swbfi_claim_mutator_set_alloc = library.kmalloc(Digest::LEN as u32);
+        let push_swbfi_update_program_digest =
+            Literal::Digest(CorrectSwbfiUpdate.hash()).push_to_stack_code();
         // The hash of the mutator set after the previous block, for the
         // claim's output.
         let mutator_set_after_prev_block_alloc = library.kmalloc(Digest::LEN as u32);
@@ -1069,6 +1089,139 @@ impl TritonProgram for PredecessorIsValid {
             // _ *copy
         );
 
+        // Whether the claim input, whose program digest and length already
+        // match the SWBFI update claim's, binds the mutator set after the
+        // previous block's predecessor.
+        let swbfi_claim_input_matches =
+            "predecessor_is_valid_swbfi_claim_input_matches".to_string();
+        let swbfi_claim_input_matches_code = triton_asm!(
+            // BEFORE: _ *input 1
+            // AFTER:  _ *input input_matches
+            {swbfi_claim_input_matches}:
+                pop 1
+                dup 0 addi {Digest::LEN} read_mem {Digest::LEN} pop 1
+                swap 4 swap 1 swap 3 swap 1
+                // _ *input [mutator_set_hash_in_input]
+
+                push {swbfi_claim_mutator_set_alloc.read_address()} read_mem {Digest::LEN} pop 1
+                {&digests_are_equal}
+                // _ *input input_matches
+
+                return
+        );
+
+        // Find the SWBFI update claim for the previous block's transaction in
+        // the previous block's appendix. Sets the index to the matching claim.
+        let find_swbfi_claim = "predecessor_is_valid_find_swbfi_claim".to_string();
+        let find_swbfi_claim_code = triton_asm!(
+            // INVARIANT: _ *claim[i]_si num_claims i
+            {find_swbfi_claim}:
+                dup 1 dup 1 eq
+                push 0 eq assert error_id {BlockValidationRule::AppendixMissingClaim.error_id()}
+                // _ *claim[i]_si num_claims i
+
+                dup 2 addi 1 {&field!(Claim::program_digest)} {&read_digest}
+                {&push_swbfi_update_program_digest}
+                {&digests_are_equal}
+                // _ *claim[i]_si num_claims i program_matches
+
+                dup 3 addi 1 {&field_with_size!(Claim::input)}
+                // _ *claim[i]_si num_claims i program_matches *input input_size
+
+                // The size counts the length word the pointer points at.
+                push {Digest::LEN + 1} eq
+                pick 2 mul
+                // _ *claim[i]_si num_claims i *input shape_matches
+
+                dup 0 skiz call {swbfi_claim_input_matches}
+                place 1 pop 1
+                // _ *claim[i]_si num_claims i is_swbfi_claim_about_prev_block
+
+                skiz return
+                // _ *claim[i]_si num_claims i
+
+                pick 2 read_mem 1
+                // _ num_claims i claim_size (*claim[i]_si - 1)
+
+                // Crashes unless the size is a u32.
+                dup 1 pop_count pop 1
+
+                addi 2 add
+                // _ num_claims i *claim[i+1]_si
+
+                place 2 addi 1
+                // _ *claim[i+1]_si num_claims (i + 1)
+
+                recurse
+        );
+
+        // BEFORE: _ *list
+        // AFTER:  _ [digest]
+        let hash_digest_list = triton_asm!(
+            dup 0 read_mem 1 pop 1 push {Digest::LEN} mul addi 1
+            // _ *list size
+
+            call {hash_varlen}
+            // [digest]
+        );
+
+        // Rules 2.a, 2.b, 2.d and 2.e: the transaction applied to the
+        // witness's mutator set yields the body's. The mutator set after the
+        // removals comes, by hash, from the SWBFI update claim the previous
+        // block carries, which its proof covers; the rest is computed here.
+        // BEFORE: _ *w [prev_block_hash] *prev_claim_output
+        // AFTER:  _ *w [prev_block_hash] *prev_claim_output
+        let mutator_set_update_prev = triton_asm!(
+            dup 0 addi {Self::output_mutator_set_offset() + Digest::LEN}
+            read_mem {Digest::LEN} pop 1
+            push {swbfi_claim_mutator_set_alloc.write_address()} write_mem {Digest::LEN} pop 1
+            // _ *w [prev_block_hash] *prev_claim_output
+
+            dup 6 {&field!(PredecessorIsValidWitnessMemory::prev_block_appendix)}
+            {&field!(BlockAppendix::claims)}
+            read_mem 1 addi 2 place 1 push 0
+            // _ *w [prev_block_hash] *prev_claim_output *claim[0]_si num_claims 0
+
+            call {find_swbfi_claim}
+            pop 2 addi 1 {&field!(Claim::output)}
+            // _ *w [prev_block_hash] *prev_claim_output *swbfi_claim_output
+
+            // The output is the number of leaves and of index sets covered,
+            // the hash of the mutator set after the removals, then the peaks
+            // of the MMR over the index sets as a list. The claim must cover
+            // all inputs, whose peaks are recomputed here.
+            dup 0 read_mem 1 pop 1
+            dup 1 addi {3 + Digest::LEN} read_mem 1 pop 1
+            push {Digest::LEN} mul addi {3 + Digest::LEN} eq
+            assert error_id {BlockValidationRule::MutatorSetUpdateIntegrity.error_id()}
+            dup 0 addi 2 read_mem 1 pop 1
+            dup 8 {&prev_block_txk} {&field!(TransactionKernel::inputs)} read_mem 1 pop 1 eq
+            assert error_id {BlockValidationRule::RemovalIndexCommitmentMismatch.error_id()}
+            // _ *w [prev_block_hash] *prev_claim_output *swbfi_claim_output
+
+            dup 7 {&prev_block_txk} {&field!(TransactionKernel::inputs)}
+            call {removal_index_commitment}
+            {&hash_digest_list}
+            dup 5 addi {3 + Digest::LEN} {&hash_digest_list}
+            assert_vector error_id {BlockValidationRule::RemovalIndexCommitmentMismatch.error_id()}
+            pop {Digest::LEN}
+            // _ *w [prev_block_hash] *prev_claim_output *swbfi_claim_output
+
+            addi {2 + Digest::LEN} read_mem {Digest::LEN} pop 1
+            // _ *w [prev_block_hash] *prev_claim_output [mutator_set_after_removals_hash]
+
+            dup 11 {&prev_block_txk} {&field!(TransactionKernel::inputs)}
+            dup 12 {&prev_block_txk} {&field!(TransactionKernel::outputs)}
+            dup 13 {&field!(PredecessorIsValidWitnessMemory::prev_block_transaction_mutator_set)}
+            dup 14 {&field!(PredecessorIsValidWitnessMemory::prev_block_body)}
+            {&field!(BlockBody::mutator_set_accumulator)}
+            pick 8 pick 8 pick 8 pick 8 pick 8
+            // _ *w [prev_block_hash] *prev_claim_output *inputs *outputs *mutator_set *body_mutator_set [mutator_set_after_removals_hash]
+
+            call {mutator_set_update}
+            // _ *w [prev_block_hash] *prev_claim_output
+        );
+
         // The divined tokens are the positions of the inputs sorted by index
         // set; see [RemovalRecordsAreUnique::divined_tokens].
         // BEFORE: _ *w [prev_block_hash]
@@ -1174,6 +1327,8 @@ impl TritonProgram for PredecessorIsValid {
         let (rule_0e_prev, rule_0e_prev_code) = subroutine("rule_0e_prev", rule_0e_prev);
         let (rule_0f_prev, rule_0f_prev_code) = subroutine("rule_0f_prev", rule_0f_prev);
         let (rule_2t_prev, rule_2t_prev_code) = subroutine("rule_2t_prev", rule_2t_prev);
+        let (mutator_set_update_prev, mutator_set_update_prev_code) =
+            subroutine("mutator_set_update_prev", mutator_set_update_prev);
 
         let (rule_1e_prev, rule_1e_prev_code) = subroutine("rule_1e_prev", rule_1e_prev);
 
@@ -1226,6 +1381,9 @@ impl TritonProgram for PredecessorIsValid {
                 // _ *w [prev_block_hash] *prev_claim_output
 
                 call {rule_2t_prev}
+                // _ *w [prev_block_hash] *prev_claim_output
+
+                call {mutator_set_update_prev}
                 // _ *w [prev_block_hash] *prev_claim_output
 
                 pop 1
@@ -1678,6 +1836,9 @@ impl TritonProgram for PredecessorIsValid {
             {&rule_0e_prev_code}
             {&rule_0f_prev_code}
             {&rule_2t_prev_code}
+            {&mutator_set_update_prev_code}
+            {&swbfi_claim_input_matches_code}
+            {&find_swbfi_claim_code}
             {&rule_1e_prev_code}
             {&write_output_code}
             {&library.all_imports()}
@@ -1705,7 +1866,14 @@ impl TritonProgram for PredecessorIsValid {
 mod tests {
     use std::collections::HashMap;
 
+    use neptune_mutator_set::addition_record::AdditionRecord;
+    use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+    use neptune_mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
     use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
+    use neptune_mutator_set::removal_record::RemovalRecord;
+    use neptune_mutator_set::shared::CHUNK_SIZE;
+    use neptune_mutator_set::shared::NUM_TRIALS;
+    use neptune_mutator_set::shared::WINDOW_SIZE;
     use neptune_primitives::block_height::BlockHeight;
     use neptune_primitives::difficulty_control::difficulty_control;
     use neptune_primitives::network::Network;
@@ -1715,6 +1883,7 @@ mod tests {
     use rand::SeedableRng;
     use tasm_lib::twenty_first::prelude::Mmr;
 
+    use super::super::correct_swbfi_update::CorrectSwbfiUpdateWitness;
     use super::*;
     use crate::block::block_kernel::BlockKernel;
     use crate::block::mutator_set_update::MutatorSetUpdate;
@@ -1730,6 +1899,7 @@ mod tests {
     use crate::proof_abstractions::tasm::program::proof_cache::load_proof_or_produce_and_save;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::proof_abstractions::test_runtime::tokio_runtime;
+    use crate::proof_abstractions::SecretWitness;
     use crate::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::transaction::validity::neptune_proof::Proof as NeptuneProof;
 
@@ -1945,6 +2115,42 @@ mod tests {
                 assert_eq!(
                     parent_claim.output[mutator_set_offset..mutator_set_offset + Digest::LEN],
                     mutator_set.hash().values()
+                );
+
+                // 2.a, 2.b, 2.d, 2.e) The previous block's appendix carries
+                // the SWBFI update claim about its transaction's removals on
+                // the mutator set it is built on; its proof was verified with
+                // the block's. The rest of the update is computed here.
+                let claim_input = CorrectSwbfiUpdate::claim_input(mutator_set);
+                let swbfi_claim = witness
+                    .prev_block_appendix
+                    .claims()
+                    .iter()
+                    .find(|claim| {
+                        claim.program_digest == CorrectSwbfiUpdate.hash()
+                            && claim.input == claim_input
+                    })
+                    .expect("previous block must carry the SWBFI update claim");
+                let output = &swbfi_claim.output;
+                let num_peaks = output[2 + Digest::LEN].value() as usize;
+                assert_eq!(3 + Digest::LEN * (num_peaks + 1), output.len());
+                assert_eq!(bfe!(prev_transaction_kernel.inputs.len() as u64), output[1]);
+                let peaks = output[3 + Digest::LEN..]
+                    .chunks(Digest::LEN)
+                    .map(|words| Digest::new(words.try_into().unwrap()))
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    RemovalIndexCommitment::peaks(&prev_transaction_kernel.inputs),
+                    peaks
+                );
+                let hash_after_removals =
+                    Digest::new(output[2..2 + Digest::LEN].try_into().unwrap());
+                MutatorSetUpdateFromStateHash::verify(
+                    &prev_transaction_kernel.inputs,
+                    &prev_transaction_kernel.outputs,
+                    mutator_set,
+                    hash_after_removals,
+                    &witness.prev_block_body.mutator_set_accumulator,
                 );
 
                 // 1.e)
@@ -2202,11 +2408,11 @@ mod tests {
 
     /// The block this one was built on, if the test case built it on one.
     fn predecessor_of(block: &Block) -> Option<Block> {
-        predecessors()
-            .lock()
-            .unwrap()
-            .get(&block.header().prev_block_digest)
-            .cloned()
+        predecessor_by_hash(block.header().prev_block_digest)
+    }
+
+    fn predecessor_by_hash(hash: Digest) -> Option<Block> {
+        predecessors().lock().unwrap().get(&hash).cloned()
     }
 
     /// The mutator set the block's transaction is built on: the one after
@@ -2292,11 +2498,41 @@ mod tests {
     /// transaction claim and then these claims, without a proof. For the
     /// program that skips proof verification.
     fn unproven_block(header: BlockHeader, body: BlockBody, claims: Vec<Claim>) -> Block {
+        let swbfi_claim = swbfi_update_claim(&header, &body);
+        unproven_block_with_swbfi_claim(header, body, claims, swbfi_claim)
+    }
+
+    /// The SWBFI update claim a block's appendix must carry, if the fixtures
+    /// built the block on a known predecessor its transaction applies to.
+    fn swbfi_update_claim(header: &BlockHeader, body: &BlockBody) -> Option<Claim> {
+        let predecessor = predecessor_by_hash(header.prev_block_digest)?;
+        let mutator_set = predecessor.mutator_set_accumulator_after().ok()?;
+        let inputs = &body.transaction_kernel.inputs;
+        let unpacked = RemovalRecordList::try_unpack(inputs.clone(), true).ok()?;
+        if !unpacked.iter().all(|record| mutator_set.can_remove(record)) {
+            return None;
+        }
+
+        Some(CorrectSwbfiUpdate::claim(inputs, &mutator_set))
+    }
+
+    /// As [unproven_block], with this SWBFI update claim, or none.
+    fn unproven_block_with_swbfi_claim(
+        header: BlockHeader,
+        body: BlockBody,
+        claims: Vec<Claim>,
+        swbfi_claim: Option<Claim>,
+    ) -> Block {
         let transaction_claim = single_proof_claim(
             body.transaction_kernel.mast_hash(),
             ConsensusRuleSet::HardforkDelta,
         );
-        let claims = [vec![transaction_claim], claims].concat();
+        let claims = [
+            vec![transaction_claim],
+            swbfi_claim.into_iter().collect(),
+            claims,
+        ]
+        .concat();
 
         block(
             header,
@@ -2614,7 +2850,25 @@ mod tests {
             body: BlockBody,
             claims: Vec<(Claim, NeptuneProof)>,
         ) -> Block {
-            let claims = [vec![transaction_claim_and_proof_for(&body)], claims].concat();
+            let swbfi_claim = swbfi_update_claim(&header, &body).map(|claim| {
+                let predecessor = predecessor_by_hash(header.prev_block_digest).unwrap();
+                let witness = CorrectSwbfiUpdateWitness::new(
+                    body.transaction_kernel.inputs.clone(),
+                    predecessor.mutator_set_accumulator_after().unwrap(),
+                );
+                let proof = load_proof_or_produce_and_save(
+                    &claim,
+                    CorrectSwbfiUpdate.program(),
+                    witness.nondeterminism(),
+                );
+                (claim, proof)
+            });
+            let claims = [
+                vec![transaction_claim_and_proof_for(&body)],
+                swbfi_claim.into_iter().collect(),
+                claims,
+            ]
+            .concat();
             let proof = block_proof(&body, &claims);
             let appendix = BlockAppendix::new(claims.into_iter().map(|(claim, _)| claim).collect());
 
@@ -3409,7 +3663,13 @@ mod tests {
             );
             let own_claim =
                 own_claim_with_epochs(&skipping(), prev_prev_block, &body, &header, epochs);
-            let claims = vec![transaction_claim, own_claim];
+            let swbfi_claim = swbfi_update_claim(&header, &body);
+            let claims = [
+                vec![transaction_claim],
+                swbfi_claim.into_iter().collect(),
+                vec![own_claim],
+            ]
+            .concat();
             let prev_block = block_solved_by_nonce_search(
                 header,
                 body,
@@ -3419,6 +3679,329 @@ mod tests {
             let (next_body, next_header) = next_body_and_header(&prev_block, 0);
 
             (prev_block, next_body, next_header)
+        }
+
+        /// The previous block on the shared grandparent, carrying this SWBFI
+        /// update claim in place of the one its transaction calls for.
+        fn prev_block_with_swbfi_claim(
+            swbfi_claim: Option<Claim>,
+        ) -> (Block, BlockBody, BlockHeader) {
+            let grandparent = fixture_grandparent();
+            let (body, header) = next_body_and_header(&grandparent, 0);
+            let own_claim =
+                own_claim_with_epochs(&skipping(), &grandparent, &body, &header, &epochs());
+            let prev_block =
+                unproven_block_with_swbfi_claim(header, body, vec![own_claim], swbfi_claim);
+            let (next_body, next_header) = next_body_and_header(&prev_block, 0);
+
+            (prev_block, next_body, next_header)
+        }
+
+        /// The SWBFI update claim the shared transaction calls for on the
+        /// shared grandparent.
+        fn fixture_swbfi_claim() -> Claim {
+            let (kernel, _) = transaction_kernel_and_proof();
+            let mutator_set = fixture_grandparent()
+                .mutator_set_accumulator_after()
+                .unwrap();
+            CorrectSwbfiUpdate::claim(&kernel.inputs, &mutator_set)
+        }
+
+        #[test]
+        fn prev_block_with_its_swbfi_claim_passes() {
+            let (prev_block, next_body, next_header) =
+                prev_block_with_swbfi_claim(Some(fixture_swbfi_claim()));
+            assert_accepts(&skipping(), &prev_block, &next_body, &next_header);
+        }
+
+        #[test]
+        fn prev_block_without_swbfi_claim_fails() {
+            let (prev_block, next_body, next_header) = prev_block_with_swbfi_claim(None);
+            assert_rejects(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::AppendixMissingClaim.error_id(),
+            );
+        }
+
+        #[test]
+        fn prev_block_with_swbfi_claim_with_longer_input_fails() {
+            let mut claim = fixture_swbfi_claim();
+            claim.input.push(bfe!(0));
+            let (prev_block, next_body, next_header) = prev_block_with_swbfi_claim(Some(claim));
+            assert_rejects(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::AppendixMissingClaim.error_id(),
+            );
+        }
+
+        #[test]
+        fn prev_block_with_swbfi_claim_on_other_mutator_set_fails() {
+            let mut claim = fixture_swbfi_claim();
+            claim.input[0] += bfe!(1);
+            let (prev_block, next_body, next_header) = prev_block_with_swbfi_claim(Some(claim));
+            assert_rejects(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::AppendixMissingClaim.error_id(),
+            );
+        }
+
+        #[test]
+        fn prev_block_with_swbfi_claim_outputting_other_state_fails() {
+            let mut claim = fixture_swbfi_claim();
+            claim.output[2] += bfe!(1);
+            let (prev_block, next_body, next_header) = prev_block_with_swbfi_claim(Some(claim));
+            assert_rejects(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::MutatorSetUpdateIntegrity.error_id(),
+            );
+        }
+
+        #[test]
+        fn prev_block_with_swbfi_claim_with_other_peaks_fails() {
+            let mut claim = fixture_swbfi_claim();
+            claim.output[3 + Digest::LEN] += bfe!(1);
+            let (prev_block, next_body, next_header) = prev_block_with_swbfi_claim(Some(claim));
+            assert_rejects(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::RemovalIndexCommitmentMismatch.error_id(),
+            );
+        }
+
+        #[test]
+        fn prev_block_with_swbfi_claim_counting_other_index_sets_fails() {
+            let mut claim = fixture_swbfi_claim();
+            claim.output[1] += bfe!(1);
+            let (prev_block, next_body, next_header) = prev_block_with_swbfi_claim(Some(claim));
+            assert_rejects(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::RemovalIndexCommitmentMismatch.error_id(),
+            );
+        }
+
+        #[test]
+        fn prev_block_with_malformed_swbfi_claim_output_fails() {
+            let mut claim = fixture_swbfi_claim();
+            claim.output.push(bfe!(0));
+            let (prev_block, next_body, next_header) = prev_block_with_swbfi_claim(Some(claim));
+            assert_rejects(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::MutatorSetUpdateIntegrity.error_id(),
+            );
+        }
+
+        #[test]
+        fn prev_block_with_body_swbfi_with_other_peaks_fails() {
+            let mut mutator_set = fixture_mutator_set_after_transaction();
+            let mut peaks = mutator_set.swbf_inactive.peaks();
+            peaks[0] = StdRng::seed_from_u64(0).random();
+            mutator_set.swbf_inactive =
+                MmrAccumulator::init(peaks, mutator_set.swbf_inactive.num_leafs());
+            assert_body_mutator_set_rejected(mutator_set);
+        }
+
+        /// The shared transaction's mutator set after the fixture grandparent,
+        /// as the previous block's body must carry it.
+        fn fixture_mutator_set_after_transaction() -> MutatorSetAccumulator {
+            let (kernel, _) = transaction_kernel_and_proof();
+            mutator_set_after_transaction(&fixture_grandparent(), kernel)
+                .expect("the shared transaction applies after the fixture grandparent")
+        }
+
+        fn assert_body_mutator_set_rejected(mutator_set: MutatorSetAccumulator) {
+            let grandparent = fixture_grandparent();
+            let (body, _) = next_body_and_header(&grandparent, 0);
+            let body = body_with_mutator_set(body, mutator_set);
+            let (prev_block, next_body, next_header) =
+                prev_block_with_body(&grandparent, body, &epochs());
+
+            assert_rejects(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::MutatorSetUpdateIntegrity.error_id(),
+            );
+        }
+
+        #[test]
+        fn fixture_transaction_adds_to_the_aocl() {
+            let before = fixture_grandparent()
+                .mutator_set_accumulator_after()
+                .unwrap();
+            let after = fixture_mutator_set_after_transaction();
+            assert!(after.aocl.num_leafs() > before.aocl.num_leafs());
+            assert_ne!(after.aocl.peaks(), before.aocl.peaks());
+        }
+
+        /// The shared transaction's inputs with a record whose indices all
+        /// lie in the active window and are unset there. It spends nothing
+        /// real; the skipping program does not check the transaction's
+        /// proof.
+        fn inputs_with_record_in_the_window() -> Vec<RemovalRecord> {
+            let (kernel, _) = transaction_kernel_and_proof();
+            let mutator_set = fixture_grandparent()
+                .mutator_set_accumulator_after()
+                .unwrap();
+            let window_start =
+                u128::from(mutator_set.swbf_inactive.num_leafs()) << CHUNK_SIZE.ilog2();
+            let mut rng = StdRng::seed_from_u64(0);
+            let indices = core::array::from_fn(|_| loop {
+                let relative = rng.random_range(0..WINDOW_SIZE);
+                if !mutator_set.swbf_active.contains(relative) {
+                    return window_start + u128::from(relative);
+                }
+            });
+            let record = RemovalRecord {
+                absolute_indices: AbsoluteIndexSet::new(indices),
+                target_chunks: ChunkDictionary::default(),
+            };
+            let mut inputs = RemovalRecordList::try_unpack(kernel.inputs.clone(), true).unwrap();
+            inputs.push(record);
+            RemovalRecordList::pack(inputs, true)
+        }
+
+        #[test]
+        fn prev_block_with_input_in_the_window_passes_and_sets_its_indices() {
+            let (kernel, _) = transaction_kernel_and_proof();
+            let transaction_kernel = TransactionKernelModifier::default()
+                .inputs(inputs_with_record_in_the_window())
+                .modify(kernel.clone());
+            let grandparent = fixture_grandparent();
+            let before = grandparent.mutator_set_accumulator_after().unwrap();
+            let after = mutator_set_after_transaction(&grandparent, &transaction_kernel).unwrap();
+            assert_eq!(
+                before.swbf_active.sbf.len() + NUM_TRIALS as usize,
+                after.swbf_active.sbf.len(),
+                "the record's indices must be set in the window"
+            );
+
+            let (prev_block, next_body, next_header) =
+                prev_block_with_transaction_kernel(transaction_kernel.clone(), &epochs());
+            assert_accepts(&skipping(), &prev_block, &next_body, &next_header);
+
+            // With one of its indices left out of the body's window.
+            let mut mutator_set = after;
+            let index = transaction_kernel
+                .inputs
+                .last()
+                .unwrap()
+                .absolute_indices
+                .to_array()[0];
+            let window_start = u128::from(before.swbf_inactive.num_leafs()) << CHUNK_SIZE.ilog2();
+            mutator_set
+                .swbf_active
+                .remove((index - window_start) as u32);
+            let (body, _) = next_body_and_header(&grandparent, 0);
+            let body = BlockBody::new(
+                transaction_kernel,
+                mutator_set,
+                body.lock_free_mmr_accumulator.clone(),
+                body.block_mmr_accumulator.clone(),
+            );
+            let (prev_block, next_body, next_header) =
+                prev_block_with_body(&grandparent, body, &epochs());
+            assert_rejects(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::MutatorSetUpdateIntegrity.error_id(),
+            );
+        }
+
+        #[test]
+        fn prev_block_with_body_window_missing_an_index_fails() {
+            let mut mutator_set = fixture_mutator_set_after_transaction();
+            mutator_set.swbf_active.sbf.pop();
+            assert_body_mutator_set_rejected(mutator_set);
+        }
+
+        #[test]
+        fn prev_block_with_body_window_with_an_extra_index_fails() {
+            let mut mutator_set = fixture_mutator_set_after_transaction();
+            mutator_set.swbf_active.insert(12_345);
+            assert_body_mutator_set_rejected(mutator_set);
+        }
+
+        #[test]
+        fn prev_block_with_body_aocl_with_an_extra_leaf_fails() {
+            let mut mutator_set = fixture_mutator_set_after_transaction();
+            mutator_set.aocl.append(Digest::default());
+            assert_body_mutator_set_rejected(mutator_set);
+        }
+
+        #[test]
+        fn prev_block_with_body_aocl_with_other_peaks_fails() {
+            let mut mutator_set = fixture_mutator_set_after_transaction();
+            let leaf_count = mutator_set.aocl.num_leafs();
+            let mut peaks = mutator_set.aocl.peaks();
+            peaks[0] = Digest::default();
+            mutator_set.aocl = MmrAccumulator::init(peaks, leaf_count);
+            assert_body_mutator_set_rejected(mutator_set);
+        }
+
+        #[test]
+        fn prev_block_with_body_swbfi_with_an_extra_leaf_fails() {
+            // A leaf count that does not fit the peaks is caught when the
+            // accumulator is hashed, so a leaf is appended instead.
+            let mut mutator_set = fixture_mutator_set_after_transaction();
+            mutator_set.swbf_inactive.append(Digest::default());
+            assert_body_mutator_set_rejected(mutator_set);
+        }
+
+        #[test]
+        fn prev_block_with_many_outputs_slides_the_window_and_passes() {
+            let (kernel, _) = transaction_kernel_and_proof();
+            let mut rng = StdRng::seed_from_u64(0);
+            let outputs = (0..20)
+                .map(|_| AdditionRecord::new(rng.random()))
+                .collect::<Vec<_>>();
+            let transaction_kernel = TransactionKernelModifier::default()
+                .outputs(outputs)
+                .modify(kernel.clone());
+            let grandparent = fixture_grandparent();
+            let before = grandparent.mutator_set_accumulator_after().unwrap();
+            let after = mutator_set_after_transaction(&grandparent, &transaction_kernel).unwrap();
+            assert!(
+                after.swbf_inactive.num_leafs() > before.swbf_inactive.num_leafs(),
+                "the outputs must slide the window"
+            );
+
+            let (prev_block, next_body, next_header) =
+                prev_block_with_transaction_kernel(transaction_kernel, &epochs());
+            assert_accepts(&skipping(), &prev_block, &next_body, &next_header);
+        }
+
+        #[test]
+        fn prev_block_without_outputs_passes() {
+            let (kernel, _) = transaction_kernel_and_proof();
+            let transaction_kernel = TransactionKernelModifier::default()
+                .outputs(vec![])
+                .modify(kernel.clone());
+            let (prev_block, next_body, next_header) =
+                prev_block_with_transaction_kernel(transaction_kernel, &epochs());
+            assert_accepts(&skipping(), &prev_block, &next_body, &next_header);
         }
 
         #[test]

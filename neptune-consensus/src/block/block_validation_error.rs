@@ -144,6 +144,10 @@ pub enum BlockValidationError {
     /// do not have that guarantee.
     #[error("Block timestamp must not exceed transaction-retirement value")]
     TransactionRetired,
+
+    /// The removal records' index sets are not the ones a claim commits to.
+    #[error("Removal records must match the claim's index commitment")]
+    RemovalIndexCommitmentMismatch,
 }
 
 impl From<RemovalRecordListUnpackError> for BlockValidationError {
