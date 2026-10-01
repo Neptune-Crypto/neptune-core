@@ -37,6 +37,7 @@ use super::epoch_table::EpochTable;
 use super::epoch_table::NUM_EPOCHS;
 use super::meets_threshold::MeetsThreshold;
 use crate::block::block_appendix::BlockAppendix;
+use crate::block::block_appendix::MAX_NUM_CLAIMS;
 use crate::block::block_body::BlockBody;
 use crate::block::block_body::BlockBodyField;
 use crate::block::block_header::BlockHeader;
@@ -1077,6 +1078,21 @@ impl TritonProgram for PredecessorIsValid {
             // _
         );
 
+        // BEFORE: _ *w [prev_block_hash]
+        // AFTER:  _ *w [prev_block_hash]
+        let rule_1b_prev = triton_asm!(
+            dup 5 {&field!(PredecessorIsValidWitnessMemory::prev_block_appendix)}
+            {&field!(BlockAppendix::claims)}
+            read_mem 1 pop 1
+            // _ *w [prev_block_hash] num_claims
+
+            push {MAX_NUM_CLAIMS + 1} swap 1 lt
+            // _ *w [prev_block_hash] (num_claims <= MAX_NUM_CLAIMS)
+
+            assert error_id {BlockValidationRule::AppendixTooLarge.error_id()}
+            // _ *w [prev_block_hash]
+        );
+
         // Find the claim with this hash in the previous block's appendix.
         let find_claim_by_hash = "predecessor_is_valid_find_claim_by_hash".to_string();
         let find_claim_by_hash_code = triton_asm!(
@@ -1173,6 +1189,7 @@ impl TritonProgram for PredecessorIsValid {
         let (rule_0c, rule_0c_code) = subroutine("rule_0c", rule_0c);
         let (prev_block_pow, prev_block_pow_code) =
             subroutine("proof_of_work_prev", prev_block_pow);
+        let (rule_1b_prev, rule_1b_prev_code) = subroutine("rule_1b_prev", rule_1b_prev);
         let (rule_1a_txproof_prev, rule_1a_txproof_prev_code) =
             subroutine("rule_1a_prev", rule_1a_txproof_prev);
         let (write_output, write_output_code) = subroutine("write_output", write_output);
@@ -1209,6 +1226,9 @@ impl TritonProgram for PredecessorIsValid {
             call {prev_block_pow}
             // _ [next_block_body_mh] *w [prev_block_hash]
 
+            call {rule_1b_prev}
+            // _ [next_block_body_mh] *w [prev_block_hash]
+
             call {rule_1a_txproof_prev}
             // _ [next_block_body_mh] *w [prev_block_hash]
 
@@ -1237,6 +1257,7 @@ impl TritonProgram for PredecessorIsValid {
             {&rule_0a_code}
             {&rule_0c_code}
             {&prev_block_pow_code}
+            {&rule_1b_prev_code}
             {&rule_1a_txproof_prev_code}
             {&read_epoch_table_code}
             {&rule_0b_prev_code}
@@ -1339,6 +1360,9 @@ mod tests {
             let difficulty = witness.prev_block_header.difficulty;
             assert!(difficulty >= Difficulty::MINIMUM);
             assert!(prev_block_hash <= difficulty.target());
+
+            // 1.b)
+            assert!(witness.prev_block_appendix.len() <= MAX_NUM_CLAIMS);
 
             // 1.a) The transaction claim; this program's own claim is found
             // under the header rules.
@@ -2101,6 +2125,31 @@ mod tests {
                 &next_body,
                 &next_header,
                 PowValidationError::ThresholdNotMet.error_id(),
+            );
+        }
+
+        #[test]
+        fn prev_block_with_too_many_claims_fails() {
+            let mut rng = StdRng::seed_from_u64(0);
+            let prev_prev_block = random_unproven_block(0);
+            let (body, header) = next_body_and_header(&prev_prev_block, 0);
+            let claims = (0..=MAX_NUM_CLAIMS)
+                .map(|_| Claim::new(rng.random()))
+                .collect();
+            let prev_block = block(
+                header,
+                body,
+                BlockAppendix::new(claims),
+                BlockProof::Invalid,
+            );
+            let (next_body, next_header) = next_body_and_header(&prev_block, 0);
+
+            assert_rejects(
+                &PredecessorIsValid,
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::AppendixTooLarge.error_id(),
             );
         }
 
