@@ -152,6 +152,11 @@ pub enum BlockValidationError {
     /// An aggregated SWBFI update claim's children do not chain.
     #[error("SWBFI update claims must chain across adjacent input ranges")]
     SwbfiUpdateChaining,
+
+    /// A united SWBFI update claim's children do not start from its mutator
+    /// set or do not cover its inputs.
+    #[error("SWBFI update claims in a union must share the mutator set and split the inputs")]
+    SwbfiUpdateUnion,
 }
 
 impl From<RemovalRecordListUnpackError> for BlockValidationError {

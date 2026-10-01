@@ -55,6 +55,7 @@ mod roots_from_authentication_struct;
 mod sorted_window_indices;
 mod swbfi_peaks_after_removals;
 pub mod swbfi_update_aggregation;
+pub mod swbfi_update_union;
 mod update_tree_leaf;
 mod window_after_removals;
 
