@@ -39,6 +39,7 @@ use super::epoch_table::Epoch;
 use super::epoch_table::EpochTable;
 use super::epoch_table::NUM_EPOCHS;
 use super::meets_threshold::MeetsThreshold;
+use super::removal_records_are_unique::RemovalRecordsAreUnique;
 use crate::block::block_appendix::BlockAppendix;
 use crate::block::block_appendix::MAX_NUM_CLAIMS;
 use crate::block::block_body::BlockBody;
@@ -109,6 +110,13 @@ impl PredecessorIsValidWitness {
                 );
             }
         }
+
+        // 2.c)
+        nondeterminism
+            .individual_tokens
+            .extend(RemovalRecordsAreUnique::divined_tokens(
+                &self.prev_block.body().transaction_kernel.inputs,
+            ));
 
         let prev_block_height = self.prev_block.header().height;
         if prev_block_height >= epochs.activation_height() {
@@ -334,6 +342,7 @@ impl TritonProgram for PredecessorIsValid {
         let u64_lt = library.import(Box::new(U64Lt));
         let u192_safe_add = library.import(Box::new(U192SafeAdd));
         let difficulty_control = library.import(Box::new(DifficultyControl));
+        let removal_records_are_unique = library.import(Box::new(RemovalRecordsAreUnique));
         let new_claim = library.import(Box::new(NewClaim::new(ConsensusRuleSet::HardforkDelta)));
         let generate_single_proof_claim = library.import(Box::new(GenerateSingleProofClaim::new(
             ConsensusRuleSet::HardforkDelta,
@@ -959,6 +968,25 @@ impl TritonProgram for PredecessorIsValid {
             // _ *w [prev_block_hash] *prev_claim_output
         );
 
+        // BEFORE: _ *w
+        // AFTER:  _ *txk
+        let prev_block_txk = triton_asm!(
+            {&field!(PredecessorIsValidWitnessMemory::prev_block_body)}
+            {&field!(BlockBody::transaction_kernel)}
+        );
+
+        // The divined tokens are the positions of the inputs sorted by index
+        // set; see [RemovalRecordsAreUnique::divined_tokens].
+        // BEFORE: _ *w [prev_block_hash]
+        // AFTER:  _ *w [prev_block_hash]
+        let rule_2c_prev = triton_asm!(
+            dup 5 {&prev_block_txk} {&field!(TransactionKernel::inputs)}
+            // _ *w [prev_block_hash] *inputs
+
+            call {removal_records_are_unique}
+            // _ *w [prev_block_hash]
+        );
+
         // BEFORE: _ *w [prev_block_hash]
         // AFTER:  _ *w [prev_block_hash]
         let rule_1e_prev = triton_asm!(
@@ -1407,6 +1435,7 @@ impl TritonProgram for PredecessorIsValid {
         let (rule_1b_prev, rule_1b_prev_code) = subroutine("rule_1b_prev", rule_1b_prev);
         let (rule_1a_txproof_prev, rule_1a_txproof_prev_code) =
             subroutine("rule_1a_prev", rule_1a_txproof_prev);
+        let (rule_2c_prev, rule_2c_prev_code) = subroutine("rule_2c_prev", rule_2c_prev);
         let (write_output, write_output_code) = subroutine("write_output", write_output);
 
         let code = triton_asm!(
@@ -1455,6 +1484,9 @@ impl TritonProgram for PredecessorIsValid {
             // _ [next_block_body_mh] *w [prev_block_hash]
 
 
+            call {rule_2c_prev}
+            // _ [next_block_body_mh] *w [prev_block_hash]
+
             {&prev_block_epoch_rules_if_activated}
             // _ [next_block_body_mh] *w [prev_block_hash]
 
@@ -1484,6 +1516,7 @@ impl TritonProgram for PredecessorIsValid {
             {&rule_1b_prev_code}
             {&verify_prev_block_proof_code}
             {&rule_1a_txproof_prev_code}
+            {&rule_2c_prev_code}
             {&read_epoch_table_code}
             {&rule_0b_prev_code}
             {&rule_0d_prev_code}
@@ -1637,6 +1670,26 @@ mod tests {
             let transaction_claim =
                 single_proof_claim(prev_block_txk_mh, ConsensusRuleSet::HardforkDelta);
             assert!(witness.prev_block_appendix.contains(&transaction_claim));
+
+            let prev_transaction_kernel = &witness.prev_block_body.transaction_kernel;
+
+            // 2.c) The divined positions must be a permutation of the inputs,
+            // along which the index sets are strictly increasing.
+            let num_inputs = prev_transaction_kernel.inputs.len();
+            let mut taken = vec![false; num_inputs];
+            let mut previous_index_set: Option<Vec<u128>> = None;
+            for _ in 0..num_inputs {
+                let position = usize::try_from(tasm::tasmlib_io_read_secin___bfe().value())
+                    .expect("position must fit");
+                assert!(position < num_inputs);
+                assert!(!taken[position]);
+                taken[position] = true;
+                let index_set = prev_transaction_kernel.inputs[position]
+                    .absolute_indices
+                    .to_vec();
+                assert!(previous_index_set.is_none_or(|previous| previous < index_set));
+                previous_index_set = Some(index_set);
+            }
 
             // The header rules, for the previous block. Its predecessor's
             // values come from the previous block's copy of the claim for this
@@ -3158,6 +3211,26 @@ mod tests {
             let (next_body, next_header) = next_body_and_header(&prev_block, 0);
 
             (prev_block, next_body, next_header)
+        }
+
+        #[test]
+        fn prev_block_with_duplicate_input_fails() {
+            let (kernel, _) = transaction_kernel_and_proof();
+            let mut inputs = kernel.inputs.clone();
+            inputs.push(inputs[0].clone());
+            let transaction_kernel = TransactionKernelModifier::default()
+                .inputs(inputs)
+                .modify(kernel.clone());
+            let (prev_block, next_body, next_header) =
+                prev_block_with_transaction_kernel(transaction_kernel, &epochs());
+
+            assert_rejects(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::RemovalRecordsUniqueness.error_id(),
+            );
         }
 
         #[test]
