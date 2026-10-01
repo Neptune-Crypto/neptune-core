@@ -1176,6 +1176,26 @@ impl TritonProgram for PredecessorIsValid {
             // _
         );
 
+        // BEFORE: _ *header
+        // AFTER:  _ version_in_pow
+        let read_version_in_pow = triton_asm!(
+            {&field!(BlockHeader::pow)} {&field!(BlockPow::path_a)}
+            addi {Digest::LEN * (POW_MEMORY_TREE_HEIGHT - 3) + Digest::LEN - 1} read_mem 1 pop 1
+        );
+
+        // BEFORE: _ *w [prev_block_hash]
+        // AFTER:  _ *w [prev_block_hash]
+        let rule_1f_prev = triton_asm!(
+            dup 5 {&prev_block_header} {&field!(BlockHeader::version)} read_mem 1 pop 1
+            // _ *w [prev_block_hash] version
+
+            dup 6 {&prev_block_header} {&read_version_in_pow}
+            // _ *w [prev_block_hash] version version_in_pow
+
+            eq assert error_id {BlockValidationRule::VersionMismatch.error_id()}
+            // _ *w [prev_block_hash]
+        );
+
         // BEFORE: _ *w [prev_block_hash]
         // AFTER:  _ *w [prev_block_hash]
         let rule_1b_prev = triton_asm!(
@@ -1381,6 +1401,7 @@ impl TritonProgram for PredecessorIsValid {
             subroutine("prev_block_hash", prev_block_hash);
         let (rule_0a, rule_0a_code) = subroutine("rule_0a", rule_0a);
         let (rule_0c, rule_0c_code) = subroutine("rule_0c", rule_0c);
+        let (rule_1f_prev, rule_1f_prev_code) = subroutine("rule_1f_prev", rule_1f_prev);
         let (prev_block_pow, prev_block_pow_code) =
             subroutine("proof_of_work_prev", prev_block_pow);
         let (rule_1b_prev, rule_1b_prev_code) = subroutine("rule_1b_prev", rule_1b_prev);
@@ -1416,6 +1437,9 @@ impl TritonProgram for PredecessorIsValid {
             // _ [next_block_body_mh] *w [prev_block_hash]
 
             call {rule_0c}
+            // _ [next_block_body_mh] *w [prev_block_hash]
+
+            call {rule_1f_prev}
             // _ [next_block_body_mh] *w [prev_block_hash]
 
             call {prev_block_pow}
@@ -1455,6 +1479,7 @@ impl TritonProgram for PredecessorIsValid {
             {&prev_block_hash_code}
             {&rule_0a_code}
             {&rule_0c_code}
+            {&rule_1f_prev_code}
             {&prev_block_pow_code}
             {&rule_1b_prev_code}
             {&verify_prev_block_proof_code}
@@ -1572,6 +1597,12 @@ mod tests {
             assert_eq!(
                 expected_next_block_mmr.peaks(),
                 witness.next_block_mmr_accumulator.peaks()
+            );
+
+            // 1.f)
+            assert_eq!(
+                witness.prev_block_header.version,
+                witness.prev_block_header.pow.version_in_pow()
             );
 
             let difficulty = witness.prev_block_header.difficulty;
@@ -2486,6 +2517,22 @@ mod tests {
                 &next_body,
                 &next_header,
                 BlockValidationRule::AppendixMissingClaim.error_id(),
+            );
+        }
+
+        #[test]
+        fn prev_block_whose_version_disagrees_with_its_copy_in_pow_fails() {
+            let mut prev_block = random_unproven_block(0);
+            let version = prev_block.header().version;
+            prev_block.set_header_version_in_pow_only(version + bfe!(1));
+            let (next_body, next_header) = next_body_and_header(&prev_block, 0);
+
+            assert_rejects(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::VersionMismatch.error_id(),
             );
         }
 
