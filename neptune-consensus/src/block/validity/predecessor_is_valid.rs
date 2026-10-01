@@ -1478,6 +1478,23 @@ impl TritonProgram for PredecessorIsValid {
 
         // BEFORE: _ *w [prev_block_hash]
         // AFTER:  _ *w [prev_block_hash]
+        let rule_2l_prev = triton_asm!(
+            push {prev_epoch_alloc.read_address()} read_mem 1 pop 1
+            // _ *w [prev_block_hash] *epoch
+
+            dup 6 {&prev_block_txk} {&field!(TransactionKernel::announcements)}
+            read_mem 1 pop 1
+            // _ *w [prev_block_hash] *epoch num_announcements
+
+            dup 1 {&field!(Epoch::max_num_announcements)} read_mem 1 pop 1
+            addi 1 swap 1 lt
+            // _ *w [prev_block_hash] *epoch (num_announcements <= max_num_announcements)
+
+            assert error_id {BlockValidationRule::TooManyAnnouncements.error_id()}
+            pop 1
+            // _ *w [prev_block_hash]
+        );
+
         // The rules about the previous block that depend on the epoch in
         // force at its height: its header fields that its own program
         // execution could not assert, since they were not fixed when that
@@ -1496,6 +1513,7 @@ impl TritonProgram for PredecessorIsValid {
         let (rule_2f_prev, rule_2f_prev_code) = subroutine("rule_2f_prev", rule_2f_prev);
         let (rule_2j_prev, rule_2j_prev_code) = subroutine("rule_2j_prev", rule_2j_prev);
         let (rule_2k_prev, rule_2k_prev_code) = subroutine("rule_2k_prev", rule_2k_prev);
+        let (rule_2l_prev, rule_2l_prev_code) = subroutine("rule_2l_prev", rule_2l_prev);
 
         let prev_block_epoch_rules = "predecessor_is_valid_prev_block_epoch_rules".to_string();
         let prev_block_epoch_rules_code = triton_asm!(
@@ -1564,6 +1582,9 @@ impl TritonProgram for PredecessorIsValid {
                 // _ *w [prev_block_hash]
 
                 call {rule_2k_prev}
+                // _ *w [prev_block_hash]
+
+                call {rule_2l_prev}
                 // _ *w [prev_block_hash]
 
                 return
@@ -2037,6 +2058,7 @@ impl TritonProgram for PredecessorIsValid {
             {&rule_2f_prev_code}
             {&rule_2j_prev_code}
             {&rule_2k_prev_code}
+            {&rule_2l_prev_code}
             {&write_output_code}
             {&library.all_imports()}
         );
@@ -2099,6 +2121,7 @@ mod tests {
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::proof_abstractions::test_runtime::tokio_runtime;
     use crate::proof_abstractions::SecretWitness;
+    use crate::transaction::announcement::Announcement;
     use crate::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::transaction::validity::neptune_proof::Proof as NeptuneProof;
 
@@ -2391,6 +2414,12 @@ mod tests {
                 assert!(
                     u64::try_from(prev_transaction_kernel.outputs.len()).unwrap()
                         <= prev_epoch.max_num_outputs.value()
+                );
+
+                // 2.l)
+                assert!(
+                    u64::try_from(prev_transaction_kernel.announcements.len()).unwrap()
+                        <= prev_epoch.max_num_announcements.value()
                 );
             }
 
@@ -4587,6 +4616,34 @@ mod tests {
                 &next_header,
                 &epochs,
                 BlockValidationRule::TooManyOutputs.error_id(),
+            );
+        }
+
+        #[test]
+        fn prev_block_with_too_many_announcements_fails() {
+            let announcements = (0..3)
+                .map(|i| Announcement::new(vec![bfe!(i)]))
+                .collect::<Vec<_>>();
+            let transaction_kernel = TransactionKernelModifier::default()
+                .announcements(announcements)
+                .modify(transaction_kernel_and_proof().0.clone());
+            let max_num_outputs = activation_epoch().max_num_outputs.value();
+
+            let epochs = epochs_with_limits(max_num_outputs, 3);
+            let (prev_block, next_body, next_header) =
+                prev_block_with_transaction_kernel(transaction_kernel.clone(), &epochs);
+            assert_accepts_with_epochs(&skipping(), &prev_block, &next_body, &next_header, &epochs);
+
+            let epochs = epochs_with_limits(max_num_outputs, 2);
+            let (prev_block, next_body, next_header) =
+                prev_block_with_transaction_kernel(transaction_kernel, &epochs);
+            assert_rejects_with_epochs(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                &epochs,
+                BlockValidationRule::TooManyAnnouncements.error_id(),
             );
         }
 
