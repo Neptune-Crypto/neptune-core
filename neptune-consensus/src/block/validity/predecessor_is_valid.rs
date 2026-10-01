@@ -5,6 +5,7 @@ use neptune_primitives::difficulty_control::Difficulty;
 use neptune_primitives::mast_hash::MastHash;
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::arithmetic::u64::lt::Lt as U64Lt;
 use tasm_lib::field;
 use tasm_lib::field_with_size;
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
@@ -23,7 +24,11 @@ use tasm_lib::prelude::TasmObject;
 use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+use tasm_lib::verifier::own_program_digest::OwnProgramDigest;
 
+use super::epoch_table::Epoch;
+use super::epoch_table::EpochTable;
+use super::epoch_table::NUM_EPOCHS;
 use crate::block::block_appendix::BlockAppendix;
 use crate::block::block_body::BlockBody;
 use crate::block::block_body::BlockBodyField;
@@ -131,6 +136,7 @@ impl From<&PredecessorIsValidWitness> for PredecessorIsValidWitnessMemory {
 /// Input:
 /// - next block body's MAST hash
 /// - next block's height
+/// - the epoch table
 ///
 /// Output:
 ///  - previous block's hash
@@ -142,18 +148,31 @@ impl From<&PredecessorIsValidWitness> for PredecessorIsValidWitnessMemory {
 pub struct PredecessorIsValid;
 
 impl PredecessorIsValid {
+    /// Number of words in the claim's standard-in stream.
+    ///
+    /// Same number as the number of words read from standard-in in this
+    /// program.
+    fn input_len() -> usize {
+        // - Next block body MAST hash (5 words)
+        // - Next block height (1)
+        // - epoch table
+        Digest::LEN + 1 + EpochTable::static_length().unwrap()
+    }
+
     /// The claim for this program execution.
     pub fn claim(
         &self,
         next_block_body_mh: Digest,
         next_header: &BlockHeader,
         prev_block: &Block,
+        epochs: &EpochTable,
         consensus_rule_set: ConsensusRuleSet,
     ) -> Claim {
         let prev_block_header = prev_block.header();
         let input = [
             next_block_body_mh.reversed().values().to_vec(),
             vec![next_header.height.into()],
+            epochs.encode(),
         ]
         .concat();
 
@@ -190,7 +209,13 @@ impl TritonProgram for PredecessorIsValid {
             (label, code)
         };
 
+        let own_program_digest = library.import(Box::new(OwnProgramDigest));
+
+        let own_program_digest_alloc = library.kmalloc(Digest::LEN as u32);
+
         let prev_block_body_mh_alloc = library.kmalloc(Digest::LEN as u32);
+        let expected_prev_height_alloc = library.kmalloc(1);
+        let epochs_alloc = library.kmalloc(EpochTable::static_length().unwrap() as u32);
 
         let audit_witness = library.import(Box::new(VerifyNdSiIntegrity::<
             PredecessorIsValidWitnessMemory,
@@ -204,6 +229,7 @@ impl TritonProgram for PredecessorIsValid {
         let push_digest = library.import(Box::new(Push::new(DataType::Digest)));
         let append_to_mmr = library.import(Box::new(CalculateNewPeaksFromAppend));
         let memcpy = library.import(Box::new(MemCpy));
+        let u64_lt = library.import(Box::new(U64Lt));
         // The `BlockProof`'s encoding lies inside the `Vec` field, after the
         // `Vec`'s own length word.
         let prev_block_proof_encoding = triton_asm!(
@@ -213,6 +239,7 @@ impl TritonProgram for PredecessorIsValid {
             // _ *block_proof block_proof_size
         );
 
+        let read_digest = triton_asm!(addi {Digest::LEN - 1} read_mem {Digest::LEN} pop 1);
         let read_u64 = triton_asm!(addi 1 read_mem 2 pop 1);
         let read_difficulty =
             triton_asm!(addi {Difficulty::NUM_LIMBS - 1} read_mem {Difficulty::NUM_LIMBS} pop 1);
@@ -474,6 +501,274 @@ impl TritonProgram for PredecessorIsValid {
             // _ *w [prev_block_hash]
         );
 
+        // BEFORE: _ [a: Digest] [b: Digest]
+        // AFTER:  _ (a == b)
+        let digests_are_equal = DataType::Digest.compare();
+
+        let epoch_size = Epoch::static_length().unwrap();
+        let epoch_type = DataType::Tuple(vec![DataType::Bfe; epoch_size]);
+
+        // BEFORE: _ *epoch_last_word
+        // AFTER:  _ [epoch]
+        let read_epoch = epoch_type.read_value_from_memory_pop_pointer();
+
+        // Whether the epoch has started by the height. Unused entries, with
+        // height zero, never have.
+        let epoch_has_started = "predecessor_is_valid_epoch_has_started".to_string();
+        let epoch_has_started_code = triton_asm!(
+            // BEFORE: _ height epoch_height
+            // AFTER:  _ (epoch_height != 0 && epoch_height <= height)
+            {epoch_has_started}:
+                dup 0 push 0 eq push 0 eq
+                // _ height epoch_height (epoch_height != 0)
+
+                place 2 split
+                // _ (epoch_height != 0) height [epoch_height: u64]
+
+                pick 2 split
+                // _ (epoch_height != 0) [epoch_height] [height]
+
+                call {u64_lt}
+                // _ (epoch_height != 0) (height < epoch_height)
+
+                push 0 eq mul
+                // _ (epoch_height != 0 && epoch_height <= height)
+
+                return
+        );
+
+        // Whether the table read from standard-in holds all of the claim's
+        // epochs, and any epochs it holds beyond those had not started by the
+        // previous block's height.
+        let epoch_tables_agree = "predecessor_is_valid_epoch_tables_agree".to_string();
+        let epoch_tables_agree_loop = format!("{epoch_tables_agree}_loop");
+        let epoch_tables_agree_code = triton_asm!(
+            // BEFORE: _ *claim_epochs
+            // AFTER:  _ tables_agree
+            {epoch_tables_agree}:
+                push {expected_prev_height_alloc.read_address()} read_mem 1 pop 1
+                push {epochs_alloc.write_address()} push 1 push 0
+                call {epoch_tables_agree_loop}
+                // _ *claim_epoch[n] height *epoch[n] tables_agree n
+
+                pop 1 place 3 pop 3
+                // _ tables_agree
+
+                return
+
+            // INVARIANT: _ *claim_epoch[i] height *epoch[i] tables_agree i
+            {epoch_tables_agree_loop}:
+                dup 0 push {NUM_EPOCHS} eq skiz return
+                // _ *claim_epoch[i] height *epoch[i] tables_agree i
+
+                dup 4 addi {epoch_size - 1} {&read_epoch}
+                dup {epoch_size + 2} addi {epoch_size - 1} {&read_epoch}
+                {&epoch_type.compare()}
+                // _ *claim_epoch[i] height *epoch[i] tables_agree i epochs_are_equal
+
+                dup 5 addi {epoch_size - 1} {&read_epoch}
+                {&vec![triton_asm!(push 0); epoch_size].concat()}
+                {&epoch_type.compare()}
+                // _ *claim_epoch[i] height *epoch[i] tables_agree i epochs_are_equal claim_epoch_is_unused
+
+                dup 5 dup 5 {&field!(Epoch::height)} read_mem 1 pop 1
+                call {epoch_has_started}
+                // _ *claim_epoch[i] height *epoch[i] tables_agree i epochs_are_equal claim_epoch_is_unused epoch_has_started
+
+                push 0 eq mul
+                // _ *claim_epoch[i] height *epoch[i] tables_agree i epochs_are_equal (claim_epoch_is_unused && !epoch_has_started)
+
+                add push 0 eq push 0 eq
+                // _ *claim_epoch[i] height *epoch[i] tables_agree i (epochs_are_equal || (claim_epoch_is_unused && !epoch_has_started))
+
+                pick 2 mul place 1
+                // _ *claim_epoch[i] height *epoch[i] tables_agree' i
+
+                pick 2 addi {epoch_size} place 2
+                pick 4 addi {epoch_size} place 4
+                addi 1
+                // _ *claim_epoch[i + 1] height *epoch[i + 1] tables_agree' (i + 1)
+
+                recurse
+        );
+
+        // Whether the claim input, whose program digest and length already
+        // match this program's, is about the previous block.
+        let own_claim_input_matches = "predecessor_is_valid_own_claim_input_matches".to_string();
+        let own_claim_input_matches_code = triton_asm!(
+            // BEFORE: _ *input 1
+            // AFTER:  _ *input input_matches
+            {own_claim_input_matches}:
+                pop 1
+                dup 0 addi {Digest::LEN} read_mem {Digest::LEN} pop 1
+                swap 4 swap 1 swap 3 swap 1
+                // _ *input [body_mh_in_input]
+
+                push {prev_block_body_mh_alloc.read_address()} read_mem {Digest::LEN} pop 1
+                // _ *input [body_mh_in_input] [prev_block_body_mh]
+
+                {&digests_are_equal}
+                // _ *input body_mh_matches
+
+                dup 1 addi {Digest::LEN + 1} read_mem 1 pop 1
+                push {expected_prev_height_alloc.read_address()} read_mem 1 pop 1
+                eq
+                // _ *input body_mh_matches height_matches
+
+                dup 2 addi {Digest::LEN + 2}
+                call {epoch_tables_agree}
+                // _ *input body_mh_matches height_matches tables_agree
+
+                mul mul
+                // _ *input input_matches
+
+                return
+        );
+
+        // Find this program's claim for the previous block, in the previous
+        // block's appendix. Sets the index to the matching claim.
+        // It is not sufficient to match on program digest. The block body MAST
+        // hash, height and epoch table must also agree. Match on everything
+        // that must be true in the looked-for claim.
+        let find_own_claim = "predecessor_is_valid_find_own_claim".to_string();
+        let find_own_claim_code = triton_asm!(
+            // INVARIANT: _ *claim[i]_si num_claims i
+            {find_own_claim}:
+                dup 1 dup 1 eq
+                push 0 eq assert error_id {BlockValidationRule::AppendixMissingClaim.error_id()}
+                // _ *claim[i]_si num_claims i
+
+                dup 2 addi 1 {&field!(Claim::program_digest)} {&read_digest}
+                // _ *claim[i]_si num_claims i [claim_program_digest]
+
+                push {own_program_digest_alloc.read_address()} read_mem {Digest::LEN} pop 1
+                // _ *claim[i]_si num_claims i [claim_program_digest] [own_program_digest]
+
+                {&digests_are_equal}
+                // _ *claim[i]_si num_claims i program_matches
+
+                dup 3 addi 1 {&field_with_size!(Claim::input)}
+                // _ *claim[i]_si num_claims i program_matches *input input_size
+
+                // The size counts the length word the pointer points at.
+                push {Self::input_len() + 1} eq
+                // _ *claim[i]_si num_claims i program_matches *input size_matches
+
+                pick 2 mul
+                // _ *claim[i]_si num_claims i *input shape_matches
+
+                dup 0 skiz call {own_claim_input_matches}
+                // _ *claim[i]_si num_claims i *input is_own_claim_about_prev_block
+
+                place 1 pop 1
+                // _ *claim[i]_si num_claims i is_own_claim_about_prev_block
+
+                skiz return
+                // _ *claim[i]_si num_claims i
+
+                pick 2 read_mem 1
+                // _ num_claims i claim_size (*claim[i]_si - 1)
+
+                // Crashes unless the size is a u32.
+                dup 1 pop_count pop 1
+
+                addi 2 add
+                // _ num_claims i *claim[i+1]_si
+
+                place 2 addi 1
+                // _ *claim[i+1]_si num_claims (i + 1)
+
+                recurse
+        );
+
+        // BEFORE: _ *w [prev_block_hash] *prev_claim_output
+        // AFTER:  _ *w [prev_block_hash] *prev_claim_output
+        let rule_0b_prev = triton_asm!(
+            dup 0 addi {Digest::LEN} read_mem {Digest::LEN} pop 1
+            // _ *w [prev_block_hash] *prev_claim_output [prev_prev_block_hash]
+
+            dup 11 {&prev_block_header} {&field!(BlockHeader::prev_block_digest)} {&read_digest}
+            // _ *w [prev_block_hash] *prev_claim_output [prev_prev_block_hash] [prev_block_prev_block_digest]
+
+            assert_vector error_id {BlockValidationRule::PrevBlockDigest.error_id()}
+            pop {Digest::LEN}
+            // _ *w [prev_block_hash] *prev_claim_output
+        );
+
+        // The rule about the previous block that its own program execution
+        // could not assert, since its header was not fixed when that
+        // execution was run: it points at the block whose hash that execution
+        // output. The previous block's copy of this claim holds that output.
+        let (rule_0b_prev, rule_0b_prev_code) = subroutine("rule_0b_prev", rule_0b_prev);
+
+        let prev_block_epoch_rules = "predecessor_is_valid_prev_block_epoch_rules".to_string();
+        let prev_block_epoch_rules_code = triton_asm!(
+            // BEFORE: _ *w [prev_block_hash]
+            // AFTER:  _ *w [prev_block_hash]
+            {prev_block_epoch_rules}:
+                dup 5 {&field!(PredecessorIsValidWitnessMemory::prev_block_appendix)}
+                {&field!(BlockAppendix::claims)}
+                // _ *w [prev_block_hash] *claims
+
+                read_mem 1 addi 2 place 1 push 0
+                // _ *w [prev_block_hash] *claim[0]_si num_claims 0
+
+                call {find_own_claim}
+                // _ *w [prev_block_hash] *claim_si num_claims i
+
+                pop 2 addi 1
+                {&field!(Claim::output)}
+                // _ *w [prev_block_hash] *prev_claim_output
+
+                call {rule_0b_prev}
+                // _ *w [prev_block_hash] *prev_claim_output
+
+                pop 1
+                // _ *w [prev_block_hash]
+
+                return
+        );
+
+        // Reads the entire epoch table from this execution's standard-in.
+        // BEFORE: _ *w [prev_block_hash]
+        // AFTER:  _ *w [prev_block_hash]
+        // STDIN:  [epoch_table]
+        let read_epoch_table = triton_asm!(
+            push {epochs_alloc.write_address()}
+            {&vec![triton_asm!(read_io 1 pick 1 write_mem 1); epochs_alloc.num_words() as usize].concat()}
+            pop 1
+            // _ *w [prev_block_hash]
+
+            dup 5 {&read_prev_block_height}
+            push {expected_prev_height_alloc.write_address()} write_mem 1 pop 1
+            // _ *w [prev_block_hash]
+        );
+        let (read_epoch_table, read_epoch_table_code) =
+            subroutine("read_epoch_table", read_epoch_table);
+
+        // BEFORE: _ *w [prev_block_hash]
+        // AFTER:  _ *w [prev_block_hash]
+        // STDIN:  [epoch_table]
+        let prev_block_epoch_rules_if_activated = triton_asm!(
+            call {read_epoch_table}
+            // _ *w [prev_block_hash]
+
+            push {epochs_alloc.write_address()} {&field!(Epoch::height)} read_mem 1 pop 1 split
+            // _ *w [prev_block_hash] [activation_height: u64]
+
+            dup 7 {&read_prev_block_height} split
+            // _ *w [prev_block_hash] [activation_height] [prev_block_height]
+
+            call {u64_lt}
+            // _ *w [prev_block_hash] (prev_block_height < activation_height)
+
+            push 0 eq
+            // _ *w [prev_block_hash] (prev_block_height >= activation_height)
+
+            skiz call {prev_block_epoch_rules}
+            // _ *w [prev_block_hash]
+        );
+
         // BEFORE: _ [next_block_body_mh] *w
         // AFTER:  _ [next_block_body_mh] *w
         let authenticate_next_block_mmr_accumulator = triton_asm!(
@@ -540,6 +835,10 @@ impl TritonProgram for PredecessorIsValid {
         let (write_output, write_output_code) = subroutine("write_output", write_output);
 
         let code = triton_asm!(
+            call {own_program_digest}
+            push {own_program_digest_alloc.write_address()} write_mem {Digest::LEN} pop 1
+            // _
+
             read_io {Digest::LEN}
             // _ [next_block_body_mh]
 
@@ -564,6 +863,9 @@ impl TritonProgram for PredecessorIsValid {
             call {rule_0c}
             // _ [next_block_body_mh] *w [prev_block_hash]
 
+            {&prev_block_epoch_rules_if_activated}
+            // _ [next_block_body_mh] *w [prev_block_hash]
+
             call {write_output}
             // _ [next_block_body_mh]
 
@@ -572,11 +874,18 @@ impl TritonProgram for PredecessorIsValid {
 
             {&header_mast_hash_code}
             {&transaction_kernel_mast_hash_code}
+            {&epoch_has_started_code}
+            {&epoch_tables_agree_code}
+            {&own_claim_input_matches_code}
+            {&find_own_claim_code}
+            {&prev_block_epoch_rules_code}
             {&authenticate_next_block_mmr_accumulator_code}
             {&hash_prev_block_body_code}
             {&prev_block_hash_code}
             {&rule_0a_code}
             {&rule_0c_code}
+            {&read_epoch_table_code}
+            {&rule_0b_prev_code}
             {&write_output_code}
             {&library.all_imports()}
         );
@@ -617,15 +926,18 @@ mod tests {
     use crate::block::validity::block_program::BlockProgram;
     use crate::block::validity::block_proof_witness::BlockProofWitness;
     use crate::block::BlockProof;
+    use crate::consensus_rule_set::LustrationRule;
     use crate::proof_abstractions::tasm::builtins as tasm;
     use crate::proof_abstractions::tasm::program::proof_cache::load_proof_or_produce_and_save;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
+    use crate::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::transaction::validity::neptune_proof::Proof as NeptuneProof;
     use crate::transaction::validity::single_proof::single_proof_claim;
     use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
     impl TritonProgramSpecification for PredecessorIsValid {
         fn source(&self) {
+            let own_program_digest = tasm::own_program_digest();
             let next_block_body_mh: Digest = tasm::tasmlib_io_read_stdin___digest();
             let witness: PredecessorIsValidWitnessMemory =
                 tasm::decode_from_memory(FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS);
@@ -666,6 +978,40 @@ mod tests {
                 witness.next_block_mmr_accumulator.peaks()
             );
 
+            // The header rules, for the previous block. Its predecessor's
+            // values come from the previous block's copy of the claim for this
+            // program execution.
+            let epoch_table_words = (0..EpochTable::static_length().unwrap())
+                .map(|_| tasm::tasmlib_io_read_stdin___bfe())
+                .collect::<Vec<_>>();
+            let epochs = *EpochTable::decode(&epoch_table_words).unwrap();
+            let prev_block_height = witness.prev_block_header.height;
+            if prev_block_height >= epochs.activation_height() {
+                let expected_input_start = [
+                    prev_block_body_mh.reversed().values().to_vec(),
+                    vec![prev_block_height.into()],
+                ]
+                .concat();
+                let parent_claim = witness
+                    .prev_block_appendix
+                    .iter()
+                    .find(|claim| {
+                        claim.program_digest == own_program_digest
+                            && claim.input.len() == Self::input_len()
+                            && claim.input.starts_with(&expected_input_start)
+                            && EpochTable::decode(&claim.input[expected_input_start.len()..])
+                                .unwrap()
+                                .is_prefix_of_up_to(&epochs, prev_block_height)
+                    })
+                    .expect("previous block must carry this claim about itself");
+
+                // 0.b)
+                assert_eq!(
+                    parent_claim.output[..Digest::LEN],
+                    witness.prev_block_header.prev_block_digest.values()
+                );
+            }
+
             tasm::tasmlib_io_write_to_stdout___digest(prev_block_hash);
 
             // The lustration status's words, as they sit in the PoW field; see
@@ -696,6 +1042,39 @@ mod tests {
 
     fn target_block_interval() -> Timestamp {
         Network::Main.target_block_interval()
+    }
+
+    fn activation_epoch() -> Epoch {
+        let consensus_rule_set = ConsensusRuleSet::HardforkDelta;
+        Epoch {
+            height: activation_height().into(),
+            minimum_block_time: minimum_block_time(),
+            target_block_interval: target_block_interval(),
+            max_num_inputs: bfe!(consensus_rule_set.max_num_inputs() as u64),
+            max_num_outputs: bfe!(consensus_rule_set.max_num_outputs() as u64),
+            max_num_announcements: bfe!(consensus_rule_set.max_num_announcements() as u64),
+            max_block_size: bfe!(consensus_rule_set.max_block_size() as u64),
+            transaction_backdating_threshold: consensus_rule_set
+                .transaction_backdating_threshold()
+                .unwrap(),
+            lustration_counter_initial: lustration_counter_initial(),
+            resets_lustration_status: bfe!(0),
+        }
+    }
+
+    /// The initial lustration counter of the latest lustration rule.
+    fn lustration_counter_initial() -> NativeCurrencyAmount {
+        let far_future = BlockHeight::from(u64::MAX >> 1);
+        let LustrationRule::Updated { initial_counter } =
+            ConsensusRuleSet::lustration_rule(Network::Main, far_future, 0).unwrap()
+        else {
+            panic!("latest lustration rule must be an update");
+        };
+        initial_counter
+    }
+
+    fn epochs() -> EpochTable {
+        EpochTable::new(&[activation_epoch()])
     }
 
     /// Give the header the difficulty and cumulative proof of work its
@@ -961,6 +1340,12 @@ mod tests {
         random_unproven_block_at_height(seed, height_below_activation())
     }
 
+    /// The hash of the mutator set after the block, which a transaction in
+    /// its successor must be built on.
+    fn mutator_set_hash_after(block: &Block) -> Digest {
+        block.mutator_set_accumulator_after().unwrap().hash()
+    }
+
     /// The mutator set after the block with this transaction on the mutator
     /// set after its predecessor, if the transaction applies to it: the
     /// shared transaction does not apply after a block that carries it.
@@ -1055,10 +1440,21 @@ mod tests {
         next_body: &BlockBody,
         next_header: &BlockHeader,
     ) -> Claim {
+        own_claim_with_epochs(program, prev_block, next_body, next_header, &epochs())
+    }
+
+    fn own_claim_with_epochs(
+        program: &PredecessorIsValid,
+        prev_block: &Block,
+        next_body: &BlockBody,
+        next_header: &BlockHeader,
+        epochs: &EpochTable,
+    ) -> Claim {
         program.claim(
             next_body.mast_hash(),
             next_header,
             prev_block,
+            epochs,
             ConsensusRuleSet::HardforkDelta,
         )
     }
@@ -1093,7 +1489,18 @@ mod tests {
         header: BlockHeader,
         seed: u64,
     ) -> Block {
-        let own_claim = own_claim(&PredecessorIsValid, prev_block, &body, &header);
+        unproven_block_with_own_claim_with_epochs(prev_block, body, header, seed, &epochs())
+    }
+
+    fn unproven_block_with_own_claim_with_epochs(
+        prev_block: &Block,
+        body: BlockBody,
+        header: BlockHeader,
+        seed: u64,
+        epochs: &EpochTable,
+    ) -> Block {
+        let own_claim =
+            own_claim_with_epochs(&PredecessorIsValid, prev_block, &body, &header, epochs);
         let mut claims = vec![halt_claim_and_proof().0, halt_claim_and_proof().0];
         claims.insert(own_claim_position(seed), own_claim);
 
@@ -1116,8 +1523,9 @@ mod tests {
         prev_block: &Block,
         next_body: &BlockBody,
         next_header: &BlockHeader,
+        epochs: &EpochTable,
     ) -> (Claim, NonDeterminism) {
-        let claim = own_claim(program, prev_block, next_body, next_header);
+        let claim = own_claim_with_epochs(program, prev_block, next_body, next_header, epochs);
         let witness = PredecessorIsValidWitness::new(prev_block, next_body);
 
         (claim, witness.nondeterminism())
@@ -1131,8 +1539,18 @@ mod tests {
         next_body: &BlockBody,
         next_header: &BlockHeader,
     ) {
+        assert_accepts_with_epochs(program, prev_block, next_body, next_header, &epochs());
+    }
+
+    fn assert_accepts_with_epochs(
+        program: &PredecessorIsValid,
+        prev_block: &Block,
+        next_body: &BlockBody,
+        next_header: &BlockHeader,
+        epochs: &EpochTable,
+    ) {
         let (claim, nondeterminism) =
-            claim_and_nondeterminism(program, prev_block, next_body, next_header);
+            claim_and_nondeterminism(program, prev_block, next_body, next_header, epochs);
         let input = PublicInput::new(claim.input);
 
         let rust_output = program.run_rust(&input, nondeterminism.clone()).unwrap();
@@ -1140,7 +1558,9 @@ mod tests {
         assert_eq!(rust_output, tasm_output);
         assert_eq!(claim.output, tasm_output);
 
-        if prev_block.header().height >= activation_height() {
+        let mirrors_host =
+            *epochs == self::epochs() && prev_block.header().height >= epochs.activation_height();
+        if mirrors_host {
             let predecessor =
                 predecessor_of(prev_block).expect("test case must be built on a block");
             prev_block
@@ -1156,8 +1576,26 @@ mod tests {
         next_header: &BlockHeader,
         error_id: i128,
     ) {
+        assert_rejects_with_epochs(
+            program,
+            prev_block,
+            next_body,
+            next_header,
+            &epochs(),
+            error_id,
+        );
+    }
+
+    fn assert_rejects_with_epochs(
+        program: &PredecessorIsValid,
+        prev_block: &Block,
+        next_body: &BlockBody,
+        next_header: &BlockHeader,
+        epochs: &EpochTable,
+        error_id: i128,
+    ) {
         let (claim, nondeterminism) =
-            claim_and_nondeterminism(program, prev_block, next_body, next_header);
+            claim_and_nondeterminism(program, prev_block, next_body, next_header, epochs);
         program
             .test_assertion_failure(PublicInput::new(claim.input), nondeterminism, &[error_id])
             .unwrap();
@@ -1174,6 +1612,33 @@ mod tests {
                     unproven_prev_block_and_next_body_and_header(seed);
                 assert_accepts(&PredecessorIsValid, &prev_block, &next_body, &next_header);
             }
+        }
+
+        #[test]
+        fn prev_block_below_activation_height_needs_no_claim() {
+            let prev_prev_block =
+                random_unproven_block_at_height(0, activation_height().value() - 2);
+            let (body, header) = next_body_and_header(&prev_prev_block, 0);
+            let prev_block = unproven_block(header, body, vec![]);
+            let (next_body, next_header) = next_body_and_header(&prev_block, 0);
+
+            assert_accepts(&PredecessorIsValid, &prev_block, &next_body, &next_header);
+        }
+
+        #[test]
+        fn prev_block_at_activation_height_without_the_claim_fails() {
+            let prev_prev_block = random_unproven_block(0);
+            let (body, header) = next_body_and_header(&prev_prev_block, 0);
+            let prev_block = unproven_block(header, body, vec![]);
+            let (next_body, next_header) = next_body_and_header(&prev_block, 0);
+
+            assert_rejects(
+                &PredecessorIsValid,
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::AppendixMissingClaim.error_id(),
+            );
         }
 
         #[test]
@@ -1233,6 +1698,179 @@ mod tests {
                 &next_body,
                 &next_header,
                 BlockValidationRule::BlockHeight.error_id(),
+            );
+        }
+
+        /// An unproven previous block with the given timestamp, on top of a
+        /// random block, and a next body and header for it.
+        fn prev_block_with_timestamp(
+            prev_prev_block: &Block,
+            timestamp: Timestamp,
+            epochs: &EpochTable,
+        ) -> (Block, BlockBody, BlockHeader) {
+            let (body, mut header) = next_body_and_header(prev_prev_block, 0);
+            header.timestamp = timestamp;
+            set_difficulty_fields(&mut header, prev_prev_block);
+            // The shared transaction, dated to the block and built on the
+            // block's predecessor, whatever its height and timestamp.
+            let transaction_kernel = TransactionKernelModifier::default()
+                .timestamp(timestamp)
+                .mutator_set_hash(mutator_set_hash_after(prev_prev_block))
+                .modify(body.transaction_kernel.clone());
+            let body = BlockBody::new(
+                transaction_kernel,
+                body.mutator_set_accumulator.clone(),
+                body.lock_free_mmr_accumulator.clone(),
+                body.block_mmr_accumulator.clone(),
+            );
+            let body = body_with_mutator_set_after_transaction(prev_prev_block, body);
+            let prev_block =
+                unproven_block_with_own_claim_with_epochs(prev_prev_block, body, header, 0, epochs);
+            let (next_body, next_header) = next_body_and_header(&prev_block, 0);
+
+            (prev_block, next_body, next_header)
+        }
+
+        #[test]
+        fn prev_block_whose_header_points_to_another_block_fails() {
+            let prev_prev_block = random_unproven_block(0);
+            let (body, mut header) = next_body_and_header(&prev_prev_block, 0);
+            let own_claim = own_claim(&PredecessorIsValid, &prev_prev_block, &body, &header);
+            header.prev_block_digest = StdRng::seed_from_u64(0).random();
+            let prev_block = unproven_block(header, body, vec![own_claim]);
+            let (next_body, next_header) = next_body_and_header(&prev_block, 0);
+
+            assert_rejects(
+                &PredecessorIsValid,
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::PrevBlockDigest.error_id(),
+            );
+        }
+
+        /// A claim of this program about some other block says nothing about
+        /// this chain, even if it sits first in the appendix.
+        #[test]
+        fn decoy_claim_of_this_program_about_another_block_is_ignored() {
+            let prev_prev_block = random_unproven_block(0);
+            let (body, header) = next_body_and_header(&prev_prev_block, 0);
+
+            // The decoy is about a block far in the future, so believing it would
+            // violate rule 0.d.
+            let (decoy_prev_header, decoy_prev_body) = random_header_and_body(
+                1,
+                height_below_activation(),
+                header.timestamp + Timestamp::days(1),
+            );
+            let decoy_prev_block = unproven_block(decoy_prev_header, decoy_prev_body, vec![]);
+            let (decoy_body, decoy_header) = next_body_and_header(&decoy_prev_block, 1);
+            let decoy = own_claim(
+                &PredecessorIsValid,
+                &decoy_prev_block,
+                &decoy_body,
+                &decoy_header,
+            );
+
+            let own_claim = own_claim(&PredecessorIsValid, &prev_prev_block, &body, &header);
+            let prev_block = unproven_block(header, body, vec![decoy, own_claim]);
+            let (next_body, next_header) = next_body_and_header(&prev_block, 0);
+
+            assert_accepts(&PredecessorIsValid, &prev_block, &next_body, &next_header);
+        }
+
+        /// An epoch starting right after activation, with this minimum block time.
+        fn epoch_after_activation(minimum_block_time: Timestamp) -> Epoch {
+            Epoch {
+                height: activation_height().next().into(),
+                minimum_block_time,
+                ..activation_epoch()
+            }
+        }
+
+        /// The previous block at the height after activation, its timestamp this
+        /// long after its predecessor's, with its own claim under these epochs,
+        /// and a next body and header for it.
+        fn prev_block_after_activation(
+            block_time: Timestamp,
+            epochs: &EpochTable,
+        ) -> (Block, BlockBody, BlockHeader) {
+            let prev_prev_block = random_unproven_block_at_height(0, activation_height().value());
+            let timestamp = prev_prev_block.header().timestamp + block_time;
+            prev_block_with_timestamp(&prev_prev_block, timestamp, epochs)
+        }
+
+        #[test]
+        fn epochs_may_be_appended_after_the_prev_block() {
+            let (prev_block, next_body, next_header) =
+                unproven_prev_block_and_next_body_and_header(0);
+            let future_epoch = Epoch {
+                height: prev_block.header().height.next().into(),
+                ..activation_epoch()
+            };
+            let with_future_epoch = EpochTable::new(&[activation_epoch(), future_epoch]);
+            assert_accepts_with_epochs(
+                &PredecessorIsValid,
+                &prev_block,
+                &next_body,
+                &next_header,
+                &with_future_epoch,
+            );
+        }
+
+        #[test]
+        fn prev_block_claiming_an_unknown_epoch_fails() {
+            let prev_prev_block = random_unproven_block(0);
+            let (body, header) = next_body_and_header(&prev_prev_block, 0);
+            let unknown_epoch = Epoch {
+                height: header.height.next().into(),
+                ..activation_epoch()
+            };
+            let with_unknown_epoch = EpochTable::new(&[activation_epoch(), unknown_epoch]);
+            let prev_block = unproven_block_with_own_claim_with_epochs(
+                &prev_prev_block,
+                body,
+                header,
+                0,
+                &with_unknown_epoch,
+            );
+            let (next_body, next_header) = next_body_and_header(&prev_block, 0);
+
+            assert_rejects(
+                &PredecessorIsValid,
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::AppendixMissingClaim.error_id(),
+            );
+        }
+
+        #[test]
+        fn epoch_started_by_prev_block_must_be_in_its_own_claim() {
+            let epochs_with_second = EpochTable::new(&[
+                activation_epoch(),
+                epoch_after_activation(minimum_block_time()),
+            ]);
+
+            let (prev_block, next_body, next_header) =
+                prev_block_after_activation(minimum_block_time(), &epochs_with_second);
+            assert_accepts_with_epochs(
+                &PredecessorIsValid,
+                &prev_block,
+                &next_body,
+                &next_header,
+                &epochs_with_second,
+            );
+
+            let (prev_block, next_body, next_header) =
+                prev_block_after_activation(minimum_block_time(), &epochs());
+            assert_rejects_with_epochs(
+                &PredecessorIsValid,
+                &prev_block,
+                &next_body,
+                &next_header,
+                &epochs_with_second,
+                BlockValidationRule::AppendixMissingClaim.error_id(),
             );
         }
     }
