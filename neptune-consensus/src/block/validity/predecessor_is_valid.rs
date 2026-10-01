@@ -2,7 +2,9 @@ use std::sync::OnceLock;
 
 use get_size2::GetSize;
 use neptune_primitives::difficulty_control::Difficulty;
+use neptune_primitives::difficulty_control::ProofOfWork;
 use neptune_primitives::mast_hash::MastHash;
+use neptune_primitives::timestamp::Timestamp;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::arithmetic::u64::lt::Lt as U64Lt;
@@ -26,6 +28,7 @@ use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::verifier::own_program_digest::OwnProgramDigest;
 
+use super::difficulty_control::DifficultyControl;
 use super::epoch_table::Epoch;
 use super::epoch_table::EpochTable;
 use super::epoch_table::NUM_EPOCHS;
@@ -58,7 +61,7 @@ impl PredecessorIsValidWitness {
         }
     }
 
-    pub fn nondeterminism(&self) -> NonDeterminism {
+    pub fn nondeterminism(&self, epochs: &EpochTable) -> NonDeterminism {
         let mut nondeterminism = NonDeterminism::default();
         encode_to_memory(
             &mut nondeterminism.ram,
@@ -72,6 +75,17 @@ impl PredecessorIsValidWitness {
                 .next_block_body
                 .mast_path(BlockBodyField::BlockMmrAccumulator),
         );
+
+        let prev_block_height = self.prev_block.header().height;
+        if prev_block_height >= epochs.activation_height() {
+            // 0.e)
+            nondeterminism
+                .individual_tokens
+                .extend(DifficultyControl::divined_tokens(
+                    epochs.in_force_at(prev_block_height).target_block_interval,
+                    prev_block_height.previous().unwrap(),
+                ));
+        }
 
         nondeterminism
     }
@@ -154,6 +168,17 @@ impl PredecessorIsValid {
         Digest::LEN + LustrationStatus::static_length().unwrap()
     }
 
+    /// Where in the claim's output the previous block's cumulative proof of
+    /// work is.
+    fn output_cumulative_pow_offset() -> usize {
+        Self::output_timestamp_offset() + Timestamp::static_length().unwrap()
+    }
+
+    /// Where in the claim's output the previous block's difficulty is.
+    fn output_difficulty_offset() -> usize {
+        Self::output_cumulative_pow_offset() + ProofOfWork::static_length().unwrap()
+    }
+
     /// Number of words in the claim's standard-in stream.
     ///
     /// Same number as the number of words read from standard-in in this
@@ -221,11 +246,16 @@ impl TritonProgram for PredecessorIsValid {
 
         let prev_block_body_mh_alloc = library.kmalloc(Digest::LEN as u32);
         let expected_prev_height_alloc = library.kmalloc(1);
+        // Pointer to the epoch in force at the previous block's height.
+        let prev_epoch_alloc = library.kmalloc(1);
         let epochs_alloc = library.kmalloc(EpochTable::static_length().unwrap() as u32);
 
-        // Minimum block time that parent block must satisfy.
-        let prev_minimum_block_time_alloc = library.kmalloc(1);
+        // Minimum block time and target block interval that parent block must
+        // satisfy.
+        let prev_timing_alloc = library.kmalloc(2);
 
+        // Pointer to grandparent block height
+        let prev_prev_block_height_alloc = library.kmalloc(1);
         let audit_witness = library.import(Box::new(VerifyNdSiIntegrity::<
             PredecessorIsValidWitnessMemory,
         >::default()));
@@ -239,6 +269,7 @@ impl TritonProgram for PredecessorIsValid {
         let append_to_mmr = library.import(Box::new(CalculateNewPeaksFromAppend));
         let memcpy = library.import(Box::new(MemCpy));
         let u64_lt = library.import(Box::new(U64Lt));
+        let difficulty_control = library.import(Box::new(DifficultyControl));
         // The `BlockProof`'s encoding lies inside the `Vec` field, after the
         // `Vec`'s own length word.
         let prev_block_proof_encoding = triton_asm!(
@@ -267,6 +298,9 @@ impl TritonProgram for PredecessorIsValid {
         );
         let read_prev_block_timestamp = triton_asm!(
             {&prev_block_header} {&field!(BlockHeader::timestamp)} read_mem 1 pop 1
+        );
+        let read_prev_block_difficulty = triton_asm!(
+            {&prev_block_header} {&field!(BlockHeader::difficulty)} {&read_difficulty}
         );
 
         // The status occupies the last words of the PoW field's first path;
@@ -751,8 +785,8 @@ impl TritonProgram for PredecessorIsValid {
             dup 0 addi {Self::output_timestamp_offset() + 1} read_mem 1 pop 1
             // _ *w [prev_block_hash] *prev_claim_output prev_prev_block_timestamp
 
-            push {prev_minimum_block_time_alloc.read_address()} read_mem 1 pop 1
-            // _ *w [prev_block_hash] *prev_claim_output prev_prev_block_timestamp prev_minimum_block_time
+            push {prev_timing_alloc.write_address()} read_mem 1 pop 1
+            // _ *w [prev_block_hash] *prev_claim_output prev_prev_block_timestamp min_block_interval
 
             add split
             // _ *w [prev_block_hash] *prev_claim_output [earliest_prev_block_timestamp: u64]
@@ -770,6 +804,41 @@ impl TritonProgram for PredecessorIsValid {
             // _ *w [prev_block_hash] *prev_claim_output
         );
 
+        // BEFORE: _ *w [prev_block_hash] *prev_claim_output
+        // AFTER:  _ *w [prev_block_hash] *prev_claim_output
+        let rule_0e_prev = triton_asm!(
+            dup 6 {&read_prev_block_height} addi -1
+            // _ *w [prev_block_hash] prev_prev_height
+
+            push {prev_prev_block_height_alloc.write_address()} write_mem 1 pop 1
+            // _ *w [prev_block_hash] *prev_claim_output
+
+            dup 0 addi {Self::output_difficulty_offset() + 1} {&read_difficulty}
+            // _ *w [prev_block_hash] *prev_claim_output [prev_prev_block_difficulty: u160]
+
+            push {prev_timing_alloc.read_address()} read_mem 1 pop 1 split
+            // _ *w [prev_block_hash] *prev_claim_output [prev_prev_block_difficulty: u160] [prev_target_block_interval: u64]
+
+            dup 7 addi {Self::output_timestamp_offset() + 1} read_mem 1 pop 1 split
+            // _ *w [prev_block_hash] *prev_claim_output [prev_prev_block_difficulty] [prev_target_block_interval] [prev_prev_block_timestamp: u64]
+
+            dup 15 {&read_prev_block_timestamp} split
+            // _ *w [prev_block_hash] *prev_claim_output [prev_prev_block_difficulty] [prev_target_block_interval] [prev_prev_block_timestamp] [prev_block_timestamp]
+
+            push {prev_prev_block_height_alloc.read_address()} read_mem 1 pop 1
+            // _ *w [prev_block_hash] *prev_claim_output [prev_prev_block_difficulty] [prev_target_block_interval] [prev_prev_block_timestamp] [prev_block_timestamp] prev_prev_block_height
+
+            call {difficulty_control}
+            // _ *w [prev_block_hash] *prev_claim_output [expected_difficulty]
+
+            dup 11 {&read_prev_block_difficulty}
+            // _ *w [prev_block_hash] *prev_claim_output [expected_difficulty] [prev_block_difficulty]
+
+            {&DataType::U160.compare()}
+            assert error_id {BlockValidationRule::Difficulty.error_id()}
+            // _ *w [prev_block_hash] *prev_claim_output
+        );
+
         // The rules about the previous block that depend on the epoch in
         // force at its height: its header fields that its own program
         // execution could not assert, since they were not fixed when that
@@ -778,6 +847,7 @@ impl TritonProgram for PredecessorIsValid {
         // from the previous block's copy of this claim.
         let (rule_0b_prev, rule_0b_prev_code) = subroutine("rule_0b_prev", rule_0b_prev);
         let (rule_0d_prev, rule_0d_prev_code) = subroutine("rule_0d_prev", rule_0d_prev);
+        let (rule_0e_prev, rule_0e_prev_code) = subroutine("rule_0e_prev", rule_0e_prev);
 
         let prev_block_epoch_rules = "predecessor_is_valid_prev_block_epoch_rules".to_string();
         let prev_block_epoch_rules_code = triton_asm!(
@@ -791,10 +861,14 @@ impl TritonProgram for PredecessorIsValid {
                 call {epoch_in_force}
                 // _ *w [prev_block_hash] *epoch
 
-                {&field!(Epoch::minimum_block_time)} read_mem 1 pop 1
-                // _ *w [prev_block_hash] prev_minimum_block_time
+                dup 0 push {prev_epoch_alloc.write_address()} write_mem 1 pop 1
+                // _ *w [prev_block_hash] *epoch
 
-                push {prev_minimum_block_time_alloc.write_address()} write_mem 1 pop 1
+                dup 0 {&field!(Epoch::target_block_interval)} read_mem 1 pop 1
+                swap 1 {&field!(Epoch::minimum_block_time)} read_mem 1 pop 1
+                // _ *w [prev_block_hash] prev_target_block_interval prev_minimum_block_time
+
+                push {prev_timing_alloc.write_address()} write_mem 2 pop 1
                 // _ *w [prev_block_hash]
 
                 dup 5 {&field!(PredecessorIsValidWitnessMemory::prev_block_appendix)}
@@ -815,6 +889,9 @@ impl TritonProgram for PredecessorIsValid {
                 // _ *w [prev_block_hash] *prev_claim_output
 
                 call {rule_0d_prev}
+                // _ *w [prev_block_hash] *prev_claim_output
+
+                call {rule_0e_prev}
                 // _ *w [prev_block_hash] *prev_claim_output
 
                 pop 1
@@ -982,6 +1059,7 @@ impl TritonProgram for PredecessorIsValid {
             {&read_epoch_table_code}
             {&rule_0b_prev_code}
             {&rule_0d_prev_code}
+            {&rule_0e_prev_code}
             {&write_output_code}
             {&library.all_imports()}
         );
@@ -1006,7 +1084,7 @@ mod tests {
     use neptune_primitives::block_height::BlockHeight;
     use neptune_primitives::difficulty_control::difficulty_control;
     use neptune_primitives::network::Network;
-    use neptune_primitives::timestamp::Timestamp;
+    use num_bigint::BigUint;
     use num_traits::Zero;
     use rand::rngs::StdRng;
     use rand::RngExt;
@@ -1087,6 +1165,7 @@ mod tests {
             if prev_block_height >= epochs.activation_height() {
                 let prev_epoch = epochs.in_force_at(prev_block_height);
                 let prev_minimum_block_time = prev_epoch.minimum_block_time;
+                let prev_target_block_interval = prev_epoch.target_block_interval;
 
                 let expected_input_start = [
                     prev_block_body_mh.reversed().values().to_vec(),
@@ -1119,6 +1198,34 @@ mod tests {
                 assert!(
                     prev_prev_block_timestamp + prev_minimum_block_time
                         <= witness.prev_block_header.timestamp
+                );
+
+                // 0.e)
+                let difficulty_offset = Self::output_difficulty_offset();
+                let prev_prev_block_difficulty = *Difficulty::decode(
+                    &parent_claim.output
+                        [difficulty_offset..difficulty_offset + Difficulty::NUM_LIMBS],
+                )
+                .unwrap();
+                let divined_tokens = (0..4)
+                    .map(|_| tasm::tasmlib_io_read_secin___bfe())
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    DifficultyControl::divined_tokens(
+                        prev_target_block_interval,
+                        prev_block_height.previous().unwrap(),
+                    ),
+                    divined_tokens
+                );
+                assert_eq!(
+                    difficulty_control(
+                        witness.prev_block_header.timestamp,
+                        prev_prev_block_timestamp,
+                        prev_prev_block_difficulty,
+                        prev_target_block_interval,
+                        prev_block_height.previous().unwrap(),
+                    ),
+                    witness.prev_block_header.difficulty
                 );
             }
 
@@ -1638,7 +1745,7 @@ mod tests {
         let claim = own_claim_with_epochs(program, prev_block, next_body, next_header, epochs);
         let witness = PredecessorIsValidWitness::new(prev_block, next_body);
 
-        (claim, witness.nondeterminism())
+        (claim, witness.nondeterminism(epochs))
     }
 
     /// Run the program in Rust and in Triton VM, and check that both agree
@@ -1933,6 +2040,24 @@ mod tests {
                 &next_body,
                 &next_header,
                 BlockValidationRule::PrevBlockDigest.error_id(),
+            );
+        }
+
+        #[test]
+        fn prev_block_with_wrong_difficulty_fails() {
+            let prev_prev_block = random_unproven_block(0);
+            let (body, mut header) = next_body_and_header(&prev_prev_block, 0);
+            header.difficulty =
+                Difficulty::from_biguint(BigUint::from(header.difficulty) + 1u32).unwrap();
+            let prev_block = unproven_block_with_own_claim(&prev_prev_block, body, header, 0);
+            let (next_body, next_header) = next_body_and_header(&prev_block, 0);
+
+            assert_rejects(
+                &PredecessorIsValid,
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::Difficulty.error_id(),
             );
         }
 

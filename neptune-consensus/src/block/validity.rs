@@ -24,6 +24,7 @@ pub mod coinbase_is_valid;
 pub mod correct_control_parameter_update;
 pub mod correct_mmr_update;
 pub mod correct_mutator_set_update;
+pub mod difficulty_control;
 pub mod epoch_table;
 pub mod mmr_membership;
 pub mod predecessor_is_valid;
