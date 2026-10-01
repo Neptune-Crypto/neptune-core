@@ -49,6 +49,9 @@ use crate::block::Block;
 use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::transaction::transaction_kernel::TransactionKernel;
+use crate::transaction::validity::single_proof::single_proof_claim;
+use crate::transaction::validity::single_proof::SingleProof;
+use crate::transaction::validity::tasm::claims::generate_single_proof_claim::GenerateSingleProofClaim;
 
 /// The witness for [`PredecessorIsValid`]: the previous block and the next
 /// block's body.
@@ -250,6 +253,7 @@ impl TritonProgram for PredecessorIsValid {
         let own_program_digest_alloc = library.kmalloc(Digest::LEN as u32);
 
         let prev_block_body_mh_alloc = library.kmalloc(Digest::LEN as u32);
+        let prev_block_txk_mh_alloc = library.kmalloc(Digest::LEN as u32);
         let expected_prev_height_alloc = library.kmalloc(1);
         // Pointer to the epoch in force at the previous block's height.
         let prev_epoch_alloc = library.kmalloc(1);
@@ -277,6 +281,20 @@ impl TritonProgram for PredecessorIsValid {
         let u64_lt = library.import(Box::new(U64Lt));
         let u192_safe_add = library.import(Box::new(U192SafeAdd));
         let difficulty_control = library.import(Box::new(DifficultyControl));
+        let generate_single_proof_claim = library.import(Box::new(GenerateSingleProofClaim::new(
+            ConsensusRuleSet::HardforkDelta,
+        )));
+        let push_single_proof_digest = SingleProof::new(ConsensusRuleSet::HardforkDelta)
+            .hash()
+            .values()
+            .into_iter()
+            .rev()
+            .flat_map(|word| triton_asm!(push { word }))
+            .collect::<Vec<_>>();
+        let transaction_claim_size =
+            single_proof_claim(Digest::default(), ConsensusRuleSet::HardforkDelta)
+                .encode()
+                .len();
         // The `BlockProof`'s encoding lies inside the `Vec` field, after the
         // `Vec`'s own length word.
         let prev_block_proof_encoding = triton_asm!(
@@ -403,19 +421,25 @@ impl TritonProgram for PredecessorIsValid {
                 return
         );
 
-        // Hash the previous block's body, and keep its MAST hash in static
-        // memory.
+        // Hash the previous block's body, and keep its and its transaction
+        // kernel's MAST hashes in static memory.
         // BEFORE: _ *w
         // AFTER:  _ *w
         let hash_prev_block_body = triton_asm!(
             dup 0 {&field!(PredecessorIsValidWitnessMemory::prev_block_body)}
             // _ *w *body
 
+            dup 0 {&field!(BlockBody::transaction_kernel)}
+            call {transaction_kernel_mast_hash}
+            // _ *w *body [txk_mast_hash]
+
+            push {prev_block_txk_mh_alloc.write_address()} write_mem {Digest::LEN} pop 1
+            // _ *w *body
+
             call {new_list}
             // _ *w *body *leafs
 
-            dup 1 {&field!(BlockBody::transaction_kernel)}
-            call {transaction_kernel_mast_hash}
+            push {prev_block_txk_mh_alloc.read_address()} read_mem {Digest::LEN} pop 1
             call {hash_digest}
             // _ *w *body *leafs [txk_leaf]
 
@@ -1053,6 +1077,72 @@ impl TritonProgram for PredecessorIsValid {
             // _
         );
 
+        // Find the claim with this hash in the previous block's appendix.
+        let find_claim_by_hash = "predecessor_is_valid_find_claim_by_hash".to_string();
+        let find_claim_by_hash_code = triton_asm!(
+            // INVARIANT: _ [claim_hash] *claim[i]_si num_claims i
+            {find_claim_by_hash}:
+                dup 1 dup 1 eq
+                push 0 eq assert error_id {BlockValidationRule::AppendixMissingClaim.error_id()}
+                // _ [claim_hash] *claim[i]_si num_claims i
+
+                dup 2 read_mem 1 addi 2
+                // _ [claim_hash] *claim[i]_si num_claims i claim_size *claim[i]
+
+                // Crashes unless the size is a u32.
+                dup 1 pop_count pop 1
+
+                dup 1 call {hash_varlen}
+                // _ [claim_hash] *claim[i]_si num_claims i claim_size [claim[i]_hash]
+
+                dup 13 dup 13 dup 13 dup 13 dup 13
+                {&digests_are_equal}
+                // _ [claim_hash] *claim[i]_si num_claims i claim_size hashes_match
+
+                pick 1 pop 1
+                skiz return
+                // _ [claim_hash] *claim[i]_si num_claims i
+
+                pick 2 read_mem 1
+                // _ [claim_hash] num_claims i claim_size (*claim[i]_si - 1)
+
+                // Crashes unless the size is a u32.
+                dup 1 pop_count pop 1
+
+                addi 2 add
+                // _ [claim_hash] num_claims i *claim[i+1]_si
+
+                place 2 addi 1
+                // _ [claim_hash] *claim[i+1]_si num_claims (i + 1)
+
+                recurse
+        );
+
+        // The transaction claim; this program's own claim is found under the
+        // header rules.
+        // BEFORE: _ *w [prev_block_hash]
+        // AFTER:  _ *w [prev_block_hash]
+        let rule_1a_txproof_prev = triton_asm!(
+            push {prev_block_txk_mh_alloc.read_address()} read_mem {Digest::LEN} pop 1
+            {&push_single_proof_digest}
+            call {generate_single_proof_claim}
+            // _ *w [prev_block_hash] *transaction_claim
+
+            push {transaction_claim_size} call {hash_varlen}
+            // _ *w [prev_block_hash] [transaction_claim_hash]
+
+            dup 10 {&field!(PredecessorIsValidWitnessMemory::prev_block_appendix)}
+            {&field!(BlockAppendix::claims)}
+            read_mem 1 addi 2 place 1 push 0
+            // _ *w [prev_block_hash] [transaction_claim_hash] *claim[0]_si num_claims 0
+
+            call {find_claim_by_hash}
+            // _ *w [prev_block_hash] [transaction_claim_hash] *claim[i]_si num_claims i
+
+            pop 3 pop {Digest::LEN}
+            // _ *w [prev_block_hash]
+        );
+
         // The claim's output: the previous block's hash, lustration status,
         // timestamp, cumulative proof-of-work and difficulty.
         // BEFORE: _ [next_block_body_mh] *w [prev_block_hash]
@@ -1083,6 +1173,8 @@ impl TritonProgram for PredecessorIsValid {
         let (rule_0c, rule_0c_code) = subroutine("rule_0c", rule_0c);
         let (prev_block_pow, prev_block_pow_code) =
             subroutine("proof_of_work_prev", prev_block_pow);
+        let (rule_1a_txproof_prev, rule_1a_txproof_prev_code) =
+            subroutine("rule_1a_prev", rule_1a_txproof_prev);
         let (write_output, write_output_code) = subroutine("write_output", write_output);
 
         let code = triton_asm!(
@@ -1117,6 +1209,10 @@ impl TritonProgram for PredecessorIsValid {
             call {prev_block_pow}
             // _ [next_block_body_mh] *w [prev_block_hash]
 
+            call {rule_1a_txproof_prev}
+            // _ [next_block_body_mh] *w [prev_block_hash]
+
+
             {&prev_block_epoch_rules_if_activated}
             // _ [next_block_body_mh] *w [prev_block_hash]
 
@@ -1128,6 +1224,7 @@ impl TritonProgram for PredecessorIsValid {
 
             {&header_mast_hash_code}
             {&transaction_kernel_mast_hash_code}
+            {&find_claim_by_hash_code}
             {&epoch_has_started_code}
             {&epoch_in_force_code}
             {&epoch_tables_agree_code}
@@ -1140,6 +1237,7 @@ impl TritonProgram for PredecessorIsValid {
             {&rule_0a_code}
             {&rule_0c_code}
             {&prev_block_pow_code}
+            {&rule_1a_txproof_prev_code}
             {&read_epoch_table_code}
             {&rule_0b_prev_code}
             {&rule_0d_prev_code}
@@ -1192,7 +1290,6 @@ mod tests {
     use crate::proof_abstractions::test_runtime::tokio_runtime;
     use crate::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::transaction::validity::neptune_proof::Proof as NeptuneProof;
-    use crate::transaction::validity::single_proof::single_proof_claim;
     use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
     impl TritonProgramSpecification for PredecessorIsValid {
@@ -1208,6 +1305,7 @@ mod tests {
                 Tip5::hash_varlen(&witness.next_block_mmr_accumulator.encode()),
                 BlockBody::MAST_HEIGHT as u32,
             );
+            let prev_block_txk_mh = witness.prev_block_body.transaction_kernel.mast_hash();
             let prev_block_body_mh = witness.prev_block_body.mast_hash();
 
             // 0.b)
@@ -1241,6 +1339,12 @@ mod tests {
             let difficulty = witness.prev_block_header.difficulty;
             assert!(difficulty >= Difficulty::MINIMUM);
             assert!(prev_block_hash <= difficulty.target());
+
+            // 1.a) The transaction claim; this program's own claim is found
+            // under the header rules.
+            let transaction_claim =
+                single_proof_claim(prev_block_txk_mh, ConsensusRuleSet::HardforkDelta);
+            assert!(witness.prev_block_appendix.contains(&transaction_claim));
 
             // The header rules, for the previous block. Its predecessor's
             // values come from the previous block's copy of the claim for this
@@ -1948,6 +2052,28 @@ mod tests {
             let prev_prev_block = random_unproven_block(0);
             let (body, header) = next_body_and_header(&prev_prev_block, 0);
             let prev_block = unproven_block(header, body, vec![]);
+            let (next_body, next_header) = next_body_and_header(&prev_block, 0);
+
+            assert_rejects(
+                &PredecessorIsValid,
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::AppendixMissingClaim.error_id(),
+            );
+        }
+
+        #[test]
+        fn prev_block_without_transaction_claim_fails() {
+            let prev_prev_block = random_unproven_block(0);
+            let (body, header) = next_body_and_header(&prev_prev_block, 0);
+            let own_claim = own_claim(&PredecessorIsValid, &prev_prev_block, &body, &header);
+            let prev_block = block(
+                header,
+                body,
+                BlockAppendix::new(vec![own_claim]),
+                BlockProof::Invalid,
+            );
             let (next_body, next_header) = next_body_and_header(&prev_block, 0);
 
             assert_rejects(
