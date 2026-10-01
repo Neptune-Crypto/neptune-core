@@ -50,6 +50,7 @@ use super::mutator_set_update_from_state_hash::MutatorSetUpdateFromStateHash;
 use super::removal_index_commitment::RemovalIndexCommitment;
 use super::removal_records_are_unique::RemovalRecordsAreUnique;
 use super::swbfi_update_aggregation::SwbfiUpdateAggregation;
+use super::swbfi_update_union::SwbfiUpdateUnion;
 use crate::block::block_appendix::BlockAppendix;
 use crate::block::block_appendix::MAX_NUM_CLAIMS;
 use crate::block::block_body::BlockBody;
@@ -407,6 +408,8 @@ impl TritonProgram for PredecessorIsValid {
             Literal::Digest(CorrectSwbfiUpdate.hash()).push_to_stack_code();
         let push_swbfi_aggregation_program_digest =
             Literal::Digest(SwbfiUpdateAggregation::new().hash()).push_to_stack_code();
+        let push_swbfi_union_program_digest =
+            Literal::Digest(SwbfiUpdateUnion::new().hash()).push_to_stack_code();
         // The hash of the mutator set after the previous block, for the
         // claim's output.
         let mutator_set_after_prev_block_alloc = library.kmalloc(Digest::LEN as u32);
@@ -1129,9 +1132,13 @@ impl TritonProgram for PredecessorIsValid {
                 {&push_swbfi_update_program_digest}
                 {&digests_are_equal}
                 place 5
+                dup 4 dup 4 dup 4 dup 4 dup 4
                 {&push_swbfi_aggregation_program_digest}
                 {&digests_are_equal}
-                add
+                place 5
+                {&push_swbfi_union_program_digest}
+                {&digests_are_equal}
+                add add
                 // _ *claim[i]_si num_claims i program_matches
 
                 dup 3 addi 1 {&field_with_size!(Claim::input)}
@@ -2138,7 +2145,8 @@ mod tests {
                     .iter()
                     .find(|claim| {
                         (claim.program_digest == CorrectSwbfiUpdate.hash()
-                            || claim.program_digest == SwbfiUpdateAggregation::new().hash())
+                            || claim.program_digest == SwbfiUpdateAggregation::new().hash()
+                            || claim.program_digest == SwbfiUpdateUnion::new().hash())
                             && claim.input == claim_input
                     })
                     .expect("previous block must carry the SWBFI update claim");
@@ -3742,6 +3750,23 @@ mod tests {
                 &leaves[1].versioned_claim(),
                 IndexSetDigests::digests(&kernel.inputs),
             );
+            let (prev_block, next_body, next_header) = prev_block_with_swbfi_claim(Some(claim));
+            assert_accepts(&skipping(), &prev_block, &next_body, &next_header);
+        }
+
+        #[test]
+        fn prev_block_with_union_swbfi_claim_passes() {
+            let (kernel, _) = transaction_kernel_and_proof();
+            let mutator_set = fixture_grandparent()
+                .mutator_set_accumulator_after()
+                .unwrap();
+            let split = kernel.inputs.len() / 2;
+            let leaves = CorrectSwbfiUpdateWitness::siblings(
+                &kernel.inputs,
+                &mutator_set,
+                &[split, kernel.inputs.len() - split],
+            );
+            let claim = SwbfiUpdateUnion::claim(&leaves[0], &leaves[1]);
             let (prev_block, next_body, next_header) = prev_block_with_swbfi_claim(Some(claim));
             assert_accepts(&skipping(), &prev_block, &next_body, &next_header);
         }

@@ -89,6 +89,41 @@ impl CorrectSwbfiUpdateWitness {
             .collect()
     }
 
+    /// The witnesses of consecutive segments of these inputs, of these
+    /// sizes, all built on the same mutator set.
+    pub fn siblings(
+        inputs: &[RemovalRecord],
+        mutator_set: &MutatorSetAccumulator,
+        segment_sizes: &[usize],
+    ) -> Vec<Self> {
+        let allow_big_chunks = ConsensusRuleSet::HardforkDelta.allow_big_chunks();
+        let mut rest = RemovalRecordList::try_unpack(inputs.to_vec(), allow_big_chunks)
+            .expect("inputs must unpack");
+        segment_sizes
+            .iter()
+            .map(|&size| {
+                let segment = rest.drain(..size).collect();
+                Self::new(
+                    RemovalRecordList::pack(segment, allow_big_chunks),
+                    mutator_set.clone(),
+                )
+            })
+            .collect()
+    }
+
+    /// The inputs of these witnesses, built on one mutator set, as one
+    /// packed list.
+    pub fn united_inputs(witnesses: &[&Self]) -> Vec<RemovalRecord> {
+        let unpacked = witnesses
+            .iter()
+            .flat_map(|witness| {
+                SwbfiPeaksAfterRemovals::unpacked_records(&witness.inputs, &witness.mutator_set)
+                    .expect("inputs must unpack")
+            })
+            .collect();
+        RemovalRecordList::pack(unpacked, ConsensusRuleSet::HardforkDelta.allow_big_chunks())
+    }
+
     pub fn inputs(&self) -> &[RemovalRecord] {
         &self.inputs
     }
@@ -363,6 +398,16 @@ pub(super) mod tests {
     ) -> Vec<CorrectSwbfiUpdateWitness> {
         let all = witness(segment_sizes.iter().sum(), seed);
         CorrectSwbfiUpdateWitness::segments(&all.packed_inputs(), &all.mutator_set, segment_sizes)
+    }
+
+    /// The witnesses of consecutive segments of these sizes of one block's
+    /// inputs, all built on the same mutator set.
+    pub(in crate::block::validity) fn sibling_witnesses(
+        segment_sizes: &[usize],
+        seed: u64,
+    ) -> Vec<CorrectSwbfiUpdateWitness> {
+        let all = witness(segment_sizes.iter().sum(), seed);
+        CorrectSwbfiUpdateWitness::siblings(&all.packed_inputs(), &all.mutator_set, segment_sizes)
     }
 
     /// The mutator set the archival update computes for the witness's

@@ -332,6 +332,19 @@ impl SwbfiPeaksAfterRemovals {
         Self::try_apply_removals(inputs, mutator_set).expect("inputs must be removable")
     }
 
+    /// The witness's inputs as the archival update takes them: the list
+    /// unpacked.
+    pub(super) fn unpacked_records(
+        inputs: &[RemovalRecord],
+        mutator_set: &MutatorSetAccumulator,
+    ) -> Option<Vec<RemovalRecord>> {
+        RemovalRecordList::try_unpack(
+            Self::packed_form(inputs.to_vec(), mutator_set),
+            ConsensusRuleSet::HardforkDelta.allow_big_chunks(),
+        )
+        .ok()
+    }
+
     /// The mutator set with the packed inputs removed, if they unpack and
     /// can be removed from it.
     pub(super) fn try_apply_removals(
@@ -374,19 +387,6 @@ pub(super) mod tests {
     use crate::proof_abstractions::tasm::builtins as tasm;
 
     impl SwbfiPeaksAfterRemovals {
-        /// The witness's inputs as the archival update takes them: the list
-        /// unpacked.
-        pub(in crate::block::validity) fn unpacked_records(
-            inputs: &[RemovalRecord],
-            mutator_set: &MutatorSetAccumulator,
-        ) -> Option<Vec<RemovalRecord>> {
-            RemovalRecordList::try_unpack(
-                Self::packed_form(inputs.to_vec(), mutator_set),
-                ConsensusRuleSet::HardforkDelta.allow_big_chunks(),
-            )
-            .ok()
-        }
-
         /// The host shadow: asserts what the snippet asserts, reading the
         /// same divined tokens, and returns the peaks it computes.
         pub(in crate::block::validity) fn verify(
