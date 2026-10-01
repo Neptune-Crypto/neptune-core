@@ -1459,6 +1459,23 @@ impl TritonProgram for PredecessorIsValid {
 
         // BEFORE: _ *w [prev_block_hash]
         // AFTER:  _ *w [prev_block_hash]
+        let rule_2k_prev = triton_asm!(
+            push {prev_epoch_alloc.read_address()} read_mem 1 pop 1
+            // _ *w [prev_block_hash] *epoch
+
+            dup 6 {&prev_block_txk} {&field!(TransactionKernel::outputs)}
+            read_mem 1 pop 1
+            // _ *w [prev_block_hash] *epoch num_outputs
+
+            dup 1 {&field!(Epoch::max_num_outputs)} read_mem 1 pop 1
+            addi 1 swap 1 lt
+            // _ *w [prev_block_hash] *epoch (num_outputs <= max_num_outputs)
+
+            assert error_id {BlockValidationRule::TooManyOutputs.error_id()}
+            pop 1
+            // _ *w [prev_block_hash]
+        );
+
         // BEFORE: _ *w [prev_block_hash]
         // AFTER:  _ *w [prev_block_hash]
         // The rules about the previous block that depend on the epoch in
@@ -1478,6 +1495,7 @@ impl TritonProgram for PredecessorIsValid {
         let (rule_1e_prev, rule_1e_prev_code) = subroutine("rule_1e_prev", rule_1e_prev);
         let (rule_2f_prev, rule_2f_prev_code) = subroutine("rule_2f_prev", rule_2f_prev);
         let (rule_2j_prev, rule_2j_prev_code) = subroutine("rule_2j_prev", rule_2j_prev);
+        let (rule_2k_prev, rule_2k_prev_code) = subroutine("rule_2k_prev", rule_2k_prev);
 
         let prev_block_epoch_rules = "predecessor_is_valid_prev_block_epoch_rules".to_string();
         let prev_block_epoch_rules_code = triton_asm!(
@@ -1543,6 +1561,9 @@ impl TritonProgram for PredecessorIsValid {
                 // _ *w [prev_block_hash]
 
                 call {rule_2j_prev}
+                // _ *w [prev_block_hash]
+
+                call {rule_2k_prev}
                 // _ *w [prev_block_hash]
 
                 return
@@ -2015,6 +2036,7 @@ impl TritonProgram for PredecessorIsValid {
             {&rule_1e_prev_code}
             {&rule_2f_prev_code}
             {&rule_2j_prev_code}
+            {&rule_2k_prev_code}
             {&write_output_code}
             {&library.all_imports()}
         );
@@ -2363,6 +2385,12 @@ mod tests {
                 assert!(
                     u64::try_from(prev_transaction_kernel.inputs.len()).unwrap()
                         <= prev_epoch.max_num_inputs.value()
+                );
+
+                // 2.k)
+                assert!(
+                    u64::try_from(prev_transaction_kernel.outputs.len()).unwrap()
+                        <= prev_epoch.max_num_outputs.value()
                 );
             }
 
@@ -3887,6 +3915,16 @@ mod tests {
             (prev_block, next_body, next_header)
         }
 
+        /// The epoch table whose activation epoch allows this many outputs
+        /// and announcements.
+        fn epochs_with_limits(max_num_outputs: u64, max_num_announcements: u64) -> EpochTable {
+            EpochTable::new(&[Epoch {
+                max_num_outputs: bfe!(max_num_outputs),
+                max_num_announcements: bfe!(max_num_announcements),
+                ..activation_epoch()
+            }])
+        }
+
         /// The previous block at this height with this coinbase, and a next
         /// body and header for it.
         fn prev_block_with_coinbase_at_height(
@@ -4522,6 +4560,33 @@ mod tests {
                 &next_header,
                 &epochs,
                 BlockValidationRule::TooManyInputs.error_id(),
+            );
+        }
+
+        #[test]
+        fn prev_block_with_too_many_outputs_fails() {
+            let mut rng = StdRng::seed_from_u64(0);
+            let outputs = (0..3).map(|_| rng.random()).collect::<Vec<_>>();
+            let transaction_kernel = TransactionKernelModifier::default()
+                .outputs(outputs)
+                .modify(transaction_kernel_and_proof().0.clone());
+            let max_num_announcements = activation_epoch().max_num_announcements.value();
+
+            let epochs = epochs_with_limits(3, max_num_announcements);
+            let (prev_block, next_body, next_header) =
+                prev_block_with_transaction_kernel(transaction_kernel.clone(), &epochs);
+            assert_accepts_with_epochs(&skipping(), &prev_block, &next_body, &next_header, &epochs);
+
+            let epochs = epochs_with_limits(2, max_num_announcements);
+            let (prev_block, next_body, next_header) =
+                prev_block_with_transaction_kernel(transaction_kernel, &epochs);
+            assert_rejects_with_epochs(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                &epochs,
+                BlockValidationRule::TooManyOutputs.error_id(),
             );
         }
 
