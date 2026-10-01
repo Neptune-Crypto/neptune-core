@@ -5,8 +5,10 @@ use neptune_primitives::difficulty_control::Difficulty;
 use neptune_primitives::difficulty_control::ProofOfWork;
 use neptune_primitives::mast_hash::MastHash;
 use neptune_primitives::timestamp::Timestamp;
+use num_bigint::BigUint;
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::arithmetic::u160::lt::Lt as U160Lt;
 use tasm_lib::arithmetic::u192::safe_add::SafeAdd as U192SafeAdd;
 use tasm_lib::arithmetic::u64::lt::Lt as U64Lt;
 use tasm_lib::field;
@@ -33,6 +35,7 @@ use super::difficulty_control::DifficultyControl;
 use super::epoch_table::Epoch;
 use super::epoch_table::EpochTable;
 use super::epoch_table::NUM_EPOCHS;
+use super::meets_threshold::MeetsThreshold;
 use crate::block::block_appendix::BlockAppendix;
 use crate::block::block_body::BlockBody;
 use crate::block::block_body::BlockBodyField;
@@ -40,6 +43,7 @@ use crate::block::block_header::BlockHeader;
 use crate::block::block_header::BlockPow;
 use crate::block::block_validation_error::BlockValidationRule;
 use crate::block::pow::LustrationStatus;
+use crate::block::pow::PowValidationError;
 use crate::block::pow::POW_MEMORY_TREE_HEIGHT;
 use crate::block::Block;
 use crate::consensus_rule_set::ConsensusRuleSet;
@@ -269,6 +273,7 @@ impl TritonProgram for PredecessorIsValid {
         let push_digest = library.import(Box::new(Push::new(DataType::Digest)));
         let append_to_mmr = library.import(Box::new(CalculateNewPeaksFromAppend));
         let memcpy = library.import(Box::new(MemCpy));
+        let u160_lt = library.import(Box::new(U160Lt));
         let u64_lt = library.import(Box::new(U64Lt));
         let u192_safe_add = library.import(Box::new(U192SafeAdd));
         let difficulty_control = library.import(Box::new(DifficultyControl));
@@ -280,6 +285,7 @@ impl TritonProgram for PredecessorIsValid {
             addi -1 pick 1 addi 1 pick 1
             // _ *block_proof block_proof_size
         );
+        let meets_threshold = library.import(Box::new(MeetsThreshold));
 
         let read_digest = triton_asm!(addi {Digest::LEN - 1} read_mem {Digest::LEN} pop 1);
         let read_u64 = triton_asm!(addi 1 read_mem 2 pop 1);
@@ -994,6 +1000,40 @@ impl TritonProgram for PredecessorIsValid {
             // _ [next_block_body_mh] *w
         );
 
+        let mut minimum_difficulty_limbs = BigUint::from(Difficulty::MINIMUM).to_u32_digits();
+        minimum_difficulty_limbs.resize(Difficulty::NUM_LIMBS, 0);
+        let push_minimum_difficulty = minimum_difficulty_limbs
+            .iter()
+            .rev()
+            .flat_map(|&limb| triton_asm!(push { limb }))
+            .collect::<Vec<_>>();
+
+        // BEFORE: _ *w [prev_block_hash]
+        // AFTER:  _ *w [prev_block_hash]
+        let prev_block_pow = triton_asm!(
+                {&push_minimum_difficulty}
+                // _ *w [prev_block_hash] [minimum_difficulty]
+
+                dup 10 {&read_prev_block_difficulty}
+                // _ *w [prev_block_hash] [minimum_difficulty] [difficulty]
+
+                call {u160_lt}
+                // _ *w [prev_block_hash] (difficulty < minimum_difficulty)
+
+                push 0 eq assert error_id {PowValidationError::ThresholdNotMet.error_id()}
+                // _ *w [prev_block_hash]
+
+                dup 5 {&read_prev_block_difficulty}
+                // _ *w [prev_block_hash] [difficulty]
+
+                dup 9 dup 9 dup 9 dup 9 dup 9
+                // _ *w [prev_block_hash] [difficulty] [prev_block_hash]
+
+                call {meets_threshold}
+                assert error_id {PowValidationError::ThresholdNotMet.error_id()}
+                // _ *w [prev_block_hash]
+        );
+
         // BEFORE: _ *w
         // AFTER:  _
         let write_prev_block_header_fields = triton_asm!(
@@ -1041,6 +1081,8 @@ impl TritonProgram for PredecessorIsValid {
             subroutine("prev_block_hash", prev_block_hash);
         let (rule_0a, rule_0a_code) = subroutine("rule_0a", rule_0a);
         let (rule_0c, rule_0c_code) = subroutine("rule_0c", rule_0c);
+        let (prev_block_pow, prev_block_pow_code) =
+            subroutine("proof_of_work_prev", prev_block_pow);
         let (write_output, write_output_code) = subroutine("write_output", write_output);
 
         let code = triton_asm!(
@@ -1072,6 +1114,9 @@ impl TritonProgram for PredecessorIsValid {
             call {rule_0c}
             // _ [next_block_body_mh] *w [prev_block_hash]
 
+            call {prev_block_pow}
+            // _ [next_block_body_mh] *w [prev_block_hash]
+
             {&prev_block_epoch_rules_if_activated}
             // _ [next_block_body_mh] *w [prev_block_hash]
 
@@ -1094,6 +1139,7 @@ impl TritonProgram for PredecessorIsValid {
             {&prev_block_hash_code}
             {&rule_0a_code}
             {&rule_0c_code}
+            {&prev_block_pow_code}
             {&read_epoch_table_code}
             {&rule_0b_prev_code}
             {&rule_0d_prev_code}
@@ -1123,7 +1169,6 @@ mod tests {
     use neptune_primitives::block_height::BlockHeight;
     use neptune_primitives::difficulty_control::difficulty_control;
     use neptune_primitives::network::Network;
-    use num_bigint::BigUint;
     use num_traits::Zero;
     use rand::rngs::StdRng;
     use rand::RngExt;
@@ -1192,6 +1237,10 @@ mod tests {
                 expected_next_block_mmr.peaks(),
                 witness.next_block_mmr_accumulator.peaks()
             );
+
+            let difficulty = witness.prev_block_header.difficulty;
+            assert!(difficulty >= Difficulty::MINIMUM);
+            assert!(prev_block_hash <= difficulty.target());
 
             // The header rules, for the previous block. Its predecessor's
             // values come from the previous block's copy of the claim for this
@@ -1907,6 +1956,25 @@ mod tests {
                 &next_body,
                 &next_header,
                 BlockValidationRule::AppendixMissingClaim.error_id(),
+            );
+        }
+
+        #[test]
+        fn prev_block_without_proof_of_work_fails() {
+            let prev_prev_block = random_unproven_block(0);
+            let (body, mut header) = next_body_and_header(&prev_prev_block, 0);
+            header.difficulty = Difficulty::new([1, 2, 3, 4, 5]);
+            header.pow.set_version_in_pow(header.version);
+            let prev_block =
+                Block::new(header, body, BlockAppendix::default(), BlockProof::Invalid);
+            let (next_body, next_header) = next_body_and_header(&prev_block, 0);
+
+            assert_rejects(
+                &PredecessorIsValid,
+                &prev_block,
+                &next_body,
+                &next_header,
+                PowValidationError::ThresholdNotMet.error_id(),
             );
         }
 
