@@ -17,6 +17,7 @@ use std::sync::OnceLock;
 
 use get_size2::GetSize;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
 use neptune_mutator_set::removal_record::RemovalRecord;
 use serde::Deserialize;
 use serde::Serialize;
@@ -33,6 +34,7 @@ use super::mutator_set_hash_after_removals::MutatorSetHashAfterRemovals;
 use super::removal_index_commitment::RemovalIndexCommitment;
 use super::swbfi_peaks_after_removals::SwbfiPeaksAfterRemovals;
 use crate::block::block_validation_error::BlockValidationRule;
+use crate::block::mutator_set_update::MutatorSetUpdate;
 use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::proof_abstractions::SecretWitness;
@@ -54,6 +56,37 @@ impl CorrectSwbfiUpdateWitness {
             inputs: SwbfiPeaksAfterRemovals::witness_form(inputs, &mutator_set),
             mutator_set,
         }
+    }
+
+    /// The witnesses of consecutive segments of these inputs, of these
+    /// sizes, each built on the mutator set after the segments before it.
+    pub fn segments(
+        inputs: &[RemovalRecord],
+        mutator_set: &MutatorSetAccumulator,
+        segment_sizes: &[usize],
+    ) -> Vec<Self> {
+        let allow_big_chunks = ConsensusRuleSet::HardforkDelta.allow_big_chunks();
+        let mut rest = RemovalRecordList::try_unpack(inputs.to_vec(), allow_big_chunks)
+            .expect("inputs must unpack");
+        let mut mutator_set = mutator_set.clone();
+        segment_sizes
+            .iter()
+            .map(|&size| {
+                let segment = rest.drain(..size).collect::<Vec<_>>();
+                let witness = Self::new(
+                    RemovalRecordList::pack(segment.clone(), allow_big_chunks),
+                    mutator_set.clone(),
+                );
+                MutatorSetUpdate::new(segment, vec![])
+                    .apply_to_accumulator_and_records(
+                        &mut mutator_set,
+                        &mut rest.iter_mut().collect::<Vec<_>>(),
+                        &mut [],
+                    )
+                    .expect("segment must be removable");
+                witness
+            })
+            .collect()
     }
 
     pub fn inputs(&self) -> &[RemovalRecord] {
@@ -236,7 +269,6 @@ pub(super) mod tests {
     use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
     use neptune_mutator_set::removal_record::chunk::Chunk;
     use neptune_mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
-    use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
     use neptune_mutator_set::shared::CHUNK_SIZE;
     use neptune_mutator_set::shared::WINDOW_SIZE;
     use rand::rngs::StdRng;
@@ -253,7 +285,6 @@ pub(super) mod tests {
     use super::super::resolve_chunk_indices::ResolveChunkIndices;
     use super::super::window_after_removals::WindowAfterRemovals;
     use super::*;
-    use crate::block::mutator_set_update::MutatorSetUpdate;
     use crate::proof_abstractions::tasm::builtins as tasm;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
 
@@ -324,6 +355,16 @@ pub(super) mod tests {
         CorrectSwbfiUpdateWitness::new(inputs, mutator_set)
     }
 
+    /// The witnesses of consecutive segments of these sizes of one block's
+    /// inputs, each built on the mutator set after the segments before it.
+    pub(in crate::block::validity) fn chained_witnesses(
+        segment_sizes: &[usize],
+        seed: u64,
+    ) -> Vec<CorrectSwbfiUpdateWitness> {
+        let all = witness(segment_sizes.iter().sum(), seed);
+        CorrectSwbfiUpdateWitness::segments(&all.packed_inputs(), &all.mutator_set, segment_sizes)
+    }
+
     /// The mutator set the archival update computes for the witness's
     /// inputs.
     pub(in crate::block::validity) fn archival_mutator_set_after(
@@ -357,6 +398,27 @@ pub(super) mod tests {
             // computes.
             let expected_hash = archival_mutator_set_after(&witness).hash().values();
             assert_eq!(expected_hash, tasm_output[2..7], "{num_inputs} inputs");
+        }
+    }
+
+    #[test]
+    fn chained_witnesses_are_accepted_and_chain_the_mutator_set() {
+        let witnesses = chained_witnesses(&[2, 3], 7);
+        let [left, right] = witnesses.as_slice() else {
+            unreachable!()
+        };
+        let all = witness(5, 7);
+        assert_eq!(all.mutator_set, left.mutator_set);
+        assert_eq!(archival_mutator_set_after(left), right.mutator_set);
+        assert_eq!(
+            archival_mutator_set_after(&all),
+            archival_mutator_set_after(right)
+        );
+        for witness in &witnesses {
+            let input = witness.standard_input();
+            let nondeterminism = witness.nondeterminism();
+            let tasm_output = CorrectSwbfiUpdate.run_tasm(&input, nondeterminism).unwrap();
+            assert_eq!(witness.output(), tasm_output);
         }
     }
 

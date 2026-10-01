@@ -54,6 +54,7 @@ mod resolve_chunk_indices;
 mod roots_from_authentication_struct;
 mod sorted_window_indices;
 mod swbfi_peaks_after_removals;
+pub mod swbfi_update_aggregation;
 mod update_tree_leaf;
 mod window_after_removals;
 

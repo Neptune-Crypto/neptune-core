@@ -148,6 +148,10 @@ pub enum BlockValidationError {
     /// The removal records' index sets are not the ones a claim commits to.
     #[error("Removal records must match the claim's index commitment")]
     RemovalIndexCommitmentMismatch,
+
+    /// An aggregated SWBFI update claim's children do not chain.
+    #[error("SWBFI update claims must chain across adjacent input ranges")]
+    SwbfiUpdateChaining,
 }
 
 impl From<RemovalRecordListUnpackError> for BlockValidationError {
