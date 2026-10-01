@@ -33,12 +33,16 @@ use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::verifier::own_program_digest::OwnProgramDigest;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 
+use super::apply_addition_records::ApplyAdditionRecords;
 use super::block_program::BlockProgram;
 use super::difficulty_control::DifficultyControl;
 use super::epoch_table::Epoch;
 use super::epoch_table::EpochTable;
 use super::epoch_table::NUM_EPOCHS;
+use super::guesser_fee_addition_records::GuesserFeeAdditionRecords;
 use super::meets_threshold::MeetsThreshold;
+use super::mutator_set_hash::MutatorSetHash;
+use super::mutator_set_hash::MutatorSetHashFromComponents;
 use super::removal_records_are_unique::RemovalRecordsAreUnique;
 use crate::block::block_appendix::BlockAppendix;
 use crate::block::block_appendix::MAX_NUM_CLAIMS;
@@ -59,6 +63,7 @@ use crate::transaction::validity::single_proof::single_proof_claim;
 use crate::transaction::validity::single_proof::SingleProof;
 use crate::transaction::validity::tasm::claims::generate_single_proof_claim::GenerateSingleProofClaim;
 use crate::transaction::validity::tasm::claims::new_claim::NewClaim;
+use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
 /// The witness for [`PredecessorIsValid`]: the previous block and the next
 /// block's body.
@@ -211,6 +216,7 @@ impl From<&PredecessorIsValidWitness> for PredecessorIsValidWitnessMemory {
 ///  - previous block's timestamp
 ///  - previous block's cumulative proof-of-work
 ///  - previous block's difficulty
+///  - hash of the mutator set after the previous block
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec)]
 pub struct PredecessorIsValid {
     /// Whether to verify the previous block's proof. Only ever false in tests.
@@ -281,12 +287,20 @@ impl PredecessorIsValid {
             .lustration_status()
             .map(|status| status.encode())
             .unwrap_or_default();
+        // The mutator set the next block's transaction is built on. A
+        // previous block whose fee is negative is rejected regardless, so
+        // any value serves for it.
+        let mutator_set_after_prev_block = prev_block
+            .mutator_set_accumulator_after()
+            .map(|mutator_set| mutator_set.hash())
+            .unwrap_or_default();
         let output = [
             next_header.prev_block_digest.values().to_vec(),
             prev_lustration_status,
             vec![prev_block_header.timestamp.0],
             prev_block_header.cumulative_proof_of_work.encode(),
             prev_block_header.difficulty.encode(),
+            mutator_set_after_prev_block.values().to_vec(),
         ]
         .concat();
 
@@ -343,6 +357,13 @@ impl TritonProgram for PredecessorIsValid {
         let u192_safe_add = library.import(Box::new(U192SafeAdd));
         let difficulty_control = library.import(Box::new(DifficultyControl));
         let removal_records_are_unique = library.import(Box::new(RemovalRecordsAreUnique));
+        let guesser_fee_addition_records = library.import(Box::new(GuesserFeeAdditionRecords));
+        let apply_addition_records = library.import(Box::new(ApplyAdditionRecords));
+        let mutator_set_hash_from_components =
+            library.import(Box::new(MutatorSetHashFromComponents));
+        // The hash of the mutator set after the previous block, for the
+        // claim's output.
+        let mutator_set_after_prev_block_alloc = library.kmalloc(Digest::LEN as u32);
         let new_claim = library.import(Box::new(NewClaim::new(ConsensusRuleSet::HardforkDelta)));
         let generate_single_proof_claim = library.import(Box::new(GenerateSingleProofClaim::new(
             ConsensusRuleSet::HardforkDelta,
@@ -975,6 +996,26 @@ impl TritonProgram for PredecessorIsValid {
             {&field!(BlockBody::transaction_kernel)}
         );
 
+        let amount_size = NativeCurrencyAmount::static_length().unwrap();
+
+        // Copies a list of digests: appending to an MMR modifies its peaks
+        // list in place.
+        // BEFORE: _ *list
+        // AFTER:  _ *copy
+        let copy_digest_list = triton_asm!(
+            dup 0 read_mem 1 pop 1 push {Digest::LEN} mul addi 1
+            // _ *list size
+
+            call {new_list}
+            // _ *list size *copy
+
+            place 1 dup 1 place 3
+            // _ *copy *list *copy size
+
+            call {memcpy}
+            // _ *copy
+        );
+
         // The divined tokens are the positions of the inputs sorted by index
         // set; see [RemovalRecordsAreUnique::divined_tokens].
         // BEFORE: _ *w [prev_block_hash]
@@ -987,6 +1028,50 @@ impl TritonProgram for PredecessorIsValid {
             // _ *w [prev_block_hash]
         );
 
+        // The mutator set after the previous block: its body's accumulator
+        // with the addition records of its guesser reward added. The hash is
+        // stored for the claim's output.
+        // BEFORE: _ *w [prev_block_hash]
+        // AFTER:  _ *w [prev_block_hash]
+        let mutator_set_after_prev_block = triton_asm!(
+            dup 5 {&prev_block_header}
+            dup 5 dup 5 dup 5 dup 5 dup 5
+            // _ *w [prev_block_hash] *header [prev_block_hash]
+
+            dup 11 {&prev_block_txk} {&field!(TransactionKernel::fee)}
+            addi {amount_size - 1} read_mem {amount_size} pop 1
+            // _ *w [prev_block_hash] *header [prev_block_hash] [fee]
+
+            call {guesser_fee_addition_records}
+            // _ *w [prev_block_hash] *records
+
+            dup 6 {&field!(PredecessorIsValidWitnessMemory::prev_block_body)}
+            {&field!(BlockBody::mutator_set_accumulator)}
+            {&MutatorSetHash::read_components()}
+            // _ *w [prev_block_hash] *records *window *swbfi_peaks [swbfi_leaf_count] [aocl_leaf_count] *aocl_peaks
+
+            {&copy_digest_list}
+            pick 5 {&copy_digest_list} place 5
+            // _ *w [prev_block_hash] *records [components]
+
+            pick 7
+            // _ *w [prev_block_hash] [components] *records
+
+            call {apply_addition_records}
+            // _ *w [prev_block_hash] [components']
+
+            call {mutator_set_hash_from_components}
+            // _ *w [prev_block_hash] [mutator_set_hash]
+
+            push {mutator_set_after_prev_block_alloc.write_address()}
+            write_mem {Digest::LEN} pop 1
+            // _ *w [prev_block_hash]
+        );
+
+        // BEFORE: _ *w [prev_block_hash]
+        // AFTER:  _ *w [prev_block_hash]
+        // BEFORE: _ *w [prev_block_hash]
+        // AFTER:  _ *w [prev_block_hash]
         // BEFORE: _ *w [prev_block_hash]
         // AFTER:  _ *w [prev_block_hash]
         let rule_1e_prev = triton_asm!(
@@ -1402,7 +1487,8 @@ impl TritonProgram for PredecessorIsValid {
             };
 
         // The claim's output: the previous block's hash, lustration status,
-        // timestamp, cumulative proof-of-work and difficulty.
+        // timestamp, cumulative proof-of-work and difficulty, and the hash
+        // of the mutator set after it.
         // BEFORE: _ [next_block_body_mh] *w [prev_block_hash]
         // AFTER:  _ [next_block_body_mh]
         let write_output = triton_asm!(
@@ -1415,6 +1501,11 @@ impl TritonProgram for PredecessorIsValid {
             // _ [next_block_body_mh] *w
 
             {&write_prev_block_header_fields}
+            // _ [next_block_body_mh]
+
+            push {mutator_set_after_prev_block_alloc.read_address()}
+            read_mem {Digest::LEN} pop 1
+            write_io {Digest::LEN}
             // _ [next_block_body_mh]
         );
 
@@ -1436,6 +1527,8 @@ impl TritonProgram for PredecessorIsValid {
         let (rule_1a_txproof_prev, rule_1a_txproof_prev_code) =
             subroutine("rule_1a_prev", rule_1a_txproof_prev);
         let (rule_2c_prev, rule_2c_prev_code) = subroutine("rule_2c_prev", rule_2c_prev);
+        let (mutator_set_after_prev_block, mutator_set_after_prev_block_code) =
+            subroutine("mutator_set_after_prev_block", mutator_set_after_prev_block);
         let (write_output, write_output_code) = subroutine("write_output", write_output);
 
         let code = triton_asm!(
@@ -1487,6 +1580,10 @@ impl TritonProgram for PredecessorIsValid {
             call {rule_2c_prev}
             // _ [next_block_body_mh] *w [prev_block_hash]
 
+            call {mutator_set_after_prev_block}
+            // _ [next_block_body_mh] *w [prev_block_hash]
+
+
             {&prev_block_epoch_rules_if_activated}
             // _ [next_block_body_mh] *w [prev_block_hash]
 
@@ -1517,6 +1614,7 @@ impl TritonProgram for PredecessorIsValid {
             {&verify_prev_block_proof_code}
             {&rule_1a_txproof_prev_code}
             {&rule_2c_prev_code}
+            {&mutator_set_after_prev_block_code}
             {&read_epoch_table_code}
             {&rule_0b_prev_code}
             {&rule_0d_prev_code}
@@ -1561,6 +1659,7 @@ mod tests {
     use tasm_lib::twenty_first::prelude::Mmr;
 
     use super::*;
+    use crate::block::block_kernel::BlockKernel;
     use crate::block::mutator_set_update::MutatorSetUpdate;
     use crate::block::test_helpers::block_mmra_with_num_leafs;
     use crate::block::validity::block_primitive_witness::deterministic_block_primitive_witness;
@@ -1576,7 +1675,6 @@ mod tests {
     use crate::proof_abstractions::test_runtime::tokio_runtime;
     use crate::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::transaction::validity::neptune_proof::Proof as NeptuneProof;
-    use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
     impl PredecessorIsValidWitnessMemory {
         /// The previous block's size, as [Block::size] computes it.
@@ -1799,6 +1897,23 @@ mod tests {
                 witness.prev_block_header.cumulative_proof_of_work,
             );
             tasm::tasmlib_io_write_to_stdout___encoding(witness.prev_block_header.difficulty);
+
+            // The mutator set after the previous block: its body's
+            // accumulator with its guesser reward added.
+            let prev_block_kernel = BlockKernel::new(
+                witness.prev_block_header,
+                witness.prev_block_body.clone(),
+                witness.prev_block_appendix.clone(),
+            );
+            let mut mutator_set_after_prev_block =
+                witness.prev_block_body.mutator_set_accumulator.clone();
+            for addition_record in prev_block_kernel
+                .guesser_fee_addition_records(prev_block_hash)
+                .unwrap()
+            {
+                mutator_set_after_prev_block.add(&addition_record);
+            }
+            tasm::tasmlib_io_write_to_stdout___digest(mutator_set_after_prev_block.hash());
         }
     }
 
@@ -3211,6 +3326,22 @@ mod tests {
             let (next_body, next_header) = next_body_and_header(&prev_block, 0);
 
             (prev_block, next_body, next_header)
+        }
+
+        #[test]
+        fn claim_output_ends_with_mutator_set_after_prev_block() {
+            let (prev_block, next_body, next_header) =
+                unproven_prev_block_and_next_body_and_header(0);
+            let claim = own_claim(&skipping(), &prev_block, &next_body, &next_header);
+            let offset = claim.output.len() - Digest::LEN;
+            assert_eq!(
+                prev_block
+                    .mutator_set_accumulator_after()
+                    .unwrap()
+                    .hash()
+                    .values(),
+                claim.output[offset..]
+            );
         }
 
         #[test]

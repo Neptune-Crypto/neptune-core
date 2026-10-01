@@ -17,6 +17,8 @@ use super::Block;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::proof_abstractions::SecretWitness;
 
+mod apply_addition_record;
+mod apply_addition_records;
 pub mod block_primitive_witness;
 pub mod block_program;
 pub mod block_proof_witness;
@@ -31,6 +33,7 @@ pub mod correct_swbfi_update;
 pub mod difficulty_control;
 mod divined_chunk_indices;
 pub mod epoch_table;
+mod guesser_fee_addition_records;
 mod hash_chunk_with_insertions;
 mod hash_words;
 mod insert_into_window;
