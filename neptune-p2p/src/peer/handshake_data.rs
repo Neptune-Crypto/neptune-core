@@ -44,51 +44,23 @@ impl VersionString {
             return false;
         };
 
-        // Cannot connect two different versions on either side of 0.12.0
+        // Cannot connect two different versions on either side of 0.17.0
         if own.major == 0 && other.major == 0 {
-            const LATEST_HARDFORK_V: u64 = 12;
-            let own_is_less = own.minor < LATEST_HARDFORK_V;
-            let other_is_more = other.minor >= LATEST_HARDFORK_V;
+            const LATEST_ACTIVATED_HARDFORK_V: u64 = 17;
+            let own_is_less = own.minor < LATEST_ACTIVATED_HARDFORK_V;
+            let other_is_more = other.minor >= LATEST_ACTIVATED_HARDFORK_V;
             if own_is_less && other_is_more {
                 return false;
             }
 
-            let own_is_more = own.minor >= LATEST_HARDFORK_V;
-            let other_is_less = other.minor < LATEST_HARDFORK_V;
+            let own_is_more = own.minor >= LATEST_ACTIVATED_HARDFORK_V;
+            let other_is_less = other.minor < LATEST_ACTIVATED_HARDFORK_V;
             if own_is_more && other_is_less {
                 return false;
             }
         }
 
         true
-    }
-
-    /// Whether a peer with this version understands
-    /// [`PeerMessage::ValidatedBlockRequestByHeight`] and can answer it with a
-    /// [`PeerMessage::ValidatedBlock`]. Versions exceeding 0.15.1 do.
-    ///
-    /// Returns false for unparseable version strings.
-    ///
-    /// [`PeerMessage::ValidatedBlockRequestByHeight`]: super::PeerMessage::ValidatedBlockRequestByHeight
-    /// [`PeerMessage::ValidatedBlock`]: super::PeerMessage::ValidatedBlock
-    pub fn supports_validated_block_request(&self) -> bool {
-        let Ok(version) = semver::Version::parse(self) else {
-            return false;
-        };
-
-        version > semver::Version::new(0, 15, 1)
-    }
-
-    /// Whether a peer on this version understands the link-transaction.
-    ///
-    /// TODO: Remove after hardfork-delta since all peers will then understand
-    /// this message type.
-    pub fn supports_link_transactions(&self) -> bool {
-        let Ok(version) = semver::Version::parse(self) else {
-            return false;
-        };
-
-        version > semver::Version::new(0, 16, 0)
     }
 }
 
@@ -312,53 +284,35 @@ mod tests {
     }
 
     #[test]
-    fn v0_11_0_and_0_12_0_are_incompatible() {
+    fn v0_16_0_and_0_17_0_are_incompatible() {
         assert!(!VersionString::versions_are_compatible(
-            VersionString::new_from_str("0.12.0"),
-            VersionString::new_from_str("0.11.0")
+            VersionString::new_from_str("0.17.0"),
+            VersionString::new_from_str("0.16.0")
         ));
         assert!(!VersionString::versions_are_compatible(
-            VersionString::new_from_str("0.11.0"),
-            VersionString::new_from_str("0.12.0")
+            VersionString::new_from_str("0.16.0"),
+            VersionString::new_from_str("0.17.0")
         ));
     }
 
     #[test]
-    fn only_versions_above_0_16_0_support_link_transactions() {
-        let not_supported = ["0.16.0", "0.15.2", "0.12.0", "potato", ""];
-        for version in not_supported {
-            assert!(!VersionString::new_from_str(version).supports_link_transactions());
-        }
-
-        let supported = ["0.16.1", "0.17.0", "1.0.0", "9999.99999.9999"];
-        for version in supported {
-            assert!(VersionString::new_from_str(version).supports_link_transactions());
-        }
-    }
-
-    #[test]
-    fn only_versions_above_0_15_1_support_validated_block_requests() {
-        let not_supported = ["0.15.1", "0.15.0", "0.14.9", "0.12.0", "potato", ""];
-        for version in not_supported {
-            assert!(!VersionString::new_from_str(version).supports_validated_block_request());
-        }
-
-        let supported = ["0.15.2", "0.16.0", "1.0.0", "9999.99999.9999"];
-        for version in supported {
-            assert!(VersionString::new_from_str(version).supports_validated_block_request());
-        }
-    }
-
-    #[test]
-    fn versions_are_compatible_for_all_versions_above_0_12_() {
+    fn versions_are_compatible_for_all_versions_above_0_17_() {
         let version_numbers = [
-            "0.12.0",
-            "0.12.1",
-            "0.12.99",
-            "0.12.0",
-            "0.13.0",
-            "0.14.0",
-            "1.12.0",
+            "0.17.0",
+            "0.17.1",
+            "0.17.99",
+            "0.17.0",
+            "0.18.0",
+            "0.19.0",
+            "0.20.0",
+            "0.20.1",
+            "0.20.2",
+            "0.21.0",
+            "0.21.1",
+            "0.21.76",
+            "1.0.0",
+            "1.16.0",
+            "1.17.0",
             "2.12.0",
             "3.12.0",
             "9999.99999.9999",

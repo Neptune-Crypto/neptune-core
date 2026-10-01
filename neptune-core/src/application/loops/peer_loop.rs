@@ -1496,19 +1496,8 @@ impl PeerLoopHandler {
                     .as_ref()
                     .map(|sync_anchor| sync_anchor.champion);
                 if let Some(champion) = champion {
-                    // A peer on a version that understands
-                    // ValidatedBlockRequestByHeight serves middle blocks
-                    // authenticated whenever it can, and declines otherwise.
-                    //
-                    // TODO: Once the minimum supported peer version exceeds
-                    // 0.15.1, every peer serves authenticated blocks, and the
-                    // acceptance of plain middle blocks below can be dropped.
                     let extends_champion = block.header().prev_block_digest == champion.1;
-                    let peer_serves_validated_blocks = self
-                        .peer_handshake_data
-                        .version
-                        .supports_validated_block_request();
-                    if peer_serves_validated_blocks && !extends_champion {
+                    if !extends_champion {
                         warn!(
                             "Ignoring unauthenticated block {} / {:x} from peer {}: the peer \
                              can serve authenticated blocks, and the block does not extend \
@@ -2645,25 +2634,15 @@ impl PeerLoopHandler {
                     std::process::exit(255);
                 }
 
-                // Prefer the validated block request if possible: requires
-                // that this node is syncing, and that peer understands this
-                // message type.
-                let anchor = if self
-                    .peer_handshake_data
-                    .version
-                    .supports_validated_block_request()
-                {
-                    self.global_state_lock
-                        .lock_guard()
-                        .await
-                        .net
-                        .sync_anchor
-                        .as_ref()
-                        .map(|sync_anchor| sync_anchor.block_mmr.clone())
-                } else {
-                    None
-                };
-
+                // If this node is syncing, request a validated block.
+                let anchor = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .net
+                    .sync_anchor
+                    .as_ref()
+                    .map(|sync_anchor| sync_anchor.block_mmr.clone());
                 if let Some(anchor) = anchor {
                     peer.send(PeerMessage::ValidatedBlockRequestByHeight(
                         ValidatedBlockRequestByHeight { height, anchor },
@@ -2726,15 +2705,6 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             MainToPeerTask::LinkTxNotification(link_tx_notification) => {
-                if !self
-                    .peer_handshake_data
-                    .version
-                    .supports_link_transactions()
-                {
-                    debug!("Peer version does not understand link transactions; not notifying");
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
                 debug!("Sending PeerMessage::LinkTxNotification");
                 peer.send(PeerMessage::LinkTxNotification(link_tx_notification))
                     .await?;
@@ -4581,14 +4551,12 @@ mod tests {
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
-        async fn plain_blocks_from_validated_capable_peers_are_ignored_during_sync() -> Result<()> {
-            // Scenario: This node is syncing. A peer whose version can serve
-            // authenticated blocks ([`PeerMessage::ValidatedBlock`]) sends a
-            // plain block. If the block extends the sync champion it is
-            // accepted, since successors lie beyond the sync anchor and
-            // cannot be authenticated against it. Any other plain block from
-            // such a peer is ignored, without punishment. Plain blocks from
-            // peers on older versions are still accepted.
+        async fn plain_blocks_are_ignored_during_sync() -> Result<()> {
+            // Scenario: This node is syncing. A peer sends a plain block. If
+            // the block extends the sync champion it is accepted, since
+            // successors lie beyond the sync anchor and cannot be authenticated
+            // against it. Any other plain block from such a peer is ignored,
+            // without punishment.
             use neptune_p2p::peer::handshake_data::VersionString;
 
             let network = Network::Testnet(42);
@@ -4610,19 +4578,14 @@ mod tests {
                 block_2.hash(),
             ]);
             let capable_version = VersionString::new_from_str("0.99.0");
-            assert!(capable_version.supports_validated_block_request());
-            let incapable_version = VersionString::new_from_str("0.15.1");
-            assert!(!incapable_version.supports_validated_block_request());
 
             enum Expected {
                 Ignored,
                 NewSyncTarget,
-                NewSyncBlock,
             }
             let cases = [
                 (capable_version, block_1.clone(), Expected::Ignored),
                 (capable_version, block_3.clone(), Expected::NewSyncTarget),
-                (incapable_version, block_1.clone(), Expected::NewSyncBlock),
             ];
             for (version, sent_block, expected) in cases {
                 let (
@@ -4704,17 +4667,6 @@ mod tests {
                             Some(PeerTaskToMain::NewSyncTarget(Box::new(sent_block))),
                             received_sync_message,
                             "Plain champion successor must be accepted"
-                        );
-                    }
-                    Expected::NewSyncBlock => {
-                        assert_eq!(
-                            Some(PeerTaskToMain::NewSyncBlock(
-                                Box::new(sent_block),
-                                peer_id,
-                                None
-                            )),
-                            received_sync_message,
-                            "Plain middle block from an old-version peer must be accepted"
                         );
                     }
                 }
