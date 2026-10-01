@@ -1,6 +1,7 @@
 use std::sync::OnceLock;
 
 use get_size2::GetSize;
+use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_primitives::difficulty_control::Difficulty;
 use neptune_primitives::difficulty_control::ProofOfWork;
 use neptune_primitives::mast_hash::MastHash;
@@ -65,19 +66,29 @@ use crate::transaction::validity::tasm::claims::generate_single_proof_claim::Gen
 use crate::transaction::validity::tasm::claims::new_claim::NewClaim;
 use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
-/// The witness for [`PredecessorIsValid`]: the previous block and the next
-/// block's body.
+/// The witness for [`PredecessorIsValid`]: the previous block, the next
+/// block's body, and the mutator set the previous block's transaction is
+/// built on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PredecessorIsValidWitness {
     prev_block: Block,
     next_block_body: BlockBody,
+    prev_block_transaction_mutator_set: MutatorSetAccumulator,
 }
 
 impl PredecessorIsValidWitness {
-    pub fn new(prev_block: &Block, next_block_body: &BlockBody) -> Self {
+    /// The mutator set is the one after the previous block's predecessor.
+    /// It is only read when the previous block is at or past the activation
+    /// height, whose copy of the claim then attests to it.
+    pub fn new(
+        prev_block: &Block,
+        next_block_body: &BlockBody,
+        prev_block_transaction_mutator_set: MutatorSetAccumulator,
+    ) -> Self {
         Self {
             prev_block: prev_block.clone(),
             next_block_body: next_block_body.clone(),
+            prev_block_transaction_mutator_set,
         }
     }
 
@@ -158,6 +169,10 @@ struct PredecessorIsValidWitnessMemory {
     /// The encoding of the previous block's `BlockProof`. As above
     /// [Self::prev_block_header], Plus proof is verified.
     prev_block_proof: Vec<BFieldElement>,
+
+    /// The mutator set the previous block's transaction is built on. Hashed
+    /// and compared against the previous block's copy of this claim.
+    prev_block_transaction_mutator_set: MutatorSetAccumulator,
 }
 
 impl PredecessorIsValidWitnessMemory {
@@ -178,6 +193,7 @@ impl From<&PredecessorIsValidWitness> for PredecessorIsValidWitnessMemory {
             prev_block_body: prev_block.body().clone(),
             prev_block_appendix: prev_block.appendix().clone(),
             prev_block_proof: prev_block.proof.encode(),
+            prev_block_transaction_mutator_set: witness.prev_block_transaction_mutator_set.clone(),
         }
     }
 }
@@ -252,6 +268,12 @@ impl PredecessorIsValid {
     /// Where in the claim's output the previous block's difficulty is.
     fn output_difficulty_offset() -> usize {
         Self::output_cumulative_pow_offset() + ProofOfWork::static_length().unwrap()
+    }
+
+    /// Where in the claim's output the hash of the mutator set after the
+    /// previous block starts.
+    fn output_mutator_set_offset() -> usize {
+        Self::output_difficulty_offset() + Difficulty::NUM_LIMBS
     }
 
     /// Number of words in the claim's standard-in stream.
@@ -361,6 +383,7 @@ impl TritonProgram for PredecessorIsValid {
         let apply_addition_records = library.import(Box::new(ApplyAdditionRecords));
         let mutator_set_hash_from_components =
             library.import(Box::new(MutatorSetHashFromComponents));
+        let mutator_set_hash = library.import(Box::new(MutatorSetHash));
         // The hash of the mutator set after the previous block, for the
         // claim's output.
         let mutator_set_after_prev_block_alloc = library.kmalloc(Digest::LEN as u32);
@@ -998,6 +1021,36 @@ impl TritonProgram for PredecessorIsValid {
 
         let amount_size = NativeCurrencyAmount::static_length().unwrap();
 
+        // The previous block's transaction must be built on the mutator set
+        // after its predecessor, which the previous block's copy of this
+        // claim carries. The witness's mutator set must be that one, too.
+        // BEFORE: _ *w [prev_block_hash] *prev_claim_output
+        // AFTER:  _ *w [prev_block_hash] *prev_claim_output
+        let rule_2t_prev = triton_asm!(
+            dup 0 addi {Self::output_mutator_set_offset() + Digest::LEN}
+            read_mem {Digest::LEN} pop 1
+            // _ *w [prev_block_hash] *prev_claim_output [mutator_set_after_prev_prev_block]
+
+            dup 11 {&prev_block_txk} {&field!(TransactionKernel::mutator_set_hash)} {&read_digest}
+            // _ *w [prev_block_hash] *prev_claim_output [mutator_set_after_prev_prev_block] [prev_block_transaction_mutator_set]
+
+            assert_vector error_id {BlockValidationRule::TransactionMutatorSetMismatch.error_id()}
+            pop {Digest::LEN}
+            // _ *w [prev_block_hash] *prev_claim_output
+
+            dup 6 {&field!(PredecessorIsValidWitnessMemory::prev_block_transaction_mutator_set)}
+            call {mutator_set_hash}
+            // _ *w [prev_block_hash] *prev_claim_output [witness_mutator_set_hash]
+
+            dup 5 addi {Self::output_mutator_set_offset() + Digest::LEN}
+            read_mem {Digest::LEN} pop 1
+            // _ *w [prev_block_hash] *prev_claim_output [witness_mutator_set_hash] [mutator_set_after_prev_prev_block]
+
+            assert_vector error_id {BlockValidationRule::TransactionMutatorSetMismatch.error_id()}
+            pop {Digest::LEN}
+            // _ *w [prev_block_hash] *prev_claim_output
+        );
+
         // Copies a list of digests: appending to an MMR modifies its peaks
         // list in place.
         // BEFORE: _ *list
@@ -1120,6 +1173,7 @@ impl TritonProgram for PredecessorIsValid {
         let (rule_0d_prev, rule_0d_prev_code) = subroutine("rule_0d_prev", rule_0d_prev);
         let (rule_0e_prev, rule_0e_prev_code) = subroutine("rule_0e_prev", rule_0e_prev);
         let (rule_0f_prev, rule_0f_prev_code) = subroutine("rule_0f_prev", rule_0f_prev);
+        let (rule_2t_prev, rule_2t_prev_code) = subroutine("rule_2t_prev", rule_2t_prev);
 
         let (rule_1e_prev, rule_1e_prev_code) = subroutine("rule_1e_prev", rule_1e_prev);
 
@@ -1169,6 +1223,9 @@ impl TritonProgram for PredecessorIsValid {
                 // _ *w [prev_block_hash] *prev_claim_output
 
                 call {rule_0f_prev}
+                // _ *w [prev_block_hash] *prev_claim_output
+
+                call {rule_2t_prev}
                 // _ *w [prev_block_hash] *prev_claim_output
 
                 pop 1
@@ -1620,6 +1677,7 @@ impl TritonProgram for PredecessorIsValid {
             {&rule_0d_prev_code}
             {&rule_0e_prev_code}
             {&rule_0f_prev_code}
+            {&rule_2t_prev_code}
             {&rule_1e_prev_code}
             {&write_output_code}
             {&library.all_imports()}
@@ -1647,7 +1705,6 @@ impl TritonProgram for PredecessorIsValid {
 mod tests {
     use std::collections::HashMap;
 
-    use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
     use neptune_primitives::block_height::BlockHeight;
     use neptune_primitives::difficulty_control::difficulty_control;
@@ -1875,6 +1932,21 @@ mod tests {
                     prev_prev_block_cumulative_pow + witness.prev_block_header.difficulty,
                     witness.prev_block_header.cumulative_proof_of_work
                 );
+                // 2.t)
+                let mutator_set_offset = Self::output_mutator_set_offset();
+                assert_eq!(
+                    parent_claim.output[mutator_set_offset..mutator_set_offset + Digest::LEN],
+                    prev_transaction_kernel.mutator_set_hash.values()
+                );
+
+                // 2.t) The witness's mutator set is the one the transaction
+                // is built on.
+                let mutator_set = &witness.prev_block_transaction_mutator_set;
+                assert_eq!(
+                    parent_claim.output[mutator_set_offset..mutator_set_offset + Digest::LEN],
+                    mutator_set.hash().values()
+                );
+
                 // 1.e)
                 assert!(
                     u64::try_from(witness.prev_block_size()).unwrap()
@@ -2135,6 +2207,15 @@ mod tests {
             .unwrap()
             .get(&block.header().prev_block_digest)
             .cloned()
+    }
+
+    /// The mutator set the block's transaction is built on: the one after
+    /// its predecessor, if the fixtures built the block on it. Any value
+    /// serves a previous block below the activation height.
+    fn transaction_mutator_set(block: &Block) -> MutatorSetAccumulator {
+        predecessor_of(block)
+            .and_then(|predecessor| predecessor.mutator_set_accumulator_after().ok())
+            .unwrap_or_default()
     }
 
     /// A random body with the given block MMR, transaction and mutator set
@@ -2442,7 +2523,11 @@ mod tests {
         epochs: &EpochTable,
     ) -> (Claim, NonDeterminism) {
         let claim = own_claim_with_epochs(program, prev_block, next_body, next_header, epochs);
-        let witness = PredecessorIsValidWitness::new(prev_block, next_body);
+        let witness = PredecessorIsValidWitness::new(
+            prev_block,
+            next_body,
+            transaction_mutator_set(prev_block),
+        );
 
         (claim, witness.nondeterminism(program, epochs))
     }
@@ -2551,7 +2636,11 @@ mod tests {
         ) -> (Claim, NeptuneProof) {
             let program = PredecessorIsValid::new();
             let claim = own_claim(&program, prev_block, next_body, next_header);
-            let witness = PredecessorIsValidWitness::new(prev_block, next_body);
+            let witness = PredecessorIsValidWitness::new(
+                prev_block,
+                next_body,
+                transaction_mutator_set(prev_block),
+            );
             let proof = load_proof_or_produce_and_save(
                 &claim,
                 program.program(),
@@ -2769,7 +2858,11 @@ mod tests {
                 prev_block_of_size(500_000).0,
             ] {
                 let (next_body, _) = next_body_and_header(&prev_block, 0);
-                let witness = PredecessorIsValidWitness::new(&prev_block, &next_body);
+                let witness = PredecessorIsValidWitness::new(
+                    &prev_block,
+                    &next_body,
+                    transaction_mutator_set(&prev_block),
+                );
                 let memory = PredecessorIsValidWitnessMemory::from(&witness);
                 assert_eq!(prev_block.size(), memory.prev_block_size());
             }
@@ -3329,11 +3422,52 @@ mod tests {
         }
 
         #[test]
+        fn witness_with_other_mutator_set_fails() {
+            let (prev_block, next_body, next_header) =
+                unproven_prev_block_and_next_body_and_header(0);
+            let program = skipping();
+            let claim = own_claim(&program, &prev_block, &next_body, &next_header);
+            let mut other_mutator_set = transaction_mutator_set(&prev_block);
+            other_mutator_set.swbf_active.insert(1);
+            let witness =
+                PredecessorIsValidWitness::new(&prev_block, &next_body, other_mutator_set);
+
+            program
+                .test_assertion_failure(
+                    PublicInput::new(claim.input),
+                    witness.nondeterminism(&program, &epochs()),
+                    &[BlockValidationRule::TransactionMutatorSetMismatch.error_id()],
+                )
+                .unwrap();
+        }
+
+        #[test]
+        fn prev_block_with_transaction_on_other_mutator_set_fails() {
+            let prev_prev_block =
+                random_unproven_block_at_height(0, activation_height().value() - 1);
+            let (kernel, _) = transaction_kernel_and_proof();
+            let transaction_kernel = TransactionKernelModifier::default()
+                .mutator_set_hash(StdRng::seed_from_u64(7).random())
+                .modify(kernel.clone());
+            let (prev_block, next_body, next_header) =
+                prev_block_on(&prev_prev_block, transaction_kernel, &epochs());
+
+            assert_rejects(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::TransactionMutatorSetMismatch.error_id(),
+            );
+        }
+
+        #[test]
         fn claim_output_ends_with_mutator_set_after_prev_block() {
             let (prev_block, next_body, next_header) =
                 unproven_prev_block_and_next_body_and_header(0);
             let claim = own_claim(&skipping(), &prev_block, &next_body, &next_header);
-            let offset = claim.output.len() - Digest::LEN;
+            let offset = PredecessorIsValid::output_mutator_set_offset();
+            assert_eq!(offset + Digest::LEN, claim.output.len());
             assert_eq!(
                 prev_block
                     .mutator_set_accumulator_after()
