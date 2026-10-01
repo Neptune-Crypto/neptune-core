@@ -1242,6 +1242,13 @@ impl TritonProgram for PredecessorIsValid {
             // _ *w [prev_block_hash] *prev_claim_output
         );
 
+        // The sign bit is the top bit of the most significant limb.
+        // BEFORE: _ [amount: i128]
+        // AFTER:  _ (amount >= 0)
+        let is_non_negative = triton_asm!(pop 3 push {1_u64 << 31} swap 1 lt);
+
+        // BEFORE: _ *w [prev_block_hash]
+        // AFTER:  _ *w [prev_block_hash]
         // The divined tokens are the positions of the inputs sorted by index
         // set; see [RemovalRecordsAreUnique::divined_tokens].
         // BEFORE: _ *w [prev_block_hash]
@@ -1294,6 +1301,21 @@ impl TritonProgram for PredecessorIsValid {
             // _ *w [prev_block_hash]
         );
 
+        let coinbase_is_non_negative = "predecessor_is_valid_coinbase_is_non_negative".to_string();
+        let coinbase_is_non_negative_code = triton_asm!(
+            // BEFORE: _ *coinbase
+            // AFTER:  _ *coinbase
+            {coinbase_is_non_negative}:
+                dup 0 addi {amount_size} read_mem {amount_size} pop 1
+                // _ *coinbase [coinbase]
+
+                {&is_non_negative}
+                assert error_id {BlockValidationRule::NegativeCoinbase.error_id()}
+                // _ *coinbase
+
+                return
+        );
+
         let coinbase_is_within_subsidy =
             "predecessor_is_valid_coinbase_is_within_subsidy".to_string();
         let coinbase_is_within_subsidy_code = triton_asm!(
@@ -1335,6 +1357,18 @@ impl TritonProgram for PredecessorIsValid {
 
         // BEFORE: _ *w [prev_block_hash]
         // AFTER:  _ *w [prev_block_hash]
+        let rule_2h_prev = triton_asm!(
+            dup 5 {&prev_block_txk} {&field!(TransactionKernel::coinbase)}
+            // _ *w [prev_block_hash] *coinbase
+
+            dup 0 read_mem 1 pop 1
+            // _ *w [prev_block_hash] *coinbase coinbase_is_some
+
+            skiz call {coinbase_is_non_negative}
+            pop 1
+            // _ *w [prev_block_hash]
+        );
+
         // BEFORE: _ *w [prev_block_hash]
         // AFTER:  _ *w [prev_block_hash]
         let rule_1e_prev = triton_asm!(
@@ -1830,6 +1864,7 @@ impl TritonProgram for PredecessorIsValid {
         let (rule_1a_txproof_prev, rule_1a_txproof_prev_code) =
             subroutine("rule_1a_prev", rule_1a_txproof_prev);
         let (rule_2g_prev, rule_2g_prev_code) = subroutine("rule_2g_prev", rule_2g_prev);
+        let (rule_2h_prev, rule_2h_prev_code) = subroutine("rule_2h_prev", rule_2h_prev);
         let (rule_2c_prev, rule_2c_prev_code) = subroutine("rule_2c_prev", rule_2c_prev);
         let (mutator_set_after_prev_block, mutator_set_after_prev_block_code) =
             subroutine("mutator_set_after_prev_block", mutator_set_after_prev_block);
@@ -1885,6 +1920,10 @@ impl TritonProgram for PredecessorIsValid {
             // _ [next_block_body_mh] *w [prev_block_hash]
 
 
+            call {rule_2h_prev}
+            // _ [next_block_body_mh] *w [prev_block_hash]
+
+
             call {rule_2c_prev}
             // _ [next_block_body_mh] *w [prev_block_hash]
 
@@ -1911,6 +1950,7 @@ impl TritonProgram for PredecessorIsValid {
             {&own_claim_input_matches_code}
             {&find_own_claim_code}
             {&coinbase_is_within_subsidy_code}
+            {&coinbase_is_non_negative_code}
             {&prev_block_epoch_rules_code}
             {&authenticate_next_block_mmr_accumulator_code}
             {&hash_prev_block_body_code}
@@ -1923,6 +1963,7 @@ impl TritonProgram for PredecessorIsValid {
             {&verify_prev_block_proof_code}
             {&rule_1a_txproof_prev_code}
             {&rule_2g_prev_code}
+            {&rule_2h_prev_code}
             {&rule_2c_prev_code}
             {&mutator_set_after_prev_block_code}
             {&read_epoch_table_code}
@@ -2099,6 +2140,11 @@ mod tests {
             // 2.g)
             if let Some(coinbase) = prev_transaction_kernel.coinbase {
                 assert!(coinbase <= Block::block_subsidy(witness.prev_block_header.height));
+            }
+
+            // 2.h)
+            if let Some(coinbase) = prev_transaction_kernel.coinbase {
+                assert!(!coinbase.is_negative());
             }
 
             // 2.c) The divined positions must be a permutation of the inputs,
@@ -3841,6 +3887,23 @@ mod tests {
                     );
                 }
             }
+        }
+
+        #[test]
+        fn prev_block_with_negative_coinbase_fails() {
+            let transaction_kernel = TransactionKernelModifier::default()
+                .coinbase(Some(-NativeCurrencyAmount::coins(1)))
+                .modify(transaction_kernel_and_proof().0.clone());
+            let (prev_block, next_body, next_header) =
+                prev_block_with_transaction_kernel(transaction_kernel, &epochs());
+
+            assert_rejects(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::NegativeCoinbase.error_id(),
+            );
         }
 
         /// The previous block on the shared grandparent, carrying this SWBFI
