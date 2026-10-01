@@ -115,6 +115,15 @@ pub enum BlockProof {
     SingleProof(Proof),
 }
 
+impl BlockProof {
+    /// First word of the encoding of [`Self::SingleProof`].
+    pub const SINGLE_PROOF_DISCRIMINANT: u64 = 2;
+
+    /// Number of words the encoding of [`Self::SingleProof`] puts before the
+    /// actual proof's encoding: discriminant and the proof's length.
+    pub const SINGLE_PROOF_PREFIX_LEN: u64 = 2;
+}
+
 /// Public fields of `Block` are read-only, enforced by #[readonly::make].
 /// Modifications are possible only through `Block` methods.
 ///
