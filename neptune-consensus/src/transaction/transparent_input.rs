@@ -6,6 +6,7 @@ use rand::distr::StandardUniform;
 use rand::Rng;
 use rand::RngExt;
 use tasm_lib::prelude::Digest;
+use tasm_lib::prelude::TasmObject;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 
@@ -33,7 +34,7 @@ use crate::transaction::utxo::Utxo;
 ///    -- output counterpart to this struct, does not contain info needed to
 ///    re-derive the absolute index set because that information is not known by
 ///    the transaction initiator.
-#[derive(Debug, Clone, BFieldCodec)]
+#[derive(Debug, Clone, BFieldCodec, TasmObject)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct TransparentInput {
     pub utxo: Utxo,
