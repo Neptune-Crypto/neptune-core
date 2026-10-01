@@ -183,6 +183,7 @@ mod test_support {
     use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
     use neptune_mutator_set::msa_and_records::MsaAndRecords;
     use neptune_mutator_set::removal_record::RemovalRecord;
+    use neptune_mutator_set::shared::WINDOW_SIZE;
     use neptune_primitives::block_height::BlockHeight;
     use neptune_primitives::difficulty_control::Difficulty;
     use proptest::collection::vec;
@@ -251,19 +252,135 @@ mod test_support {
                 .current()
         }
 
+        /// As [`Self::deterministic_with_block_height_and_difficulty`], with
+        /// the predecessor block built by the given function from the
+        /// generated header, body and appendix. The transaction is built on
+        /// the mutator set after the block the function returns, so the
+        /// function may prove the block or solve its proof of work.
+        pub fn deterministic_with_height_difficulty_and_predecessor_builder(
+            block_height: BlockHeight,
+            difficulty: Difficulty,
+            network: Network,
+            build_predecessor: fn(BlockHeader, BlockBody, BlockAppendix) -> Block,
+        ) -> Self {
+            let mut test_runner = TestRunner::deterministic();
+
+            Self::arbitrary_with_height_difficulty_and_predecessor_builder(
+                block_height,
+                difficulty,
+                network,
+                build_predecessor,
+            )
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current()
+        }
+
+        /// The predecessor block as generated, without a proof.
+        fn unproven_predecessor(
+            header: BlockHeader,
+            body: BlockBody,
+            appendix: BlockAppendix,
+        ) -> Block {
+            Block {
+                kernel: BlockKernel {
+                    header,
+                    body,
+                    appendix,
+                },
+                proof: BlockProof::Invalid,
+                digest: OnceLock::new(),
+            }
+        }
+
         pub fn arbitrary_with_height_and_difficulty(
             block_height: BlockHeight,
             difficulty: Difficulty,
             network: Network,
         ) -> BoxedStrategy<BlockPrimitiveWitness> {
-            const NUM_INPUTS: usize = 2;
+            Self::arbitrary_with_height_difficulty_and_predecessor_builder(
+                block_height,
+                difficulty,
+                network,
+                Self::unproven_predecessor,
+            )
+        }
 
+        /// As [`Self::arbitrary_with_height_and_difficulty`], with the
+        /// predecessor block built by the given function; see
+        /// [`Self::deterministic_with_height_difficulty_and_predecessor_builder`].
+        pub fn arbitrary_with_height_difficulty_and_predecessor_builder(
+            block_height: BlockHeight,
+            difficulty: Difficulty,
+            network: Network,
+            build_predecessor: fn(BlockHeader, BlockBody, BlockAppendix) -> Block,
+        ) -> BoxedStrategy<BlockPrimitiveWitness> {
+            const NUM_INPUTS: usize = 2;
+            Self::arbitrary_predecessor_and_primitive_witnesses(
+                NUM_INPUTS,
+                block_height,
+                difficulty,
+                network,
+                build_predecessor,
+            )
+            .prop_flat_map(move |(predecessor_block, coinbase, inputs)| {
+                arb::<[u8; 32]>().prop_map(move |shuffle_seed| {
+                    let block_transaction =
+                        block_transaction(&coinbase, &inputs, shuffle_seed, block_height, network);
+                    BlockPrimitiveWitness::new(
+                        predecessor_block.clone(),
+                        block_transaction,
+                        network,
+                    )
+                })
+            })
+            .boxed()
+        }
+
+        /// As [`Self::arbitrary_predecessor_and_primitive_witnesses`] but
+        /// deterministic.
+        ///
+        /// Produces no proofs.
+        pub fn deterministic_predecessor_and_primitive_witnesses(
+            num_inputs: usize,
+            block_height: BlockHeight,
+            difficulty: Difficulty,
+            network: Network,
+            build_predecessor: fn(BlockHeader, BlockBody, BlockAppendix) -> Block,
+        ) -> (Block, PrimitiveWitness, PrimitiveWitness) {
+            let mut test_runner = TestRunner::deterministic();
+
+            Self::arbitrary_predecessor_and_primitive_witnesses(
+                num_inputs,
+                block_height,
+                difficulty,
+                network,
+                build_predecessor,
+            )
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current()
+        }
+
+        /// The predecessor block built by the given function, and primitive
+        /// witness-backed transactions of the coinbase, and a transaction with
+        /// the given number of inputs, synced to the mutator set after the
+        /// predecessor.
+        ///
+        /// Produces no proofs.
+        fn arbitrary_predecessor_and_primitive_witnesses(
+            num_inputs: usize,
+            block_height: BlockHeight,
+            difficulty: Difficulty,
+            network: Network,
+            build_predecessor: fn(BlockHeader, BlockBody, BlockAppendix) -> Block,
+        ) -> BoxedStrategy<(Block, PrimitiveWitness, PrimitiveWitness)> {
             (
                 NativeCurrencyAmount::arbitrary_non_negative(),
-                vec(0f64..1f64, NUM_INPUTS - 1),
-                vec(arb::<Digest>(), NUM_INPUTS),
-                vec(arb::<Digest>(), NUM_INPUTS),
-                vec(arb::<Digest>(), NUM_INPUTS),
+                vec(0f64..1f64, num_inputs - 1),
+                vec(arb::<Digest>(), num_inputs),
+                vec(arb::<Digest>(), num_inputs),
+                vec(arb::<Digest>(), num_inputs),
                 0..u64::MAX / 2,
             )
                 .prop_flat_map(
@@ -275,17 +392,16 @@ mod test_support {
                         receiver_preimages,
                         aocl_size,
                     )| {
-                        let mut input_amounts = input_distribution
-                            .into_iter()
-                            .map(|fraction| total_input.lossy_f64_fraction_mul(fraction))
-                            .collect_vec();
-                        input_amounts.push(
-                            total_input
-                                .checked_sub(
-                                    &input_amounts.iter().copied().sum::<NativeCurrencyAmount>(),
-                                )
-                                .unwrap(),
-                        );
+                        // Each input takes a fraction of what the earlier
+                        // ones left; the last takes the remaining amount.
+                        let mut remaining = total_input;
+                        let mut input_amounts = vec![];
+                        for fraction in input_distribution {
+                            let amount = remaining.lossy_f64_fraction_mul(fraction);
+                            input_amounts.push(amount);
+                            remaining = remaining.checked_sub(&amount).unwrap();
+                        }
+                        input_amounts.push(remaining);
                         let lock_scripts_and_witnesses = hash_lock_keys
                             .iter()
                             .copied()
@@ -306,7 +422,19 @@ mod test_support {
                         )
                         .collect_vec();
                         MsaAndRecords::arbitrary_with((removables.clone(), aocl_size))
-                            .prop_flat_map(move |msa_and_records| {
+                            .prop_flat_map(move |mut msa_and_records| {
+                                // The active window as the mutator set
+                                // produces it: a sorted multiset of indices
+                                // inside the window. The arbitrary window
+                                // is neither.
+                                let window =
+                                    &mut msa_and_records.mutator_set_accumulator.swbf_active.sbf;
+                                *window = window
+                                    .iter()
+                                    .map(|index| index % WINDOW_SIZE)
+                                    .sorted()
+                                    .collect();
+
                                 let unpacked_removal_records =
                                     msa_and_records.unpacked_removal_records();
                                 let membership_proofs = msa_and_records.membership_proofs;
@@ -341,16 +469,8 @@ mod test_support {
                                             ),
                                         );
 
-                                        let parent_kernel = BlockKernel {
-                                            header,
-                                            body: body.clone(),
-                                            appendix: appendix.clone(),
-                                        };
-                                        let predecessor_block = Block {
-                                            kernel: parent_kernel,
-                                            proof: BlockProof::Invalid,
-                                            digest: OnceLock::new(),
-                                        };
+                                        let predecessor_block =
+                                            build_predecessor(header, body, appendix.clone());
 
                                         let coinbase_amount = Block::block_subsidy(
                                             predecessor_block.header().height.next(),
@@ -391,7 +511,7 @@ mod test_support {
                                             unpacked_removal_records,
                                             membership_proofs,
                                         );
-                                        arbitrary_block_transaction_from_msa_and_records(
+                                        PrimitiveWitness::arbitrary_pair_with_coinbase_and_inputs_respectively_from_msa_and_records(
                                             2,
                                             2,
                                             msa_and_records_after_block,
@@ -399,18 +519,10 @@ mod test_support {
                                             lock_scripts_and_witnesses.clone(),
                                             coinbase_amount,
                                             timestamp,
-                                            block_height,
-                                            network,
                                         )
-                                        .prop_map(
-                                            move |block_tx| {
-                                                BlockPrimitiveWitness::new(
-                                                    predecessor_block.clone(),
-                                                    block_tx.clone(),
-                                                    network,
-                                                )
-                                            },
-                                        )
+                                        .prop_map(move |(coinbase, inputs)| {
+                                            (predecessor_block.clone(), coinbase, inputs)
+                                        })
                                     },
                                 )
                             })
@@ -432,75 +544,57 @@ mod test_support {
         }
     }
 
-    /// Returns transactions without packed inputs
-    #[expect(clippy::too_many_arguments)]
-    fn arbitrary_block_transaction_from_msa_and_records(
-        num_outputs: usize,
-        num_announcements: usize,
-        msa_and_records: MsaAndRecords,
-        input_utxos: Vec<Utxo>,
-        lock_scripts_and_witnesses: Vec<LockScriptAndWitness>,
-        coinbase_amount: NativeCurrencyAmount,
-        timestamp: Timestamp,
+    /// The block transaction merging the coinbase transaction and the
+    /// transaction spending inputs, each with a single proof, without packed
+    /// inputs.
+    fn block_transaction(
+        coinbase: &PrimitiveWitness,
+        inputs: &PrimitiveWitness,
+        shuffle_seed: [u8; 32],
         block_height: BlockHeight,
         network: Network,
-    ) -> BoxedStrategy<BlockTransaction> {
+    ) -> BlockTransaction {
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
-        (
-        PrimitiveWitness::arbitrary_pair_with_coinbase_and_inputs_respectively_from_msa_and_records(
-            num_outputs,
-            num_announcements,
-            msa_and_records,
-            input_utxos,
-            lock_scripts_and_witnesses,
-            coinbase_amount,
-            timestamp,
-        ),
-        arb::<[u8; 32]>(),
-    )
-        .prop_map(move |((primwit_coinbase, primwit_inputs), shuffle_seed)| {
-            let rt = crate::proof_abstractions::test_runtime::tokio_runtime();
-            let _guard = rt.enter();
+        let rt = crate::proof_abstractions::test_runtime::tokio_runtime();
+        let _guard = rt.enter();
 
-            let proof_job_options = TritonVmProofJobOptions::default_with_network(network);
+        let proof_job_options = TritonVmProofJobOptions::default_with_network(network);
 
-            let single_proof_coinbase = rt
-                .block_on(produce_single_proof(
-                    &primwit_coinbase,
-                    TritonVmJobQueue::get_instance(),
-                    proof_job_options.clone(),
-                    consensus_rule_set,
-                ))
-                .unwrap();
-
-            let tx_coinbase = Transaction {
-                kernel: primwit_coinbase.kernel,
-                proof: TransactionProof::SingleProof(single_proof_coinbase),
-            };
-            let single_proof_inputs = rt
-                .block_on(produce_single_proof(
-                    &primwit_inputs,
-                    TritonVmJobQueue::get_instance(),
-                    proof_job_options.clone(),
-                    consensus_rule_set,
-                ))
-                .unwrap();
-            let tx_inputs = Transaction {
-                kernel: primwit_inputs.kernel,
-                proof: TransactionProof::SingleProof(single_proof_inputs),
-            };
-
-            rt.block_on(BlockTransaction::merge(
-                tx_coinbase.into(),
-                tx_inputs,
-                shuffle_seed,
+        let single_proof_coinbase = rt
+            .block_on(produce_single_proof(
+                coinbase,
                 TritonVmJobQueue::get_instance(),
                 proof_job_options.clone(),
                 consensus_rule_set,
             ))
-            .unwrap()
-        })
-        .boxed()
+            .unwrap();
+
+        let tx_coinbase = Transaction {
+            kernel: coinbase.kernel.clone(),
+            proof: TransactionProof::SingleProof(single_proof_coinbase),
+        };
+        let single_proof_inputs = rt
+            .block_on(produce_single_proof(
+                inputs,
+                TritonVmJobQueue::get_instance(),
+                proof_job_options.clone(),
+                consensus_rule_set,
+            ))
+            .unwrap();
+        let tx_inputs = Transaction {
+            kernel: inputs.kernel.clone(),
+            proof: TransactionProof::SingleProof(single_proof_inputs),
+        };
+
+        rt.block_on(BlockTransaction::merge(
+            tx_coinbase.into(),
+            tx_inputs,
+            shuffle_seed,
+            TritonVmJobQueue::get_instance(),
+            proof_job_options.clone(),
+            consensus_rule_set,
+        ))
+        .unwrap()
     }
 }
 
