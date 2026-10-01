@@ -7,6 +7,7 @@ use neptune_primitives::mast_hash::MastHash;
 use neptune_primitives::timestamp::Timestamp;
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::arithmetic::u192::safe_add::SafeAdd as U192SafeAdd;
 use tasm_lib::arithmetic::u64::lt::Lt as U64Lt;
 use tasm_lib::field;
 use tasm_lib::field_with_size;
@@ -269,6 +270,7 @@ impl TritonProgram for PredecessorIsValid {
         let append_to_mmr = library.import(Box::new(CalculateNewPeaksFromAppend));
         let memcpy = library.import(Box::new(MemCpy));
         let u64_lt = library.import(Box::new(U64Lt));
+        let u192_safe_add = library.import(Box::new(U192SafeAdd));
         let difficulty_control = library.import(Box::new(DifficultyControl));
         // The `BlockProof`'s encoding lies inside the `Vec` field, after the
         // `Vec`'s own length word.
@@ -301,6 +303,10 @@ impl TritonProgram for PredecessorIsValid {
         );
         let read_prev_block_difficulty = triton_asm!(
             {&prev_block_header} {&field!(BlockHeader::difficulty)} {&read_difficulty}
+        );
+        let read_prev_block_cumulative_pow = triton_asm!(
+            {&prev_block_header} {&field!(BlockHeader::cumulative_proof_of_work)}
+            {&read_cumulative_pow}
         );
 
         // The status occupies the last words of the PoW field's first path;
@@ -839,6 +845,34 @@ impl TritonProgram for PredecessorIsValid {
             // _ *w [prev_block_hash] *prev_claim_output
         );
 
+        // BEFORE: _ *w [prev_block_hash] *prev_claim_output
+        // AFTER:  _ *w [prev_block_hash] *prev_claim_output
+        let rule_0f_prev = triton_asm!(
+            dup 0 addi {Self::output_cumulative_pow_offset() + 1} {&read_cumulative_pow}
+            // _ *w [prev_block_hash] *prev_claim_output [prev_prev_block_cumulative_pow: u192]
+
+            push 0 dup 13 {&read_prev_block_difficulty}
+            // _ *w [prev_block_hash] *prev_claim_output [prev_prev_block_cumulative_pow: u192] [prev_block_difficulty: u192]
+
+            call {u192_safe_add}
+            // _ *w [prev_block_hash] *prev_claim_output [expected_cumulative_pow: u192]
+
+            dup 12 {&read_prev_block_cumulative_pow}
+            // _ *w [prev_block_hash] *prev_claim_output [expected_cumulative_pow: u192] [prev_block_cumulative_pow: u192]
+
+            {&DataType::U192.compare()}
+            assert error_id {BlockValidationRule::CumulativeProofOfWork.error_id()}
+            // _ *w [prev_block_hash] *prev_claim_output
+        );
+
+        // BEFORE: _ *w [prev_block_hash]
+        // AFTER:  _ *w [prev_block_hash]
+        // BEFORE: _ *w [prev_block_hash]
+        // AFTER:  _ *w [prev_block_hash]
+        // BEFORE: _ *w [prev_block_hash]
+        // AFTER:  _ *w [prev_block_hash]
+        // BEFORE: _ *w [prev_block_hash]
+        // AFTER:  _ *w [prev_block_hash]
         // The rules about the previous block that depend on the epoch in
         // force at its height: its header fields that its own program
         // execution could not assert, since they were not fixed when that
@@ -848,6 +882,7 @@ impl TritonProgram for PredecessorIsValid {
         let (rule_0b_prev, rule_0b_prev_code) = subroutine("rule_0b_prev", rule_0b_prev);
         let (rule_0d_prev, rule_0d_prev_code) = subroutine("rule_0d_prev", rule_0d_prev);
         let (rule_0e_prev, rule_0e_prev_code) = subroutine("rule_0e_prev", rule_0e_prev);
+        let (rule_0f_prev, rule_0f_prev_code) = subroutine("rule_0f_prev", rule_0f_prev);
 
         let prev_block_epoch_rules = "predecessor_is_valid_prev_block_epoch_rules".to_string();
         let prev_block_epoch_rules_code = triton_asm!(
@@ -892,6 +927,9 @@ impl TritonProgram for PredecessorIsValid {
                 // _ *w [prev_block_hash] *prev_claim_output
 
                 call {rule_0e_prev}
+                // _ *w [prev_block_hash] *prev_claim_output
+
+                call {rule_0f_prev}
                 // _ *w [prev_block_hash] *prev_claim_output
 
                 pop 1
@@ -1060,6 +1098,7 @@ impl TritonProgram for PredecessorIsValid {
             {&rule_0b_prev_code}
             {&rule_0d_prev_code}
             {&rule_0e_prev_code}
+            {&rule_0f_prev_code}
             {&write_output_code}
             {&library.all_imports()}
         );
@@ -1161,6 +1200,7 @@ mod tests {
                 .map(|_| tasm::tasmlib_io_read_stdin___bfe())
                 .collect::<Vec<_>>();
             let epochs = *EpochTable::decode(&epoch_table_words).unwrap();
+            let cumulative_pow_size = ProofOfWork::static_length().unwrap();
             let prev_block_height = witness.prev_block_header.height;
             if prev_block_height >= epochs.activation_height() {
                 let prev_epoch = epochs.in_force_at(prev_block_height);
@@ -1226,6 +1266,18 @@ mod tests {
                         prev_block_height.previous().unwrap(),
                     ),
                     witness.prev_block_header.difficulty
+                );
+
+                // 0.f)
+                let cumulative_pow_offset = Self::output_cumulative_pow_offset();
+                let prev_prev_block_cumulative_pow = *ProofOfWork::decode(
+                    &parent_claim.output
+                        [cumulative_pow_offset..cumulative_pow_offset + cumulative_pow_size],
+                )
+                .unwrap();
+                assert_eq!(
+                    prev_prev_block_cumulative_pow + witness.prev_block_header.difficulty,
+                    witness.prev_block_header.cumulative_proof_of_work
                 );
             }
 
@@ -2058,6 +2110,23 @@ mod tests {
                 &next_body,
                 &next_header,
                 BlockValidationRule::Difficulty.error_id(),
+            );
+        }
+
+        #[test]
+        fn prev_block_with_wrong_cumulative_proof_of_work_fails() {
+            let prev_prev_block = random_unproven_block(0);
+            let (body, mut header) = next_body_and_header(&prev_prev_block, 0);
+            header.cumulative_proof_of_work = header.cumulative_proof_of_work + Difficulty::MINIMUM;
+            let prev_block = unproven_block_with_own_claim(&prev_prev_block, body, header, 0);
+            let (next_body, next_header) = next_body_and_header(&prev_block, 0);
+
+            assert_rejects(
+                &PredecessorIsValid,
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::CumulativeProofOfWork.error_id(),
             );
         }
 
