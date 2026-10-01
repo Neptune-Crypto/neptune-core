@@ -2423,8 +2423,11 @@ mod tests {
     use rand::rngs::StdRng;
     use rand::RngExt;
     use rand::SeedableRng;
+    use tasm_lib::triton_vm::execution_trace_profiler::ExecutionTraceProfile;
+    use tasm_lib::triton_vm::execution_trace_profiler::VMTableHeights;
     use tasm_lib::twenty_first::prelude::Mmr;
 
+    use super::super::chunk_witness::ChunkWitness;
     use super::super::correct_swbfi_update::CorrectSwbfiUpdateWitness;
     use super::super::removal_index_commitment::IndexSetDigests;
     use super::*;
@@ -3842,6 +3845,16 @@ mod tests {
             (prev_block, next_body, next_header)
         }
 
+        /// The fixture grandparent's header and body as generated, without
+        /// a proof or claims.
+        fn unproven_fixture_grandparent(
+            generated_header: BlockHeader,
+            body: BlockBody,
+            _appendix: BlockAppendix,
+        ) -> Block {
+            unproven_block(fixture_grandparent_header(&generated_header), body, vec![])
+        }
+
         thread_local! {
             /// The lustration status the grandparent of a lustration chain
             /// carries, set by the test that builds the chain.
@@ -4234,6 +4247,609 @@ mod tests {
                 &next_header,
                 BlockValidationRule::LustrationCounterExceedsInitialValue.error_id(),
             );
+        }
+
+        /// The rows of every table, as signed numbers, so that profiles can
+        /// be subtracted.
+        #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+        struct Rows {
+            processor: i64,
+            op_stack: i64,
+            ram: i64,
+            hash: i64,
+            u32: i64,
+        }
+
+        impl From<VMTableHeights> for Rows {
+            fn from(heights: VMTableHeights) -> Self {
+                Self {
+                    processor: heights.processor.into(),
+                    op_stack: heights.op_stack.into(),
+                    ram: heights.ram.into(),
+                    hash: heights.hash.into(),
+                    u32: heights.u32.into(),
+                }
+            }
+        }
+
+        impl Rows {
+            fn zip(self, other: Self, f: impl Fn(i64, i64) -> i64) -> Self {
+                Self {
+                    processor: f(self.processor, other.processor),
+                    op_stack: f(self.op_stack, other.op_stack),
+                    ram: f(self.ram, other.ram),
+                    hash: f(self.hash, other.hash),
+                    u32: f(self.u32, other.u32),
+                }
+            }
+
+            fn add(self, other: Self) -> Self {
+                self.zip(other, |a, b| a + b)
+            }
+
+            fn sub(self, other: Self) -> Self {
+                self.zip(other, |a, b| a - b)
+            }
+
+            fn div(self, divisor: i64) -> Self {
+                self.zip(Self::default(), |a, _| a / divisor)
+            }
+        }
+
+        /// The rows each check of the program adds to every table, in
+        /// program order: the spans of the subroutines the program calls
+        /// directly, and, within the epoch section, of the checks it calls.
+        /// The rows outside those spans are listed as glue. The u32 table
+        /// counts distinct entries only, so its rows do not add up across
+        /// checks.
+        struct CheckCosts {
+            /// A row per check, indented for the checks of the epoch section,
+            /// and twice for the rules inside the mutator set update.
+            rows: Vec<(String, Rows)>,
+            total: Rows,
+            padded_height: usize,
+            /// The program table's height: the program's padded length.
+            program: u32,
+        }
+
+        impl CheckCosts {
+            const EPOCH_SECTION: &str = "predecessor_is_valid_prev_block_epoch_rules";
+            const MUTATOR_SET_UPDATE: &str = "predecessor_is_valid_mutator_set_update_prev";
+            /// The checks inside the mutator set update, by label.
+            const MUTATOR_SET_UPDATE_RULES: [&str; 3] = [
+                "neptune_consensus_block_removal_index_commitment",
+                "predecessor_is_valid_find_swbfi_claim",
+                "neptune_consensus_block_mutator_set_update_from_state_hash_rule_2e",
+            ];
+
+            fn new(profile: &ExecutionTraceProfile) -> Self {
+                let mut rows: Vec<(String, Rows)> = vec![];
+                let mut add = |label: String, rows_of_span: Rows| match rows
+                    .iter_mut()
+                    .find(|(existing, _)| *existing == label)
+                {
+                    Some((_, existing)) => *existing = existing.add(rows_of_span),
+                    None => rows.push((label, rows_of_span)),
+                };
+
+                let mut parent = String::new();
+                for line in &profile.profile {
+                    let contribution =
+                        Rows::from(line.table_heights_stop).sub(line.table_heights_start.into());
+                    if line.call_depth == 0 {
+                        parent.clone_from(&line.label);
+                        add(line.label.clone(), contribution);
+                    } else if line.call_depth == 1 && parent == Self::EPOCH_SECTION {
+                        add(format!("  {}", line.label), contribution);
+                    } else if Self::MUTATOR_SET_UPDATE_RULES.contains(&line.label.as_str()) {
+                        add(format!("    {}", line.label), contribution);
+                    }
+                }
+
+                let mutator_set_update = rows
+                    .iter()
+                    .find(|(label, _)| label.trim_start() == Self::MUTATOR_SET_UPDATE)
+                    .map(|(_, rows)| *rows);
+                if let Some(mutator_set_update) = mutator_set_update {
+                    let in_rules = rows
+                        .iter()
+                        .filter(|(label, _)| label.starts_with("    "))
+                        .fold(Rows::default(), |sum, (_, rows)| sum.add(*rows));
+                    let last_rule = rows
+                        .iter()
+                        .rposition(|(label, _)| label.starts_with("    "))
+                        .expect("the update has rules");
+                    rows.insert(
+                        last_rule + 1,
+                        (
+                            "    (glue of the mutator set update)".to_string(),
+                            mutator_set_update.sub(in_rules),
+                        ),
+                    );
+                }
+
+                let total = Rows::from(profile.total);
+                let epoch_section = rows
+                    .iter()
+                    .find(|(label, _)| label == Self::EPOCH_SECTION)
+                    .map(|(_, rows)| *rows);
+                if let Some(epoch_section) = epoch_section {
+                    let in_checks = rows
+                        .iter()
+                        .filter(|(label, _)| label.starts_with(' ') && !label.starts_with("    "))
+                        .fold(Rows::default(), |sum, (_, rows)| sum.add(*rows));
+                    rows.push((
+                        "  (glue of the epoch section)".to_string(),
+                        epoch_section.sub(in_checks),
+                    ));
+                }
+                let in_spans = rows
+                    .iter()
+                    .filter(|(label, _)| !label.starts_with(' '))
+                    .fold(Rows::default(), |sum, (_, rows)| sum.add(*rows));
+                rows.push((
+                    "(glue of the main program)".to_string(),
+                    total.sub(in_spans),
+                ));
+
+                Self {
+                    rows,
+                    total,
+                    padded_height: profile.padded_height,
+                    program: profile.total.program,
+                }
+            }
+
+            /// The rows of each check, less those of the same check in the
+            /// other profile, divided by the count.
+            fn per_unit(&self, other: &Self, count: i64) -> Vec<(String, Rows)> {
+                self.rows
+                    .iter()
+                    .map(|(label, rows)| {
+                        let other_rows = other
+                            .rows
+                            .iter()
+                            .find(|(other_label, _)| other_label == label)
+                            .map_or(Rows::default(), |(_, rows)| *rows);
+                        (label.clone(), rows.sub(other_rows).div(count))
+                    })
+                    .collect()
+            }
+
+            /// The processor rows of the check with this label.
+            fn processor_rows_of(&self, label: &str) -> i64 {
+                self.rows
+                    .iter()
+                    .find(|(existing, _)| existing.trim_start() == label)
+                    .map_or(0, |(_, rows)| rows.processor)
+            }
+
+            /// The hash rows outside every span: program attestation.
+            fn program_attestation_hash_rows(&self) -> i64 {
+                self.rows
+                    .iter()
+                    .find(|(label, _)| label == "(glue of the main program)")
+                    .map_or(0, |(_, rows)| rows.hash)
+            }
+
+            /// The readable name of the check with this subroutine label.
+            fn describe_check(label: &str) -> &str {
+                let label = label.strip_prefix("predecessor_is_valid_").unwrap_or(label);
+                match label {
+                    "tasmlib_verifier_own_program_digest" => "own program digest",
+                    _ if label.starts_with("tasmlib_structure_verify_nd_si_integrity") => {
+                        "witness audit"
+                    }
+                    "authenticate_next_block_mmr_accumulator" => {
+                        "authenticate next block's MMR accumulator (leaf for 0.a, 0.c)"
+                    }
+                    "hash_prev_block_body" => "hash previous block's body and transaction kernel",
+                    "prev_block_hash" => "previous block's hash (header MAST, appendix, proof)",
+                    "rule_0a" => "0.a height",
+                    "rule_0c" => "0.c block MMR update",
+                    "rule_1f_prev" => "1.f version in PoW",
+                    "proof_of_work_prev" => "proof of work (minimum difficulty, hash under target)",
+                    "rule_1b_prev" => "1.b appendix size",
+                    "rule_1e_prev" => "1.e block size",
+                    "rule_1c_prev" => "1.c single proof",
+                    "rule_1d_prev" => "1.d block proof verification",
+                    "rule_1a_prev" => "1.a transaction claim in appendix",
+                    "rule_2g_prev" => "2.g coinbase within subsidy",
+                    "rule_2h_prev" => "2.h coinbase non-negative",
+                    "rule_2i_prev" => "2.i fee non-negative",
+                    "rule_2c_prev" => "2.c inputs unique",
+                    "mutator_set_after_prev_block" => {
+                        "mutator set after previous block (guesser fee; claim output)"
+                    }
+                    "rules_2o_2u_announcements_prev" => "2.o/2.u announcement scan",
+                    "rule_2m_prev" => "2.m lustration status parses",
+                    "read_epoch_table" => "read epoch table",
+                    "tasmlib_arithmetic_u64_lt" => "activation height comparison",
+                    "prev_block_epoch_rules" => "**epoch section (sum of the indented rows)**",
+                    "epoch_in_force" => "epoch in force",
+                    "find_own_claim" => "find own claim in appendix",
+                    "rule_0b_prev" => "0.b parent digest",
+                    "rule_0d_prev" => "0.d minimum block time",
+                    "rule_0e_prev" => "0.e difficulty",
+                    "rule_0f_prev" => "0.f cumulative PoW",
+                    "rule_2t_prev" => "2.t transaction and witness mutator set hashes",
+                    "mutator_set_update_prev" => {
+                        "2.a to 2.e mutator set update (sum of the indented rows)"
+                    }
+                    "neptune_consensus_block_removal_index_commitment" => {
+                        "MMR peaks over the inputs' index sets"
+                    }
+                    "find_swbfi_claim" => "find SWBFI update claim in appendix",
+                    "neptune_consensus_block_mutator_set_update_from_state_hash_rule_2e" => {
+                        "2.e window, peaks, additions and comparison"
+                    }
+                    "rule_2q_prev" => "2.q lustration threshold",
+                    "rules_2o_2p_2r_prev" => "2.o/2.p/2.r lustration amount and counter",
+                    "lustration_reset_prev" => "2.p/2.q lustration reset",
+                    "lustration_update_prev" => "2.o to 2.r lustration update",
+                    "rule_2f_prev" => "2.f transaction timestamp",
+                    "rule_2j_prev" => "2.j max inputs",
+                    "rule_2k_prev" => "2.k max outputs",
+                    "rule_2l_prev" => "2.l max announcements",
+                    "rule_2s_prev" => "2.s counter below initial value",
+                    "write_output" => "write claim output",
+                    "(glue of the main program)" => {
+                        "(glue of the main program; program attestation in the hash table)"
+                    }
+                    "total" => "**total**",
+                    other => other,
+                }
+            }
+
+            /// A markdown table of these rows, omitting rows that are zero
+            /// throughout if asked.
+            fn markdown_table(rows: &[(String, Rows)], omit_zero_rows: bool) -> String {
+                let mut table = String::from(
+                    "| check | processor | op_stack | ram | hash | u32 |\n\
+                     |---|---:|---:|---:|---:|---:|\n",
+                );
+                for (label, rows) in rows {
+                    if omit_zero_rows && *rows == Rows::default() {
+                        continue;
+                    }
+                    let (indent, label) =
+                        match (label.strip_prefix("    "), label.strip_prefix("  ")) {
+                            (Some(label), _) => {
+                                ("&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;", label)
+                            }
+                            (None, Some(label)) => ("&nbsp;&nbsp;&nbsp;&nbsp;", label),
+                            (None, None) => ("", label.as_str()),
+                        };
+                    table += &format!(
+                        "| {indent}{} | {} | {} | {} | {} | {} |\n",
+                        Self::describe_check(label),
+                        with_separators(rows.processor),
+                        with_separators(rows.op_stack),
+                        with_separators(rows.ram),
+                        with_separators(rows.hash),
+                        with_separators(rows.u32),
+                    );
+                }
+                table
+            }
+
+            /// A markdown section with the full profile.
+            fn markdown(&self, title: &str, description: &str) -> String {
+                let mut rows = self.rows.clone();
+                rows.push(("total".to_string(), self.total));
+                format!(
+                    "### {title}\n\n{description}. Padded height 2^{} ({}); program table \
+                     height {}.\n\n{}",
+                    self.padded_height.ilog2(),
+                    with_separators(self.padded_height as i64),
+                    with_separators(self.program.into()),
+                    Self::markdown_table(&rows, false),
+                )
+            }
+        }
+
+        /// The number with thousands separators.
+        fn with_separators(n: i64) -> String {
+            let digits = n.abs().to_string();
+            let mut grouped = String::new();
+            for (i, digit) in digits.chars().enumerate() {
+                if i > 0 && (digits.len() - i).is_multiple_of(3) {
+                    grouped.push(',');
+                }
+                grouped.push(digit);
+            }
+            if n < 0 {
+                grouped.insert(0, '-');
+            }
+            grouped
+        }
+
+        /// The rows every table gets from each check of the skipping
+        /// program, for this chain.
+        fn profile_checks(
+            (prev_block, next_body, next_header): &(Block, BlockBody, BlockHeader),
+        ) -> CheckCosts {
+            let program = skipping();
+            let (claim, nondeterminism) =
+                claim_and_nondeterminism(&program, prev_block, next_body, next_header, &epochs());
+            let (output, profile) = VM::profile(
+                program.program(),
+                PublicInput::new(claim.input),
+                nondeterminism,
+            )
+            .unwrap();
+            assert_eq!(claim.output, output);
+
+            CheckCosts::new(&profile)
+        }
+
+        /// The number of chunks the previous block's transaction's inputs
+        /// need, in total and per input.
+        fn describe_chunks(prev_block: &Block) -> (usize, usize) {
+            let kernel = &prev_block.body().transaction_kernel;
+            let num_chunks = ChunkWitness::num_chunks(&kernel.inputs);
+            (num_chunks, num_chunks / kernel.inputs.len().max(1))
+        }
+
+        /// The shape of the previous block's transaction, in one line.
+        fn describe_chain((prev_block, _, _): &(Block, BlockBody, BlockHeader)) -> String {
+            let kernel = &prev_block.body().transaction_kernel;
+            let mutator_set = transaction_mutator_set(prev_block);
+            let window_start =
+                u128::from(mutator_set.swbf_inactive.num_leafs()) << CHUNK_SIZE.ilog2();
+            let inputs = RemovalRecordList::try_unpack(kernel.inputs.clone(), true).unwrap();
+            let indices_in_window = inputs
+                .iter()
+                .flat_map(|record| record.absolute_indices.to_array())
+                .filter(|&index| index >= window_start)
+                .count();
+            let announcement_words = kernel
+                .announcements
+                .iter()
+                .map(|announcement| announcement.message.len())
+                .sum::<usize>();
+            format!(
+                "Previous block of {} words: {} inputs with {} packed chunks and {} of {} indices \
+                 in the active window, {} outputs, {} announcements of {} words in total",
+                prev_block.size(),
+                inputs.len(),
+                describe_chunks(prev_block).0,
+                indices_in_window,
+                inputs.len() * NUM_TRIALS as usize,
+                kernel.outputs.len(),
+                kernel.announcements.len(),
+                announcement_words,
+            )
+        }
+
+        /// Where the profile of the checks is written: next to the workspace
+        /// manifest.
+        const COST_PROFILE_PATH: &str = "../predecessor-is-valid-cost-profile.md";
+
+        /// Writes the rows each check of the skipping program adds to the
+        /// tables that decide the padded height, for previous blocks whose
+        /// transactions differ in shape, and then the difference per input,
+        /// per output, per announcement and per lustrating input, to the
+        /// markdown document at [COST_PROFILE_PATH], and prints it. Built
+        /// without any proof. Run this test after changing the program to
+        /// regenerate the document.
+        #[test]
+        #[ignore = "regenerates the cost profile document"]
+        fn profile_skipping_program_by_transaction_shape() {
+            const FEW_INPUTS: usize = 2;
+            const MANY_INPUTS: usize = 20;
+            const EXTRA_OUTPUTS: usize = 18;
+            const NUM_ANNOUNCEMENTS: usize = 10;
+            const ANNOUNCEMENT_LEN: usize = 100;
+
+            let plain = |num_inputs| {
+                chain_with_inputs(num_inputs, unproven_fixture_grandparent, |_, kernel| kernel).0
+            };
+            let with_outputs =
+                chain_with_inputs(FEW_INPUTS, unproven_fixture_grandparent, |_, kernel| {
+                    let mut rng = StdRng::seed_from_u64(0);
+                    let extra = (0..EXTRA_OUTPUTS).map(|_| AdditionRecord::new(rng.random()));
+                    let outputs = kernel.outputs.iter().copied().chain(extra).collect();
+                    TransactionKernelModifier::default()
+                        .outputs(outputs)
+                        .modify(kernel)
+                })
+                .0;
+            let with_announcements =
+                chain_with_inputs(FEW_INPUTS, unproven_fixture_grandparent, |_, kernel| {
+                    let announcement = Announcement::new(vec![bfe!(1); ANNOUNCEMENT_LEN]);
+                    let announcements = kernel
+                        .announcements
+                        .iter()
+                        .cloned()
+                        .chain(std::iter::repeat_n(announcement, NUM_ANNOUNCEMENTS))
+                        .collect();
+                    TransactionKernelModifier::default()
+                        .announcements(announcements)
+                        .modify(kernel)
+                })
+                .0;
+            let lustrating = |num_inputs| {
+                lustration_chain_with_inputs(
+                    num_inputs,
+                    lustrating_status(lustration_counter_initial()),
+                    all_lustrations,
+                )
+                .0
+            };
+
+            let few = plain(FEW_INPUTS);
+            let many = plain(MANY_INPUTS);
+            let few_lustrating = lustrating(FEW_INPUTS);
+            let many_lustrating = lustrating(MANY_INPUTS);
+            let lustration_words = few_lustrating
+                .0
+                .body()
+                .transaction_kernel
+                .announcements
+                .iter()
+                .map(|announcement| announcement.message.len())
+                .max()
+                .unwrap();
+            let chains = [
+                (format!("{FEW_INPUTS} inputs"), &few),
+                (format!("{MANY_INPUTS} inputs"), &many),
+                (format!("{FEW_INPUTS} inputs, {EXTRA_OUTPUTS} extra outputs"), &with_outputs),
+                (
+                    format!("{FEW_INPUTS} inputs, {NUM_ANNOUNCEMENTS} announcements of {ANNOUNCEMENT_LEN} words"),
+                    &with_announcements,
+                ),
+                (format!("{FEW_INPUTS} lustrating inputs"), &few_lustrating),
+                (format!("{MANY_INPUTS} lustrating inputs"), &many_lustrating),
+            ];
+            let profiles = chains.each_ref().map(|(_, chain)| profile_checks(chain));
+            let full_profiles = chains
+                .iter()
+                .zip(&profiles)
+                .map(|((name, chain), profile)| profile.markdown(name, &describe_chain(chain)))
+                .join("\n");
+            let [few, many, with_outputs, with_announcements, few_lustrating, many_lustrating] =
+                &profiles;
+
+            let extra_inputs = (MANY_INPUTS - FEW_INPUTS) as i64;
+            let per_input = many.per_unit(few, extra_inputs);
+            let per_output = with_outputs.per_unit(few, EXTRA_OUTPUTS as i64);
+            let per_announcement = with_announcements.per_unit(few, NUM_ANNOUNCEMENTS as i64);
+            let lustration = few_lustrating.per_unit(few, 1);
+            let per_lustrating_input = many_lustrating
+                .per_unit(few_lustrating, extra_inputs)
+                .into_iter()
+                .zip(many.per_unit(few, extra_inputs))
+                .map(|((label, lustrating), (_, plain))| (label, lustrating.sub(plain)))
+                .collect_vec();
+            let table = |rows: &[(String, Rows)]| CheckCosts::markdown_table(rows, true);
+
+            let mutator_set_share = |profile: &CheckCosts| {
+                let mutator_set_rules =
+                    profile.processor_rows_of("predecessor_is_valid_mutator_set_update_prev");
+                100 * mutator_set_rules / profile.total.processor
+            };
+            let (_, chunks_per_input) = describe_chunks(&chains[0].1 .0);
+            let chunks_per_input = chunks_per_input as i64;
+
+            let document = format!(
+                "# Cost profile of `PredecessorIsValid`
+
+Rows each check of `PredecessorIsValid` adds to the tables of the Triton VM
+execution trace, for the program that skips the verification of the previous
+block's proof (rule 1.d). A STARK verification is a few hundred thousand rows
+and is not profiled here.
+
+Generated by the test `profile_skipping_program_by_transaction_shape` in
+`neptune-consensus/src/block/validity/predecessor_is_valid.rs`. Regenerate it
+after changing the program:
+
+```
+cargo nextest run -p neptune-consensus --run-ignored ignored-only \\
+    -E 'test(profile_skipping_program_by_transaction_shape)'
+```
+
+## Method
+
+Every check is a labelled subroutine, so Triton VM's execution-trace profiler
+(`VM::profile`) attributes the rows of every table to it, callees included.
+The test builds six previous blocks from the deterministic block primitive
+witness generator, profiles each, and computes the differences.
+
+The padded height is the next power of two above the tallest table. The u32
+table counts distinct entries only, so its rows do not add up across checks.
+
+The fixture transaction spends inputs whose {NUM_TRIALS} indices all lie in
+the inactive SWBF, needing about {chunks_per_input} chunks per input. An
+input whose indices lie in the active window needs no chunks and is much
+cheaper. The generator's transaction has no outputs; outputs and announcements
+are added on top of it.
+
+## Deltas per unit
+
+Each row is the difference between two profiles divided by the number of units
+added. Rows that are zero throughout are omitted. The epoch section is the sum
+of the checks that run only when the previous block is at or past the
+activation height.
+
+### Per input ({MANY_INPUTS} inputs against {FEW_INPUTS})
+
+{}
+
+### Per output ({EXTRA_OUTPUTS} extra outputs against none)
+
+{}
+### Per announcement of {ANNOUNCEMENT_LEN} words ({NUM_ANNOUNCEMENTS} against none)
+
+{}
+### Lustration
+
+{FEW_INPUTS} inputs that must lustrate, each with its {lustration_words}-word
+lustration announcement, against the same inputs without lustration:
+
+{}
+Per lustrating input, over an input that does not lustrate ({MANY_INPUTS} and
+{FEW_INPUTS} lustrating inputs against {MANY_INPUTS} and {FEW_INPUTS} plain
+ones):
+
+{}
+## Full profiles
+
+{}
+## Observations
+
+- The mutator-set rules 2.a and 2.e are {}% of the processor rows with
+  {FEW_INPUTS} inputs and {}% with {MANY_INPUTS}.
+- The base cost that scales with block size rather than with inputs is hashing
+  the body and auditing the witness.
+- The hash rows in the main program's glue, {}, are program attestation. The
+  program table's height, {}, includes the STARK verifier, which is linked
+  even when rule 1.d is not called.
+",
+                table(&per_input),
+                table(&per_output),
+                table(&per_announcement),
+                table(&lustration),
+                table(&per_lustrating_input),
+                full_profiles,
+                mutator_set_share(few),
+                mutator_set_share(many),
+                with_separators(few.program_attestation_hash_rows()),
+                with_separators(few.program.into()),
+            );
+
+            println!("{document}");
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(COST_PROFILE_PATH);
+            std::fs::write(&path, document).unwrap();
+            println!("written to {}", path.display());
+        }
+
+        /// Prints how the skipping program's cycles distribute over subroutines,
+        /// for a small previous block and for one of maximum size.
+        #[test]
+        #[ignore = "prints a profile"]
+        fn profile_skipping_program() {
+            let program = skipping();
+            let max_block_size = max_block_size();
+            for (name, (prev_block, next_body, next_header)) in [
+                ("small", unproven_prev_block_and_next_body_and_header(0)),
+                ("max size", prev_block_of_size(max_block_size)),
+            ] {
+                let (claim, nondeterminism) = claim_and_nondeterminism(
+                    &program,
+                    &prev_block,
+                    &next_body,
+                    &next_header,
+                    &epochs(),
+                );
+                let profile = tasm_lib::generate_full_profile(
+                    name,
+                    program.program(),
+                    &PublicInput::new(claim.input),
+                    &nondeterminism,
+                );
+                println!("previous block size: {}\n{profile}", prev_block.size());
+            }
         }
 
         #[test]
