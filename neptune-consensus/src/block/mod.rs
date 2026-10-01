@@ -559,6 +559,18 @@ impl Block {
         now: Timestamp,
         network: Network,
     ) -> Result<(), BlockValidationError> {
+        self.validate_except_proof(previous_block, now, network)?;
+
+        // 1.c) 1.d)
+        self.validate_proof(network).await
+    }
+
+    fn validate_except_proof(
+        &self,
+        previous_block: &Block,
+        now: Timestamp,
+        network: Network,
+    ) -> Result<(), BlockValidationError> {
         // Note that there is a correspondence between the logic here and the
         // error types in `BlockValidationError`.
 
@@ -623,9 +635,12 @@ impl Block {
             return Err(BlockValidationError::CumulativeProofOfWork);
         }
 
-        // Everything that does not depend on the predecessor, including the
+        // Everything that does not depend on the predecessor, except the
         // block's proof.
-        self.solo_validate(now, network).await?;
+        self.solo_validate_without_proof(now, network)?;
+
+        // 1.a) 1.b)
+        self.validate_appendix(network)?;
 
         // 2.a)
         let inputs = RemovalRecordList::try_unpack(
@@ -918,6 +933,12 @@ impl Block {
     /// Validate the proof of a block, an that the proof relates to the expected
     /// appendices.
     pub async fn validate_block_proof(&self, network: Network) -> Result<(), BlockValidationError> {
+        self.validate_appendix(network)?;
+        self.validate_proof(network).await
+    }
+
+    /// The appendix holds the claims the rules require, and not too many.
+    fn validate_appendix(&self, network: Network) -> Result<(), BlockValidationError> {
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, self.header().height);
 
         // 1.a)
@@ -932,6 +953,11 @@ impl Block {
             return Err(BlockValidationError::AppendixTooLarge);
         }
 
+        Ok(())
+    }
+
+    /// The proof is a single proof, and it verifies.
+    async fn validate_proof(&self, network: Network) -> Result<(), BlockValidationError> {
         // 1.c)
         let BlockProof::SingleProof(block_proof) = &self.proof else {
             return Err(BlockValidationError::ProofQuality);
