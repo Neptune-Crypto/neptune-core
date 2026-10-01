@@ -295,6 +295,11 @@ impl AbsoluteIndexSet {
         self.minimum = new_minimum;
     }
 
+    /// The distances of the indices to the minimum, as stored.
+    pub fn distances(&self) -> [u32; NUM_TRIALS as usize] {
+        self.distances
+    }
+
     pub fn minimum(&self) -> u128 {
         self.minimum
     }
