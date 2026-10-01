@@ -35,6 +35,7 @@ use crate::block::block_body::BlockBodyField;
 use crate::block::block_header::BlockHeader;
 use crate::block::block_header::BlockPow;
 use crate::block::block_validation_error::BlockValidationRule;
+use crate::block::pow::LustrationStatus;
 use crate::block::pow::POW_MEMORY_TREE_HEIGHT;
 use crate::block::Block;
 use crate::consensus_rule_set::ConsensusRuleSet;
@@ -148,6 +149,11 @@ impl From<&PredecessorIsValidWitness> for PredecessorIsValidWitnessMemory {
 pub struct PredecessorIsValid;
 
 impl PredecessorIsValid {
+    /// Where in the claim's output the previous block's timestamp is.
+    fn output_timestamp_offset() -> usize {
+        Digest::LEN + LustrationStatus::static_length().unwrap()
+    }
+
     /// Number of words in the claim's standard-in stream.
     ///
     /// Same number as the number of words read from standard-in in this
@@ -217,6 +223,9 @@ impl TritonProgram for PredecessorIsValid {
         let expected_prev_height_alloc = library.kmalloc(1);
         let epochs_alloc = library.kmalloc(EpochTable::static_length().unwrap() as u32);
 
+        // Minimum block time that parent block must satisfy.
+        let prev_minimum_block_time_alloc = library.kmalloc(1);
+
         let audit_witness = library.import(Box::new(VerifyNdSiIntegrity::<
             PredecessorIsValidWitnessMemory,
         >::default()));
@@ -255,6 +264,9 @@ impl TritonProgram for PredecessorIsValid {
         let prev_block_header = field!(PredecessorIsValidWitnessMemory::prev_block_header);
         let read_prev_block_height = triton_asm!(
             {&prev_block_header} {&field!(BlockHeader::height)} read_mem 1 pop 1
+        );
+        let read_prev_block_timestamp = triton_asm!(
+            {&prev_block_header} {&field!(BlockHeader::timestamp)} read_mem 1 pop 1
         );
 
         // The status occupies the last words of the PoW field's first path;
@@ -537,6 +549,44 @@ impl TritonProgram for PredecessorIsValid {
                 return
         );
 
+        // The last epoch in the table that has started by the height. Found
+        // by locating the first epoch that has not started and then taking the
+        // preceding one.
+        let epoch_in_force = "predecessor_is_valid_epoch_in_force".to_string();
+        let epoch_in_force_loop = format!("{epoch_in_force}_loop");
+        let epoch_in_force_code = triton_asm!(
+            // BEFORE: _ height
+            // AFTER:  _ *epoch
+            {epoch_in_force}:
+                push {epochs_alloc.write_address()} push 1
+                call {epoch_in_force_loop}
+                // _ height *epoch i
+
+                pop 1 place 1 pop 1
+                // _ *epoch
+
+                return
+
+            // INVARIANT: _ height *epoch[i - 1] i
+            {epoch_in_force_loop}:
+                dup 0 push {NUM_EPOCHS} eq skiz return
+                // _ height *epoch[i - 1] i
+
+                dup 2 dup 2 addi {epoch_size} {&field!(Epoch::height)} read_mem 1 pop 1
+                // _ height *epoch[i - 1] i height epoch[i].height
+
+                call {epoch_has_started}
+                // _ height *epoch[i - 1] i epoch[i]_has_started
+
+                push 0 eq skiz return
+                // _ height *epoch[i - 1] i
+
+                pick 1 addi {epoch_size} place 1 addi 1
+                // _ height *epoch[i] (i + 1)
+
+                recurse
+        );
+
         // Whether the table read from standard-in holds all of the claim's
         // epochs, and any epochs it holds beyond those had not started by the
         // previous block's height.
@@ -695,17 +745,58 @@ impl TritonProgram for PredecessorIsValid {
             // _ *w [prev_block_hash] *prev_claim_output
         );
 
-        // The rule about the previous block that its own program execution
-        // could not assert, since its header was not fixed when that
-        // execution was run: it points at the block whose hash that execution
-        // output. The previous block's copy of this claim holds that output.
+        // BEFORE: _ *w [prev_block_hash] *prev_claim_output
+        // AFTER:  _ *w [prev_block_hash] *prev_claim_output
+        let rule_0d_prev = triton_asm!(
+            dup 0 addi {Self::output_timestamp_offset() + 1} read_mem 1 pop 1
+            // _ *w [prev_block_hash] *prev_claim_output prev_prev_block_timestamp
+
+            push {prev_minimum_block_time_alloc.read_address()} read_mem 1 pop 1
+            // _ *w [prev_block_hash] *prev_claim_output prev_prev_block_timestamp prev_minimum_block_time
+
+            add split
+            // _ *w [prev_block_hash] *prev_claim_output [earliest_prev_block_timestamp: u64]
+
+            dup 8 {&read_prev_block_timestamp} split
+            // _ *w [prev_block_hash] *prev_claim_output [earliest_prev_block_timestamp] [prev_block_timestamp]
+
+            call {u64_lt}
+            // _ *w [prev_block_hash] *prev_claim_output (prev_block_timestamp < earliest_prev_block_timestamp)
+
+            push 0 eq
+            // _ *w [prev_block_hash] *prev_claim_output (prev_block_timestamp >= earliest_prev_block_timestamp)
+
+            assert error_id {BlockValidationRule::MinimumBlockTime.error_id()}
+            // _ *w [prev_block_hash] *prev_claim_output
+        );
+
+        // The rules about the previous block that depend on the epoch in
+        // force at its height: its header fields that its own program
+        // execution could not assert, since they were not fixed when that
+        // program execution was run, and the limits on its transaction. The
+        // required values of *its* predecessor (next block's grandparent) come
+        // from the previous block's copy of this claim.
         let (rule_0b_prev, rule_0b_prev_code) = subroutine("rule_0b_prev", rule_0b_prev);
+        let (rule_0d_prev, rule_0d_prev_code) = subroutine("rule_0d_prev", rule_0d_prev);
 
         let prev_block_epoch_rules = "predecessor_is_valid_prev_block_epoch_rules".to_string();
         let prev_block_epoch_rules_code = triton_asm!(
             // BEFORE: _ *w [prev_block_hash]
             // AFTER:  _ *w [prev_block_hash]
             {prev_block_epoch_rules}:
+                dup 5 {&read_prev_block_height}
+
+                /* Get pointer to the epoch in force for previous block,
+                   dictated by epoch from std-in, not by previous block. */
+                call {epoch_in_force}
+                // _ *w [prev_block_hash] *epoch
+
+                {&field!(Epoch::minimum_block_time)} read_mem 1 pop 1
+                // _ *w [prev_block_hash] prev_minimum_block_time
+
+                push {prev_minimum_block_time_alloc.write_address()} write_mem 1 pop 1
+                // _ *w [prev_block_hash]
+
                 dup 5 {&field!(PredecessorIsValidWitnessMemory::prev_block_appendix)}
                 {&field!(BlockAppendix::claims)}
                 // _ *w [prev_block_hash] *claims
@@ -721,6 +812,9 @@ impl TritonProgram for PredecessorIsValid {
                 // _ *w [prev_block_hash] *prev_claim_output
 
                 call {rule_0b_prev}
+                // _ *w [prev_block_hash] *prev_claim_output
+
+                call {rule_0d_prev}
                 // _ *w [prev_block_hash] *prev_claim_output
 
                 pop 1
@@ -875,6 +969,7 @@ impl TritonProgram for PredecessorIsValid {
             {&header_mast_hash_code}
             {&transaction_kernel_mast_hash_code}
             {&epoch_has_started_code}
+            {&epoch_in_force_code}
             {&epoch_tables_agree_code}
             {&own_claim_input_matches_code}
             {&find_own_claim_code}
@@ -886,6 +981,7 @@ impl TritonProgram for PredecessorIsValid {
             {&rule_0c_code}
             {&read_epoch_table_code}
             {&rule_0b_prev_code}
+            {&rule_0d_prev_code}
             {&write_output_code}
             {&library.all_imports()}
         );
@@ -911,6 +1007,7 @@ mod tests {
     use neptune_primitives::difficulty_control::difficulty_control;
     use neptune_primitives::network::Network;
     use neptune_primitives::timestamp::Timestamp;
+    use num_traits::Zero;
     use rand::rngs::StdRng;
     use rand::RngExt;
     use rand::SeedableRng;
@@ -919,17 +1016,18 @@ mod tests {
 
     use super::*;
     use crate::block::mutator_set_update::MutatorSetUpdate;
-    use crate::block::pow::LustrationStatus;
     use crate::block::test_helpers::block_mmra_with_num_leafs;
     use crate::block::validity::block_primitive_witness::deterministic_block_primitive_witness;
     use crate::block::validity::block_primitive_witness::BlockPrimitiveWitness;
     use crate::block::validity::block_program::BlockProgram;
     use crate::block::validity::block_proof_witness::BlockProofWitness;
     use crate::block::BlockProof;
+    use crate::block::BlockValidationError;
     use crate::consensus_rule_set::LustrationRule;
     use crate::proof_abstractions::tasm::builtins as tasm;
     use crate::proof_abstractions::tasm::program::proof_cache::load_proof_or_produce_and_save;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
+    use crate::proof_abstractions::test_runtime::tokio_runtime;
     use crate::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::transaction::validity::neptune_proof::Proof as NeptuneProof;
     use crate::transaction::validity::single_proof::single_proof_claim;
@@ -987,6 +1085,9 @@ mod tests {
             let epochs = *EpochTable::decode(&epoch_table_words).unwrap();
             let prev_block_height = witness.prev_block_header.height;
             if prev_block_height >= epochs.activation_height() {
+                let prev_epoch = epochs.in_force_at(prev_block_height);
+                let prev_minimum_block_time = prev_epoch.minimum_block_time;
+
                 let expected_input_start = [
                     prev_block_body_mh.reversed().values().to_vec(),
                     vec![prev_block_height.into()],
@@ -1009,6 +1110,15 @@ mod tests {
                 assert_eq!(
                     parent_claim.output[..Digest::LEN],
                     witness.prev_block_header.prev_block_digest.values()
+                );
+
+                let prev_prev_block_timestamp =
+                    Timestamp(parent_claim.output[Self::output_timestamp_offset()]);
+
+                // 0.d)
+                assert!(
+                    prev_prev_block_timestamp + prev_minimum_block_time
+                        <= witness.prev_block_header.timestamp
                 );
             }
 
@@ -1732,6 +1842,83 @@ mod tests {
         }
 
         #[test]
+        fn prev_block_exactly_minimum_block_time_after_its_predecessor_passes() {
+            let prev_prev_block = random_unproven_block(0);
+            let timestamp = prev_prev_block.header().timestamp + minimum_block_time();
+            let (prev_block, next_body, next_header) =
+                prev_block_with_timestamp(&prev_prev_block, timestamp, &epochs());
+
+            assert_accepts(&PredecessorIsValid, &prev_block, &next_body, &next_header);
+        }
+
+        #[test]
+        fn prev_block_less_than_minimum_block_time_after_its_predecessor_fails() {
+            let prev_prev_block = random_unproven_block(0);
+            let prev_prev_block_timestamp = prev_prev_block.header().timestamp;
+            for timestamp in [
+                prev_prev_block_timestamp + minimum_block_time() - Timestamp::millis(1),
+                prev_prev_block_timestamp,
+                prev_prev_block_timestamp - Timestamp::millis(1),
+                Timestamp::zero(),
+            ] {
+                let (prev_block, next_body, next_header) =
+                    prev_block_with_timestamp(&prev_prev_block, timestamp, &epochs());
+
+                assert_rejects(
+                    &PredecessorIsValid,
+                    &prev_block,
+                    &next_body,
+                    &next_header,
+                    BlockValidationRule::MinimumBlockTime.error_id(),
+                );
+            }
+        }
+
+        /// `Block::validate` rejects when `prev + minimum > next`; the program
+        /// rejects when `next < prev + minimum`. Check that they agree at the
+        /// boundary.
+        #[test]
+        fn rule_0d_agrees_with_block_validate_at_the_boundary() {
+            let prev_prev_block = random_unproven_block(0);
+            let earliest_prev_block_timestamp =
+                prev_prev_block.header().timestamp + minimum_block_time();
+            let start = earliest_prev_block_timestamp - Timestamp::millis(2);
+            for offset_millis in 0..5 {
+                let timestamp = start + Timestamp::millis(offset_millis);
+                let too_early = offset_millis < 2;
+                let (prev_block, next_body, next_header) =
+                    prev_block_with_timestamp(&prev_prev_block, timestamp, &epochs());
+
+                let host_rejects_on_0d = tokio_runtime().block_on(prev_block.validate(
+                    &prev_prev_block,
+                    Timestamp::now(),
+                    Network::Main,
+                )) == Err(BlockValidationError::MinimumBlockTime);
+
+                let (claim, nondeterminism) = claim_and_nondeterminism(
+                    &PredecessorIsValid,
+                    &prev_block,
+                    &next_body,
+                    &next_header,
+                    &epochs(),
+                );
+                let program_rejects_on_0d = PredecessorIsValid
+                    .test_assertion_failure(
+                        PublicInput::new(claim.input),
+                        nondeterminism,
+                        &[BlockValidationRule::MinimumBlockTime.error_id()],
+                    )
+                    .is_ok();
+
+                assert_eq!(too_early, host_rejects_on_0d, "offset {offset_millis} ms");
+                assert_eq!(
+                    too_early, program_rejects_on_0d,
+                    "offset {offset_millis} ms"
+                );
+            }
+        }
+
+        #[test]
         fn prev_block_whose_header_points_to_another_block_fails() {
             let prev_prev_block = random_unproven_block(0);
             let (body, mut header) = next_body_and_header(&prev_prev_block, 0);
@@ -1846,6 +2033,27 @@ mod tests {
         }
 
         #[test]
+        fn revised_epoch_at_the_same_height_takes_precedence() {
+            let doubled_minimum_block_time =
+                Timestamp::millis(2 * minimum_block_time().to_millis());
+            let epochs_with_revision = EpochTable::new(&[
+                activation_epoch(),
+                epoch_after_activation(doubled_minimum_block_time),
+                epoch_after_activation(minimum_block_time()),
+            ]);
+
+            let (prev_block, next_body, next_header) =
+                prev_block_after_activation(minimum_block_time(), &epochs_with_revision);
+            assert_accepts_with_epochs(
+                &PredecessorIsValid,
+                &prev_block,
+                &next_body,
+                &next_header,
+                &epochs_with_revision,
+            );
+        }
+
+        #[test]
         fn epoch_started_by_prev_block_must_be_in_its_own_claim() {
             let epochs_with_second = EpochTable::new(&[
                 activation_epoch(),
@@ -1871,6 +2079,37 @@ mod tests {
                 &next_header,
                 &epochs_with_second,
                 BlockValidationRule::AppendixMissingClaim.error_id(),
+            );
+        }
+
+        #[test]
+        fn prev_block_is_judged_under_the_last_epoch_started_by_its_height() {
+            let doubled_minimum_block_time =
+                Timestamp::millis(2 * minimum_block_time().to_millis());
+            let epochs_with_second = EpochTable::new(&[
+                activation_epoch(),
+                epoch_after_activation(doubled_minimum_block_time),
+            ]);
+
+            let (prev_block, next_body, next_header) =
+                prev_block_after_activation(minimum_block_time(), &epochs_with_second);
+            assert_rejects_with_epochs(
+                &PredecessorIsValid,
+                &prev_block,
+                &next_body,
+                &next_header,
+                &epochs_with_second,
+                BlockValidationRule::MinimumBlockTime.error_id(),
+            );
+
+            let (prev_block, next_body, next_header) =
+                prev_block_after_activation(doubled_minimum_block_time, &epochs_with_second);
+            assert_accepts_with_epochs(
+                &PredecessorIsValid,
+                &prev_block,
+                &next_body,
+                &next_header,
+                &epochs_with_second,
             );
         }
     }
