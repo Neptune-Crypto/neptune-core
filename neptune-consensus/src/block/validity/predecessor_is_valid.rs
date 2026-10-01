@@ -10,6 +10,7 @@ use num_bigint::BigUint;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::arithmetic::i128::lt::Lt as I128Lt;
+use tasm_lib::arithmetic::u128::sub::Sub as U128Sub;
 use tasm_lib::arithmetic::u160::lt::Lt as U160Lt;
 use tasm_lib::arithmetic::u192::safe_add::SafeAdd as U192SafeAdd;
 use tasm_lib::arithmetic::u64::lt::Lt as U64Lt;
@@ -53,6 +54,7 @@ use super::removal_index_commitment::RemovalIndexCommitment;
 use super::removal_records_are_unique::RemovalRecordsAreUnique;
 use super::swbfi_update_aggregation::SwbfiUpdateAggregation;
 use super::swbfi_update_union::SwbfiUpdateUnion;
+use super::verified_lustration_amount::VerifiedLustrationAmount;
 use crate::block::block_appendix::BlockAppendix;
 use crate::block::block_appendix::MAX_NUM_CLAIMS;
 use crate::block::block_body::BlockBody;
@@ -68,6 +70,7 @@ use crate::block::BlockProof;
 use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::transaction::transaction_kernel::TransactionKernel;
+use crate::transaction::transaction_kernel::LUSTRATION_FLAG;
 use crate::transaction::validity::single_proof::single_proof_claim;
 use crate::transaction::validity::single_proof::SingleProof;
 use crate::transaction::validity::tasm::claims::generate_single_proof_claim::GenerateSingleProofClaim;
@@ -159,6 +162,18 @@ impl PredecessorIsValidWitness {
                     &self.prev_block.body().transaction_kernel.inputs,
                     &self.prev_block_transaction_mutator_set,
                 ));
+
+            // 2.o)
+            if let Ok(status) = self.prev_block.header().pow.lustration_status() {
+                let kernel = &self.prev_block.body().transaction_kernel;
+                nondeterminism
+                    .individual_tokens
+                    .extend(VerifiedLustrationAmount::divined_tokens(
+                        &kernel.inputs,
+                        &kernel.announcements,
+                        status.max_lustrating_aocl_leaf_index,
+                    ));
+            }
         }
 
         nondeterminism
@@ -397,6 +412,9 @@ impl TritonProgram for PredecessorIsValid {
         let u192_safe_add = library.import(Box::new(U192SafeAdd));
         let difficulty_control = library.import(Box::new(DifficultyControl));
         let removal_records_are_unique = library.import(Box::new(RemovalRecordsAreUnique));
+        let verified_lustration_amount = library.import(Box::new(VerifiedLustrationAmount));
+        let push_pointer = library.import(Box::new(Push::new(DataType::Bfe)));
+        let u128_sub = library.import(Box::new(U128Sub));
         let guesser_fee_addition_records = library.import(Box::new(GuesserFeeAdditionRecords));
         let apply_addition_records = library.import(Box::new(ApplyAdditionRecords));
         let mutator_set_hash_from_components =
@@ -414,6 +432,8 @@ impl TritonProgram for PredecessorIsValid {
             Literal::Digest(SwbfiUpdateAggregation::new().hash()).push_to_stack_code();
         let push_swbfi_union_program_digest =
             Literal::Digest(SwbfiUpdateUnion::new().hash()).push_to_stack_code();
+        // The messages of the previous block's lustration announcements.
+        let lustrations_alloc = library.kmalloc(1);
         // The hash of the mutator set after the previous block, for the
         // claim's output.
         let mutator_set_after_prev_block_alloc = library.kmalloc(Digest::LEN as u32);
@@ -1351,6 +1371,75 @@ impl TritonProgram for PredecessorIsValid {
                 return
         );
 
+        // Appends the announcement's message to the lustration announcements.
+        let remember_lustration = "predecessor_is_valid_remember_lustration".to_string();
+        let remember_lustration_code = triton_asm!(
+            // BEFORE: _ *announcement[i]_si num_announcements i
+            // AFTER:  _ *announcement[i]_si num_announcements i
+            {remember_lustration}:
+                push {lustrations_alloc.read_address()} read_mem 1 pop 1
+                dup 3 addi 2
+                // _ *announcement[i]_si num_announcements i *lustrations *message
+
+                call {push_pointer}
+                // _ *announcement[i]_si num_announcements i
+
+                return
+        );
+
+        // The rules that look at each announcement of the previous block's
+        // transaction, in one pass over the list. An announcement is
+        // classified by its length and first words.
+        let for_each_announcement = "predecessor_is_valid_for_each_announcement".to_string();
+        let for_each_announcement_code = triton_asm!(
+            // INVARIANT: _ *announcement[i]_si num_announcements i
+            {for_each_announcement}:
+                dup 1 dup 1 eq skiz return
+                // _ *announcement[i]_si num_announcements i
+
+                dup 2 addi 3 read_mem 2 pop 1
+                // _ *announcement[i]_si num_announcements i message[0] message_length
+
+                push 0 eq push 0 eq swap 1 push {LUSTRATION_FLAG} eq mul
+                // _ *announcement[i]_si num_announcements i is_lustration
+
+                // 2.o)
+                skiz call {remember_lustration}
+                // _ *announcement[i]_si num_announcements i
+
+                pick 2 read_mem 1
+                // _ num_announcements i announcement_size (*announcement[i]_si - 1)
+
+                // Crashes unless the size is a u32.
+                dup 1 pop_count pop 1
+
+                addi 2 add
+                // _ num_announcements i *announcement[i + 1]_si
+
+                place 2 addi 1
+                // _ *announcement[i + 1]_si num_announcements (i + 1)
+
+                recurse
+        );
+
+        // BEFORE: _ *w [prev_block_hash]
+        // AFTER:  _ *w [prev_block_hash]
+        let prev_block_announcement_rules = triton_asm!(
+            call {new_list}
+            push {lustrations_alloc.write_address()} write_mem 1 pop 1
+            // _ *w [prev_block_hash]
+
+            dup 5 {&prev_block_txk} {&field!(TransactionKernel::announcements)}
+            // _ *w [prev_block_hash] *announcements
+
+            read_mem 1 addi 2 place 1 push 0
+            // _ *w [prev_block_hash] *announcement[0]_si num_announcements 0
+
+            call {for_each_announcement}
+            pop 3
+            // _ *w [prev_block_hash]
+        );
+
         // BEFORE: _ *w [prev_block_hash]
         // AFTER:  _ *w [prev_block_hash]
         let rule_2g_prev = triton_asm!(
@@ -1495,6 +1584,48 @@ impl TritonProgram for PredecessorIsValid {
             // _ *w [prev_block_hash]
         );
 
+        // The previous block's lustration counter must be its predecessor's
+        // less what its transaction lustrates, and must not fall below zero.
+        // BEFORE: _ *w [prev_block_hash] *prev_claim_output
+        // AFTER:  _ *w [prev_block_hash] *prev_claim_output
+        let rules_2o_2p_2r_prev = triton_asm!(
+            dup 6 {&prev_block_txk} {&field!(TransactionKernel::inputs)}
+            push {lustrations_alloc.read_address()} read_mem 1 pop 1
+            dup 2 addi {Digest::LEN + 1}
+            {&field!(LustrationStatus::max_lustrating_aocl_leaf_index)} {&read_u64}
+            // _ *w [prev_block_hash] *prev_claim_output *inputs *lustrations [prev_prev_threshold]
+
+            // 2.o)
+            call {verified_lustration_amount}
+            // _ *w [prev_block_hash] *prev_claim_output [lustrated]
+
+            dup 4 addi {Digest::LEN + 1} {&field!(LustrationStatus::counter)}
+            addi {amount_size - 1} read_mem {amount_size} pop 1
+            // _ *w [prev_block_hash] *prev_claim_output [lustrated] [prev_prev_counter]
+
+            // 2.r)
+            push {1_u64 << 31} dup 4 lt
+            push {1_u64 << 31} dup 9 lt
+            mul assert error_id {BlockValidationRule::NegativeLustrationCounter.error_id()}
+            // _ *w [prev_block_hash] *prev_claim_output [lustrated] [prev_prev_counter]
+
+            dup 7 dup 7 dup 7 dup 7 dup 7 dup 7 dup 7 dup 7
+            call {i128_lt}
+            // _ *w [prev_block_hash] *prev_claim_output [lustrated] [prev_prev_counter] (prev_prev_counter < lustrated)
+
+            push 0 eq
+            assert error_id {BlockValidationRule::NegativeLustrationCounter.error_id()}
+            call {u128_sub}
+            // _ *w [prev_block_hash] *prev_claim_output [expected_counter]
+
+            // 2.p)
+            dup 10 {&prev_lustration_status} {&field!(LustrationStatus::counter)}
+            addi {amount_size - 1} read_mem {amount_size} pop 1
+            {&DataType::U128.compare()}
+            assert error_id {BlockValidationRule::BadLustrationCounter.error_id()}
+            // _ *w [prev_block_hash] *prev_claim_output
+        );
+
         // The rules about the previous block that depend on the epoch in
         // force at its height: its header fields that its own program
         // execution could not assert, since they were not fixed when that
@@ -1508,6 +1639,8 @@ impl TritonProgram for PredecessorIsValid {
         let (rule_2t_prev, rule_2t_prev_code) = subroutine("rule_2t_prev", rule_2t_prev);
         let (mutator_set_update_prev, mutator_set_update_prev_code) =
             subroutine("mutator_set_update_prev", mutator_set_update_prev);
+        let (rules_2o_2p_2r_prev, rules_2o_2p_2r_prev_code) =
+            subroutine("rules_2o_2p_2r_prev", rules_2o_2p_2r_prev);
 
         let (rule_1e_prev, rule_1e_prev_code) = subroutine("rule_1e_prev", rule_1e_prev);
         let (rule_2f_prev, rule_2f_prev_code) = subroutine("rule_2f_prev", rule_2f_prev);
@@ -1567,6 +1700,9 @@ impl TritonProgram for PredecessorIsValid {
                 // _ *w [prev_block_hash] *prev_claim_output
 
                 call {mutator_set_update_prev}
+                // _ *w [prev_block_hash] *prev_claim_output
+
+                call {rules_2o_2p_2r_prev}
                 // _ *w [prev_block_hash] *prev_claim_output
 
                 pop 1
@@ -1960,6 +2096,8 @@ impl TritonProgram for PredecessorIsValid {
         let (rule_2c_prev, rule_2c_prev_code) = subroutine("rule_2c_prev", rule_2c_prev);
         let (mutator_set_after_prev_block, mutator_set_after_prev_block_code) =
             subroutine("mutator_set_after_prev_block", mutator_set_after_prev_block);
+        let (prev_block_announcement_rules, prev_block_announcement_rules_code) =
+            subroutine("rule_2o_announcements_prev", prev_block_announcement_rules);
         let (rule_2m_prev, rule_2m_prev_code) = subroutine("rule_2m_prev", rule_2m_prev);
         let (write_output, write_output_code) = subroutine("write_output", write_output);
 
@@ -2028,6 +2166,10 @@ impl TritonProgram for PredecessorIsValid {
             // _ [next_block_body_mh] *w [prev_block_hash]
 
 
+            call {prev_block_announcement_rules}
+            // _ [next_block_body_mh] *w [prev_block_hash]
+
+
             dup 5 call {rule_2m_prev} pop 1
             // _ [next_block_body_mh] *w [prev_block_hash]
 
@@ -2052,6 +2194,8 @@ impl TritonProgram for PredecessorIsValid {
             {&find_own_claim_code}
             {&coinbase_is_within_subsidy_code}
             {&coinbase_is_non_negative_code}
+            {&for_each_announcement_code}
+            {&remember_lustration_code}
             {&prev_block_epoch_rules_code}
             {&authenticate_next_block_mmr_accumulator_code}
             {&hash_prev_block_body_code}
@@ -2068,6 +2212,7 @@ impl TritonProgram for PredecessorIsValid {
             {&rule_2i_prev_code}
             {&rule_2c_prev_code}
             {&mutator_set_after_prev_block_code}
+            {&prev_block_announcement_rules_code}
             {&rule_2m_prev_code}
             {&read_epoch_table_code}
             {&rule_0b_prev_code}
@@ -2078,6 +2223,7 @@ impl TritonProgram for PredecessorIsValid {
             {&mutator_set_update_prev_code}
             {&swbfi_claim_input_matches_code}
             {&find_swbfi_claim_code}
+            {&rules_2o_2p_2r_prev_code}
             {&rule_1e_prev_code}
             {&rule_2f_prev_code}
             {&rule_2j_prev_code}
@@ -2109,6 +2255,7 @@ impl TritonProgram for PredecessorIsValid {
 mod tests {
     use std::collections::HashMap;
 
+    use itertools::Itertools;
     use neptune_mutator_set::addition_record::AdditionRecord;
     use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
     use neptune_mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
@@ -2121,6 +2268,7 @@ mod tests {
     use neptune_primitives::block_height::BLOCKS_PER_GENERATION;
     use neptune_primitives::difficulty_control::difficulty_control;
     use neptune_primitives::network::Network;
+    use num_traits::CheckedSub;
     use num_traits::Zero;
     use rand::rngs::StdRng;
     use rand::RngExt;
@@ -2147,6 +2295,7 @@ mod tests {
     use crate::proof_abstractions::SecretWitness;
     use crate::transaction::announcement::Announcement;
     use crate::transaction::transaction_kernel::TransactionKernelModifier;
+    use crate::transaction::transparent_input::TransparentInput;
     use crate::transaction::validity::neptune_proof::Proof as NeptuneProof;
 
     impl PredecessorIsValidWitnessMemory {
@@ -2452,6 +2601,35 @@ mod tests {
                     u64::try_from(prev_transaction_kernel.announcements.len()).unwrap()
                         <= prev_epoch.max_num_announcements.value()
                 );
+
+                let prev_prev_lustration_status = *LustrationStatus::decode(
+                    &parent_claim.output[Digest::LEN..Self::output_timestamp_offset()],
+                )
+                .unwrap();
+                let threshold = prev_prev_lustration_status.max_lustrating_aocl_leaf_index;
+
+                for input in &prev_transaction_kernel.inputs {
+                    let (range_start, _) = input
+                        .absolute_indices
+                        .aocl_range()
+                        .expect("every input's AOCL range is representable");
+                    if range_start <= threshold {
+                        tasm::tasmlib_io_read_secin___bfe();
+                    }
+                }
+                // 2.o)
+                let lustrated = prev_transaction_kernel
+                    .verified_lustration_amount(threshold, true)
+                    .expect("every input that must lustrate is announced");
+
+                // 2.r)
+                let expected_counter = prev_prev_lustration_status
+                    .counter
+                    .checked_sub(&lustrated)
+                    .expect("the lustration counter must not fall below zero");
+
+                // 2.p)
+                assert_eq!(expected_counter, prev_lustration_status.counter);
             }
 
             tasm::tasmlib_io_write_to_stdout___digest(prev_block_hash);
@@ -2741,6 +2919,25 @@ mod tests {
         }
     }
 
+    /// The lustration status a block must carry after a parent with this
+    /// status when it carries this transaction: the threshold unchanged and
+    /// the counter reduced by what the transaction lustrates.
+    fn lustration_status_after(
+        parent: LustrationStatus,
+        transaction_kernel: &TransactionKernel,
+    ) -> LustrationStatus {
+        let lustrated = transaction_kernel
+            .verified_lustration_amount(parent.max_lustrating_aocl_leaf_index, true)
+            .unwrap_or_else(|_| NativeCurrencyAmount::zero());
+        LustrationStatus {
+            counter: parent
+                .counter
+                .checked_sub(&lustrated)
+                .unwrap_or(parent.counter),
+            ..parent
+        }
+    }
+
     fn random_header_and_body(
         seed: u64,
         height: u64,
@@ -2947,6 +3144,7 @@ mod tests {
             .header()
             .pow
             .lustration_status()
+            .map(|parent| lustration_status_after(parent, transaction_kernel))
             .unwrap_or(random_status);
         next_header.pow.set_lustration_status(status);
 
@@ -3258,6 +3456,8 @@ mod tests {
     /// The tests that need no block proof in the witness: they run the
     /// variant of this program that skips proof verification.
     mod proof_free {
+        use std::cell::Cell;
+
         use super::*;
 
         #[test]
@@ -3315,6 +3515,43 @@ mod tests {
                 &next_body,
                 &next_header,
                 BlockValidationRule::AppendixMissingClaim.error_id(),
+            );
+        }
+
+        /// The previous block whose header carries this lustration counter,
+        /// with its own claim, and a next body and header for it.
+        /// The previous block with this lustration status in place of the
+        /// one its predecessor and transaction dictate, and a next body and
+        /// header for it.
+        fn prev_block_with_lustration_status(
+            status: LustrationStatus,
+        ) -> (Block, BlockBody, BlockHeader) {
+            let prev_prev_block = random_unproven_block(0);
+            let (body, mut header) = next_body_and_header(&prev_prev_block, 0);
+            header.pow.set_lustration_status(status);
+            let prev_block = unproven_block_with_own_claim(&prev_prev_block, body, header, 0);
+            let (next_body, next_header) = next_body_and_header(&prev_block, 0);
+
+            (prev_block, next_body, next_header)
+        }
+
+        fn dictated_lustration_status() -> LustrationStatus {
+            let (_, header) = next_body_and_header(&random_unproven_block(0), 0);
+            header.pow.lustration_status().unwrap()
+        }
+
+        #[test]
+        fn prev_block_with_other_lustration_counter_fails() {
+            let mut status = dictated_lustration_status();
+            status.counter += NativeCurrencyAmount::one_nau();
+            let (prev_block, next_body, next_header) = prev_block_with_lustration_status(status);
+
+            assert_rejects(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::BadLustrationCounter.error_id(),
             );
         }
 
@@ -3409,6 +3646,231 @@ mod tests {
             let (next_body, next_header) = next_body_and_header(&prev_block, 0);
 
             (prev_block, next_body, next_header)
+        }
+
+        thread_local! {
+            /// The lustration status the grandparent of a lustration chain
+            /// carries, set by the test that builds the chain.
+            static GRANDPARENT_LUSTRATION_STATUS: Cell<Option<LustrationStatus>> =
+                const { Cell::new(None) };
+        }
+
+        /// As [unproven_fixture_grandparent], with the lustration status the
+        /// test set.
+        fn lustrating_grandparent(
+            generated_header: BlockHeader,
+            body: BlockBody,
+            _appendix: BlockAppendix,
+        ) -> Block {
+            let mut header = fixture_grandparent_header(&generated_header);
+            let status = GRANDPARENT_LUSTRATION_STATUS
+                .get()
+                .expect("the test sets the grandparent's lustration status");
+            header.pow.set_lustration_status(status);
+
+            unproven_block(header, body, vec![])
+        }
+
+        /// A chain built without proofs: a grandparent built by this
+        /// function, a previous block at the activation height whose
+        /// transaction is the deterministic one with this many inputs, packed
+        /// and then edited by this function, and a next body and header for
+        /// it. Also returns the transparent inputs.
+        fn chain_with_inputs(
+            num_inputs: usize,
+            build_grandparent: fn(BlockHeader, BlockBody, BlockAppendix) -> Block,
+            edit_kernel: impl FnOnce(&[TransparentInput], TransactionKernel) -> TransactionKernel,
+        ) -> ((Block, BlockBody, BlockHeader), Vec<TransparentInput>) {
+            let (grandparent, _, inputs) =
+                BlockPrimitiveWitness::deterministic_predecessor_and_primitive_witnesses(
+                    num_inputs,
+                    activation_height(),
+                    Difficulty::MINIMUM,
+                    Network::Main,
+                    build_grandparent,
+                );
+            let transparent_inputs = inputs
+                .input_utxos
+                .utxos
+                .iter()
+                .cloned()
+                .zip(&inputs.input_membership_proofs)
+                .map(|(utxo, membership_proof)| TransparentInput {
+                    utxo,
+                    aocl_leaf_index: membership_proof.aocl_leaf_index,
+                    sender_randomness: membership_proof.sender_randomness,
+                    receiver_preimage: membership_proof.receiver_preimage,
+                })
+                .collect_vec();
+            // With its inputs packed, as a block transaction has them.
+            let kernel = TransactionKernelModifier::default()
+                .merge_bit(true)
+                .inputs(RemovalRecordList::pack(inputs.kernel.inputs.clone(), true))
+                .modify(inputs.kernel.clone());
+            let kernel = edit_kernel(&transparent_inputs, kernel);
+            let mutator_set = &inputs.mutator_set_accumulator;
+            let (body, header) =
+                next_body_and_header_with_transaction(&grandparent, 0, &kernel, mutator_set);
+            let prev_block = unproven_block_with_own_claim(&grandparent, body, header, 0);
+            let (next_body, next_header) =
+                next_body_and_header_with_transaction(&prev_block, 0, &kernel, mutator_set);
+
+            ((prev_block, next_body, next_header), transparent_inputs)
+        }
+
+        /// A chain built without proofs: a grandparent with this lustration
+        /// status, a previous block at the activation height whose
+        /// transaction spends this many inputs and carries the announcements
+        /// this function makes for them, and a next body and header for it.
+        /// Also returns the transparent inputs.
+        fn lustration_chain_with_inputs(
+            num_inputs: usize,
+            status: LustrationStatus,
+            announcements: impl FnOnce(&[TransparentInput]) -> Vec<Announcement>,
+        ) -> ((Block, BlockBody, BlockHeader), Vec<TransparentInput>) {
+            GRANDPARENT_LUSTRATION_STATUS.set(Some(status));
+            chain_with_inputs(num_inputs, lustrating_grandparent, |inputs, kernel| {
+                TransactionKernelModifier::default()
+                    .announcements(announcements(inputs))
+                    .modify(kernel)
+            })
+        }
+
+        /// As [lustration_chain_with_inputs], with two inputs.
+        fn lustration_chain(
+            status: LustrationStatus,
+            announcements: impl FnOnce(&[TransparentInput]) -> Vec<Announcement>,
+        ) -> ((Block, BlockBody, BlockHeader), Vec<TransparentInput>) {
+            lustration_chain_with_inputs(2, status, announcements)
+        }
+
+        /// A status under which every input of the lustration chain must
+        /// lustrate.
+        fn lustrating_status(counter: NativeCurrencyAmount) -> LustrationStatus {
+            LustrationStatus {
+                counter,
+                max_lustrating_aocl_leaf_index: u64::MAX / 2,
+            }
+        }
+
+        fn all_lustrations(inputs: &[TransparentInput]) -> Vec<Announcement> {
+            Announcement::lustration_announcements(
+                lustrating_status(NativeCurrencyAmount::zero()),
+                inputs,
+            )
+        }
+
+        #[test]
+        fn prev_block_lustrating_its_inputs_passes() {
+            let initial = lustration_counter_initial();
+            let ((prev_block, next_body, next_header), inputs) =
+                lustration_chain(lustrating_status(initial), |inputs| {
+                    [
+                        vec![Announcement::new(vec![LUSTRATION_FLAG, bfe!(3)])],
+                        all_lustrations(inputs),
+                        all_lustrations(inputs),
+                    ]
+                    .concat()
+                });
+            let lustrated: NativeCurrencyAmount = inputs
+                .iter()
+                .map(|input| input.utxo.get_native_currency_amount())
+                .sum();
+            assert!(!lustrated.is_zero());
+            assert_eq!(
+                initial.checked_sub(&lustrated).unwrap(),
+                prev_block.header().pow.lustration_status().unwrap().counter
+            );
+
+            assert_accepts(&skipping(), &prev_block, &next_body, &next_header);
+        }
+
+        #[test]
+        fn prev_block_missing_a_lustration_announcement_fails() {
+            let ((prev_block, next_body, next_header), _) =
+                lustration_chain(lustrating_status(lustration_counter_initial()), |inputs| {
+                    all_lustrations(inputs)[1..].to_vec()
+                });
+
+            assert_rejects(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::MissingLustrationAnnouncement.error_id(),
+            );
+        }
+
+        #[test]
+        fn prev_block_with_undecodable_lustration_announcement_fails() {
+            let ((prev_block, next_body, next_header), _) =
+                lustration_chain(lustrating_status(lustration_counter_initial()), |inputs| {
+                    let mut announcements = all_lustrations(inputs);
+                    announcements[0].message.pop();
+                    announcements
+                });
+
+            assert_rejects(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::MissingLustrationAnnouncement.error_id(),
+            );
+        }
+
+        #[test]
+        fn prev_block_lustrating_more_than_the_counter_fails() {
+            let ((prev_block, next_body, next_header), _) = lustration_chain(
+                lustrating_status(NativeCurrencyAmount::one_nau()),
+                all_lustrations,
+            );
+
+            assert_rejects(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::NegativeLustrationCounter.error_id(),
+            );
+        }
+
+        /// An input whose AOCL range starts at or below the threshold must
+        /// lustrate, but its amount only counts if its AOCL leaf index is at
+        /// or below the threshold.
+        #[test]
+        fn prev_block_with_input_at_the_barrier_lustrates_without_counting() {
+            let initial = lustration_counter_initial();
+            let (_, inputs) = lustration_chain(lustrating_status(initial), all_lustrations);
+            let input = &inputs[0];
+            let (range_start, _) = input.absolute_index_set().aocl_range().unwrap();
+            assert!(range_start < input.aocl_leaf_index);
+            let status = LustrationStatus {
+                counter: initial,
+                max_lustrating_aocl_leaf_index: input.aocl_leaf_index - 1,
+            };
+            assert!(inputs[1..].iter().all(|other| {
+                other.absolute_index_set().aocl_range().unwrap().0
+                    > status.max_lustrating_aocl_leaf_index
+            }));
+
+            let ((prev_block, next_body, next_header), _) =
+                lustration_chain(status, all_lustrations);
+            assert_eq!(
+                initial,
+                prev_block.header().pow.lustration_status().unwrap().counter
+            );
+            assert_accepts(&skipping(), &prev_block, &next_body, &next_header);
+
+            let ((prev_block, next_body, next_header), _) =
+                lustration_chain(status, |inputs| all_lustrations(inputs)[1..].to_vec());
+            assert_rejects(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::MissingLustrationAnnouncement.error_id(),
+            );
         }
 
         #[test]
