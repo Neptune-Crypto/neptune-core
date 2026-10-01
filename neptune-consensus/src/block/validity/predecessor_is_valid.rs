@@ -1584,6 +1584,22 @@ impl TritonProgram for PredecessorIsValid {
             // _ *w [prev_block_hash]
         );
 
+        // BEFORE: _ *w [prev_block_hash] *prev_claim_output
+        // AFTER:  _ *w [prev_block_hash] *prev_claim_output
+        let rule_2q_prev = triton_asm!(
+            dup 6 {&prev_lustration_status}
+            {&field!(LustrationStatus::max_lustrating_aocl_leaf_index)} {&read_u64}
+            // _ *w [prev_block_hash] *prev_claim_output [prev_threshold]
+
+            dup 2 addi {Digest::LEN + 1}
+            {&field!(LustrationStatus::max_lustrating_aocl_leaf_index)} {&read_u64}
+            // _ *w [prev_block_hash] *prev_claim_output [prev_threshold] [prev_prev_threshold]
+
+            {&DataType::U64.compare()}
+            assert error_id {BlockValidationRule::BadLustrationAoclThreshold.error_id()}
+            // _ *w [prev_block_hash] *prev_claim_output
+        );
+
         // The previous block's lustration counter must be its predecessor's
         // less what its transaction lustrates, and must not fall below zero.
         // BEFORE: _ *w [prev_block_hash] *prev_claim_output
@@ -1639,6 +1655,7 @@ impl TritonProgram for PredecessorIsValid {
         let (rule_2t_prev, rule_2t_prev_code) = subroutine("rule_2t_prev", rule_2t_prev);
         let (mutator_set_update_prev, mutator_set_update_prev_code) =
             subroutine("mutator_set_update_prev", mutator_set_update_prev);
+        let (rule_2q_prev, rule_2q_prev_code) = subroutine("rule_2q_prev", rule_2q_prev);
         let (rules_2o_2p_2r_prev, rules_2o_2p_2r_prev_code) =
             subroutine("rules_2o_2p_2r_prev", rules_2o_2p_2r_prev);
 
@@ -1700,6 +1717,9 @@ impl TritonProgram for PredecessorIsValid {
                 // _ *w [prev_block_hash] *prev_claim_output
 
                 call {mutator_set_update_prev}
+                // _ *w [prev_block_hash] *prev_claim_output
+
+                call {rule_2q_prev}
                 // _ *w [prev_block_hash] *prev_claim_output
 
                 call {rules_2o_2p_2r_prev}
@@ -2223,6 +2243,7 @@ impl TritonProgram for PredecessorIsValid {
             {&mutator_set_update_prev_code}
             {&swbfi_claim_input_matches_code}
             {&find_swbfi_claim_code}
+            {&rule_2q_prev_code}
             {&rules_2o_2p_2r_prev_code}
             {&rule_1e_prev_code}
             {&rule_2f_prev_code}
@@ -2607,6 +2628,12 @@ mod tests {
                 )
                 .unwrap();
                 let threshold = prev_prev_lustration_status.max_lustrating_aocl_leaf_index;
+
+                // 2.q)
+                assert_eq!(
+                    threshold,
+                    prev_lustration_status.max_lustrating_aocl_leaf_index
+                );
 
                 for input in &prev_transaction_kernel.inputs {
                     let (range_start, _) = input
@@ -3552,6 +3579,21 @@ mod tests {
                 &next_body,
                 &next_header,
                 BlockValidationRule::BadLustrationCounter.error_id(),
+            );
+        }
+
+        #[test]
+        fn prev_block_with_other_lustration_threshold_fails() {
+            let mut status = dictated_lustration_status();
+            status.max_lustrating_aocl_leaf_index += 1;
+            let (prev_block, next_body, next_header) = prev_block_with_lustration_status(status);
+
+            assert_rejects(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::BadLustrationAoclThreshold.error_id(),
             );
         }
 
