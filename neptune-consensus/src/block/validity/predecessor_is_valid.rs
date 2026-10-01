@@ -28,9 +28,12 @@ use tasm_lib::prelude::DataType;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
+use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::verifier::own_program_digest::OwnProgramDigest;
+use tasm_lib::verifier::stark_verify::StarkVerify;
 
+use super::block_program::BlockProgram;
 use super::difficulty_control::DifficultyControl;
 use super::epoch_table::Epoch;
 use super::epoch_table::EpochTable;
@@ -47,12 +50,14 @@ use crate::block::pow::LustrationStatus;
 use crate::block::pow::PowValidationError;
 use crate::block::pow::POW_MEMORY_TREE_HEIGHT;
 use crate::block::Block;
+use crate::block::BlockProof;
 use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::transaction::transaction_kernel::TransactionKernel;
 use crate::transaction::validity::single_proof::single_proof_claim;
 use crate::transaction::validity::single_proof::SingleProof;
 use crate::transaction::validity::tasm::claims::generate_single_proof_claim::GenerateSingleProofClaim;
+use crate::transaction::validity::tasm::claims::new_claim::NewClaim;
 
 /// The witness for [`PredecessorIsValid`]: the previous block and the next
 /// block's body.
@@ -70,7 +75,11 @@ impl PredecessorIsValidWitness {
         }
     }
 
-    pub fn nondeterminism(&self, epochs: &EpochTable) -> NonDeterminism {
+    pub fn nondeterminism(
+        &self,
+        program: &PredecessorIsValid,
+        epochs: &EpochTable,
+    ) -> NonDeterminism {
         let mut nondeterminism = NonDeterminism::default();
         encode_to_memory(
             &mut nondeterminism.ram,
@@ -84,6 +93,22 @@ impl PredecessorIsValidWitness {
                 .next_block_body
                 .mast_path(BlockBodyField::BlockMmrAccumulator),
         );
+
+        if program.verifies_prev_block_proof {
+            // 1.d)
+            if let BlockProof::SingleProof(prev_block_proof) = &self.prev_block.proof {
+                let prev_block_claim = BlockProgram::claim(
+                    self.prev_block.body(),
+                    self.prev_block.appendix(),
+                    ConsensusRuleSet::HardforkDelta,
+                );
+                StarkVerify::new_with_dynamic_layout(Stark::default()).update_nondeterminism(
+                    &mut nondeterminism,
+                    prev_block_proof,
+                    &prev_block_claim,
+                );
+            }
+        }
 
         let prev_block_height = self.prev_block.header().height;
         if prev_block_height >= epochs.activation_height() {
@@ -110,14 +135,15 @@ struct PredecessorIsValidWitnessMemory {
     /// block's MMR.
     prev_block_header: BlockHeader,
 
-    /// As [Self::prev_block_header].
+    /// As [Self::prev_block_header]. Plus verified through rule 1.d on the
+    /// previous block.
     prev_block_body: BlockBody,
 
     /// As [Self::prev_block_header].
     prev_block_appendix: BlockAppendix,
 
-    /// The encoding of the previous block's `BlockProof`. As
-    /// [Self::prev_block_header].
+    /// The encoding of the previous block's `BlockProof`. As above
+    /// [Self::prev_block_header], Plus proof is verified.
     prev_block_proof: Vec<BFieldElement>,
 }
 
@@ -169,9 +195,26 @@ impl From<&PredecessorIsValidWitness> for PredecessorIsValidWitnessMemory {
 ///  - previous block's cumulative proof-of-work
 ///  - previous block's difficulty
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec)]
-pub struct PredecessorIsValid;
+pub struct PredecessorIsValid {
+    /// Whether to verify the previous block's proof. Only ever false in tests.
+    ///
+    /// A compile-time variable from the TASM perspective, *not* a run-time
+    /// variable, meaning that two different programs are produced based on
+    /// this value.
+    verifies_prev_block_proof: bool,
+}
 
 impl PredecessorIsValid {
+    #[expect(
+        clippy::new_without_default,
+        reason = "the other variant is for tests only"
+    )]
+    pub fn new() -> Self {
+        Self {
+            verifies_prev_block_proof: true,
+        }
+    }
+
     /// Where in the claim's output the previous block's timestamp is.
     fn output_timestamp_offset() -> usize {
         Digest::LEN + LustrationStatus::static_length().unwrap()
@@ -282,6 +325,7 @@ impl TritonProgram for PredecessorIsValid {
         let u64_lt = library.import(Box::new(U64Lt));
         let u192_safe_add = library.import(Box::new(U192SafeAdd));
         let difficulty_control = library.import(Box::new(DifficultyControl));
+        let new_claim = library.import(Box::new(NewClaim::new(ConsensusRuleSet::HardforkDelta)));
         let generate_single_proof_claim = library.import(Box::new(GenerateSingleProofClaim::new(
             ConsensusRuleSet::HardforkDelta,
         )));
@@ -296,6 +340,16 @@ impl TritonProgram for PredecessorIsValid {
             single_proof_claim(Digest::default(), ConsensusRuleSet::HardforkDelta)
                 .encode()
                 .len();
+        let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
+            Stark::default(),
+        )));
+        let push_block_program_digest = BlockProgram
+            .hash()
+            .values()
+            .into_iter()
+            .rev()
+            .flat_map(|word| triton_asm!(push { word }))
+            .collect::<Vec<_>>();
         // The `BlockProof`'s encoding lies inside the `Vec` field, after the
         // `Vec`'s own length word.
         let prev_block_proof_encoding = triton_asm!(
@@ -1093,6 +1147,90 @@ impl TritonProgram for PredecessorIsValid {
             // _ *w [prev_block_hash]
         );
 
+        // BEFORE: _ *w [prev_block_hash]
+        // AFTER:  _ *w [prev_block_hash]
+        let rule_1c_prev = triton_asm!(
+            dup 5 {&field!(PredecessorIsValidWitnessMemory::prev_block_proof)}
+            addi 1 read_mem 1 pop 1
+            // _ *w [prev_block_hash] block_proof_discriminant
+
+            push {BlockProof::SINGLE_PROOF_DISCRIMINANT} eq
+            assert error_id {BlockValidationRule::ProofQuality.error_id()}
+            // _ *w [prev_block_hash]
+        );
+
+        // Hash each appendix claim into the block program claim's output.
+        let hash_appendix_claims = "predecessor_is_valid_hash_appendix_claims".to_string();
+        let hash_appendix_claims_code = triton_asm!(
+            // INVARIANT: _ *claim[i]_si *output[i] num_claims i
+            {hash_appendix_claims}:
+                dup 1 dup 1 eq skiz return
+                // _ *claim[i]_si *output[i] num_claims i
+
+                dup 3 read_mem 1 addi 2
+                // _ *claim[i]_si *output[i] num_claims i claim_size *claim[i]
+
+                // Crashes unless the size is a u32.
+                dup 1 pop_count pop 1
+
+                dup 1 call {hash_varlen}
+                // _ *claim[i]_si *output[i] num_claims i claim_size [claim_hash]
+
+                dup 8 write_mem {Digest::LEN}
+                // _ *claim[i]_si *output[i] num_claims i claim_size *output[i + 1]
+
+                pick 4 pop 1 place 3
+                // _ *claim[i]_si *output[i + 1] num_claims i claim_size
+
+                pick 4 add addi 1 place 3
+                // _ *claim[i + 1]_si *output[i + 1] num_claims i
+
+                addi 1
+                recurse
+        );
+
+        // The verifier crashes on an invalid proof; that crash carries no
+        // error ID.
+        // BEFORE: _ *w [prev_block_hash]
+        // AFTER:  _ *w [prev_block_hash]
+        let rule_1d_prev = triton_asm!(
+            dup 5 {&field!(PredecessorIsValidWitnessMemory::prev_block_appendix)}
+            {&field!(BlockAppendix::claims)}
+            read_mem 1 addi 2 place 1
+            // _ *w [prev_block_hash] *claim[0]_si num_claims
+
+            push {Digest::LEN} dup 1 push {Digest::LEN} mul
+            call {new_claim}
+            // _ *w [prev_block_hash] *claim[0]_si num_claims *claim *output *input *program_digest
+
+            {&push_block_program_digest}
+            pick 5 write_mem {Digest::LEN} pop 1
+            // _ *w [prev_block_hash] *claim[0]_si num_claims *claim *output *input
+
+            push {prev_block_body_mh_alloc.read_address()} read_mem {Digest::LEN} pop 1
+            swap 4 swap 1 swap 3 swap 1
+            // _ *w [prev_block_hash] *claim[0]_si num_claims *claim *output *input [prev_block_body_mh_reversed]
+
+            pick 5 write_mem {Digest::LEN} pop 1
+            // _ *w [prev_block_hash] *claim[0]_si num_claims *claim *output
+
+            pick 1 place 3 swap 1 push 0
+            // _ *w [prev_block_hash] *claim *claim[0]_si *output num_claims 0
+
+            call {hash_appendix_claims}
+            // _ *w [prev_block_hash] *claim *claim[n]_si *output[n] num_claims num_claims
+
+            pop 4
+            // _ *w [prev_block_hash] *claim
+
+            dup 6 {&field!(PredecessorIsValidWitnessMemory::prev_block_proof)}
+            addi {1 + BlockProof::SINGLE_PROOF_PREFIX_LEN}
+            // _ *w [prev_block_hash] *claim *proof
+
+            call {stark_verify}
+            // _ *w [prev_block_hash]
+        );
+
         // Find the claim with this hash in the previous block's appendix.
         let find_claim_by_hash = "predecessor_is_valid_find_claim_by_hash".to_string();
         let find_claim_by_hash_code = triton_asm!(
@@ -1159,6 +1297,18 @@ impl TritonProgram for PredecessorIsValid {
             // _ *w [prev_block_hash]
         );
 
+        let (rule_1c_prev, rule_1c_prev_code) = subroutine("rule_1c_prev", rule_1c_prev);
+        let (rule_1d_prev, rule_1d_prev_code) = subroutine("rule_1d_prev", rule_1d_prev);
+        let (verify_prev_block_proof, verify_prev_block_proof_code) =
+            if self.verifies_prev_block_proof {
+                (
+                    triton_asm!(call {rule_1c_prev} call {rule_1d_prev}),
+                    [rule_1c_prev_code, rule_1d_prev_code].concat(),
+                )
+            } else {
+                (Vec::new(), Vec::new())
+            };
+
         // The claim's output: the previous block's hash, lustration status,
         // timestamp, cumulative proof-of-work and difficulty.
         // BEFORE: _ [next_block_body_mh] *w [prev_block_hash]
@@ -1212,8 +1362,9 @@ impl TritonProgram for PredecessorIsValid {
             // _ [next_block_body_mh] *w
 
             /* Construct previous block hash from non-deterministic memory,
-            reconstructing the MAST hash construction. Along with rule 0.c, this
-            establishes that the ND memory for the previous block is authentic. */
+            reconstructing the MAST hash construction. Along with its proof
+            verification, this established that the ND memory for the previous
+            block is authentic. */
             call {prev_block_hash}
             // _ [next_block_body_mh] *w [prev_block_hash]
 
@@ -1227,6 +1378,9 @@ impl TritonProgram for PredecessorIsValid {
             // _ [next_block_body_mh] *w [prev_block_hash]
 
             call {rule_1b_prev}
+            // _ [next_block_body_mh] *w [prev_block_hash]
+
+            {&verify_prev_block_proof}
             // _ [next_block_body_mh] *w [prev_block_hash]
 
             call {rule_1a_txproof_prev}
@@ -1244,6 +1398,7 @@ impl TritonProgram for PredecessorIsValid {
 
             {&header_mast_hash_code}
             {&transaction_kernel_mast_hash_code}
+            {&hash_appendix_claims_code}
             {&find_claim_by_hash_code}
             {&epoch_has_started_code}
             {&epoch_in_force_code}
@@ -1258,6 +1413,7 @@ impl TritonProgram for PredecessorIsValid {
             {&rule_0c_code}
             {&prev_block_pow_code}
             {&rule_1b_prev_code}
+            {&verify_prev_block_proof_code}
             {&rule_1a_txproof_prev_code}
             {&read_epoch_table_code}
             {&rule_0b_prev_code}
@@ -1272,9 +1428,16 @@ impl TritonProgram for PredecessorIsValid {
     }
 
     fn hash(&self) -> Digest {
-        static HASH: OnceLock<Digest> = OnceLock::new();
+        static VERIFYING: OnceLock<Digest> = OnceLock::new();
+        static SKIPPING: OnceLock<Digest> = OnceLock::new();
 
-        *HASH.get_or_init(|| self.program().hash())
+        let cache = if self.verifies_prev_block_proof {
+            &VERIFYING
+        } else {
+            &SKIPPING
+        };
+
+        *cache.get_or_init(|| self.program().hash())
     }
 }
 
@@ -1292,7 +1455,6 @@ mod tests {
     use rand::rngs::StdRng;
     use rand::RngExt;
     use rand::SeedableRng;
-    use tasm_lib::triton_vm::stark::Stark;
     use tasm_lib::twenty_first::prelude::Mmr;
 
     use super::*;
@@ -1300,12 +1462,12 @@ mod tests {
     use crate::block::test_helpers::block_mmra_with_num_leafs;
     use crate::block::validity::block_primitive_witness::deterministic_block_primitive_witness;
     use crate::block::validity::block_primitive_witness::BlockPrimitiveWitness;
-    use crate::block::validity::block_program::BlockProgram;
     use crate::block::validity::block_proof_witness::BlockProofWitness;
     use crate::block::BlockProof;
     use crate::block::BlockValidationError;
     use crate::consensus_rule_set::LustrationRule;
     use crate::proof_abstractions::tasm::builtins as tasm;
+    use crate::proof_abstractions::tasm::builtins::verify_stark;
     use crate::proof_abstractions::tasm::program::proof_cache::load_proof_or_produce_and_save;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::proof_abstractions::test_runtime::tokio_runtime;
@@ -1363,6 +1525,26 @@ mod tests {
 
             // 1.b)
             assert!(witness.prev_block_appendix.len() <= MAX_NUM_CLAIMS);
+
+            if self.verifies_prev_block_proof {
+                // 1.c)
+                let BlockProof::SingleProof(prev_block_proof) =
+                    *BlockProof::decode(&witness.prev_block_proof).unwrap()
+                else {
+                    panic!("previous block must carry a single proof");
+                };
+
+                // 1.d)
+                let prev_block_claim = Claim::new(BlockProgram.hash())
+                    .with_input(prev_block_body_mh.reversed().values().to_vec())
+                    .with_output(witness.prev_block_appendix.claims_as_output())
+                    .about_version(
+                        ConsensusRuleSet::HardforkDelta
+                            .triton_proof_version()
+                            .version(),
+                    );
+                verify_stark(Stark::default(), &prev_block_claim, &prev_block_proof);
+            }
 
             // 1.a) The transaction claim; this program's own claim is found
             // under the header rules.
@@ -1537,6 +1719,21 @@ mod tests {
             prev_block.header().cumulative_proof_of_work + header.difficulty;
     }
 
+    impl PredecessorIsValid {
+        /// The program that does not verify the previous block's proof, for
+        /// testing the other rules on blocks, without-expensive-to-build
+        /// proofs.
+        fn skipping_proof_verification() -> Self {
+            Self {
+                verifies_prev_block_proof: false,
+            }
+        }
+    }
+
+    fn skipping() -> PredecessorIsValid {
+        PredecessorIsValid::skipping_proof_verification()
+    }
+
     /// A transaction kernel with its single proof, shared by every fixture
     /// body.
     /// The kernel and proof of a transaction from a block that has no
@@ -1642,6 +1839,21 @@ mod tests {
             let proof = transaction.proof().clone().into_single_proof();
             (transaction.kernel().clone(), proof)
         })
+    }
+
+    /// The transaction claim of the body's transaction with its proof, for
+    /// the transactions that have one: the shared one and the unrelated one.
+    fn transaction_claim_and_proof_for(body: &BlockBody) -> (Claim, NeptuneProof) {
+        let kernel = &body.transaction_kernel;
+        let (_, proof) = [
+            transaction_kernel_and_proof(),
+            unrelated_transaction_kernel_and_proof(),
+        ]
+        .into_iter()
+        .find(|(known_kernel, _)| known_kernel == kernel)
+        .expect("body must carry a transaction with a proof");
+        let claim = single_proof_claim(kernel.mast_hash(), ConsensusRuleSet::HardforkDelta);
+        (claim, proof.clone())
     }
 
     /// Each block a fixture parent has been built on, by its hash.
@@ -1927,7 +2139,7 @@ mod tests {
     }
 
     /// A successor of the previous block with this body and header, whose
-    /// appendix holds this program's claim among fillers, without a
+    /// appendix holds the skipping program's claim among fillers, without a
     /// proof.
     fn unproven_block_with_own_claim(
         prev_block: &Block,
@@ -1945,15 +2157,14 @@ mod tests {
         seed: u64,
         epochs: &EpochTable,
     ) -> Block {
-        let own_claim =
-            own_claim_with_epochs(&PredecessorIsValid, prev_block, &body, &header, epochs);
+        let own_claim = own_claim_with_epochs(&skipping(), prev_block, &body, &header, epochs);
         let mut claims = vec![halt_claim_and_proof().0, halt_claim_and_proof().0];
         claims.insert(own_claim_position(seed), own_claim);
 
         unproven_block(header, body, claims)
     }
 
-    /// An unproven previous block that carries this program's claim,
+    /// An unproven previous block that carries the skipping program's claim,
     /// and a next body and header for it.
     fn unproven_prev_block_and_next_body_and_header(seed: u64) -> (Block, BlockBody, BlockHeader) {
         let prev_prev_block = random_unproven_block(seed);
@@ -1974,7 +2185,7 @@ mod tests {
         let claim = own_claim_with_epochs(program, prev_block, next_body, next_header, epochs);
         let witness = PredecessorIsValidWitness::new(prev_block, next_body);
 
-        (claim, witness.nondeterminism(epochs))
+        (claim, witness.nondeterminism(program, epochs))
     }
 
     /// Run the program in Rust and in Triton VM, and check that both agree
@@ -2047,16 +2258,125 @@ mod tests {
             .unwrap();
     }
 
-    /// The tests on blocks without proofs.
+    /// The tests that need a block proof in the witness: they run the
+    /// variant of this program that verifies it.
+    mod require_proof {
+        use super::*;
+
+        /// The block with this header and body, whose appendix holds the
+        /// transaction claim and then these claims, with its proof.
+        fn proven_block(
+            header: BlockHeader,
+            body: BlockBody,
+            claims: Vec<(Claim, NeptuneProof)>,
+        ) -> Block {
+            let claims = [vec![transaction_claim_and_proof_for(&body)], claims].concat();
+            let proof = block_proof(&body, &claims);
+            let appendix = BlockAppendix::new(claims.into_iter().map(|(claim, _)| claim).collect());
+
+            block(header, body, appendix, BlockProof::SingleProof(proof))
+        }
+
+        /// The proven block just below the activation height that the
+        /// fixture parents build on.
+        fn random_block(_seed: u64) -> Block {
+            fixture_grandparent()
+        }
+
+        /// The verifying program's claim about the previous block, for the next
+        /// block with this body and header, with its proof from the proof cache.
+        fn own_claim_and_proof(
+            prev_block: &Block,
+            next_body: &BlockBody,
+            next_header: &BlockHeader,
+        ) -> (Claim, NeptuneProof) {
+            let program = PredecessorIsValid::new();
+            let claim = own_claim(&program, prev_block, next_body, next_header);
+            let witness = PredecessorIsValidWitness::new(prev_block, next_body);
+            let proof = load_proof_or_produce_and_save(
+                &claim,
+                program.program(),
+                witness.nondeterminism(&program, &epochs()),
+            );
+
+            (claim, proof)
+        }
+
+        /// A successor of the previous block with this body and header, whose
+        /// appendix holds the verifying program's claim among fillers, with its
+        /// proof.
+        fn proven_block_with_own_claim(
+            prev_block: &Block,
+            body: BlockBody,
+            header: BlockHeader,
+            seed: u64,
+        ) -> Block {
+            let own_claim = own_claim_and_proof(prev_block, &body, &header);
+            let mut claims = vec![halt_claim_and_proof(), halt_claim_and_proof()];
+            claims.insert(own_claim_position(seed), own_claim);
+
+            proven_block(header, body, claims)
+        }
+
+        /// A proven previous block that carries the verifying program's claim,
+        /// and a next body and header for it.
+        fn prev_block_and_next_body_and_header(seed: u64) -> (Block, BlockBody, BlockHeader) {
+            let prev_prev_block = random_block(seed);
+            let (body, header) = next_body_and_header(&prev_prev_block, seed);
+            let prev_block = proven_block_with_own_claim(&prev_prev_block, body, header, seed);
+            let (next_body, next_header) = next_body_and_header(&prev_block, seed);
+
+            (prev_block, next_body, next_header)
+        }
+
+        #[test]
+        fn rust_and_tasm_agree_and_output_is_the_prev_block_hash() {
+            let (prev_block, next_body, next_header) = prev_block_and_next_body_and_header(0);
+            assert_accepts(
+                &PredecessorIsValid::new(),
+                &prev_block,
+                &next_body,
+                &next_header,
+            );
+        }
+
+        #[test]
+        fn prev_block_with_modified_proof_fails_verification() {
+            let (mut prev_block, _, _) = prev_block_and_next_body_and_header(0);
+            let BlockProof::SingleProof(proof) = prev_block.proof.clone() else {
+                panic!("fixture must carry a single proof");
+            };
+            let mut words = proof.0.clone();
+            *words.last_mut().unwrap() += bfe!(1);
+            prev_block.set_proof(BlockProof::SingleProof(NeptuneProof::from(words)));
+            prev_block.satisfy_pow(Difficulty::MINIMUM, ConsensusRuleSet::HardforkDelta);
+            let (next_body, next_header) = next_body_and_header(&prev_block, 0);
+
+            let program = PredecessorIsValid::new();
+            let (claim, nondeterminism) = claim_and_nondeterminism(
+                &program,
+                &prev_block,
+                &next_body,
+                &next_header,
+                &epochs(),
+            );
+            let input = PublicInput::new(claim.input);
+            assert!(program.run_tasm(&input, nondeterminism.clone()).is_err());
+            assert!(program.run_rust(&input, nondeterminism).is_err());
+        }
+    }
+
+    /// The tests that need no block proof in the witness: they run the
+    /// variant of this program that skips proof verification.
     mod proof_free {
         use super::*;
 
         #[test]
-        fn rust_and_tasm_agree_and_output_is_the_prev_block_hash() {
+        fn skipping_program_agrees_with_rust_and_outputs_the_prev_block_hash() {
             for seed in 0..3 {
                 let (prev_block, next_body, next_header) =
                     unproven_prev_block_and_next_body_and_header(seed);
-                assert_accepts(&PredecessorIsValid, &prev_block, &next_body, &next_header);
+                assert_accepts(&skipping(), &prev_block, &next_body, &next_header);
             }
         }
 
@@ -2068,7 +2388,7 @@ mod tests {
             let prev_block = unproven_block(header, body, vec![]);
             let (next_body, next_header) = next_body_and_header(&prev_block, 0);
 
-            assert_accepts(&PredecessorIsValid, &prev_block, &next_body, &next_header);
+            assert_accepts(&skipping(), &prev_block, &next_body, &next_header);
         }
 
         #[test]
@@ -2079,7 +2399,7 @@ mod tests {
             let (next_body, next_header) = next_body_and_header(&prev_block, 0);
 
             assert_rejects(
-                &PredecessorIsValid,
+                &skipping(),
                 &prev_block,
                 &next_body,
                 &next_header,
@@ -2091,7 +2411,7 @@ mod tests {
         fn prev_block_without_transaction_claim_fails() {
             let prev_prev_block = random_unproven_block(0);
             let (body, header) = next_body_and_header(&prev_prev_block, 0);
-            let own_claim = own_claim(&PredecessorIsValid, &prev_prev_block, &body, &header);
+            let own_claim = own_claim(&skipping(), &prev_prev_block, &body, &header);
             let prev_block = block(
                 header,
                 body,
@@ -2101,7 +2421,7 @@ mod tests {
             let (next_body, next_header) = next_body_and_header(&prev_block, 0);
 
             assert_rejects(
-                &PredecessorIsValid,
+                &skipping(),
                 &prev_block,
                 &next_body,
                 &next_header,
@@ -2120,11 +2440,30 @@ mod tests {
             let (next_body, next_header) = next_body_and_header(&prev_block, 0);
 
             assert_rejects(
-                &PredecessorIsValid,
+                &skipping(),
                 &prev_block,
                 &next_body,
                 &next_header,
                 PowValidationError::ThresholdNotMet.error_id(),
+            );
+        }
+
+        #[test]
+        fn single_proof_encoding_has_the_layout_the_program_reads() {
+            let proof = NeptuneProof::from(vec![bfe!(7), bfe!(8), bfe!(9)]);
+            let encoding = BlockProof::SingleProof(proof.clone()).encode();
+            let expected = [
+                vec![
+                    bfe!(BlockProof::SINGLE_PROOF_DISCRIMINANT),
+                    bfe!(proof.encode().len() as u64),
+                ],
+                proof.encode(),
+            ]
+            .concat();
+            assert_eq!(expected, encoding);
+            assert_eq!(
+                BlockProof::SINGLE_PROOF_PREFIX_LEN as usize,
+                encoding.len() - proof.encode().len()
             );
         }
 
@@ -2145,11 +2484,25 @@ mod tests {
             let (next_body, next_header) = next_body_and_header(&prev_block, 0);
 
             assert_rejects(
-                &PredecessorIsValid,
+                &skipping(),
                 &prev_block,
                 &next_body,
                 &next_header,
                 BlockValidationRule::AppendixTooLarge.error_id(),
+            );
+        }
+
+        #[test]
+        fn prev_block_without_single_proof_fails() {
+            let (prev_block, next_body, next_header) =
+                unproven_prev_block_and_next_body_and_header(0);
+
+            assert_rejects(
+                &PredecessorIsValid::new(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::ProofQuality.error_id(),
             );
         }
 
@@ -2160,7 +2513,7 @@ mod tests {
             prev_block.set_proof(BlockProof::Genesis);
 
             assert_rejects(
-                &PredecessorIsValid,
+                &skipping(),
                 &prev_block,
                 &next_body,
                 &next_header,
@@ -2182,7 +2535,7 @@ mod tests {
             );
 
             assert_rejects(
-                &PredecessorIsValid,
+                &skipping(),
                 &prev_block,
                 &next_body,
                 &next_header,
@@ -2205,7 +2558,7 @@ mod tests {
             );
 
             assert_rejects(
-                &PredecessorIsValid,
+                &skipping(),
                 &prev_block,
                 &next_body,
                 &next_header,
@@ -2250,7 +2603,7 @@ mod tests {
             let (prev_block, next_body, next_header) =
                 prev_block_with_timestamp(&prev_prev_block, timestamp, &epochs());
 
-            assert_accepts(&PredecessorIsValid, &prev_block, &next_body, &next_header);
+            assert_accepts(&skipping(), &prev_block, &next_body, &next_header);
         }
 
         #[test]
@@ -2267,7 +2620,7 @@ mod tests {
                     prev_block_with_timestamp(&prev_prev_block, timestamp, &epochs());
 
                 assert_rejects(
-                    &PredecessorIsValid,
+                    &skipping(),
                     &prev_block,
                     &next_body,
                     &next_header,
@@ -2298,13 +2651,13 @@ mod tests {
                 )) == Err(BlockValidationError::MinimumBlockTime);
 
                 let (claim, nondeterminism) = claim_and_nondeterminism(
-                    &PredecessorIsValid,
+                    &skipping(),
                     &prev_block,
                     &next_body,
                     &next_header,
                     &epochs(),
                 );
-                let program_rejects_on_0d = PredecessorIsValid
+                let program_rejects_on_0d = skipping()
                     .test_assertion_failure(
                         PublicInput::new(claim.input),
                         nondeterminism,
@@ -2324,13 +2677,13 @@ mod tests {
         fn prev_block_whose_header_points_to_another_block_fails() {
             let prev_prev_block = random_unproven_block(0);
             let (body, mut header) = next_body_and_header(&prev_prev_block, 0);
-            let own_claim = own_claim(&PredecessorIsValid, &prev_prev_block, &body, &header);
+            let own_claim = own_claim(&skipping(), &prev_prev_block, &body, &header);
             header.prev_block_digest = StdRng::seed_from_u64(0).random();
             let prev_block = unproven_block(header, body, vec![own_claim]);
             let (next_body, next_header) = next_body_and_header(&prev_block, 0);
 
             assert_rejects(
-                &PredecessorIsValid,
+                &skipping(),
                 &prev_block,
                 &next_body,
                 &next_header,
@@ -2348,7 +2701,7 @@ mod tests {
             let (next_body, next_header) = next_body_and_header(&prev_block, 0);
 
             assert_rejects(
-                &PredecessorIsValid,
+                &skipping(),
                 &prev_block,
                 &next_body,
                 &next_header,
@@ -2365,7 +2718,7 @@ mod tests {
             let (next_body, next_header) = next_body_and_header(&prev_block, 0);
 
             assert_rejects(
-                &PredecessorIsValid,
+                &skipping(),
                 &prev_block,
                 &next_body,
                 &next_header,
@@ -2389,18 +2742,13 @@ mod tests {
             );
             let decoy_prev_block = unproven_block(decoy_prev_header, decoy_prev_body, vec![]);
             let (decoy_body, decoy_header) = next_body_and_header(&decoy_prev_block, 1);
-            let decoy = own_claim(
-                &PredecessorIsValid,
-                &decoy_prev_block,
-                &decoy_body,
-                &decoy_header,
-            );
+            let decoy = own_claim(&skipping(), &decoy_prev_block, &decoy_body, &decoy_header);
 
-            let own_claim = own_claim(&PredecessorIsValid, &prev_prev_block, &body, &header);
+            let own_claim = own_claim(&skipping(), &prev_prev_block, &body, &header);
             let prev_block = unproven_block(header, body, vec![decoy, own_claim]);
             let (next_body, next_header) = next_body_and_header(&prev_block, 0);
 
-            assert_accepts(&PredecessorIsValid, &prev_block, &next_body, &next_header);
+            assert_accepts(&skipping(), &prev_block, &next_body, &next_header);
         }
 
         /// An epoch starting right after activation, with this minimum block time.
@@ -2434,7 +2782,7 @@ mod tests {
             };
             let with_future_epoch = EpochTable::new(&[activation_epoch(), future_epoch]);
             assert_accepts_with_epochs(
-                &PredecessorIsValid,
+                &skipping(),
                 &prev_block,
                 &next_body,
                 &next_header,
@@ -2461,7 +2809,7 @@ mod tests {
             let (next_body, next_header) = next_body_and_header(&prev_block, 0);
 
             assert_rejects(
-                &PredecessorIsValid,
+                &skipping(),
                 &prev_block,
                 &next_body,
                 &next_header,
@@ -2482,7 +2830,7 @@ mod tests {
             let (prev_block, next_body, next_header) =
                 prev_block_after_activation(minimum_block_time(), &epochs_with_revision);
             assert_accepts_with_epochs(
-                &PredecessorIsValid,
+                &skipping(),
                 &prev_block,
                 &next_body,
                 &next_header,
@@ -2500,7 +2848,7 @@ mod tests {
             let (prev_block, next_body, next_header) =
                 prev_block_after_activation(minimum_block_time(), &epochs_with_second);
             assert_accepts_with_epochs(
-                &PredecessorIsValid,
+                &skipping(),
                 &prev_block,
                 &next_body,
                 &next_header,
@@ -2510,7 +2858,7 @@ mod tests {
             let (prev_block, next_body, next_header) =
                 prev_block_after_activation(minimum_block_time(), &epochs());
             assert_rejects_with_epochs(
-                &PredecessorIsValid,
+                &skipping(),
                 &prev_block,
                 &next_body,
                 &next_header,
@@ -2531,7 +2879,7 @@ mod tests {
             let (prev_block, next_body, next_header) =
                 prev_block_after_activation(minimum_block_time(), &epochs_with_second);
             assert_rejects_with_epochs(
-                &PredecessorIsValid,
+                &skipping(),
                 &prev_block,
                 &next_body,
                 &next_header,
@@ -2542,7 +2890,7 @@ mod tests {
             let (prev_block, next_body, next_header) =
                 prev_block_after_activation(doubled_minimum_block_time, &epochs_with_second);
             assert_accepts_with_epochs(
-                &PredecessorIsValid,
+                &skipping(),
                 &prev_block,
                 &next_body,
                 &next_header,
