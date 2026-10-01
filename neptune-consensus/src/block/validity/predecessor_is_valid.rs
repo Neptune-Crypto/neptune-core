@@ -147,6 +147,15 @@ struct PredecessorIsValidWitnessMemory {
     prev_block_proof: Vec<BFieldElement>,
 }
 
+impl PredecessorIsValidWitnessMemory {
+    /// The part of the previous block's encoding length that does not depend
+    /// on the block: the header, and the length prefixes of kernel, body,
+    /// appendix and proof.
+    fn prev_block_fixed_size() -> usize {
+        BlockHeader::static_length().unwrap() + 4
+    }
+}
+
 impl From<&PredecessorIsValidWitness> for PredecessorIsValidWitnessMemory {
     fn from(witness: &PredecessorIsValidWitness) -> Self {
         let prev_block = &witness.prev_block;
@@ -952,6 +961,36 @@ impl TritonProgram for PredecessorIsValid {
 
         // BEFORE: _ *w [prev_block_hash]
         // AFTER:  _ *w [prev_block_hash]
+        let rule_1e_prev = triton_asm!(
+            push {prev_epoch_alloc.read_address()} read_mem 1 pop 1
+            // _ *w [prev_block_hash] *epoch
+
+            dup 6 {&field_with_size!(PredecessorIsValidWitnessMemory::prev_block_body)}
+            pick 1 pop 1
+            // _ *w [prev_block_hash] *epoch body_size
+
+            dup 7 {&field_with_size!(PredecessorIsValidWitnessMemory::prev_block_appendix)}
+            pick 1 pop 1 add
+            // _ *w [prev_block_hash] *epoch (body_size + appendix_size)
+
+            dup 7 {&field!(PredecessorIsValidWitnessMemory::prev_block_proof)}
+            read_mem 1 pop 1 add
+            // _ *w [prev_block_hash] *epoch (body_size + appendix_size + proof_size)
+
+            addi {PredecessorIsValidWitnessMemory::prev_block_fixed_size()}
+            // _ *w [prev_block_hash] *epoch prev_block_size
+
+            dup 1 {&field!(Epoch::max_block_size)} read_mem 1 pop 1
+            addi 1 swap 1 lt
+            // _ *w [prev_block_hash] *epoch (prev_block_size <= max_block_size)
+
+            assert error_id {BlockValidationRule::MaxSize.error_id()}
+            pop 1
+            // _ *w [prev_block_hash]
+        );
+
+        // BEFORE: _ *w [prev_block_hash]
+        // AFTER:  _ *w [prev_block_hash]
         // BEFORE: _ *w [prev_block_hash]
         // AFTER:  _ *w [prev_block_hash]
         // BEFORE: _ *w [prev_block_hash]
@@ -968,6 +1007,8 @@ impl TritonProgram for PredecessorIsValid {
         let (rule_0d_prev, rule_0d_prev_code) = subroutine("rule_0d_prev", rule_0d_prev);
         let (rule_0e_prev, rule_0e_prev_code) = subroutine("rule_0e_prev", rule_0e_prev);
         let (rule_0f_prev, rule_0f_prev_code) = subroutine("rule_0f_prev", rule_0f_prev);
+
+        let (rule_1e_prev, rule_1e_prev_code) = subroutine("rule_1e_prev", rule_1e_prev);
 
         let prev_block_epoch_rules = "predecessor_is_valid_prev_block_epoch_rules".to_string();
         let prev_block_epoch_rules_code = triton_asm!(
@@ -1018,6 +1059,9 @@ impl TritonProgram for PredecessorIsValid {
                 // _ *w [prev_block_hash] *prev_claim_output
 
                 pop 1
+                // _ *w [prev_block_hash]
+
+                call {rule_1e_prev}
                 // _ *w [prev_block_hash]
 
                 return
@@ -1420,6 +1464,7 @@ impl TritonProgram for PredecessorIsValid {
             {&rule_0d_prev_code}
             {&rule_0e_prev_code}
             {&rule_0f_prev_code}
+            {&rule_1e_prev_code}
             {&write_output_code}
             {&library.all_imports()}
         );
@@ -1474,6 +1519,16 @@ mod tests {
     use crate::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::transaction::validity::neptune_proof::Proof as NeptuneProof;
     use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
+
+    impl PredecessorIsValidWitnessMemory {
+        /// The previous block's size, as [Block::size] computes it.
+        fn prev_block_size(&self) -> usize {
+            Self::prev_block_fixed_size()
+                + self.prev_block_body.encode().len()
+                + self.prev_block_appendix.encode().len()
+                + self.prev_block_proof.len()
+        }
+    }
 
     impl TritonProgramSpecification for PredecessorIsValid {
         fn source(&self) {
@@ -1637,6 +1692,11 @@ mod tests {
                 assert_eq!(
                     prev_prev_block_cumulative_pow + witness.prev_block_header.difficulty,
                     witness.prev_block_header.cumulative_proof_of_work
+                );
+                // 1.e)
+                assert!(
+                    u64::try_from(witness.prev_block_size()).unwrap()
+                        <= prev_epoch.max_block_size.value()
                 );
             }
 
@@ -2467,6 +2527,100 @@ mod tests {
             );
         }
 
+        /// The previous block with its own claim, and a single proof of as many
+        /// words as it takes for the block to have this size.
+        fn prev_block_of_size(size: usize) -> (Block, BlockBody, BlockHeader) {
+            let (prev_block, _, _) = unproven_prev_block_and_next_body_and_header(0);
+            let header = *prev_block.header();
+            let body = prev_block.body().clone();
+            let appendix = prev_block.appendix().clone();
+
+            let empty_proof = BlockProof::SingleProof(NeptuneProof::from(vec![]));
+            let smallest = Block::new(header, body.clone(), appendix.clone(), empty_proof);
+            let num_words = size - smallest.size();
+            let proof = BlockProof::SingleProof(NeptuneProof::from(vec![bfe!(0); num_words]));
+
+            let prev_block = block(header, body, appendix, proof);
+            let (next_body, next_header) = next_body_and_header(&prev_block, 0);
+
+            (prev_block, next_body, next_header)
+        }
+
+        #[test]
+        fn witness_memory_size_agrees_with_block_size() {
+            for prev_block in [
+                random_unproven_block(0),
+                unproven_prev_block_and_next_body_and_header(1).0,
+                prev_block_of_size(500_000).0,
+            ] {
+                let (next_body, _) = next_body_and_header(&prev_block, 0);
+                let witness = PredecessorIsValidWitness::new(&prev_block, &next_body);
+                let memory = PredecessorIsValidWitnessMemory::from(&witness);
+                assert_eq!(prev_block.size(), memory.prev_block_size());
+            }
+        }
+
+        #[test]
+        fn prev_block_at_max_size_passes() {
+            let max_block_size = max_block_size();
+            let (prev_block, next_body, next_header) = prev_block_of_size(max_block_size);
+            assert_eq!(max_block_size, prev_block.size());
+
+            assert_accepts(&skipping(), &prev_block, &next_body, &next_header);
+        }
+
+        /// The activation epoch's maximum block size.
+        fn max_block_size() -> usize {
+            usize::try_from(activation_epoch().max_block_size.value()).unwrap()
+        }
+
+        #[test]
+        fn prev_block_size_is_bounded_by_epoch() {
+            let transaction_kernel = transaction_kernel_and_proof().0.clone();
+            let limits = |max_block_size| {
+                EpochTable::new(&[Epoch {
+                    max_block_size: bfe!(max_block_size),
+                    ..activation_epoch()
+                }])
+            };
+
+            let (prev_block, ..) =
+                prev_block_with_transaction_kernel(transaction_kernel.clone(), &epochs());
+            let size = u64::try_from(prev_block.size()).unwrap();
+
+            let epochs = limits(size);
+            let (prev_block, next_body, next_header) =
+                prev_block_with_transaction_kernel(transaction_kernel.clone(), &epochs);
+            assert_eq!(size, u64::try_from(prev_block.size()).unwrap());
+            assert_accepts_with_epochs(&skipping(), &prev_block, &next_body, &next_header, &epochs);
+
+            let epochs = limits(size - 1);
+            let (prev_block, next_body, next_header) =
+                prev_block_with_transaction_kernel(transaction_kernel, &epochs);
+            assert_rejects_with_epochs(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                &epochs,
+                BlockValidationRule::MaxSize.error_id(),
+            );
+        }
+
+        #[test]
+        fn prev_block_above_max_size_fails() {
+            let max_block_size = max_block_size();
+            let (prev_block, next_body, next_header) = prev_block_of_size(max_block_size + 1);
+
+            assert_rejects(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::MaxSize.error_id(),
+            );
+        }
+
         #[test]
         fn prev_block_with_too_many_claims_fails() {
             let mut rng = StdRng::seed_from_u64(0);
@@ -2865,6 +3019,98 @@ mod tests {
                 &epochs_with_second,
                 BlockValidationRule::AppendixMissingClaim.error_id(),
             );
+        }
+
+        /// Like [block], but solving the proof of work by nonce search, for
+        /// bodies the guessing puzzle rejects, such as one with a negative fee.
+        fn block_solved_by_nonce_search(
+            header: BlockHeader,
+            body: BlockBody,
+            appendix: BlockAppendix,
+            proof: BlockProof,
+        ) -> Block {
+            let mut rng = StdRng::seed_from_u64(0);
+            let mut block = Block::new(header, body, appendix, proof);
+            let mut pow = block.header().pow;
+            pow.set_version_in_pow(block.header().version);
+            loop {
+                pow.nonce = rng.random();
+                block.set_header_pow(pow);
+                if block.hash() <= Difficulty::MINIMUM.target() {
+                    return block;
+                }
+            }
+        }
+
+        /// The previous block with this transaction kernel and its own claim
+        /// under these epochs, and a next body and header for it.
+        fn prev_block_with_transaction_kernel(
+            transaction_kernel: TransactionKernel,
+            epochs: &EpochTable,
+        ) -> (Block, BlockBody, BlockHeader) {
+            prev_block_with_transaction_kernel_at_height(
+                transaction_kernel,
+                epochs,
+                activation_height().value(),
+            )
+        }
+
+        /// As [prev_block_with_transaction_kernel], at this height.
+        fn prev_block_with_transaction_kernel_at_height(
+            transaction_kernel: TransactionKernel,
+            epochs: &EpochTable,
+            height: u64,
+        ) -> (Block, BlockBody, BlockHeader) {
+            let prev_prev_block = random_unproven_block_at_height(0, height - 1);
+            let transaction_kernel = TransactionKernelModifier::default()
+                .mutator_set_hash(mutator_set_hash_after(&prev_prev_block))
+                .modify(transaction_kernel);
+            prev_block_on(&prev_prev_block, transaction_kernel, epochs)
+        }
+
+        /// A successor of the block with this transaction kernel, carrying
+        /// the transaction claim and the skipping program's claim, and a next
+        /// body and header for it.
+        fn prev_block_on(
+            prev_prev_block: &Block,
+            transaction_kernel: TransactionKernel,
+            epochs: &EpochTable,
+        ) -> (Block, BlockBody, BlockHeader) {
+            let (body, _) = next_body_and_header(prev_prev_block, 0);
+            let body = BlockBody::new(
+                transaction_kernel,
+                body.mutator_set_accumulator.clone(),
+                body.lock_free_mmr_accumulator.clone(),
+                body.block_mmr_accumulator.clone(),
+            );
+            let body = body_with_mutator_set_after_transaction(prev_prev_block, body);
+            prev_block_with_body(prev_prev_block, body, epochs)
+        }
+
+        /// The previous block with this body and its own claim under these
+        /// epochs, and a next body and header for it.
+        fn prev_block_with_body(
+            prev_prev_block: &Block,
+            body: BlockBody,
+            epochs: &EpochTable,
+        ) -> (Block, BlockBody, BlockHeader) {
+            let (_, header) = next_body_and_header(prev_prev_block, 0);
+            let transaction_claim = single_proof_claim(
+                body.transaction_kernel.mast_hash(),
+                ConsensusRuleSet::HardforkDelta,
+            );
+            let own_claim =
+                own_claim_with_epochs(&skipping(), prev_prev_block, &body, &header, epochs);
+            let claims = vec![transaction_claim, own_claim];
+            let prev_block = block_solved_by_nonce_search(
+                header,
+                body,
+                BlockAppendix::new(claims),
+                BlockProof::Invalid,
+            );
+            let (next_body, next_header) = next_body_and_header(&prev_block, 0);
+
+            (prev_block, next_body, next_header)
         }
 
         #[test]
