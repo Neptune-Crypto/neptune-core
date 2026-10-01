@@ -35,6 +35,9 @@ pub struct BlockKernel {
 }
 
 impl BlockKernel {
+    /// How long the guesser's reward stays time-locked after the block.
+    pub(crate) const MINER_REWARD_TIME_LOCK_PERIOD: Timestamp = Timestamp::years(3);
+
     pub fn new(header: BlockHeader, body: BlockBody, appendix: BlockAppendix) -> Self {
         Self {
             header,
@@ -54,8 +57,6 @@ impl BlockKernel {
     ///
     /// The genesis block does not have a guesser reward.
     pub fn guesser_fee_utxos(&self) -> Result<Vec<Utxo>, BlockValidationError> {
-        const MINER_REWARD_TIME_LOCK_PERIOD: Timestamp = Timestamp::years(3);
-
         if self.header.height.is_genesis() {
             return Ok(vec![]);
         }
@@ -70,7 +71,7 @@ impl BlockKernel {
         let lock_script_hash = self.header.guesser_receiver_data.lock_script_hash;
         let unlocked_utxo = Utxo::new(lock_script_hash, coins_unlocked);
         let locked_utxo = Utxo::new(lock_script_hash, coins_timelocked)
-            .with_time_lock(self.header.timestamp + MINER_REWARD_TIME_LOCK_PERIOD);
+            .with_time_lock(self.header.timestamp + Self::MINER_REWARD_TIME_LOCK_PERIOD);
 
         Ok(vec![locked_utxo, unlocked_utxo])
     }
