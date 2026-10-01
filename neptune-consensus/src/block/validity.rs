@@ -42,6 +42,7 @@ mod mutator_set_hash_after_removals;
 pub mod predecessor_is_valid;
 mod removal_index_commitment;
 mod removal_record_pointers;
+mod removal_records_are_unique;
 mod removal_records_are_unspent;
 mod resolve_chunk_indices;
 // Kept for the benchmark in `update_tree_leaf`; no program uses it.
