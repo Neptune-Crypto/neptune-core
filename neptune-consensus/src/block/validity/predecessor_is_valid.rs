@@ -1680,6 +1680,24 @@ impl TritonProgram for PredecessorIsValid {
                 // _ *w [prev_block_hash]
         );
 
+        // The status parses when each of its words is a u32.
+        // BEFORE: _ *w
+        // AFTER:  _ *w
+        let rule_2m_prev = triton_asm!(
+            dup 0 {&read_prev_lustration_status}
+            // _ *w [prev_lustration_status]
+
+            {&vec![triton_asm!(
+                dup 0 split pop 1 push 0 eq
+                assert error_id {BlockValidationRule::BadLustrationCounterEncoding.error_id()}
+                place {lustration_status_size - 1}
+            ); lustration_status_size].concat()}
+            // _ *w [prev_lustration_status]
+
+            pop {Digest::LEN} pop {lustration_status_size - Digest::LEN}
+            // _ *w
+        );
+
         // BEFORE: _ *w
         // AFTER:  _
         let write_prev_block_header_fields = triton_asm!(
@@ -1942,6 +1960,7 @@ impl TritonProgram for PredecessorIsValid {
         let (rule_2c_prev, rule_2c_prev_code) = subroutine("rule_2c_prev", rule_2c_prev);
         let (mutator_set_after_prev_block, mutator_set_after_prev_block_code) =
             subroutine("mutator_set_after_prev_block", mutator_set_after_prev_block);
+        let (rule_2m_prev, rule_2m_prev_code) = subroutine("rule_2m_prev", rule_2m_prev);
         let (write_output, write_output_code) = subroutine("write_output", write_output);
 
         let code = triton_asm!(
@@ -2009,6 +2028,10 @@ impl TritonProgram for PredecessorIsValid {
             // _ [next_block_body_mh] *w [prev_block_hash]
 
 
+            dup 5 call {rule_2m_prev} pop 1
+            // _ [next_block_body_mh] *w [prev_block_hash]
+
+
             {&prev_block_epoch_rules_if_activated}
             // _ [next_block_body_mh] *w [prev_block_hash]
 
@@ -2045,6 +2068,7 @@ impl TritonProgram for PredecessorIsValid {
             {&rule_2i_prev_code}
             {&rule_2c_prev_code}
             {&mutator_set_after_prev_block_code}
+            {&rule_2m_prev_code}
             {&read_epoch_table_code}
             {&rule_0b_prev_code}
             {&rule_0d_prev_code}
@@ -2251,6 +2275,13 @@ mod tests {
                 previous_index_set = Some(index_set);
             }
 
+            // 2.m)
+            let prev_lustration_status = witness
+                .prev_block_header
+                .pow
+                .lustration_status()
+                .expect("previous block's header must carry a lustration status");
+
             // The header rules, for the previous block. Its predecessor's
             // values come from the previous block's copy of the claim for this
             // program execution.
@@ -2425,14 +2456,7 @@ mod tests {
 
             tasm::tasmlib_io_write_to_stdout___digest(prev_block_hash);
 
-            // The lustration status's words, as they sit in the PoW field; see
-            // `Pow::lustration_status`.
-            let pow = &witness.prev_block_header.pow;
-            let [e0, e1, e2, e3, e4] = pow.path_a[POW_MEMORY_TREE_HEIGHT - 2].values();
-            let e5 = pow.path_a[POW_MEMORY_TREE_HEIGHT - 1].values()[0];
-            for word in [e0, e1, e2, e3, e4, e5] {
-                tasm::tasmlib_io_write_to_stdout___bfe(word);
-            }
+            tasm::tasmlib_io_write_to_stdout___encoding(prev_lustration_status);
             tasm::tasmlib_io_write_to_stdout___bfe(witness.prev_block_header.timestamp.0);
             tasm::tasmlib_io_write_to_stdout___encoding(
                 witness.prev_block_header.cumulative_proof_of_work,
@@ -3291,6 +3315,26 @@ mod tests {
                 &next_body,
                 &next_header,
                 BlockValidationRule::AppendixMissingClaim.error_id(),
+            );
+        }
+
+        #[test]
+        fn prev_block_whose_lustration_status_does_not_parse_fails() {
+            let prev_prev_block = random_unproven_block_at_height(0, height_below_activation() - 1);
+            let (body, mut header) = next_body_and_header(&prev_prev_block, 0);
+            header.pow.path_a[POW_MEMORY_TREE_HEIGHT - 2].0[2] = bfe!(1_u64 << 32);
+            assert!(header.pow.lustration_status().is_err());
+            let appendix = BlockAppendix::new(vec![transaction_claim_and_proof_for(&body).0]);
+            let prev_block =
+                block_solved_by_nonce_search(header, body, appendix, BlockProof::Invalid);
+            let (next_body, next_header) = next_body_and_header(&prev_block, 0);
+
+            assert_rejects(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::BadLustrationCounterEncoding.error_id(),
             );
         }
 
