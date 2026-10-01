@@ -290,6 +290,7 @@ mod tests {
     use rand::rngs::StdRng;
     use rand::RngExt;
     use rand::SeedableRng;
+    use tasm_lib::memory::encode_to_memory;
     use tasm_lib::snippet_bencher::BenchmarkCase;
     use tasm_lib::traits::function::Function;
     use tasm_lib::traits::function::FunctionInitialState;
@@ -737,5 +738,174 @@ mod tests {
         assert!(old_root_mismatch(tasm_new_root(
             5, &paths, &old, &new, old_root
         )));
+    }
+
+    /// Random leaf indices, or a cluster of them within 256 consecutive
+    /// leaves the way one input's chunks lie.
+    fn leaf_indices(
+        rng: &mut StdRng,
+        tree_height: u32,
+        num_leafs: usize,
+        clustered: bool,
+    ) -> Vec<u64> {
+        let num_tree_leafs = 1_u64 << tree_height;
+        let (start, span) = if clustered {
+            let span = 256.min(num_tree_leafs);
+            (rng.random_range(0..=num_tree_leafs - span), span)
+        } else {
+            (0, num_tree_leafs)
+        };
+        let mut indices = (0..num_leafs)
+            .map(|_| start + rng.random_range(0..span))
+            .collect::<Vec<_>>();
+        indices.sort_unstable();
+        indices.dedup();
+        indices
+    }
+
+    /// The total rows of the processor, op-stack, RAM and hash tables.
+    fn table_rows(program: Program, nondeterminism: NonDeterminism) -> [u64; 4] {
+        let profile =
+            tasm_lib::generate_full_profile("", program, &PublicInput::default(), &nondeterminism);
+        let total = profile
+            .to_string()
+            .lines()
+            .find(|line| line.starts_with("| Total"))
+            .expect("profile must total")
+            .to_string();
+        let cells = total
+            .split('|')
+            .skip(2)
+            .take(4)
+            .map(|cell| {
+                cell.trim()
+                    .split(' ')
+                    .next()
+                    .unwrap()
+                    .parse::<u64>()
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        [cells[0], cells[1], cells[2], cells[3]]
+    }
+
+    /// Both approaches on identical leaves, over tree heights and leaf
+    /// counts, scattered and clustered. The path walks are one run of the
+    /// snippet per leaf, summed, so their rows leave out the loop the peak
+    /// mutation runs around them, about twenty rows per leaf; the structure
+    /// is one run.
+    #[test]
+    #[ignore = "prints a benchmark"]
+    fn benchmark_against_the_authentication_structure() {
+        use super::super::roots_from_authentication_struct::RootsFromAuthenticationStruct;
+
+        let mut rng = StdRng::seed_from_u64(2);
+        println!(
+            "{:>6} {:>6} {:>9} | {:>36} | {:>36}",
+            "height",
+            "leafs",
+            "layout",
+            "structure: proc / opstk / ram / hash",
+            "paths: proc / opstk / ram / hash"
+        );
+        for tree_height in [4, 8, 12, 16, 20, 24, 31, 32, 40, 48, 60] {
+            for (num_leafs, clustered) in
+                [(1, false), (5, false), (41, false), (41, true), (82, true)]
+            {
+                let indices = leaf_indices(&mut rng, tree_height, num_leafs, clustered);
+                let old = indices
+                    .iter()
+                    .map(|&i| (i, rng.random()))
+                    .collect::<Vec<_>>();
+                let new = indices
+                    .iter()
+                    .map(|&i| (i, rng.random()))
+                    .collect::<Vec<_>>();
+                let tree = SparseTree::new(tree_height, &old);
+
+                let (paths, old_root, _) = sparse_paths_and_roots(tree_height, &old, &new);
+                let memory = path_memory(&paths);
+                let mut running = old_root;
+                let mut paths_rows = [0; 4];
+                for (i, (&(index, old_leaf), &(_, new_leaf))) in old.iter().zip(&new).enumerate() {
+                    let mut library = Library::new();
+                    let snippet = library.import(Box::new(UpdateTreeLeaf));
+                    let pushes = arguments(
+                        path_pointer(tree_height, i),
+                        index + (1 << tree_height),
+                        old_leaf,
+                        new_leaf,
+                    )
+                    .into_iter()
+                    .flat_map(|word| triton_asm!(push { word }))
+                    .collect::<Vec<_>>();
+                    let program = Program::new(&triton_asm!(
+                        {&pushes}
+                        call {snippet} halt
+                        {&library.all_imports()}
+                    ));
+                    let mut run_memory = memory.clone();
+                    write_digest(&mut run_memory, RUNNING_POINTER, running);
+                    let rows = table_rows(program, NonDeterminism::default().with_ram(run_memory));
+                    for (total, rows) in paths_rows.iter_mut().zip(rows) {
+                        *total += rows;
+                    }
+                    running = tasm_update(
+                        memory.clone(),
+                        running,
+                        path_pointer(tree_height, i),
+                        index + (1 << tree_height),
+                        old_leaf,
+                        new_leaf,
+                    )
+                    .unwrap();
+                }
+
+                let (auth_struct_indices, _) =
+                    RootsFromAuthenticationStruct::auth_struct_and_sibling_indices(
+                        tree_height,
+                        &indices,
+                    );
+                let auth_struct = auth_struct_indices
+                    .iter()
+                    .map(|&node| tree.node(node))
+                    .collect::<Vec<_>>();
+                let (_, tokens) = RootsFromAuthenticationStruct::roots_and_tokens(
+                    tree_height,
+                    &auth_struct,
+                    &old,
+                    &new,
+                );
+                let mut library = Library::new();
+                let snippet = library.import(Box::new(RootsFromAuthenticationStruct));
+                let old_pointer = bfe!(1 << 24);
+                let new_pointer = bfe!(1 << 25);
+                let program = Program::new(&triton_asm!(
+                    push {tree_height} push {PATHS_POINTER} push {old_pointer} push {new_pointer}
+                    call {snippet} halt
+                    {&library.all_imports()}
+                ));
+                let mut ram = HashMap::new();
+                encode_to_memory(&mut ram, PATHS_POINTER, &auth_struct);
+                encode_to_memory(&mut ram, old_pointer, &old);
+                encode_to_memory(&mut ram, new_pointer, &new);
+                let structure_rows = table_rows(program, NonDeterminism::new(tokens).with_ram(ram));
+
+                let cells = |rows: [u64; 4]| {
+                    format!(
+                        "{:>8} {:>8} {:>8} {:>8}",
+                        rows[0], rows[1], rows[2], rows[3]
+                    )
+                };
+                println!(
+                    "{:>6} {:>6} {:>9} | {} | {}",
+                    tree_height,
+                    indices.len(),
+                    if clustered { "clustered" } else { "scattered" },
+                    cells(structure_rows),
+                    cells(paths_rows),
+                );
+            }
+        }
     }
 }
