@@ -72,6 +72,37 @@ pub(crate) struct GatewayHandler {
     remote_peer_id: libp2p::PeerId,
 }
 
+impl GatewayHandler {
+    /// Whether a handler for an inbound connection must start paused.
+    fn starts_paused(local_addr: &Multiaddr, remote_addr: &Multiaddr) -> bool {
+        // A connection is relayed if either address carries `/p2p-circuit`. For
+        // an inbound circuit, libp2p's relay client puts the marker on the local
+        // address and reports the remote as a bare `/p2p/<peer>`, so checking the
+        // remote address alone would let relayed connections through.
+        !(NetworkActor::is_direct(local_addr) && NetworkActor::is_direct(remote_addr))
+    }
+
+    /// Queue a completed handshake, unless the handler is paused.
+    ///
+    /// A paused handler never drains its queue, so a stream kept there would
+    /// stay open for the lifetime of the connection.
+    fn queue_handshake_success(&mut self, remote_handshake: HandshakeData, stream: libp2p::Stream) {
+        if self.pause {
+            tracing::debug!("Dropping handshake completed over a paused connection.");
+            drop(stream);
+            return;
+        }
+
+        self.pending_events
+            .push_back(ConnectionHandlerEvent::NotifyBehaviour(
+                HandshakeResult::Success {
+                    remote_handshake,
+                    stream,
+                },
+            ));
+    }
+}
+
 impl ConnectionHandler for GatewayHandler {
     type InboundOpenInfo = ();
     type OutboundOpenInfo = ();
@@ -149,14 +180,7 @@ impl ConnectionHandler for GatewayHandler {
                 protocol, ..
             }) => {
                 let (handshake, stream) = protocol;
-
-                self.pending_events
-                    .push_back(ConnectionHandlerEvent::NotifyBehaviour(
-                        HandshakeResult::Success {
-                            remote_handshake: handshake,
-                            stream,
-                        },
-                    ));
+                self.queue_handshake_success(handshake, stream);
             }
 
             // Outbound success
@@ -164,14 +188,7 @@ impl ConnectionHandler for GatewayHandler {
                 libp2p::swarm::handler::FullyNegotiatedOutbound { protocol, .. },
             ) => {
                 let (handshake, stream) = protocol;
-
-                self.pending_events
-                    .push_back(ConnectionHandlerEvent::NotifyBehaviour(
-                        HandshakeResult::Success {
-                            remote_handshake: handshake,
-                            stream,
-                        },
-                    ));
+                self.queue_handshake_success(handshake, stream);
             }
 
             ConnectionEvent::DialUpgradeError(error) => {
@@ -365,7 +382,7 @@ impl NetworkBehaviour for StreamGateway {
         &mut self,
         _connection_id: ConnectionId,
         peer: PeerId,
-        _local_addr: &Multiaddr,
+        local_addr: &Multiaddr,
         remote_addr: &Multiaddr,
     ) -> Result<THandler<Self>, libp2p::swarm::ConnectionDenied> {
         {
@@ -379,7 +396,7 @@ impl NetworkBehaviour for StreamGateway {
         Ok(GatewayHandler {
             local_handshake: self.handshake_data(),
             pending_events: VecDeque::new(),
-            pause: !NetworkActor::is_direct(remote_addr),
+            pause: GatewayHandler::starts_paused(local_addr, remote_addr),
             outbound_requested_already: false,
             local_peer_id: self.local_peer_id,
             remote_peer_id: peer,
@@ -482,8 +499,6 @@ impl NetworkBehaviour for StreamGateway {
                 remote_handshake,
                 stream,
             } => {
-                // Check that connection is allowed
-
                 // This is the "Hijack" point.
                 self.events
                     .push_back(ToSwarm::GenerateEvent(GatewayEvent::HandshakeReceived {
@@ -505,5 +520,89 @@ impl NetworkBehaviour for StreamGateway {
             return Poll::Ready(event);
         }
         Poll::Pending
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use libp2p::core::Endpoint;
+    use libp2p::multiaddr::Protocol;
+    use neptune_wallet::wallet_entropy::WalletEntropy;
+
+    use super::*;
+    use crate::application::config::cli_args;
+    use crate::tests::shared::globalstate::mock_genesis_global_state;
+
+    async fn gateway() -> StreamGateway {
+        let global_state =
+            mock_genesis_global_state(0, WalletEntropy::new_random(), cli_args::Args::default())
+                .await;
+        StreamGateway::new(
+            global_state,
+            Arc::new(Mutex::new(HashSet::new())),
+            PeerId::random(),
+        )
+    }
+
+    fn direct(ip: &str, port: u16) -> Multiaddr {
+        format!("/ip4/{ip}/tcp/{port}").parse().unwrap()
+    }
+
+    /// The address pair libp2p's relay client reports for an inbound circuit:
+    /// the marker sits on the local address, the remote is a bare peer id.
+    fn inbound_circuit() -> (Multiaddr, Multiaddr) {
+        let relay = direct("203.0.113.7", 9798).with(Protocol::P2p(PeerId::random()));
+        let local = relay.with(Protocol::P2pCircuit);
+        let remote = Multiaddr::from(Protocol::P2p(PeerId::random()));
+        (local, remote)
+    }
+
+    #[tokio::test]
+    async fn inbound_relayed_connection_starts_paused() {
+        let (local, remote) = inbound_circuit();
+        let handler = gateway()
+            .await
+            .handle_established_inbound_connection(
+                ConnectionId::new_unchecked(0),
+                PeerId::random(),
+                &local,
+                &remote,
+            )
+            .unwrap();
+        assert!(
+            handler.pause,
+            "handshake must not start over an inbound relayed connection"
+        );
+    }
+
+    #[tokio::test]
+    async fn inbound_direct_connection_starts_active() {
+        let handler = gateway()
+            .await
+            .handle_established_inbound_connection(
+                ConnectionId::new_unchecked(0),
+                PeerId::random(),
+                &direct("10.0.0.1", 9798),
+                &direct("198.51.100.2", 40000),
+            )
+            .unwrap();
+        assert!(!handler.pause);
+    }
+
+    #[tokio::test]
+    async fn outbound_relayed_connection_starts_paused() {
+        let (circuit, _) = inbound_circuit();
+        let dialed = circuit.with(Protocol::P2p(PeerId::random()));
+        let handler = gateway()
+            .await
+            .handle_established_outbound_connection(
+                ConnectionId::new_unchecked(0),
+                PeerId::random(),
+                &dialed,
+                Endpoint::Dialer,
+                PortUse::Reuse,
+            )
+            .unwrap();
+        assert!(handler.pause);
     }
 }
