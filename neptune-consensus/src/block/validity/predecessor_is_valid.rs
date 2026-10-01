@@ -1249,6 +1249,16 @@ impl TritonProgram for PredecessorIsValid {
 
         // BEFORE: _ *w [prev_block_hash]
         // AFTER:  _ *w [prev_block_hash]
+        let rule_2i_prev = triton_asm!(
+            dup 5 {&prev_block_txk} {&field!(TransactionKernel::fee)}
+            addi {amount_size - 1} read_mem {amount_size} pop 1
+            // _ *w [prev_block_hash] [fee]
+
+            {&is_non_negative}
+            assert error_id {BlockValidationRule::NegativeFee.error_id()}
+            // _ *w [prev_block_hash]
+        );
+
         // The divined tokens are the positions of the inputs sorted by index
         // set; see [RemovalRecordsAreUnique::divined_tokens].
         // BEFORE: _ *w [prev_block_hash]
@@ -1865,6 +1875,7 @@ impl TritonProgram for PredecessorIsValid {
             subroutine("rule_1a_prev", rule_1a_txproof_prev);
         let (rule_2g_prev, rule_2g_prev_code) = subroutine("rule_2g_prev", rule_2g_prev);
         let (rule_2h_prev, rule_2h_prev_code) = subroutine("rule_2h_prev", rule_2h_prev);
+        let (rule_2i_prev, rule_2i_prev_code) = subroutine("rule_2i_prev", rule_2i_prev);
         let (rule_2c_prev, rule_2c_prev_code) = subroutine("rule_2c_prev", rule_2c_prev);
         let (mutator_set_after_prev_block, mutator_set_after_prev_block_code) =
             subroutine("mutator_set_after_prev_block", mutator_set_after_prev_block);
@@ -1924,6 +1935,10 @@ impl TritonProgram for PredecessorIsValid {
             // _ [next_block_body_mh] *w [prev_block_hash]
 
 
+            call {rule_2i_prev}
+            // _ [next_block_body_mh] *w [prev_block_hash]
+
+
             call {rule_2c_prev}
             // _ [next_block_body_mh] *w [prev_block_hash]
 
@@ -1964,6 +1979,7 @@ impl TritonProgram for PredecessorIsValid {
             {&rule_1a_txproof_prev_code}
             {&rule_2g_prev_code}
             {&rule_2h_prev_code}
+            {&rule_2i_prev_code}
             {&rule_2c_prev_code}
             {&mutator_set_after_prev_block_code}
             {&read_epoch_table_code}
@@ -2146,6 +2162,9 @@ mod tests {
             if let Some(coinbase) = prev_transaction_kernel.coinbase {
                 assert!(!coinbase.is_negative());
             }
+
+            // 2.i)
+            assert!(!prev_transaction_kernel.fee.is_negative());
 
             // 2.c) The divined positions must be a permutation of the inputs,
             // along which the index sets are strictly increasing.
@@ -4348,6 +4367,34 @@ mod tests {
         fn prev_block_without_coinbase_passes() {
             let transaction_kernel = TransactionKernelModifier::default()
                 .coinbase(None)
+                .modify(transaction_kernel_and_proof().0.clone());
+            let (prev_block, next_body, next_header) =
+                prev_block_with_transaction_kernel(transaction_kernel, &epochs());
+
+            assert_accepts(&skipping(), &prev_block, &next_body, &next_header);
+        }
+
+        #[test]
+        fn prev_block_with_negative_fee_fails() {
+            let transaction_kernel = TransactionKernelModifier::default()
+                .fee(-NativeCurrencyAmount::coins(1))
+                .modify(transaction_kernel_and_proof().0.clone());
+            let (prev_block, next_body, next_header) =
+                prev_block_with_transaction_kernel(transaction_kernel, &epochs());
+
+            assert_rejects(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::NegativeFee.error_id(),
+            );
+        }
+
+        #[test]
+        fn prev_block_with_large_fee_passes() {
+            let transaction_kernel = TransactionKernelModifier::default()
+                .fee(NativeCurrencyAmount::coins(1_000_000))
                 .modify(transaction_kernel_and_proof().0.clone());
             let (prev_block, next_body, next_header) =
                 prev_block_with_transaction_kernel(transaction_kernel, &epochs());
