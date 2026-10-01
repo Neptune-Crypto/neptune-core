@@ -71,6 +71,7 @@ use crate::block::Block;
 use crate::block::BlockProof;
 use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::proof_abstractions::tasm::program::TritonProgram;
+use crate::transaction::announcement::RETIREMENT_FLAG;
 use crate::transaction::transaction_kernel::TransactionKernel;
 use crate::transaction::transaction_kernel::LUSTRATION_FLAG;
 use crate::transaction::validity::single_proof::single_proof_claim;
@@ -1379,53 +1380,89 @@ impl TritonProgram for PredecessorIsValid {
                 return
         );
 
+        // A retirement announcement is three words: the two flag words and the
+        // retirement timestamp. The announcement's words follow its size
+        // indicator and its message's length prefix.
+        let announcement_is_not_retired =
+            "predecessor_is_valid_announcement_is_not_retired".to_string();
+        let announcement_is_not_retired_code = triton_asm!(
+            // BEFORE: _ prev_block_timestamp *announcement[i]_si num_announcements i
+            // AFTER:  _ prev_block_timestamp *announcement[i]_si num_announcements i
+            {announcement_is_not_retired}:
+                dup 3 split
+                // _ prev_block_timestamp *announcement[i]_si num_announcements i [prev_block_timestamp]
+
+                dup 4 addi 5 read_mem 1 pop 1 split
+                // _ prev_block_timestamp *announcement[i]_si num_announcements i [prev_block_timestamp] [retirement]
+
+                call {u64_lt}
+                push 0 eq assert error_id {BlockValidationRule::TransactionRetired.error_id()}
+                // _ prev_block_timestamp *announcement[i]_si num_announcements i
+
+                return
+        );
+
         // Appends the announcement's message to the lustration announcements.
         let remember_lustration = "predecessor_is_valid_remember_lustration".to_string();
         let remember_lustration_code = triton_asm!(
-            // BEFORE: _ *announcement[i]_si num_announcements i
-            // AFTER:  _ *announcement[i]_si num_announcements i
+            // BEFORE: _ prev_block_timestamp *announcement[i]_si num_announcements i
+            // AFTER:  _ prev_block_timestamp *announcement[i]_si num_announcements i
             {remember_lustration}:
                 push {lustrations_alloc.read_address()} read_mem 1 pop 1
                 dup 3 addi 2
-                // _ *announcement[i]_si num_announcements i *lustrations *message
+                // _ prev_block_timestamp *announcement[i]_si num_announcements i *lustrations *message
 
                 call {push_pointer}
-                // _ *announcement[i]_si num_announcements i
+                // _ prev_block_timestamp *announcement[i]_si num_announcements i
 
                 return
         );
 
         // The rules that look at each announcement of the previous block's
         // transaction, in one pass over the list. An announcement is
-        // classified by its length and first words.
+        // classified by its length and first words. The values the checks
+        // compare against sit below the loop's own words.
         let for_each_announcement = "predecessor_is_valid_for_each_announcement".to_string();
         let for_each_announcement_code = triton_asm!(
-            // INVARIANT: _ *announcement[i]_si num_announcements i
+            // INVARIANT: _ prev_block_timestamp *announcement[i]_si num_announcements i
             {for_each_announcement}:
                 dup 1 dup 1 eq skiz return
-                // _ *announcement[i]_si num_announcements i
+                // _ prev_block_timestamp *announcement[i]_si num_announcements i
 
                 dup 2 addi 3 read_mem 2 pop 1
-                // _ *announcement[i]_si num_announcements i message[0] message_length
+                // _ prev_block_timestamp *announcement[i]_si num_announcements i message[0] message_length
 
                 push 0 eq push 0 eq swap 1 push {LUSTRATION_FLAG} eq mul
-                // _ *announcement[i]_si num_announcements i is_lustration
+                // _ prev_block_timestamp *announcement[i]_si num_announcements i is_lustration
 
                 // 2.o)
                 skiz call {remember_lustration}
-                // _ *announcement[i]_si num_announcements i
+                // _ prev_block_timestamp *announcement[i]_si num_announcements i
+
+                dup 2 addi 4 read_mem 3 pop 1
+                // _ prev_block_timestamp *announcement[i]_si num_announcements i message[1] message[0] message_length
+
+                push 3 eq place 2
+                push {RETIREMENT_FLAG[0]} eq swap 1
+                push {RETIREMENT_FLAG[1]} eq
+                mul mul
+                // _ prev_block_timestamp *announcement[i]_si num_announcements i is_retirement
+
+                // 2.u)
+                skiz call {announcement_is_not_retired}
+                // _ prev_block_timestamp *announcement[i]_si num_announcements i
 
                 pick 2 read_mem 1
-                // _ num_announcements i announcement_size (*announcement[i]_si - 1)
+                // _ prev_block_timestamp num_announcements i announcement_size (*announcement[i]_si - 1)
 
                 // Crashes unless the size is a u32.
                 dup 1 pop_count pop 1
 
                 addi 2 add
-                // _ num_announcements i *announcement[i + 1]_si
+                // _ prev_block_timestamp num_announcements i *announcement[i + 1]_si
 
                 place 2 addi 1
-                // _ *announcement[i + 1]_si num_announcements (i + 1)
+                // _ prev_block_timestamp *announcement[i + 1]_si num_announcements (i + 1)
 
                 recurse
         );
@@ -1437,14 +1474,15 @@ impl TritonProgram for PredecessorIsValid {
             push {lustrations_alloc.write_address()} write_mem 1 pop 1
             // _ *w [prev_block_hash]
 
-            dup 5 {&prev_block_txk} {&field!(TransactionKernel::announcements)}
-            // _ *w [prev_block_hash] *announcements
+            dup 5 {&read_prev_block_timestamp}
+            dup 6 {&prev_block_txk} {&field!(TransactionKernel::announcements)}
+            // _ *w [prev_block_hash] prev_block_timestamp *announcements
 
             read_mem 1 addi 2 place 1 push 0
-            // _ *w [prev_block_hash] *announcement[0]_si num_announcements 0
+            // _ *w [prev_block_hash] prev_block_timestamp *announcement[0]_si num_announcements 0
 
             call {for_each_announcement}
-            pop 3
+            pop 4
             // _ *w [prev_block_hash]
         );
 
@@ -2201,8 +2239,10 @@ impl TritonProgram for PredecessorIsValid {
         let (rule_2c_prev, rule_2c_prev_code) = subroutine("rule_2c_prev", rule_2c_prev);
         let (mutator_set_after_prev_block, mutator_set_after_prev_block_code) =
             subroutine("mutator_set_after_prev_block", mutator_set_after_prev_block);
-        let (prev_block_announcement_rules, prev_block_announcement_rules_code) =
-            subroutine("rule_2o_announcements_prev", prev_block_announcement_rules);
+        let (prev_block_announcement_rules, prev_block_announcement_rules_code) = subroutine(
+            "rules_2o_2u_announcements_prev",
+            prev_block_announcement_rules,
+        );
         let (rule_2m_prev, rule_2m_prev_code) = subroutine("rule_2m_prev", rule_2m_prev);
         let (write_output, write_output_code) = subroutine("write_output", write_output);
 
@@ -2300,6 +2340,7 @@ impl TritonProgram for PredecessorIsValid {
             {&coinbase_is_within_subsidy_code}
             {&coinbase_is_non_negative_code}
             {&for_each_announcement_code}
+            {&announcement_is_not_retired_code}
             {&remember_lustration_code}
             {&prev_block_epoch_rules_code}
             {&authenticate_next_block_mmr_accumulator_code}
@@ -2532,6 +2573,9 @@ mod tests {
                 assert!(previous_index_set.is_none_or(|previous| previous < index_set));
                 previous_index_set = Some(index_set);
             }
+
+            // 2.u)
+            assert!(!prev_transaction_kernel.retires_before(witness.prev_block_header.timestamp));
 
             // 2.m)
             let prev_lustration_status = witness
@@ -5384,6 +5428,63 @@ mod tests {
                 &next_body,
                 &next_header,
                 BlockValidationRule::TransactionTimestamp.error_id(),
+            );
+        }
+
+        #[test]
+        fn announcement_list_encoding_has_the_layout_the_program_reads() {
+            let retirement = Timestamp::millis(7);
+            let announcements = vec![Announcement::retirement(retirement)];
+            let expected = [
+                bfe!(1),
+                bfe!(5),
+                bfe!(4),
+                bfe!(3),
+                RETIREMENT_FLAG[0],
+                RETIREMENT_FLAG[1],
+                retirement.0,
+            ];
+            assert_eq!(expected.to_vec(), announcements.encode());
+        }
+
+        fn prev_block_with_announcements(
+            announcements: Vec<Announcement>,
+        ) -> (Block, BlockBody, BlockHeader) {
+            let transaction_kernel = TransactionKernelModifier::default()
+                .announcements(announcements)
+                .modify(transaction_kernel_and_proof().0.clone());
+            prev_block_with_transaction_kernel(transaction_kernel, &epochs())
+        }
+
+        #[test]
+        fn prev_block_with_transaction_retiring_at_its_own_time_passes() {
+            let (prev_block, next_body, next_header) = prev_block_with_announcements(vec![
+                Announcement::new(vec![RETIREMENT_FLAG[0], RETIREMENT_FLAG[1]]),
+                Announcement::new(vec![
+                    RETIREMENT_FLAG[0],
+                    RETIREMENT_FLAG[1],
+                    bfe!(0),
+                    bfe!(0),
+                ]),
+                Announcement::retirement(prev_block_timestamp()),
+            ]);
+
+            assert_accepts(&skipping(), &prev_block, &next_body, &next_header);
+        }
+
+        #[test]
+        fn prev_block_with_retired_transaction_fails() {
+            let (prev_block, next_body, next_header) = prev_block_with_announcements(vec![
+                Announcement::new(vec![bfe!(1), bfe!(2), bfe!(3)]),
+                Announcement::retirement(prev_block_timestamp() - Timestamp::millis(1)),
+            ]);
+
+            assert_rejects(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::TransactionRetired.error_id(),
             );
         }
 
