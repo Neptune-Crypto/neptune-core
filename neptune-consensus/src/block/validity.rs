@@ -22,6 +22,7 @@ mod apply_addition_records;
 pub mod block_primitive_witness;
 pub mod block_program;
 pub mod block_proof_witness;
+mod block_subsidy;
 mod chunk_insertions;
 mod chunk_witness;
 pub mod coinbase_is_valid;

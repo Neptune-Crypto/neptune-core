@@ -9,6 +9,7 @@ use neptune_primitives::timestamp::Timestamp;
 use num_bigint::BigUint;
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::arithmetic::i128::lt::Lt as I128Lt;
 use tasm_lib::arithmetic::u160::lt::Lt as U160Lt;
 use tasm_lib::arithmetic::u192::safe_add::SafeAdd as U192SafeAdd;
 use tasm_lib::arithmetic::u64::lt::Lt as U64Lt;
@@ -37,6 +38,7 @@ use tasm_lib::verifier::stark_verify::StarkVerify;
 
 use super::apply_addition_records::ApplyAdditionRecords;
 use super::block_program::BlockProgram;
+use super::block_subsidy::BlockSubsidy;
 use super::correct_swbfi_update::CorrectSwbfiUpdate;
 use super::difficulty_control::DifficultyControl;
 use super::epoch_table::Epoch;
@@ -388,6 +390,8 @@ impl TritonProgram for PredecessorIsValid {
         let push_digest = library.import(Box::new(Push::new(DataType::Digest)));
         let append_to_mmr = library.import(Box::new(CalculateNewPeaksFromAppend));
         let memcpy = library.import(Box::new(MemCpy));
+        let i128_lt = library.import(Box::new(I128Lt));
+        let block_subsidy = library.import(Box::new(BlockSubsidy));
         let u160_lt = library.import(Box::new(U160Lt));
         let u64_lt = library.import(Box::new(U64Lt));
         let u192_safe_add = library.import(Box::new(U192SafeAdd));
@@ -1290,8 +1294,45 @@ impl TritonProgram for PredecessorIsValid {
             // _ *w [prev_block_hash]
         );
 
+        let coinbase_is_within_subsidy =
+            "predecessor_is_valid_coinbase_is_within_subsidy".to_string();
+        let coinbase_is_within_subsidy_code = triton_asm!(
+            // BEFORE: _ *w [prev_block_hash] *coinbase
+            // AFTER:  _ *w [prev_block_hash] *coinbase
+            {coinbase_is_within_subsidy}:
+                dup 0 addi {amount_size} read_mem {amount_size} pop 1
+                // _ *w [prev_block_hash] *coinbase [coinbase]
+
+                dup 10 {&read_prev_block_height}
+                call {block_subsidy}
+                // _ *w [prev_block_hash] *coinbase [coinbase] [block_subsidy]
+
+                call {i128_lt}
+                // _ *w [prev_block_hash] *coinbase (block_subsidy < coinbase)
+
+                push 0 eq
+                // _ *w [prev_block_hash] *coinbase (block_subsidy >= coinbase)
+
+                assert error_id {BlockValidationRule::CoinbaseTooBig.error_id()}
+                // _ *w [prev_block_hash] *coinbase
+
+                return
+        );
+
         // BEFORE: _ *w [prev_block_hash]
         // AFTER:  _ *w [prev_block_hash]
+        let rule_2g_prev = triton_asm!(
+            dup 5 {&prev_block_txk} {&field!(TransactionKernel::coinbase)}
+            // _ *w [prev_block_hash] *coinbase
+
+            dup 0 read_mem 1 pop 1
+            // _ *w [prev_block_hash] *coinbase coinbase_is_some
+
+            skiz call {coinbase_is_within_subsidy}
+            pop 1
+            // _ *w [prev_block_hash]
+        );
+
         // BEFORE: _ *w [prev_block_hash]
         // AFTER:  _ *w [prev_block_hash]
         // BEFORE: _ *w [prev_block_hash]
@@ -1788,6 +1829,7 @@ impl TritonProgram for PredecessorIsValid {
         let (rule_1b_prev, rule_1b_prev_code) = subroutine("rule_1b_prev", rule_1b_prev);
         let (rule_1a_txproof_prev, rule_1a_txproof_prev_code) =
             subroutine("rule_1a_prev", rule_1a_txproof_prev);
+        let (rule_2g_prev, rule_2g_prev_code) = subroutine("rule_2g_prev", rule_2g_prev);
         let (rule_2c_prev, rule_2c_prev_code) = subroutine("rule_2c_prev", rule_2c_prev);
         let (mutator_set_after_prev_block, mutator_set_after_prev_block_code) =
             subroutine("mutator_set_after_prev_block", mutator_set_after_prev_block);
@@ -1839,6 +1881,10 @@ impl TritonProgram for PredecessorIsValid {
             // _ [next_block_body_mh] *w [prev_block_hash]
 
 
+            call {rule_2g_prev}
+            // _ [next_block_body_mh] *w [prev_block_hash]
+
+
             call {rule_2c_prev}
             // _ [next_block_body_mh] *w [prev_block_hash]
 
@@ -1864,6 +1910,7 @@ impl TritonProgram for PredecessorIsValid {
             {&epoch_tables_agree_code}
             {&own_claim_input_matches_code}
             {&find_own_claim_code}
+            {&coinbase_is_within_subsidy_code}
             {&prev_block_epoch_rules_code}
             {&authenticate_next_block_mmr_accumulator_code}
             {&hash_prev_block_body_code}
@@ -1875,6 +1922,7 @@ impl TritonProgram for PredecessorIsValid {
             {&rule_1b_prev_code}
             {&verify_prev_block_proof_code}
             {&rule_1a_txproof_prev_code}
+            {&rule_2g_prev_code}
             {&rule_2c_prev_code}
             {&mutator_set_after_prev_block_code}
             {&read_epoch_table_code}
@@ -1923,6 +1971,7 @@ mod tests {
     use neptune_mutator_set::shared::NUM_TRIALS;
     use neptune_mutator_set::shared::WINDOW_SIZE;
     use neptune_primitives::block_height::BlockHeight;
+    use neptune_primitives::block_height::BLOCKS_PER_GENERATION;
     use neptune_primitives::difficulty_control::difficulty_control;
     use neptune_primitives::network::Network;
     use num_traits::Zero;
@@ -2046,6 +2095,11 @@ mod tests {
             assert!(witness.prev_block_appendix.contains(&transaction_claim));
 
             let prev_transaction_kernel = &witness.prev_block_body.transaction_kernel;
+
+            // 2.g)
+            if let Some(coinbase) = prev_transaction_kernel.coinbase {
+                assert!(coinbase <= Block::block_subsidy(witness.prev_block_header.height));
+            }
 
             // 2.c) The divined positions must be a permutation of the inputs,
             // along which the index sets are strictly increasing.
@@ -3740,6 +3794,55 @@ mod tests {
             (prev_block, next_body, next_header)
         }
 
+        /// The previous block at this height with this coinbase, and a next
+        /// body and header for it.
+        fn prev_block_with_coinbase_at_height(
+            coinbase: Option<NativeCurrencyAmount>,
+            height: u64,
+        ) -> (Block, BlockBody, BlockHeader) {
+            let transaction_kernel = TransactionKernelModifier::default()
+                .coinbase(coinbase)
+                .modify(transaction_kernel_and_proof().0.clone());
+            prev_block_with_transaction_kernel_at_height(transaction_kernel, &epochs(), height)
+        }
+
+        #[test]
+        fn prev_block_with_coinbase_up_to_its_subsidy_passes() {
+            let heights = [
+                activation_height().value(),
+                BLOCKS_PER_GENERATION,
+                4 * BLOCKS_PER_GENERATION,
+                (1 << 32) + 7,
+            ];
+            let subsidies = heights.map(|height| Block::block_subsidy(height.into()));
+            assert!(subsidies[0] > subsidies[1]);
+            assert!(subsidies[1] > subsidies[2]);
+            assert!(subsidies[3].is_zero());
+
+            for (height, subsidy) in heights.into_iter().zip(subsidies) {
+                for coinbase in [None, Some(subsidy)] {
+                    let (prev_block, next_body, next_header) =
+                        prev_block_with_coinbase_at_height(coinbase, height);
+                    assert_accepts(&skipping(), &prev_block, &next_body, &next_header);
+                }
+
+                for excess in [
+                    NativeCurrencyAmount::one_nau(),
+                    NativeCurrencyAmount::coins(1),
+                ] {
+                    let (prev_block, next_body, next_header) =
+                        prev_block_with_coinbase_at_height(Some(subsidy + excess), height);
+                    assert_rejects(
+                        &skipping(),
+                        &prev_block,
+                        &next_body,
+                        &next_header,
+                        BlockValidationRule::CoinbaseTooBig.error_id(),
+                    );
+                }
+            }
+        }
+
         /// The previous block on the shared grandparent, carrying this SWBFI
         /// update claim in place of the one its transaction calls for.
         fn prev_block_with_swbfi_claim(
@@ -4176,6 +4279,17 @@ mod tests {
                 &next_header,
                 BlockValidationRule::RemovalRecordsUniqueness.error_id(),
             );
+        }
+
+        #[test]
+        fn prev_block_without_coinbase_passes() {
+            let transaction_kernel = TransactionKernelModifier::default()
+                .coinbase(None)
+                .modify(transaction_kernel_and_proof().0.clone());
+            let (prev_block, next_body, next_header) =
+                prev_block_with_transaction_kernel(transaction_kernel, &epochs());
+
+            assert_accepts(&skipping(), &prev_block, &next_body, &next_header);
         }
 
         /// The timestamp `prev_block_with_transaction_kernel` gives the
