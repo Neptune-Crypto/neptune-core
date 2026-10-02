@@ -8,7 +8,7 @@
 //! yields the inactive SWBF's new peaks.
 //!
 //! This is the part of the update that dominates its cost. It is the body of
-//! [`CorrectSwbfiUpdate`](super::correct_swbfi_update::CorrectSwbfiUpdate),
+//! [`CorrectSwbfiUpdate`](super::leaf::CorrectSwbfiUpdate),
 //! the claim that proves it for the current block.
 
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -44,7 +44,7 @@ use crate::consensus_rule_set::ConsensusRuleSet;
 /// AFTER:  _ *swbfi_peaks_after
 /// ```
 #[derive(Debug, Copy, Clone)]
-pub(super) struct SwbfiPeaksAfterRemovals;
+pub(in crate::block::validity) struct SwbfiPeaksAfterRemovals;
 
 impl BasicSnippet for SwbfiPeaksAfterRemovals {
     fn parameters(&self) -> Vec<(DataType, String)> {
@@ -229,7 +229,7 @@ impl SwbfiPeaksAfterRemovals {
     /// peaks. A witness with more or fewer chunks than its indices need gets
     /// a list padded or cut to its number of chunks, which the program then
     /// rejects.
-    pub(super) fn divined_tokens(
+    pub(in crate::block::validity) fn divined_tokens(
         inputs: &[RemovalRecord],
         mutator_set: &MutatorSetAccumulator,
     ) -> Vec<BFieldElement> {
@@ -282,7 +282,7 @@ impl SwbfiPeaksAfterRemovals {
     /// The witness's form of these packed inputs on this mutator set: the
     /// chunks' contents unpacked, and each tree's authentication structure
     /// replaced by the paths of the tree's chunks.
-    pub(super) fn witness_form(
+    pub(in crate::block::validity) fn witness_form(
         packed_inputs: Vec<RemovalRecord>,
         mutator_set: &MutatorSetAccumulator,
     ) -> Vec<RemovalRecord> {
@@ -302,7 +302,7 @@ impl SwbfiPeaksAfterRemovals {
 
     /// The packed list's form of these witness inputs: the inverse of
     /// [`Self::witness_form`].
-    pub(super) fn packed_form(
+    pub(in crate::block::validity) fn packed_form(
         mut inputs: Vec<RemovalRecord>,
         mutator_set: &MutatorSetAccumulator,
     ) -> Vec<RemovalRecord> {
@@ -319,35 +319,22 @@ impl SwbfiPeaksAfterRemovals {
     }
 
     /// The first index of the active window.
-    pub(super) fn window_start(mutator_set: &MutatorSetAccumulator) -> u128 {
+    pub(in crate::block::validity) fn window_start(mutator_set: &MutatorSetAccumulator) -> u128 {
         u128::from(mutator_set.swbf_inactive.num_leafs()) << CHUNK_SIZE.ilog2()
     }
 
     /// The mutator set with the packed inputs removed, computed on the host
     /// machine.
-    pub(super) fn apply_removals(
+    pub(in crate::block::validity) fn apply_removals(
         inputs: &[RemovalRecord],
         mutator_set: &MutatorSetAccumulator,
     ) -> MutatorSetAccumulator {
         Self::try_apply_removals(inputs, mutator_set).expect("inputs must be removable")
     }
 
-    /// The witness's inputs as the archival update takes them: the list
-    /// unpacked.
-    pub(super) fn unpacked_records(
-        inputs: &[RemovalRecord],
-        mutator_set: &MutatorSetAccumulator,
-    ) -> Option<Vec<RemovalRecord>> {
-        RemovalRecordList::try_unpack(
-            Self::packed_form(inputs.to_vec(), mutator_set),
-            ConsensusRuleSet::HardforkDelta.allow_big_chunks(),
-        )
-        .ok()
-    }
-
     /// The mutator set with the packed inputs removed, if they unpack and
     /// can be removed from it.
-    pub(super) fn try_apply_removals(
+    pub(in crate::block::validity) fn try_apply_removals(
         inputs: &[RemovalRecord],
         mutator_set: &MutatorSetAccumulator,
     ) -> Option<MutatorSetAccumulator> {
@@ -377,7 +364,7 @@ impl SwbfiPeaksAfterRemovals {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-pub(super) mod tests {
+pub(in crate::block::validity) mod tests {
     use neptune_mutator_set::shared::NUM_TRIALS;
 
     use super::super::chunk_witness::tests::packed_entries;
@@ -385,6 +372,21 @@ pub(super) mod tests {
     use super::super::update_tree_leaf::UpdateTreeLeaf;
     use super::*;
     use crate::proof_abstractions::tasm::builtins as tasm;
+
+    impl SwbfiPeaksAfterRemovals {
+        /// The witness's inputs as the archival update takes them: the list
+        /// unpacked.
+        pub(in crate::block::validity) fn unpacked_records(
+            inputs: &[RemovalRecord],
+            mutator_set: &MutatorSetAccumulator,
+        ) -> Option<Vec<RemovalRecord>> {
+            RemovalRecordList::try_unpack(
+                Self::packed_form(inputs.to_vec(), mutator_set),
+                ConsensusRuleSet::HardforkDelta.allow_big_chunks(),
+            )
+            .ok()
+        }
+    }
 
     impl SwbfiPeaksAfterRemovals {
         /// The host shadow: asserts what the snippet asserts, reading the

@@ -5,7 +5,7 @@
 //! expected accumulator.
 //!
 //! The hash comes from
-//! [`CorrectSwbfiUpdate`](super::correct_swbfi_update::CorrectSwbfiUpdate)'s
+//! [`CorrectSwbfiUpdate`](super::swbf_update::leaf::CorrectSwbfiUpdate)'s
 //! claim, so this needs no chunk data.
 
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -25,8 +25,8 @@ use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use super::apply_addition_records::ApplyAdditionRecords;
 use super::mutator_set_hash::MutatorSetHash;
 use super::mutator_set_hash::MutatorSetHashFromComponents;
-use super::swbfi_peaks_after_removals::SwbfiPeaksAfterRemovals;
-use super::window_after_removals::WindowAfterRemovals;
+use super::swbf_update::swbfi_peaks_after_removals::SwbfiPeaksAfterRemovals;
+use super::swbf_update::window_after_removals::WindowAfterRemovals;
 use crate::block::block_validation_error::BlockValidationRule;
 
 /// Asserts that applying a transaction to the mutator set it is built on

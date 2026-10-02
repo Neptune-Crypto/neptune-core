@@ -32,6 +32,12 @@ pub struct Epoch {
     /// initial counter and its own last AOCL leaf index as the threshold: 1
     /// if so, 0 otherwise.
     pub resets_lustration_status: BFieldElement,
+
+    /// The least the padded heights of the leaf proofs beneath a block's
+    /// SWBFI update claim may sum to: proving work a block carries whatever
+    /// its inputs, so that leaving transactions out saves the composer
+    /// nothing. Zero for no floor.
+    pub min_swbfi_padded_rows: BFieldElement,
 }
 
 /// Number of entries in an [`EpochTable`], used or not.

@@ -23,43 +23,22 @@ pub mod block_primitive_witness;
 pub mod block_program;
 pub mod block_proof_witness;
 mod block_subsidy;
-mod chunk_insertions;
-mod chunk_witness;
 pub mod coinbase_is_valid;
-mod copy_words;
 pub mod correct_control_parameter_update;
 pub mod correct_mmr_update;
 pub mod correct_mutator_set_update;
-pub mod correct_swbfi_update;
 pub mod difficulty_control;
-mod divined_chunk_indices;
 pub mod epoch_table;
 mod guesser_fee_addition_records;
-mod hash_chunk_with_insertions;
-mod hash_words;
-mod insert_into_window;
 mod meets_threshold;
 pub mod mmr_membership;
-mod mutate_swbfi_peaks;
 mod mutator_set_hash;
-mod mutator_set_hash_after_removals;
 mod mutator_set_update_from_state_hash;
 pub mod predecessor_is_valid;
-mod removal_index_commitment;
 mod removal_record_pointers;
 mod removal_records_are_unique;
-mod removal_records_are_unspent;
-mod resolve_chunk_indices;
-// Kept for the benchmark in `update_tree_leaf`; no program uses it.
-#[cfg(test)]
-mod roots_from_authentication_struct;
-mod sorted_window_indices;
-mod swbfi_peaks_after_removals;
-pub mod swbfi_update_aggregation;
-pub mod swbfi_update_union;
-mod update_tree_leaf;
+pub mod swbf_update;
 mod verified_lustration_amount;
-mod window_after_removals;
 
 /// The validity of a block, in the principal case, decomposes into these subclaims.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
