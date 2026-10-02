@@ -1,7 +1,7 @@
 # SOFuN — Standing Orders for Future Neptune
 
 Status: **design draft**. Nothing implemented yet.
-Last updated: 2026-09-05.
+Last updated: 2026-10-02.
 
 ---
 
@@ -69,7 +69,8 @@ The order book could live off-chain. Putting it on-chain buys:
   additional infrastructure, no account anywhere, and no trust in a venue.
 - **Price discovery in public.** The implied discount rate is visible to
   everyone, including to people deciding whether to mine.
-- **No new consensus rules.** See §5.
+- **One consensus change.** A hard fork lets a coinbase transaction spend
+  inputs, and nothing else in consensus changes. See §5.
 
 The cost is block space and privacy (§8).
 
@@ -913,9 +914,11 @@ and it is borne only by nodes that compose.
 
 ### 4.9 How a composer executes a fill
 
-This is the one part of SOFuN that reaches into the mining path. Nothing in the
-tree builds a coinbase transaction with an input, and the order UTXO has to
-become one.
+This is the one part of SOFuN that reaches into the mining path: the order UTXO
+becomes an input of the composer's coinbase transaction, which only the hard
+fork of §5 allows. The composer's node builds that transaction; the process
+that runs the book decides what goes into it, and the node knows nothing about
+orders.
 
 **Less is missing than it looks.** `TransactionDetails::new` already takes
 inputs and a coinbase in the same call (`transaction_details.rs:242`);
@@ -927,16 +930,28 @@ coinbase constructor that accepts one:
 `prepare_coinbase_transaction_stateless` (`composer_parameters.rs:188`) builds
 outputs and nothing else.
 
-**The apparent circularity is not one.** The fill's witness must contain the
-transaction's output list and its authentication path against the kernel MAST
-hash (§4.2) — so the witness needs the kernel, and the kernel contains the input
-that the witness unlocks. But `TransactionDetails::transaction_kernel`
-(`transaction_details.rs:362-379`) builds removal records out of each input's
-UTXO and membership proof and never touches its `lock_script_and_witness`. The
-kernel is therefore independent of the thing that seems to depend on it.
-Assemble the details once with an empty witness on the fill input, take the
-kernel, build the real witness against it, and assemble again. Two cheap passes,
-no new type, and nothing mutated after construction.
+**The witness depends on a kernel only the node builds.** The fill's witness
+must contain the transaction's output list and its authentication path against
+the kernel MAST hash (§4.2), and the index of the reward among the outputs. The
+node chooses the kernel, since the composer's own outputs, its timestamp and
+its other merges are its own, so the book process cannot compute the witness.
+But `TransactionDetails::transaction_kernel` (`transaction_details.rs:362-379`)
+builds removal records out of each input's UTXO and membership proof and never
+touches its `lock_script_and_witness`, so the kernel does not depend on the
+witness. The node assembles the details once with an empty witness on the fill
+input, takes the kernel, completes the witness against it, and assembles again.
+
+**A witness template.** The book process hands the node the order input as its
+UTXO, lock script and membership proof, and a witness template: the tokens that
+do not depend on the kernel, and slots the node fills from the kernel it built.
+A slot asks for one of four things: a kernel field's encoding at a memory
+address, that field's size as a token, its authentication path among the
+digests, or the index of a given addition record among the outputs. The fill
+witness is the cancel-or-fill words, then the outputs field's size and the
+reward's index as tokens, the outputs field in memory, and its authentication
+path, which is five words and four slots. The node fills slots and knows nothing
+of what they are for, so the same template serves any lock script that
+authenticates kernel fields.
 
 **The amounts.** The order contributes `X` as an input and the reward takes `Y`
 out as an output, so the pool the composer distributes among their own outputs
@@ -970,26 +985,25 @@ the invariant generalizes rather than breaking, and the term it needs is `Y`,
 which is why the fill belongs inside the distribution rather than beside it
 (§4.7).
 
-**Where the choosing happens.** `prepare_coinbase_transaction_stateless` stays
-stateless: the fill arrives as an argument. Picking it is a state read — the
-order index (§4.8), for the best order asking this block's time-locked subsidy —
-and belongs one level up in `create_block_transaction_from`
-(`mine_loop.rs:499`), which already holds the global state lock. A re-time
-re-enters that path, so the fill is re-selected and its witness rebuilt with no
-special handling.
+**Where the choosing happens.** The book process picks the order, the best
+one asking for this block's time-locked subsidy, and sets the coinbase
+template over RPC: the reward output, stated in full, and the order input with
+its witness template. The node applies the template whenever it composes, and a
+re-time re-enters that path, so the witness is completed again against the new
+kernel with no special handling.
 
 **What the composer checks before proving.** The index verified the order when
-it admitted it (§4.8), but a block may have arrived since, so re-check at the
-point of spending: the wallet's membership proof against the current mutator
-set (§4.8), the
-rebuilt lock script's hash against the UTXO's own, `Y` against this block's
+it admitted it (§4.8), but a block may have arrived since, so the book process
+re-checks when it sets the template: the order's membership proof against the
+current mutator set (§4.8), the rebuilt lock script's hash against the UTXO's
+own, `Y` against this block's
 time-locked subsidy, and `k` against §4.6's bound with its headroom. These are
 cheap next to proving, and they are the boundary where the composer commits
 their own money to a stranger's script.
 
 **A fill must never stop a block.** If anything fails — a check, the proof, a
-re-time that invalidates the witness — the composer drops the fill and composes
-the block without it. The block subsidy is worth more than any order, and no
+re-time that invalidates the witness — the node drops the template whole, the
+reward with the input, and composes the block without it. The block subsidy is worth more than any order, and no
 part of this may sit on the critical path in a way that can block it.
 
 
@@ -1380,9 +1394,13 @@ same goes for the query surface: return orders and let a market maker or a
 wallet decide what to do with them, rather than offering to act on their behalf.
 
 
-## 5. No consensus changes required
+## 5. One consensus change
 
-This is the strongest property of the design.
+A fill spends the order UTXO in the composer's coinbase transaction, and
+consensus forbids a coinbase transaction to have inputs:
+RemovalRecordsIntegrity asserts `coinbase.is_none() || input_utxos.is_empty()`
+(`removal_records_integrity.rs`). A hard fork lifts that rule, and SOFuN needs
+it: before the fork activates, no fill is valid. Nothing else changes.
 
 - Lock scripts are arbitrary Triton programs; a two-path script needs no new
   permission.
@@ -1397,9 +1415,28 @@ This is the strongest property of the design.
   reference implementation at `:925-931`). A time-locked output paid to a third
   party counts exactly as much as one paid to the composer.
 
-SOFuN is therefore entirely a wallet-, lock-script- and announcement-layer
-feature. Nothing in `neptune-consensus` needs to change.
+**Inputs cannot loosen the mandatory time lock.** A coinbase transaction with
+inputs raises the question of whether they count toward the rule, and in either
+sense they cannot help a composer escape it.
 
+*As time-locked value.* The rule counts a UTXO as time-locked if and only if its
+release date is at least `timestamp + 3 years`. The `TimeLock` type script lets a
+transaction spend a time-locked input only if the input's release date is
+earlier than the transaction's timestamp (`time_lock.rs`, reference
+implementation at `:1076`). So every time-locked input is already released, its
+release date lies before `timestamp`, and a fortiori before
+`timestamp + 3 years`. A rule that counted inputs by the same test would find
+none of them time-locked: counting them adds nothing to the time-locked side. A
+merge cannot change this, since it raises the timestamp and never lowers it.
+
+*As part of the base.* The rule asks for half of the total output, and by
+`total_input + coinbase = total_output + fee` the total output includes what the
+inputs bring. An input therefore raises the amount that must be time-locked,
+never lowers it. For a fill, the order's `X` raises the total output to
+`(1-g)·C + X`, which is what §4.7's analysis of the composer's lock starts from.
+
+SOFuN is therefore, apart from the fork, a wallet-, lock-script- and
+announcement-layer feature.
 
 ## 6. Merging
 
@@ -1527,7 +1564,9 @@ randomness per order.
 
 ### Phase 0 — design
 - [x] Core mechanism sketched
-- [x] Confirmed no consensus changes needed
+- [x] Established that a fill needs one consensus change, a coinbase
+      transaction with inputs, now coming as a hard fork; and that inputs, in
+      either sense, cannot loosen the mandatory time lock (§5)
 - [x] Established that a fill pays for itself only inside a coinbase
       transaction (§4.6)
 - [x] Discovery problem identified; design space enumerated (§2)
