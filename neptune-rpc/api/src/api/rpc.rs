@@ -21,6 +21,7 @@ use crate::model::common::RpcBlockSelector;
 use crate::model::common::RpcNativeCurrencyAmount;
 use crate::model::json::JsonError;
 use crate::model::message::*;
+use crate::model::mining::RpcPrimitiveWitness;
 use crate::model::wallet::transaction::RpcTransaction;
 
 #[derive(Debug, Clone, Copy, Error, Eq, PartialEq, Serialize, Deserialize)]
@@ -136,6 +137,12 @@ pub enum RpcError {
 
     #[error("The UTXO that you try to claim cannot be registered by the wallet. Error: {0}")]
     CannotClaimUtxo(String),
+
+    #[error("Malformed primitive witness: {0}")]
+    MalformedPrimitiveWitness(String),
+
+    #[error("The consensus rules for the next block forbid coinbase inputs.")]
+    CoinbaseInputsNotAllowed,
 
     #[error(
         "The consensus rules require lustration of the input, but the lustration flag was not set."
@@ -797,6 +804,32 @@ pub trait RpcApi: Sync + Send {
         &self,
         request: SubmitBlockRequest,
     ) -> RpcResult<SubmitBlockResponse>;
+
+    /// Have this node's next block proposals use `tx` as their coinbase
+    /// transaction, in place of the one the node builds, until it is set
+    /// again. No transaction unsets it.
+    ///
+    /// The node proves `tx` from its primitive witness. The node registers no
+    /// expected UTXOs for its outputs, so an output meant for this node's
+    /// wallet must carry an on-chain notification. A block proposal falls
+    /// back to the node's own coinbase transaction if the consensus rules at
+    /// its height forbid coinbase inputs, or if `tx` is invalid, was built
+    /// against another tip, claims more than the block subsidy, pays a
+    /// negative fee, is timestamped too early, or does not lustrate an input
+    /// that must lustrate.
+    ///
+    /// Fails with [`RpcError::CoinbaseInputsNotAllowed`] if the consensus
+    /// rules for the next block forbid coinbase inputs.
+    async fn set_coinbase_tx(
+        &self,
+        tx: Option<RpcPrimitiveWitness>,
+    ) -> RpcResult<SetCoinbaseTxResponse> {
+        self.set_coinbase_tx_call(SetCoinbaseTxRequest { tx }).await
+    }
+    async fn set_coinbase_tx_call(
+        &self,
+        request: SetCoinbaseTxRequest,
+    ) -> RpcResult<SetCoinbaseTxResponse>;
 
     /* Utxoindex */
 
