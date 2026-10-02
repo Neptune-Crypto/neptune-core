@@ -21,12 +21,12 @@ use super::swbfi_peaks_after_removals::SwbfiPeaksAfterRemovals;
 /// AFTER:  _ *window_after
 /// ```
 #[derive(Debug, Copy, Clone)]
-pub(super) struct WindowAfterRemovals;
+pub(in crate::block::validity) struct WindowAfterRemovals;
 
 impl WindowAfterRemovals {
     /// The tokens: the sorted indices in the active window and their
     /// positions in it.
-    pub(super) fn divined_tokens(
+    pub(in crate::block::validity) fn divined_tokens(
         inputs: &[RemovalRecord],
         mutator_set: &MutatorSetAccumulator,
     ) -> Vec<BFieldElement> {
@@ -92,7 +92,7 @@ impl BasicSnippet for WindowAfterRemovals {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-pub(super) mod tests {
+pub(in crate::block::validity) mod tests {
     use neptune_mutator_set::active_window::ActiveWindow;
 
     use super::*;

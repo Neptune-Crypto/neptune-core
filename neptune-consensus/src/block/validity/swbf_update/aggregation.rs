@@ -2,14 +2,17 @@
 //! left child starts on, removing both children's inputs yields the
 //! mutator set the right child ends on. The claim has the leaf's input and
 //! output layout, so a tree of aggregations over leaves is bound by its root
-//! alone, and the leaf count in the output says how many leaves the root
-//! stands on.
+//! alone, and the padded rows of the leaf proofs beneath it, summed in the
+//! output, say how much proving work the root stands on.
 //!
 //! The children are claims of the leaf program or of this one, and their
-//! proofs are verified here. They must chain: the left child's input is
-//! this claim's, and the right child's input is the mutator set the left
-//! child outputs. The index sets' digests come as witness; the children's
-//! peaks are recomputed from them, and this claim's over all of them.
+//! proofs are verified here; a leaf's padded height is read from its proof,
+//! an aggregation's rows from its output. They must chain: the left child's
+//! input is this claim's, the right child's input is the mutator set the
+//! left child outputs, and the right child's first leaf index is the left
+//! child's last plus one, so that no leaf, and no proof, serves twice. The
+//! index sets' digests come as witness; the children's peaks are recomputed
+//! from them, and this claim's over all of them.
 
 use std::sync::OnceLock;
 
@@ -27,49 +30,29 @@ use tasm_lib::prelude::DataType;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
+use tasm_lib::triton_vm::proof_item::ProofItemVariant;
 use tasm_lib::verifier::stark_verify::StarkVerify;
+use tasm_lib::verifier::vm_proof_iter::dequeue_next_as::DequeueNextAs;
+use tasm_lib::verifier::vm_proof_iter::new::New as NewProofIter;
 
-use super::correct_swbfi_update::CorrectSwbfiUpdate;
+use super::leaf::CorrectSwbfiUpdate;
+use super::leaf::CorrectSwbfiUpdateWitness;
 use super::removal_index_commitment::DigestPeaks;
+use super::removal_index_commitment::IndexSetDigests;
+use super::ClaimOutput;
+use super::INPUT_FIRST_LEAF_INDEX;
+use super::INPUT_LEN;
+use super::INPUT_MUTATOR_SET_HASH;
+use super::OUTPUT_COUNT;
+use super::OUTPUT_LAST_LEAF_INDEX;
+use super::OUTPUT_MUTATOR_SET_HASH;
+use super::OUTPUT_NUM_PEAKS;
+use super::OUTPUT_PADDED_ROWS;
+use super::OUTPUT_PEAKS;
 use crate::block::block_validation_error::BlockValidationRule;
 use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::proof_abstractions::SecretWitness;
-
-/// Where in an SWBFI update claim's output each part lies.
-const OUTPUT_NUM_LEAVES: usize = 0;
-const OUTPUT_COUNT: usize = 1;
-const OUTPUT_MUTATOR_SET_HASH: usize = 2;
-const OUTPUT_NUM_PEAKS: usize = OUTPUT_MUTATOR_SET_HASH + Digest::LEN;
-const OUTPUT_PEAKS: usize = OUTPUT_NUM_PEAKS + 1;
-
-/// An SWBFI update claim's output taken apart.
-struct ClaimOutput {
-    num_leaves: BFieldElement,
-    count: usize,
-    mutator_set_hash: Digest,
-    peaks: Vec<Digest>,
-}
-
-impl ClaimOutput {
-    fn parse(output: &[BFieldElement]) -> Self {
-        let num_peaks = output[OUTPUT_NUM_PEAKS].value() as usize;
-        assert_eq!(OUTPUT_PEAKS + Digest::LEN * num_peaks, output.len());
-        Self {
-            num_leaves: output[OUTPUT_NUM_LEAVES],
-            count: output[OUTPUT_COUNT].value() as usize,
-            mutator_set_hash: Digest::new(
-                output[OUTPUT_MUTATOR_SET_HASH..OUTPUT_NUM_PEAKS]
-                    .try_into()
-                    .unwrap(),
-            ),
-            peaks: output[OUTPUT_PEAKS..]
-                .chunks(Digest::LEN)
-                .map(|words| Digest::new(words.try_into().unwrap()))
-                .collect(),
-        }
-    }
-}
 
 #[derive(Debug, Clone, BFieldCodec, GetSize, PartialEq, Eq, Serialize, Deserialize, TasmObject)]
 pub struct SwbfiUpdateAggregationWitness {
@@ -122,6 +105,36 @@ impl SwbfiUpdateAggregationWitness {
 
         nondeterminism
     }
+
+    /// The padded rows of the leaf proofs beneath a child: its proof's
+    /// padded height for a leaf, its output's first word for an aggregation.
+    fn child_padded_rows(claim: &Claim, proof: &Proof) -> BFieldElement {
+        if claim.program_digest == CorrectSwbfiUpdate.hash() {
+            let padded_height = proof
+                .padded_height()
+                .expect("child proof must declare its padded height");
+            bfe!(padded_height as u64)
+        } else {
+            ClaimOutput::parse(&claim.output).padded_rows
+        }
+    }
+
+    /// The claim about this witness for this variant of the program.
+    fn claim_for(&self, program: &SwbfiUpdateAggregation) -> Claim {
+        Claim::about_program(&program.program())
+            .with_input(self.standard_input().individual_tokens)
+            .with_output(self.output())
+            .about_version(
+                ConsensusRuleSet::HardforkDelta
+                    .triton_proof_version()
+                    .version(),
+            )
+    }
+
+    /// The claim about this witness, as a block's appendix carries it.
+    pub fn versioned_claim(&self) -> Claim {
+        self.claim_for(&SwbfiUpdateAggregation::new())
+    }
 }
 
 impl SecretWitness for SwbfiUpdateAggregationWitness {
@@ -135,17 +148,15 @@ impl SecretWitness for SwbfiUpdateAggregationWitness {
         let digests = &self.index_set_digests;
         assert_eq!(left.peaks, DigestPeaks::peaks(&digests[..left.count]));
         assert_eq!(right.peaks, DigestPeaks::peaks(&digests[left.count..]));
-        let peaks = DigestPeaks::peaks(digests);
-        [
-            vec![
-                left.num_leaves + right.num_leaves,
-                bfe!((left.count + right.count) as u64),
-            ],
-            right.mutator_set_hash.values().to_vec(),
-            vec![bfe!(peaks.len() as u64)],
-            peaks.iter().flat_map(|peak| peak.values()).collect(),
-        ]
-        .concat()
+        ClaimOutput {
+            padded_rows: Self::child_padded_rows(&self.left_claim, &self.left_proof)
+                + Self::child_padded_rows(&self.right_claim, &self.right_proof),
+            count: left.count + right.count,
+            mutator_set_hash: right.mutator_set_hash,
+            last_leaf_index: right.last_leaf_index,
+            peaks: DigestPeaks::peaks(digests),
+        }
+        .encode()
     }
 
     fn program(&self) -> Program {
@@ -179,22 +190,66 @@ impl SwbfiUpdateAggregation {
         }
     }
 
-    /// The claim aggregating these two over these index sets, as a block's
-    /// appendix carries it. The children's proofs play no part in it.
-    pub fn claim(left_claim: &Claim, right_claim: &Claim, index_set_digests: Vec<Digest>) -> Claim {
-        SwbfiUpdateAggregationWitness::new(
-            left_claim.clone(),
-            Proof(vec![]),
-            right_claim.clone(),
-            Proof(vec![]),
-            index_set_digests,
-        )
-        .claim()
-        .about_version(
-            ConsensusRuleSet::HardforkDelta
-                .triton_proof_version()
-                .version(),
-        )
+    /// The root claim and proof of a tree over these leaves: the consecutive
+    /// segments of one block's inputs, numbered from the first leaf index,
+    /// each lifted to the padded height it is to have. Adjacent nodes
+    /// aggregate pairwise from the left, a node without a right neighbour
+    /// waits for the next level, and so on until one node remains. The prover
+    /// is called for every leaf and every aggregation. A single leaf is
+    /// returned as is, though a block's root must be an aggregation.
+    pub fn tree<P>(&self, leaves: &[CorrectSwbfiUpdateWitness], prove: P) -> (Claim, Proof)
+    where
+        P: Fn(&Claim, Program, NonDeterminism) -> Proof,
+    {
+        struct Node {
+            claim: Claim,
+            proof: Proof,
+            index_set_digests: Vec<Digest>,
+        }
+
+        let mut level = leaves
+            .iter()
+            .map(|leaf| {
+                let claim = leaf.versioned_claim();
+                let proof = prove(&claim, CorrectSwbfiUpdate.program(), leaf.nondeterminism());
+                Node {
+                    claim,
+                    proof,
+                    index_set_digests: IndexSetDigests::digests(leaf.inputs()),
+                }
+            })
+            .collect::<Vec<_>>();
+        assert!(!level.is_empty(), "a tree needs a leaf");
+
+        while level.len() > 1 {
+            let mut next = Vec::with_capacity(level.len().div_ceil(2));
+            let mut nodes = level.into_iter();
+            while let Some(left) = nodes.next() {
+                let Some(right) = nodes.next() else {
+                    next.push(left);
+                    break;
+                };
+                let index_set_digests = [left.index_set_digests, right.index_set_digests].concat();
+                let witness = SwbfiUpdateAggregationWitness::new(
+                    left.claim,
+                    left.proof,
+                    right.claim,
+                    right.proof,
+                    index_set_digests.clone(),
+                );
+                let claim = witness.claim_for(self);
+                let proof = prove(&claim, self.program(), witness.nondeterminism_for(self));
+                next.push(Node {
+                    claim,
+                    proof,
+                    index_set_digests,
+                });
+            }
+            level = next;
+        }
+
+        let root = level.pop().expect("a level has a node");
+        (root.claim, root.proof)
     }
 }
 
@@ -209,9 +264,15 @@ impl TritonProgram for SwbfiUpdateAggregation {
         )));
         let digest_peaks = library.import(Box::new(DigestPeaks));
         let hash_varlen = library.import(Box::new(HashVarlen));
+        let new_proof_iter = library.import(Box::new(NewProofIter));
+        let dequeue_log2_padded_height = library.import(Box::new(DequeueNextAs::new(
+            ProofItemVariant::Log2PaddedHeight,
+        )));
 
         let own_program_digest_alloc = library.kmalloc(Digest::LEN as u32);
-        let input_alloc = library.kmalloc(Digest::LEN as u32);
+        let input_msa_hash_alloc = library.kmalloc(Digest::LEN as u32);
+        let first_leaf_index_alloc = library.kmalloc(1);
+        let padded_rows_alloc = library.kmalloc(1);
 
         let push_leaf_program_digest =
             Literal::Digest(CorrectSwbfiUpdate.hash()).push_to_stack_code();
@@ -230,7 +291,8 @@ impl TritonProgram for SwbfiUpdateAggregation {
         );
 
         let check_child = "swbfi_update_aggregation_check_child".to_string();
-        let audit_output = "swbfi_update_aggregation_audit_output".to_string();
+        let child_padded_rows = "swbfi_update_aggregation_child_padded_rows".to_string();
+        let audit_claim_output = "swbfi_update_aggregation_audit_output".to_string();
         let write_peaks = "swbfi_update_aggregation_write_peaks".to_string();
 
         // The verifier crashes on an invalid proof; that crash carries no
@@ -255,10 +317,16 @@ impl TritonProgram for SwbfiUpdateAggregation {
         };
 
         let code = triton_asm!(
+            /* Read from std-in: start mutator set hash, and first leaf index
+               in proof tree */
+            read_io {Digest::LEN}
+            push {input_msa_hash_alloc.write_address()} write_mem {Digest::LEN} pop 1
+            read_io 1
+            push {first_leaf_index_alloc.write_address()} write_mem 1 pop 1
+
+            /* Write own program digest to static memory */
             dup 15 dup 15 dup 15 dup 15 dup 15
             push {own_program_digest_alloc.write_address()} write_mem {Digest::LEN} pop 1
-            read_io {Digest::LEN}
-            push {input_alloc.write_address()} write_mem {Digest::LEN} pop 1
             // _
 
             push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
@@ -268,40 +336,96 @@ impl TritonProgram for SwbfiUpdateAggregation {
 
             dup 0 {&field!(SwbfiUpdateAggregationWitness::left_claim)}
             call {check_child}
-            // _ *w *left [left_input]
+            // _ *w *left_claim left_first_leaf_index [left_mutator_set_hash]
 
-            push {input_alloc.read_address()} read_mem {Digest::LEN} pop 1
+            /* Assert left child's mutator set matches this execution's mutator
+               set. */
+            push {input_msa_hash_alloc.read_address()} read_mem {Digest::LEN} pop 1
+            // _ *w *left_claim left_first_leaf_index [left_mutator_set_hash] [own_mutator_set_hash]
+
             assert_vector error_id {chaining}
             pop {Digest::LEN}
-            // _ *w *left
+            // _ *w *left_claim left_first_leaf_index
+
+            /* Assert left child's first leaf index matches this execution's
+               first leaf index */
+            push {first_leaf_index_alloc.read_address()} read_mem 1 pop 1
+            eq
+            // _ *w *left_claim (left_first_leaf_index == our_first_leaf_index)
+
+            assert error_id {chaining}
+            // _ *w *left_claim
 
             {&verify_left}
-            call {audit_output}
+            // _ *w *left_claim
+
+            /* Read out left claim's "accumulated proof complexity count": The
+               sum of the padded heights of proofs in the leafs verified by the
+               left claim */
+            dup 0 dup 2 {&field!(SwbfiUpdateAggregationWitness::left_proof)}
+            call {child_padded_rows}
+            push {padded_rows_alloc.write_address()} write_mem 1 pop 1
+            // _ *w *left_claim
+
+            call {audit_claim_output}
             // _ *w *left_output
 
+            /* Assert that right claim started where left claim ended */
             dup 1 {&field!(SwbfiUpdateAggregationWitness::right_claim)}
             call {check_child}
-            // _ *w *left_output *right [right_input]
+            // _ *w *left_output *right right_first_leaf_index [right_mutator_set_hash]
 
-            dup 6 addi {OUTPUT_NUM_PEAKS} read_mem {Digest::LEN} pop 1
+            dup 7 addi {OUTPUT_MUTATOR_SET_HASH + Digest::LEN} read_mem {Digest::LEN} pop 1
+            // _ *w *left_output *right right_first_leaf_index [right_mutator_set_hash] [left_mutator_set_hash_after]
+
             assert_vector error_id {chaining}
             pop {Digest::LEN}
+            // _ *w *left_output *right right_first_leaf_index
+
+            /* Assert left claim outputs the next leaf index matching right
+               claims' input leaf index */
+            dup 2 addi {1 + OUTPUT_LAST_LEAF_INDEX} read_mem 1 pop 1
+            addi 1 eq assert error_id {chaining}
             // _ *w *left_output *right
 
             {&verify_right}
-            call {audit_output}
+            dup 0 dup 3 {&field!(SwbfiUpdateAggregationWitness::right_proof)}
+            call {child_padded_rows}
+
+            // The sum of the proving complexity (of the leaf executions) is a
+            // field element, not a u32  or u64: each leaf adds at most 2^31, so
+            // it takes over 2^33 verified leaf proofs to wrap the field. So
+            // it's fine to keep it as a b-field element.
+            push {padded_rows_alloc.read_address()} read_mem 1 pop 1 add
+            push {padded_rows_alloc.write_address()} write_mem 1 pop 1
+            // _ *w *left_output *right
+
+            call {audit_claim_output}
             // _ *w *left_output *right_output
 
             dup 2 {&field!(SwbfiUpdateAggregationWitness::index_set_digests)}
+            // _ *w *left_output *right_output *index_set_digests
+
             dup 0 read_mem 1 pop 1
+            // _ *w *left_output *right_output *index_set_digests num_index_set_digests
+
             dup 3 addi {1 + OUTPUT_COUNT} read_mem 1 pop 1
             dup 3 addi {1 + OUTPUT_COUNT} read_mem 1 pop 1
             // _ *w *left_output *right_output *digests num_digests left_count right_count
 
-            dup 1 dup 1 add pick 3 eq assert error_id {chaining}
+            dup 1 dup 1 add
+            // _ *w *left_output *right_output *digests num_digests left_count right_count (left_count + right_count)
+
+            pick 3 eq
+            // _ *w *left_output *right_output *digests left_count right_count (num_digests == (left_count + right_count))
+
+            assert error_id {chaining}
             // _ *w *left_output *right_output *digests left_count right_count
 
-            dup 2 push 0 dup 3 call {digest_peaks}
+            dup 2 push 0 dup 3
+            // _ *w *left_output *right_output *digests left_count right_count *digests 0 left_count
+
+            call {digest_peaks}
             {&hash_digest_list}
             dup 9 addi {1 + OUTPUT_NUM_PEAKS} {&hash_digest_list}
             assert_vector error_id {chaining}
@@ -315,11 +439,11 @@ impl TritonProgram for SwbfiUpdateAggregation {
             pop {Digest::LEN}
             // _ *w *left_output *right_output *digests left_count right_count
 
-            dup 4 addi {1 + OUTPUT_NUM_LEAVES} read_mem 1 pop 1
-            dup 4 addi {1 + OUTPUT_NUM_LEAVES} read_mem 1 pop 1
-            add write_io 1
+            push {padded_rows_alloc.read_address()} read_mem 1 pop 1 write_io 1
             dup 1 dup 1 add write_io 1
-            dup 3 addi {OUTPUT_NUM_PEAKS} read_mem {Digest::LEN} pop 1 write_io {Digest::LEN}
+            dup 3 addi {OUTPUT_MUTATOR_SET_HASH + Digest::LEN}
+            read_mem {Digest::LEN} pop 1 write_io {Digest::LEN}
+            dup 3 addi {1 + OUTPUT_LAST_LEAF_INDEX} read_mem 1 pop 1 write_io 1
             // _ *w *left_output *right_output *digests left_count right_count
 
             add push 0 place 1
@@ -338,10 +462,12 @@ impl TritonProgram for SwbfiUpdateAggregation {
             halt
 
             // A claim of the leaf program or of this one, of the current
-            // version, about one mutator set hash.
+            // version, with the leaf's input layout.
             // BEFORE: _ *claim
-            // AFTER:  _ *claim [mutator_set_hash]
+            // AFTER:  _ *claim first_leaf_index [mutator_set_hash_init]
             {check_child}:
+                /* Assert the claim's program digest is either the leaf program,
+                   or the aggregation program (this program) */
                 dup 0 {&field!(Claim::program_digest)} {&read_digest}
                 dup 4 dup 4 dup 4 dup 4 dup 4
                 {&push_leaf_program_digest}
@@ -351,26 +477,89 @@ impl TritonProgram for SwbfiUpdateAggregation {
 
                 push {own_program_digest_alloc.read_address()} read_mem {Digest::LEN} pop 1
                 {&digests_are_equal}
-                add assert error_id {chaining}
+                add
+                // _ *claim (is_leaf || is_self)
+
+                assert error_id {chaining}
                 // _ *claim
 
+                /* Assert the claim's version matches out version */
                 dup 0 {&field!(Claim::version)} read_mem 1 pop 1
-                push {version} eq assert error_id {chaining}
-                dup 0 {&field_with_size!(Claim::input)}
-                // _ *claim *input input_size
+                push {version}
+                eq
+                // _ *claim (claim_version == our_version)
 
+                assert error_id {chaining}
+                // _ *claim
+
+                dup 0 {&field_with_size!(Claim::input)}
+                // _ *claim *claim_input input_size
+
+                /* Assert expected length of claim's input */
                 // The size counts the length word the pointer points at.
-                push {1 + Digest::LEN} eq assert error_id {chaining}
-                addi {Digest::LEN} read_mem {Digest::LEN} pop 1
+                push {1 + INPUT_LEN} eq assert error_id {chaining}
+
+                // _ *claim *claim_input
+                dup 0 addi {1 + INPUT_FIRST_LEAF_INDEX} read_mem 1 pop 1
+                // _ *claim *claim_input first_leaf_index
+
+                place 1
+                // _ *claim first_leaf_index *claim_input
+
+                addi {INPUT_MUTATOR_SET_HASH + Digest::LEN} read_mem {Digest::LEN} pop 1
                 swap 4 swap 1 swap 3 swap 1
+                // _ *claim first_leaf_index [mutator_set_hash_init]
+
+                return
+
+            /* Return the padded height of the proof in case of a leaf, and
+               the "effective" total proof size of all leafs below the node if
+               it is not a leaf. Padded height is read from the proof which
+               messes up the sponge state but that's OK: All callers that need
+               it are required to reset it regardless of this mutation. */
+            // BEFORE: _ *claim *proof
+            // AFTER:  _ padded_rows
+            {child_padded_rows}:
+                sponge_init
+                call {new_proof_iter}
+                call {dequeue_log2_padded_height}
+                read_mem 1 pop 1
+                // _ *claim log2_padded_height
+
+                push 2 pow
+                // _ *claim padded_height
+
+                dup 1 {&field!(Claim::output)} addi {1 + OUTPUT_PADDED_ROWS} read_mem 1 pop 1
+                // _ *claim padded_height output_rows
+
+                pick 2 {&field!(Claim::program_digest)} {&read_digest}
+                {&push_leaf_program_digest}
+                {&digests_are_equal}
+                // _ padded_height output_rows is_leaf
+
+                dup 1 push -1 mul pick 3 add
+                // _ output_rows is_leaf (padded_height - output_rows)
+
+                mul add
+                // _ padded_rows
+
                 return
 
             // BEFORE: _ *claim
-            // AFTER:  _ *output
-            {audit_output}:
+            // AFTER:  _ *claim_output
+            {audit_claim_output}:
                 {&field_with_size!(Claim::output)}
+                // _ *claim_output size
+
                 dup 1 addi {1 + OUTPUT_NUM_PEAKS} read_mem 1 pop 1
-                push {Digest::LEN} mul addi {1 + OUTPUT_PEAKS} eq
+                // _ *claim_output size num_peaks
+
+                push {Digest::LEN} mul
+                // _ *claim_output size expected_peaks_size
+
+                addi {1 + OUTPUT_PEAKS} eq
+                // _ *claim_output (size == expected_claim_output_size)
+
                 assert error_id {chaining}
                 return
 
@@ -404,11 +593,15 @@ impl TritonProgram for SwbfiUpdateAggregation {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use super::super::correct_swbfi_update::tests::archival_mutator_set_after;
-    use super::super::correct_swbfi_update::tests::chained_witnesses;
-    use super::super::correct_swbfi_update::CorrectSwbfiUpdateWitness;
-    use super::super::removal_index_commitment::IndexSetDigests;
+pub(in crate::block::validity) mod tests {
+    use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+    use neptune_mutator_set::removal_record::RemovalRecord;
+    use tasm_lib::triton_vm::proof_item::ProofItem;
+    use tasm_lib::triton_vm::proof_stream::ProofStream;
+    use tasm_lib::triton_vm::vm::VM;
+
+    use super::super::leaf::tests::archival_mutator_set_after;
+    use super::super::leaf::tests::chained_witnesses;
     use super::super::removal_index_commitment::RemovalIndexCommitment;
     use super::*;
     use crate::proof_abstractions::tasm::builtins as tasm;
@@ -419,6 +612,7 @@ mod tests {
         fn source(&self) {
             let own_program_digest = tasm::own_program_digest();
             let mutator_set_hash = tasm::tasmlib_io_read_stdin___digest();
+            let first_leaf_index = tasm::tasmlib_io_read_stdin___bfe();
             let witness: SwbfiUpdateAggregationWitness =
                 tasm::decode_from_memory(FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS);
             let version = ConsensusRuleSet::HardforkDelta
@@ -431,17 +625,25 @@ mod tests {
                         || claim.program_digest == own_program_digest
                 );
                 assert_eq!(version, claim.version);
-                assert_eq!(Digest::LEN, claim.input.len());
-                Digest::new(claim.input.clone().try_into().unwrap()).reversed()
+                assert_eq!(INPUT_LEN, claim.input.len());
+                let hash = &claim.input[INPUT_MUTATOR_SET_HASH..][..Digest::LEN];
+                let hash = Digest::new(hash.try_into().unwrap()).reversed();
+                (hash, claim.input[INPUT_FIRST_LEAF_INDEX])
             };
 
-            assert_eq!(mutator_set_hash, check_child(&witness.left_claim));
+            assert_eq!(
+                (mutator_set_hash, first_leaf_index),
+                check_child(&witness.left_claim)
+            );
             if self.verifies_children {
                 verify_stark(Stark::default(), &witness.left_claim, &witness.left_proof);
             }
             let left = ClaimOutput::parse(&witness.left_claim.output);
 
-            assert_eq!(left.mutator_set_hash, check_child(&witness.right_claim));
+            assert_eq!(
+                (left.mutator_set_hash, left.last_leaf_index + bfe!(1)),
+                check_child(&witness.right_claim)
+            );
             if self.verifies_children {
                 verify_stark(Stark::default(), &witness.right_claim, &witness.right_proof);
             }
@@ -452,13 +654,17 @@ mod tests {
             assert_eq!(left.peaks, DigestPeaks::peaks(&digests[..left.count]));
             assert_eq!(right.peaks, DigestPeaks::peaks(&digests[left.count..]));
 
-            tasm::tasmlib_io_write_to_stdout___bfe(left.num_leaves + right.num_leaves);
-            tasm::tasmlib_io_write_to_stdout___bfe(bfe!((left.count + right.count) as u64));
-            tasm::tasmlib_io_write_to_stdout___digest(right.mutator_set_hash);
-            let peaks = DigestPeaks::peaks(digests);
-            tasm::tasmlib_io_write_to_stdout___bfe(bfe!(peaks.len() as u64));
-            for peak in peaks {
-                tasm::tasmlib_io_write_to_stdout___digest(peak);
+            let padded_rows = SwbfiUpdateAggregationWitness::child_padded_rows;
+            let output = ClaimOutput {
+                padded_rows: padded_rows(&witness.left_claim, &witness.left_proof)
+                    + padded_rows(&witness.right_claim, &witness.right_proof),
+                count: left.count + right.count,
+                mutator_set_hash: right.mutator_set_hash,
+                last_leaf_index: right.last_leaf_index,
+                peaks: DigestPeaks::peaks(digests),
+            };
+            for word in output.encode() {
+                tasm::tasmlib_io_write_to_stdout___bfe(word);
             }
         }
     }
@@ -469,10 +675,46 @@ mod tests {
         }
     }
 
+    /// A proof that declares this padded height, followed by one more item,
+    /// so that the proof iterator does not reach the proof's end after the
+    /// height, as it does not in a real proof. All the skipping program
+    /// reads of a proof is the height.
+    pub(in crate::block::validity) fn placeholder_proof(log2_padded_height: u32) -> Proof {
+        let mut stream = ProofStream::new();
+        stream.enqueue(ProofItem::Log2PaddedHeight(log2_padded_height));
+        stream.enqueue(ProofItem::MerkleRoot(Digest::default()));
+        stream.into()
+    }
+
+    const CHILD_LOG2_PADDED_HEIGHT: u32 = 20;
+
     /// The claim of a leaf, or of an aggregation of the skipping program,
-    /// with a placeholder proof.
+    /// with a placeholder proof of the fixture height.
     fn child(claim: Claim) -> (Claim, Proof) {
-        (claim, Proof(vec![]))
+        (claim, placeholder_proof(CHILD_LOG2_PADDED_HEIGHT))
+    }
+
+    /// The claim of an aggregation of the leaves over the two halves of
+    /// these inputs, with placeholder proofs of these padded heights.
+    pub(in crate::block::validity) fn claim_over_halves(
+        inputs: &[RemovalRecord],
+        mutator_set: &MutatorSetAccumulator,
+        log2_padded_heights: [u32; 2],
+    ) -> Claim {
+        let split = inputs.len() / 2;
+        let leaves = CorrectSwbfiUpdateWitness::segments(
+            inputs,
+            mutator_set,
+            &[split, inputs.len() - split],
+        );
+        SwbfiUpdateAggregationWitness::new(
+            leaves[0].versioned_claim(),
+            placeholder_proof(log2_padded_heights[0]),
+            leaves[1].versioned_claim(),
+            placeholder_proof(log2_padded_heights[1]),
+            index_set_digests(&leaves),
+        )
+        .versioned_claim()
     }
 
     /// The digests of these leaves' index sets, in order.
@@ -533,8 +775,9 @@ mod tests {
             let output = outputs(&witness);
             let parsed = ClaimOutput::parse(&output);
 
-            assert_eq!(bfe!(2), parsed.num_leaves);
+            assert_eq!(bfe!(2 << CHILD_LOG2_PADDED_HEIGHT), parsed.padded_rows);
             assert_eq!(left_size + right_size, parsed.count);
+            assert_eq!(bfe!(2), parsed.last_leaf_index);
             assert_eq!(
                 archival_mutator_set_after(&leaves[1]).hash(),
                 parsed.mutator_set_hash
@@ -580,13 +823,63 @@ mod tests {
         );
         let parsed = ClaimOutput::parse(&outputs(&upper));
 
-        assert_eq!(bfe!(3), parsed.num_leaves);
+        // The lower aggregation's own proof height is not counted; its output is.
+        assert_eq!(bfe!(3 << CHILD_LOG2_PADDED_HEIGHT), parsed.padded_rows);
         assert_eq!(6, parsed.count);
+        assert_eq!(bfe!(3), parsed.last_leaf_index);
         let all_inputs = leaves
             .iter()
             .flat_map(|leaf| leaf.inputs().to_vec())
             .collect::<Vec<_>>();
         assert_eq!(RemovalIndexCommitment::peaks(&all_inputs), parsed.peaks);
+    }
+
+    /// Runs the node in the VM and hands back a placeholder proof.
+    fn run_and_placeholder(
+        claim: &Claim,
+        program: Program,
+        nondeterminism: NonDeterminism,
+    ) -> Proof {
+        let input = PublicInput::new(claim.input.clone());
+        let output = VM::run(program, input, nondeterminism).unwrap();
+        assert_eq!(claim.output, output);
+        placeholder_proof(CHILD_LOG2_PADDED_HEIGHT)
+    }
+
+    #[test]
+    fn trees_of_any_height_chain_their_leaves() {
+        for num_leaves in 1..=6 {
+            let sizes = (0..num_leaves).map(|i| i % 3).collect::<Vec<_>>();
+            let leaves = chained_witnesses(&sizes, 9);
+            let (root, _) = skipping().tree(&leaves, run_and_placeholder);
+            let parsed = ClaimOutput::parse(&root.output);
+
+            assert_eq!(bfe!(num_leaves as u64), parsed.last_leaf_index);
+            assert_eq!(sizes.iter().sum::<usize>(), parsed.count);
+            let expected_rows = if num_leaves == 1 {
+                0
+            } else {
+                (num_leaves as u64) << CHILD_LOG2_PADDED_HEIGHT
+            };
+            assert_eq!(
+                bfe!(expected_rows),
+                parsed.padded_rows,
+                "{num_leaves} leaves"
+            );
+            assert_eq!(
+                archival_mutator_set_after(leaves.last().unwrap()).hash(),
+                parsed.mutator_set_hash
+            );
+        }
+    }
+
+    #[test]
+    fn leaf_padded_rows_come_from_their_proofs() {
+        let (mut witness, _) = witness_over_leaves(2, 2, 5);
+        witness.left_proof = placeholder_proof(18);
+        witness.right_proof = placeholder_proof(21);
+        let parsed = ClaimOutput::parse(&outputs(&witness));
+        assert_eq!(bfe!((1 << 18) + (1 << 21)), parsed.padded_rows);
     }
 
     #[test]
@@ -601,6 +894,30 @@ mod tests {
     fn right_child_not_starting_where_left_ends_is_rejected() {
         let (mut witness, _) = witness_over_leaves(2, 2, 5);
         witness.right_claim.input[0] += bfe!(1);
+        assert_rejects(&witness, None);
+    }
+
+    #[test]
+    fn own_first_leaf_index_must_be_the_left_childs() {
+        let (witness, _) = witness_over_leaves(2, 2, 5);
+        let mut input = witness.standard_input();
+        input.individual_tokens[INPUT_FIRST_LEAF_INDEX] += bfe!(1);
+        assert_rejects(&witness, Some(input));
+    }
+
+    #[test]
+    fn right_child_not_following_the_left_childs_last_leaf_is_rejected() {
+        let (mut witness, _) = witness_over_leaves(2, 2, 5);
+        witness.right_claim.input[INPUT_FIRST_LEAF_INDEX] += bfe!(1);
+        assert_rejects(&witness, None);
+    }
+
+    #[test]
+    fn empty_leaf_cannot_be_its_own_sibling() {
+        // An empty leaf ends where it starts, so only its index keeps it
+        // from chaining with itself.
+        let (mut witness, _) = witness_over_leaves(0, 0, 5);
+        witness.right_claim = witness.left_claim.clone();
         assert_rejects(&witness, None);
     }
 

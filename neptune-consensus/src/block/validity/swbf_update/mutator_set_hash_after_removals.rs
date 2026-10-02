@@ -10,10 +10,10 @@ use tasm_lib::prelude::DataType;
 use tasm_lib::prelude::Library;
 use tasm_lib::triton_vm::prelude::*;
 
-use super::mutator_set_hash::MutatorSetHash;
-use super::mutator_set_hash::MutatorSetHashFromComponents;
 use super::swbfi_peaks_after_removals::SwbfiPeaksAfterRemovals;
 use super::window_after_removals::WindowAfterRemovals;
+use crate::block::validity::mutator_set_hash::MutatorSetHash;
+use crate::block::validity::mutator_set_hash::MutatorSetHashFromComponents;
 
 /// ```text
 /// BEFORE: _ *inputs *mutator_set

@@ -153,10 +153,12 @@ pub enum BlockValidationError {
     #[error("SWBFI update claims must chain across adjacent input ranges")]
     SwbfiUpdateChaining,
 
-    /// A united SWBFI update claim's children do not start from its mutator
-    /// set or do not cover its inputs.
-    #[error("SWBFI update claims in a union must share the mutator set and split the inputs")]
-    SwbfiUpdateUnion,
+    /// The leaf proofs of the SWBFI update claim must contain a certain amount
+    /// of proving work. This is to incentivize composers to pick up
+    /// transactions with many inputs. The metric is the padded height of the
+    /// proofs of the leaf program execution in the SWBFI update tree.
+    #[error("SWBFI update leaf proofs must meet the epoch's padded rows")]
+    SwbfiUpdateBelowWorkFloor,
 }
 
 impl From<RemovalRecordListUnpackError> for BlockValidationError {

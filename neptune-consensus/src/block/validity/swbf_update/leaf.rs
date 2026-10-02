@@ -1,19 +1,24 @@
 //! Rule 2.e for the current block, restricted to the removals: from the
 //! mutator set the block's transaction is built on, setting the indices of
 //! its inputs yields the mutator set with this hash. Rules 2.a, 2.b and 2.d
-//! come along: the chunks the witness supplies are exactly what they are
-//! about.
+//! come along: the chunks the witness supplies match the state of the
+//! mutator set before applying the input/output set of the transaction.
 //!
-//! The claim goes in the block's appendix, so its proof is consumed by the
+//! The claim goes in the block's appendix, so its proof is verified by the
 //! block proof. Its public input binds the mutator set by hash and its
 //! output the inputs by a commitment to their index sets, so that a verifier
 //! that holds neither the chunks nor the mutator set can still tell what was
-//! proven. Light nodes check the tip's update from it on the host machine,
-//! and `PredecessorIsValid` checks the predecessor's from the predecessor's
-//! copy. It is a leaf of the aggregation tree; the leaf count in its output
-//! says so.
+//! proven. The input also carries the leaf's position among the block's
+//! leaves, so that no two leaves of one block share a claim, and no proof
+//! can stand in for two leaves. Light nodes check the tip's update from it
+//! on the host machine, and `PredecessorIsValid` checks the predecessor's
+//! from the predecessor's copy. It is a leaf of the SWBFI aggregation tree,
+//! which reads the padded height of its proof, and sums these for all leaf
+//! programs verified in the aggregation tree. This sum is calculated to
+//! remove the incentive to mine empty blocks.
 
 use std::sync::OnceLock;
+use std::time::Instant;
 
 use get_size2::GetSize;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -28,13 +33,16 @@ use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
 use tasm_lib::prelude::TasmObject;
 use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
+use tasm_lib::triton_vm::vm::VM;
+use tracing::debug;
 
-use super::mutator_set_hash::MutatorSetHash;
 use super::mutator_set_hash_after_removals::MutatorSetHashAfterRemovals;
 use super::removal_index_commitment::RemovalIndexCommitment;
 use super::swbfi_peaks_after_removals::SwbfiPeaksAfterRemovals;
+use super::ClaimOutput;
 use crate::block::block_validation_error::BlockValidationRule;
 use crate::block::mutator_set_update::MutatorSetUpdate;
+use crate::block::validity::mutator_set_hash::MutatorSetHash;
 use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::proof_abstractions::SecretWitness;
@@ -47,6 +55,20 @@ pub struct CorrectSwbfiUpdateWitness {
 
     /// The mutator set the transaction is built on.
     mutator_set: MutatorSetAccumulator,
+
+    /// How many loop iterations of idle spinning to do after the work. This is
+    /// done to meet requirements of minimum padded heights. Not part of the
+    /// claim since verifiers read the padded height from the proof.
+    /// See [`Self::with_padded_height`].
+    idle_iterations: BFieldElement,
+
+    /// The leaf's position among the block's leaves, counted from
+    /// [`CorrectSwbfiUpdate::FIRST_LEAF_INDEX`] along the chain of segments.
+    /// Part of the claim's public input, not read from memory.
+    ///
+    /// Exists to prevent the same leaf from being used twice to save work on
+    /// input aggregation.
+    leaf_index: BFieldElement,
 }
 
 impl CorrectSwbfiUpdateWitness {
@@ -55,6 +77,8 @@ impl CorrectSwbfiUpdateWitness {
         Self {
             inputs: SwbfiPeaksAfterRemovals::witness_form(inputs, &mutator_set),
             mutator_set,
+            idle_iterations: bfe!(0),
+            leaf_index: bfe!(CorrectSwbfiUpdate::FIRST_LEAF_INDEX),
         }
     }
 
@@ -71,7 +95,8 @@ impl CorrectSwbfiUpdateWitness {
         let mut mutator_set = mutator_set.clone();
         segment_sizes
             .iter()
-            .map(|&size| {
+            .enumerate()
+            .map(|(position, &size)| {
                 let segment = rest.drain(..size).collect::<Vec<_>>();
                 let witness = Self::new(
                     RemovalRecordList::pack(segment.clone(), allow_big_chunks),
@@ -84,44 +109,9 @@ impl CorrectSwbfiUpdateWitness {
                         &mut [],
                     )
                     .expect("segment must be removable");
-                witness
+                witness.with_leaf_index(CorrectSwbfiUpdate::FIRST_LEAF_INDEX + position as u64)
             })
             .collect()
-    }
-
-    /// The witnesses of consecutive segments of these inputs, of these
-    /// sizes, all built on the same mutator set.
-    pub fn siblings(
-        inputs: &[RemovalRecord],
-        mutator_set: &MutatorSetAccumulator,
-        segment_sizes: &[usize],
-    ) -> Vec<Self> {
-        let allow_big_chunks = ConsensusRuleSet::HardforkDelta.allow_big_chunks();
-        let mut rest = RemovalRecordList::try_unpack(inputs.to_vec(), allow_big_chunks)
-            .expect("inputs must unpack");
-        segment_sizes
-            .iter()
-            .map(|&size| {
-                let segment = rest.drain(..size).collect();
-                Self::new(
-                    RemovalRecordList::pack(segment, allow_big_chunks),
-                    mutator_set.clone(),
-                )
-            })
-            .collect()
-    }
-
-    /// The inputs of these witnesses, built on one mutator set, as one
-    /// packed list.
-    pub fn united_inputs(witnesses: &[&Self]) -> Vec<RemovalRecord> {
-        let unpacked = witnesses
-            .iter()
-            .flat_map(|witness| {
-                SwbfiPeaksAfterRemovals::unpacked_records(&witness.inputs, &witness.mutator_set)
-                    .expect("inputs must unpack")
-            })
-            .collect();
-        RemovalRecordList::pack(unpacked, ConsensusRuleSet::HardforkDelta.allow_big_chunks())
     }
 
     pub fn inputs(&self) -> &[RemovalRecord] {
@@ -146,27 +136,106 @@ impl CorrectSwbfiUpdateWitness {
                 .version(),
         )
     }
+
+    /// # Panics
+    ///
+    /// If the iterations exceed [`CorrectSwbfiUpdate::MAX_IDLE_ITERATIONS`].
+    pub fn with_idle_iterations(mut self, idle_iterations: u64) -> Self {
+        assert!(
+            idle_iterations <= CorrectSwbfiUpdate::MAX_IDLE_ITERATIONS,
+            "idle iterations exceed the cap"
+        );
+        self.idle_iterations = bfe!(idle_iterations);
+        self
+    }
+
+    pub fn with_leaf_index(mut self, leaf_index: u64) -> Self {
+        self.leaf_index = bfe!(leaf_index);
+        self
+    }
+
+    pub fn leaf_index(&self) -> BFieldElement {
+        self.leaf_index
+    }
+
+    /// Set enough idle iterations to increase the proof of this program
+    /// execution to the supplied padded height. A program execution below the
+    /// padded height value idles it up to the required height. A program
+    /// execution that has already met this requirement does nothing.
+    ///
+    /// # Panics
+    ///
+    /// If the leaf's work alone exceeds the height.
+    pub fn with_padded_height(self, log2_padded_height: u32) -> Self {
+        let witness = self.with_idle_iterations(0);
+
+        let tick = Instant::now();
+        let (aet, _) = VM::trace_execution(
+            witness.program(),
+            witness.standard_input(),
+            witness.nondeterminism(),
+        )
+        .expect("witness must run");
+        let trace_execution_time = tick.elapsed();
+        debug!(
+            "Trace execution to measure required spin took: {}ms",
+            trace_execution_time.as_millis()
+        );
+
+        let target = 1 << log2_padded_height;
+        if aet.padded_height() >= target {
+            assert_eq!(
+                target,
+                aet.padded_height(),
+                "leaf exceeds the padded height"
+            );
+            return witness;
+        }
+
+        // No table exceeds half the target. So grow by idling. Idling mainly
+        // grows the processor table, so that table will decide the padded
+        // height after idling.
+        let rows_short = target / 2 - aet.processor_trace.nrows();
+        let idle_iterations = rows_short / CorrectSwbfiUpdate::IDLE_ROWS_PER_ITERATION + 1;
+        witness.with_idle_iterations(idle_iterations as u64)
+    }
 }
 
 impl SecretWitness for CorrectSwbfiUpdateWitness {
     fn standard_input(&self) -> PublicInput {
-        PublicInput::new(CorrectSwbfiUpdate::claim_input(&self.mutator_set))
+        // - mutator set hash the leaf starts from: the one in the transaction
+        //   kernel for the block's first leaf, the one the preceding leaf
+        //   ends on otherwise (5 words)
+        // - leaf index: this leaf's position among the block's leaves (1 word)
+        //   all n leafs must be enumerated 1..n for the proof tree to be
+        //   accepted during block verification.
+        PublicInput::new(CorrectSwbfiUpdate::claim_input(
+            &self.mutator_set,
+            self.leaf_index,
+        ))
     }
 
     fn output(&self) -> Vec<BFieldElement> {
+        // - 0: padded row count in proof below leaf. Zero since there are no
+        //      proofs in the proof tree below the leaf. (1 word)
+        // - number of inputs applied to the mutator set in this leaf (1 word)
+        // - mutator set hash after application of all removals in this leaf
+        //   (5 words)
+        // - last leaf index in this proof: this leaf's index from the claim
+        //   input, since it is a leaf (1 word)
+        // - number of peaks in the MMR of the absolute index sets in this leaf
+        //   (1 word)
+        // - those peaks (5 words each)
         let mutator_set_after =
             SwbfiPeaksAfterRemovals::apply_removals(&self.packed_inputs(), &self.mutator_set);
-        let peaks = RemovalIndexCommitment::peaks(&self.inputs);
-        [
-            vec![
-                bfe!(CorrectSwbfiUpdate::NUM_LEAVES),
-                bfe!(self.inputs.len() as u64),
-            ],
-            mutator_set_after.hash().values().to_vec(),
-            vec![bfe!(peaks.len() as u64)],
-            peaks.iter().flat_map(|peak| peak.values()).collect(),
-        ]
-        .concat()
+        ClaimOutput {
+            padded_rows: bfe!(CorrectSwbfiUpdate::ATTESTED_PADDED_ROWS),
+            count: self.inputs.len(),
+            mutator_set_hash: mutator_set_after.hash(),
+            last_leaf_index: self.leaf_index,
+            peaks: RemovalIndexCommitment::peaks(&self.inputs),
+        }
+        .encode()
     }
 
     fn program(&self) -> Program {
@@ -187,29 +256,68 @@ impl SecretWitness for CorrectSwbfiUpdateWitness {
     }
 }
 
-/// Input: the hash of the mutator set the transaction is built on. Output:
-/// the number of leaves and of index sets covered, the hash of the mutator
-/// set after the inputs' removals, then the peaks of the MMR over the index
-/// sets, as a list.
+/// Input:
+/// - the hash of the mutator set the leaf starts from: the one the block's
+///   transaction is built on for the first leaf, the one the preceding leaf
+///   ends on for any other (5 words)
+/// - the leaf's index: its position among the block's leaves, counted from
+///   [`Self::FIRST_LEAF_INDEX`] (1 word)
+///
+/// Output:
+/// - the attested padded rows: zero, see [`Self::ATTESTED_PADDED_ROWS`]
+///   (1 word)
+/// - the number of inputs removed, which the index-set peaks below commit to
+///   (1 word)
+/// - the hash of the mutator set after the removals (5 words)
+/// - the last leaf index: the leaf's own, echoed from the input (1 word)
+/// - the number of peaks of the MMR over the inputs' index sets (1 word)
+/// - those peaks (5 words each)
+///
+/// Aggregations of leaves keep this layout, with the first word summing the
+/// leaf proofs' padded heights beneath them and the leaf indices spanning
+/// their leaves.
 #[derive(
     Debug, Clone, Copy, Default, BFieldCodec, GetSize, PartialEq, Eq, Serialize, Deserialize,
 )]
 pub struct CorrectSwbfiUpdate;
 
 impl CorrectSwbfiUpdate {
-    /// The leaves of the aggregation tree this claim covers: itself.
-    pub const NUM_LEAVES: u64 = 1;
+    /// The first output word: the padded rows of the leaf proofs a claim
+    /// attests, which an aggregation sums over its children. A leaf cannot
+    /// attest its own proof's height, so it writes zero; the aggregation
+    /// reads the height from the proof instead.
+    pub const ATTESTED_PADDED_ROWS: u64 = 0;
 
-    /// The claim for a block's inputs on this mutator set, as its appendix
-    /// carries it.
+    /// Processor rows one idle iteration costs; see
+    /// [`CorrectSwbfiUpdateWitness::with_padded_height`].
+    pub const IDLE_ROWS_PER_ITERATION: usize = 4;
+
+    /// The index of a block's first leaf; the others follow in order of
+    /// their segments.
+    pub const FIRST_LEAF_INDEX: u64 = 1;
+
+    /// The most idle iterations a leaf takes: idling alone then stays under
+    /// 2^29 processor rows, the tallest trace the verifier accepts. The
+    /// program rejects a witness above it.
+    pub const MAX_IDLE_ITERATIONS: u64 = 1 << 27;
+
+    /// The claim for a block's inputs on this mutator set as its only leaf,
+    /// as its appendix carries it.
     pub fn claim(inputs: &[RemovalRecord], mutator_set: &MutatorSetAccumulator) -> Claim {
         CorrectSwbfiUpdateWitness::new(inputs.to_vec(), mutator_set.clone()).versioned_claim()
     }
 
-    /// The claim's input for this mutator set: what a block binds, without
-    /// computing the output.
-    pub fn claim_input(mutator_set: &MutatorSetAccumulator) -> Vec<BFieldElement> {
-        mutator_set.hash().reversed().values().to_vec()
+    /// The claim's input for a leaf with this index starting from this
+    /// mutator set: what a block binds, without computing the output.
+    pub fn claim_input(
+        mutator_set: &MutatorSetAccumulator,
+        leaf_index: BFieldElement,
+    ) -> Vec<BFieldElement> {
+        [
+            mutator_set.hash().reversed().values().to_vec(),
+            vec![leaf_index],
+        ]
+        .concat()
     }
 }
 
@@ -224,6 +332,8 @@ impl TritonProgram for CorrectSwbfiUpdate {
         let commitment = library.import(Box::new(RemovalIndexCommitment));
 
         let write_peaks = "correct_swbfi_update_write_peaks".to_string();
+        let idle = "correct_swbfi_update_idle".to_string();
+        let idle_loop = format!("{idle}_loop");
 
         let code = triton_asm!(
             read_io {Digest::LEN}
@@ -255,11 +365,15 @@ impl TritonProgram for CorrectSwbfiUpdate {
             call {hash_after_removals}
             // _ *peaks *w [mutator_set_after_removals_hash]
 
-            push {Self::NUM_LEAVES} write_io 1
+            push {Self::ATTESTED_PADDED_ROWS} write_io 1
             dup 5 {&field!(CorrectSwbfiUpdateWitness::inputs)} read_mem 1 pop 1 write_io 1
             write_io {Digest::LEN}
             pop 1
             // _ *peaks
+
+            // The leaf index, which only the claim reads: the last leaf index
+            // of a leaf is its own.
+            read_io 1 write_io 1
 
             dup 0 read_mem 1 pop 1
             dup 0 write_io 1
@@ -270,7 +384,31 @@ impl TritonProgram for CorrectSwbfiUpdate {
             // _ *peaks_end *peaks_end
 
             pop 2
+            push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
+            {&field!(CorrectSwbfiUpdateWitness::idle_iterations)} read_mem 1 pop 1
+            // _ idle_iterations
+
+            // Crashes unless the count is a u32 at or below the cap.
+            push {Self::MAX_IDLE_ITERATIONS + 1} dup 1 lt assert
+            // _ idle_iterations
+
+            dup 0 skiz call {idle}
+            pop 1
             halt
+
+            // BEFORE: _ n     (n > 0)
+            // AFTER:  _ 0
+            {idle}:
+                push 0 push 0 push 0 push 0 push 0 push 0
+                call {idle_loop}
+                pop 5 pop 1
+                return
+
+            // `IDLE_ROWS_PER_ITERATION` processor rows per iteration.
+            // INVARIANT: _ n 0 0 0 0 0 0
+            {idle_loop}:
+                pick 6 addi -1 place 6
+                recurse_or_return
 
             // INVARIANT: _ *end *peak[i]_previous_word
             {write_peaks}:
@@ -339,12 +477,15 @@ pub(super) mod tests {
                 MmrAccumulator::init(peaks, witness.mutator_set.swbf_inactive.num_leafs());
             mutator_set_after.swbf_active = window;
 
-            tasm::tasmlib_io_write_to_stdout___bfe(bfe!(Self::NUM_LEAVES));
-            tasm::tasmlib_io_write_to_stdout___bfe(bfe!(witness.inputs.len() as u64));
-            tasm::tasmlib_io_write_to_stdout___digest(mutator_set_after.hash());
-            tasm::tasmlib_io_write_to_stdout___bfe(bfe!(index_set_peaks.len() as u64));
-            for peak in index_set_peaks {
-                tasm::tasmlib_io_write_to_stdout___digest(peak);
+            let output = ClaimOutput {
+                padded_rows: bfe!(Self::ATTESTED_PADDED_ROWS),
+                count: witness.inputs.len(),
+                mutator_set_hash: mutator_set_after.hash(),
+                last_leaf_index: tasm::tasmlib_io_read_stdin___bfe(),
+                peaks: index_set_peaks,
+            };
+            for word in output.encode() {
+                tasm::tasmlib_io_write_to_stdout___bfe(word);
             }
         }
     }
@@ -400,16 +541,6 @@ pub(super) mod tests {
         CorrectSwbfiUpdateWitness::segments(&all.packed_inputs(), &all.mutator_set, segment_sizes)
     }
 
-    /// The witnesses of consecutive segments of these sizes of one block's
-    /// inputs, all built on the same mutator set.
-    pub(in crate::block::validity) fn sibling_witnesses(
-        segment_sizes: &[usize],
-        seed: u64,
-    ) -> Vec<CorrectSwbfiUpdateWitness> {
-        let all = witness(segment_sizes.iter().sum(), seed);
-        CorrectSwbfiUpdateWitness::siblings(&all.packed_inputs(), &all.mutator_set, segment_sizes)
-    }
-
     /// The mutator set the archival update computes for the witness's
     /// inputs.
     pub(in crate::block::validity) fn archival_mutator_set_after(
@@ -444,6 +575,34 @@ pub(super) mod tests {
             let expected_hash = archival_mutator_set_after(&witness).hash().values();
             assert_eq!(expected_hash, tasm_output[2..7], "{num_inputs} inputs");
         }
+    }
+
+    #[test]
+    fn leaf_index_is_echoed_and_changes_nothing_else() {
+        let first = witness(2, 3);
+        let third = first.clone().with_leaf_index(3);
+        assert_ne!(first.versioned_claim(), third.versioned_claim());
+        for leaf in [&first, &third] {
+            let output = CorrectSwbfiUpdate
+                .run_tasm(&leaf.standard_input(), leaf.nondeterminism())
+                .unwrap();
+            assert_eq!(leaf.output(), output);
+            assert_eq!(leaf.leaf_index(), output[2 + Digest::LEN]);
+        }
+        let (first, third) = (first.output(), third.output());
+        assert_eq!(first[..2 + Digest::LEN], third[..2 + Digest::LEN]);
+        assert_eq!(first[3 + Digest::LEN..], third[3 + Digest::LEN..]);
+    }
+
+    #[test]
+    fn segments_are_numbered_from_the_first_leaf_index() {
+        let witnesses = chained_witnesses(&[1, 0, 2], 7);
+        let indices = witnesses
+            .iter()
+            .map(|witness| witness.leaf_index().value())
+            .collect::<Vec<_>>();
+        let first = CorrectSwbfiUpdate::FIRST_LEAF_INDEX;
+        assert_eq!(vec![first, first + 1, first + 2], indices);
     }
 
     #[test]
@@ -1168,7 +1327,7 @@ pub(super) mod tests {
             .run_tasm(&witness.standard_input(), witness.nondeterminism())
             .unwrap();
 
-        // Same leaf count and input count, other mutator set and peaks.
+        // Same attested rows and input count, other mutator set and peaks.
         assert_eq!(honest_output[..2], output[..2]);
         assert_ne!(
             honest_output[2..2 + Digest::LEN],
@@ -1221,6 +1380,78 @@ pub(super) mod tests {
     /// Prints how the program's cycles and table rows distribute over its
     /// subroutines, at the input counts a leaf of the aggregation tree is
     /// sized for.
+    fn processor_rows_and_padded_height(witness: &CorrectSwbfiUpdateWitness) -> (usize, usize) {
+        let (aet, _) = VM::trace_execution(
+            witness.program(),
+            witness.standard_input(),
+            witness.nondeterminism(),
+        )
+        .unwrap();
+        (aet.processor_trace.nrows(), aet.padded_height())
+    }
+
+    #[test]
+    fn idling_costs_the_rows_per_iteration_and_changes_nothing_else() {
+        let witness = witness(2, 0);
+        let idle = witness.clone().with_idle_iterations(1_000);
+        assert_eq!(witness.versioned_claim(), idle.versioned_claim());
+        let output = CorrectSwbfiUpdate
+            .run_tasm(&idle.standard_input(), idle.nondeterminism())
+            .unwrap();
+        assert_eq!(idle.output(), output);
+
+        let (rows, _) = processor_rows_and_padded_height(&witness);
+        let (idle_rows, _) = processor_rows_and_padded_height(&idle);
+        let per_iteration = CorrectSwbfiUpdate::IDLE_ROWS_PER_ITERATION;
+        assert!(idle_rows - rows >= 1_000 * per_iteration);
+        assert!(idle_rows - rows < 1_000 * per_iteration + 32);
+    }
+
+    #[test]
+    #[should_panic(expected = "idle iterations exceed the cap")]
+    fn idle_iterations_are_capped() {
+        witness(1, 0).with_idle_iterations(CorrectSwbfiUpdate::MAX_IDLE_ITERATIONS + 1);
+    }
+
+    #[test]
+    fn program_rejects_idle_iterations_above_the_cap_or_beyond_u32() {
+        for idle_iterations in [CorrectSwbfiUpdate::MAX_IDLE_ITERATIONS + 1, 1 << 40] {
+            let mut witness = witness(1, 0);
+            witness.idle_iterations = bfe!(idle_iterations);
+            let result =
+                CorrectSwbfiUpdate.run_tasm(&witness.standard_input(), witness.nondeterminism());
+            assert!(result.is_err(), "{idle_iterations} iterations");
+        }
+    }
+
+    #[test]
+    fn idling_lifts_the_padded_height_to_the_target() {
+        let witness = witness(2, 0);
+        let (_, natural) = processor_rows_and_padded_height(&witness);
+        let natural_log2 = natural.ilog2();
+        assert_eq!(
+            bfe!(0),
+            witness
+                .clone()
+                .with_padded_height(natural_log2)
+                .idle_iterations
+        );
+        for log2 in [natural_log2 + 1, natural_log2 + 2] {
+            let lifted = witness.clone().with_padded_height(log2);
+            let (rows, padded) = processor_rows_and_padded_height(&lifted);
+            assert_eq!(1 << log2, padded, "target 2^{log2}");
+            assert!(rows > padded / 2);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "exceeds the padded height")]
+    fn leaf_above_the_target_height_cannot_be_lowered() {
+        let witness = witness(2, 0);
+        let (_, natural) = processor_rows_and_padded_height(&witness);
+        witness.with_padded_height(natural.ilog2() - 1);
+    }
+
     #[test]
     #[ignore = "prints a profile"]
     fn profile_leaf() {

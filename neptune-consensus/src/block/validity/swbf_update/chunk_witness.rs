@@ -44,7 +44,7 @@ use crate::block::block_validation_error::BlockValidationRule;
 ///
 /// Crashes unless the tree heights are strictly increasing.
 #[derive(Debug, Copy, Clone)]
-pub(super) struct ChunkWitness;
+pub(in crate::block::validity) struct ChunkWitness;
 
 impl ChunkWitness {
     fn tree_heights_error_id() -> i128 {
@@ -88,7 +88,7 @@ impl ChunkWitness {
 
     /// A packed list with its chunks' contents unpacked, the form a witness
     /// holds; and the inverse.
-    pub(super) fn with_unpacked_chunks(
+    pub(in crate::block::validity) fn with_unpacked_chunks(
         mut removal_records: Vec<RemovalRecord>,
         allow_big_chunks: bool,
     ) -> Vec<RemovalRecord> {
@@ -102,7 +102,7 @@ impl ChunkWitness {
         removal_records
     }
 
-    pub(super) fn with_packed_chunks(
+    pub(in crate::block::validity) fn with_packed_chunks(
         mut removal_records: Vec<RemovalRecord>,
         allow_big_chunks: bool,
     ) -> Vec<RemovalRecord> {
@@ -128,7 +128,7 @@ impl ChunkWitness {
     }
 
     /// Replaces the tree entries' digest lists, in their order.
-    pub(super) fn set_tree_paths(
+    pub(in crate::block::validity) fn set_tree_paths(
         removal_records: &mut [RemovalRecord],
         tree_paths: Vec<Vec<Digest>>,
     ) {
@@ -439,7 +439,7 @@ impl BasicSnippet for ChunkWitness {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-pub(super) mod tests {
+pub(in crate::block::validity) mod tests {
     use std::collections::HashMap;
 
     use itertools::Itertools;

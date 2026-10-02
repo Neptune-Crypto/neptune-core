@@ -1,5 +1,5 @@
 //! The commitment to a block transaction's inputs that
-//! [`CorrectSwbfiUpdate`](super::correct_swbfi_update::CorrectSwbfiUpdate)
+//! [`CorrectSwbfiUpdate`](super::leaf::CorrectSwbfiUpdate)
 //! binds, to their index sets and nothing else: the peaks of an MMR over
 //! the index sets, in block order.
 //!
@@ -23,18 +23,18 @@ use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
-use super::removal_record_pointers::RemovalRecordPointers;
+use crate::block::validity::removal_record_pointers::RemovalRecordPointers;
 
 /// ```text
 /// BEFORE: _ *inputs
 /// AFTER:  _ *peaks
 /// ```
 #[derive(Debug, Copy, Clone)]
-pub(super) struct RemovalIndexCommitment;
+pub(in crate::block::validity) struct RemovalIndexCommitment;
 
 impl RemovalIndexCommitment {
     /// The peaks of the MMR over these inputs' index sets.
-    pub(super) fn peaks(inputs: &[RemovalRecord]) -> Vec<Digest> {
+    pub(in crate::block::validity) fn peaks(inputs: &[RemovalRecord]) -> Vec<Digest> {
         DigestPeaks::peaks(&IndexSetDigests::digests(inputs))
     }
 }
@@ -81,10 +81,10 @@ impl BasicSnippet for RemovalIndexCommitment {
 ///
 /// Each input's index set hashed, in order.
 #[derive(Debug, Copy, Clone)]
-pub(super) struct IndexSetDigests;
+pub(in crate::block::validity) struct IndexSetDigests;
 
 impl IndexSetDigests {
-    pub(super) fn digests(inputs: &[RemovalRecord]) -> Vec<Digest> {
+    pub(in crate::block::validity) fn digests(inputs: &[RemovalRecord]) -> Vec<Digest> {
         inputs
             .iter()
             .map(|input| Tip5::hash_varlen(&input.absolute_indices.encode()))
@@ -160,10 +160,10 @@ impl BasicSnippet for IndexSetDigests {
 ///
 /// The peaks of the MMR over `count` of the digests, from index `first`.
 #[derive(Debug, Copy, Clone)]
-pub(super) struct DigestPeaks;
+pub(in crate::block::validity) struct DigestPeaks;
 
 impl DigestPeaks {
-    pub(super) fn peaks(digests: &[Digest]) -> Vec<Digest> {
+    pub(in crate::block::validity) fn peaks(digests: &[Digest]) -> Vec<Digest> {
         let mut mmr = MmrAccumulator::init(vec![], 0);
         for &digest in digests {
             mmr.append(digest);
@@ -244,8 +244,8 @@ mod tests {
     use tasm_lib::prelude::TasmObject;
     use tasm_lib::triton_vm::vm::VMState;
 
-    use super::super::removal_record_pointers::tests::random_removal_records;
     use super::*;
+    use crate::block::validity::removal_record_pointers::tests::random_removal_records;
 
     /// The digest list a snippet leaves a pointer to, run in isolation on
     /// these arguments.
