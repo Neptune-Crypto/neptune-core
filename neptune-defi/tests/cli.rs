@@ -1,13 +1,12 @@
 //! The `neptune-defi` binary, run against a stand-in for `neptune-core`.
 //!
-//! The stand-in is a shell script that records the arguments it receives and
-//! exits with a code the test chooses, so these tests check what
-//! `neptune-defi` hands `neptune-core` and what it makes of the result,
-//! without starting a node.
-#![cfg(unix)]
+//! The stand-in, `neptune-core-stand-in`, records the arguments it receives,
+//! can run the notify commands among them, and exits with a code the test
+//! chooses, so these tests check what `neptune-defi` hands `neptune-core` and
+//! what it makes of the result, without starting a node.
 
+use std::env::consts::EXE_SUFFIX;
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
@@ -31,7 +30,7 @@ const APPENDED: [&str; 3] = [
 
 /// Held while a test writes an executable or runs one.
 ///
-/// A file open for writing cannot be executed, and a process forked by
+/// A file open for writing cannot be executed, and on Unix a process forked by
 /// another test thread inherits every open file until it executes its own
 /// program. So without this lock, one test's executable may still be open
 /// in another test's child when it is run, and running it fails with "text
@@ -71,38 +70,39 @@ impl Sandbox {
     }
 
     fn exe(&self) -> PathBuf {
-        self.dir.join(self.bin).join("neptune-defi")
+        self.dir
+            .join(self.bin)
+            .join(format!("neptune-defi{EXE_SUFFIX}"))
     }
 
-    /// Put a stand-in `neptune-core` in `dir`. It writes its arguments, one
-    /// per line, to `<dir>/args`, and exits with `exit`.
-    fn neptune_core(&self, dir: &str, exit: &str) -> PathBuf {
+    /// Put the stand-in, named `neptune-core`, in `dir`, and return `dir`.
+    fn neptune_core(&self, dir: &str) -> PathBuf {
         let dir = self.dir.join(dir);
         fs::create_dir_all(&dir).unwrap();
-        let script = dir.join("neptune-core");
-        let args_file = dir.join("args");
         let _executables = executables();
-        fs::write(
-            &script,
-            format!(
-                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\n{exit}\n",
-                args_file.display()
-            ),
+        fs::copy(
+            env!("CARGO_BIN_EXE_neptune-core-stand-in"),
+            dir.join(format!("neptune-core{EXE_SUFFIX}")),
         )
         .unwrap();
-        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
         dir
     }
 
-    /// Run `neptune-defi` with `args`, and with `PATH` set to `path`.
-    fn run(&self, args: &[&str], path: &[&Path]) -> Output {
+    /// Run `neptune-defi` with `args`, with `PATH` set to `path`, and with the
+    /// stand-in's environment variables set as `stand_in` says.
+    fn run_with(&self, args: &[&str], path: &[&Path], stand_in: &[(&str, &str)]) -> Output {
         let path = std::env::join_paths(path).unwrap();
         let _executables = executables();
         Command::new(self.exe())
             .args(args)
             .env("PATH", path)
+            .envs(stand_in.iter().copied())
             .output()
             .unwrap()
+    }
+
+    fn run(&self, args: &[&str], path: &[&Path]) -> Output {
+        self.run_with(args, path, &[])
     }
 
     /// The arguments the stand-in in `dir` received, up to the notify flags,
@@ -152,7 +152,7 @@ fn strings(args: &[&str]) -> Vec<String> {
 #[test]
 fn the_users_arguments_reach_neptune_core_followed_by_the_fixed_flags() {
     let sandbox = Sandbox::new();
-    sandbox.neptune_core("bin", "exit 0");
+    sandbox.neptune_core("bin");
     let user = ["--network", "regtest", "--data-dir", "/a path/with spaces"];
 
     let output = sandbox.run(&user, &[]);
@@ -168,7 +168,7 @@ fn the_users_arguments_reach_neptune_core_followed_by_the_fixed_flags() {
 #[test]
 fn a_listen_rpc_address_of_the_users_reaches_neptune_core_once() {
     let sandbox = Sandbox::new();
-    sandbox.neptune_core("bin", "exit 0");
+    sandbox.neptune_core("bin");
     let user = ["--listen-rpc", "[::1]:1234"];
 
     let output = sandbox.run(&user, &[]);
@@ -183,19 +183,21 @@ fn a_listen_rpc_address_of_the_users_reaches_neptune_core_once() {
 
 #[test]
 fn neptune_cores_exit_code_is_neptune_defis() {
+    let sandbox = Sandbox::new();
+    sandbox.neptune_core("bin");
     for code in [0, 1, 2, 3, 101] {
-        let sandbox = Sandbox::new();
-        sandbox.neptune_core("bin", &format!("exit {code}"));
-        let output = sandbox.run(&[], &[]);
+        let output = sandbox.run_with(&[], &[], &[("STAND_IN_EXIT", &code.to_string())]);
         assert_eq!(Some(code), output.status.code());
     }
 }
 
+/// Only Unix ends a process with a signal, and so without an exit code.
+#[cfg(unix)]
 #[test]
 fn neptune_core_killed_by_a_signal_is_a_failure() {
     let sandbox = Sandbox::new();
-    sandbox.neptune_core("bin", "kill -9 $$");
-    let output = sandbox.run(&[], &[]);
+    sandbox.neptune_core("bin");
+    let output = sandbox.run_with(&[], &[], &[("STAND_IN_ABORT", "1")]);
     assert_eq!(Some(1), output.status.code());
 }
 
@@ -204,7 +206,7 @@ fn a_fixed_flag_is_refused_without_starting_neptune_core() {
     for flag in FIXED_FLAGS {
         for args in [vec![flag.to_owned()], vec![format!("{flag}=value")]] {
             let sandbox = Sandbox::new();
-            sandbox.neptune_core("bin", "exit 0");
+            sandbox.neptune_core("bin");
             let args = args.iter().map(String::as_str).collect::<Vec<_>>();
 
             let output = sandbox.run(&args, &[]);
@@ -219,7 +221,7 @@ fn a_fixed_flag_is_refused_without_starting_neptune_core() {
 #[test]
 fn an_invalid_listen_rpc_address_is_refused_without_starting_neptune_core() {
     let sandbox = Sandbox::new();
-    sandbox.neptune_core("bin", "exit 0");
+    sandbox.neptune_core("bin");
 
     let output = sandbox.run(&["--listen-rpc", "localhost:9797"], &[]);
 
@@ -245,7 +247,7 @@ fn without_neptune_core_the_user_is_asked_to_install_it() {
 #[test]
 fn neptune_core_is_found_on_path_when_not_next_to_neptune_defi() {
     let sandbox = Sandbox::new();
-    let on_path = sandbox.neptune_core("elsewhere", "exit 0");
+    let on_path = sandbox.neptune_core("elsewhere");
 
     let output = sandbox.run(&[], &[&on_path]);
 
@@ -256,8 +258,8 @@ fn neptune_core_is_found_on_path_when_not_next_to_neptune_defi() {
 #[test]
 fn neptune_core_next_to_neptune_defi_is_preferred_to_one_on_path() {
     let sandbox = Sandbox::new();
-    sandbox.neptune_core("bin", "exit 0");
-    let on_path = sandbox.neptune_core("elsewhere", "exit 0");
+    sandbox.neptune_core("bin");
+    let on_path = sandbox.neptune_core("elsewhere");
 
     let output = sandbox.run(&[], &[&on_path]);
 
@@ -266,32 +268,20 @@ fn neptune_core_next_to_neptune_defi_is_preferred_to_one_on_path() {
     assert_eq!(None, sandbox.received("elsewhere"));
 }
 
+/// Only Unix has a permission to execute a file.
+#[cfg(unix)]
 #[test]
 fn a_neptune_core_that_cannot_be_executed_is_reported() {
+    use std::os::unix::fs::PermissionsExt;
+
     let sandbox = Sandbox::new();
-    let script = sandbox.neptune_core("bin", "exit 0").join("neptune-core");
-    fs::set_permissions(&script, fs::Permissions::from_mode(0o644)).unwrap();
+    let exe = sandbox.neptune_core("bin").join("neptune-core");
+    fs::set_permissions(&exe, fs::Permissions::from_mode(0o644)).unwrap();
 
     let output = sandbox.run(&[], &[]);
 
     assert_eq!(Some(1), output.status.code());
     assert!(stderr(&output).contains("Could not start"));
-}
-
-/// A stand-in that runs every notify command it was given, the way
-/// `neptune-core` does on an event, with `id` for `%s`, and then exits. It
-/// runs a command with `eval`, which keeps a double-quoted path one word, as
-/// `neptune-core` does.
-fn notifying_neptune_core(id: &str) -> String {
-    format!(
-        "for arg in \"$@\"; do\n\
-         \x20 case \"$arg\" in\n\
-         \x20   --*-notify=*) eval \"$(printf '%s' \"${{arg#*=}}\" | sed 's/%s/{id}/')\" ;;\n\
-         \x20 esac\n\
-         done\n\
-         sleep 1\n\
-         exit 0"
-    )
 }
 
 /// `neptune-defi` takes in each notification its `neptune-core` sends,
@@ -301,9 +291,9 @@ fn notifications_from_neptune_core_reach_neptune_defi() {
     for bin in ["bin", "with space"] {
         let sandbox = Sandbox::with_bin(bin);
         let id = "0".repeat(80);
-        sandbox.neptune_core(bin, &notifying_neptune_core(&id));
+        sandbox.neptune_core(bin);
 
-        let output = sandbox.run(&[], &[Path::new("/bin"), Path::new("/usr/bin")]);
+        let output = sandbox.run_with(&[], &[], &[("STAND_IN_NOTIFY", &id)]);
 
         assert_eq!(Some(0), output.status.code(), "{}", stderr(&output));
         for kind in ["block", "tx", "proposal"] {
@@ -317,10 +307,12 @@ fn notifications_from_neptune_core_reach_neptune_defi() {
     }
 }
 
+/// Windows forbids a double quote in a path, so the case arises only on Unix.
+#[cfg(unix)]
 #[test]
 fn a_path_to_neptune_defi_with_a_double_quote_is_refused() {
     let sandbox = Sandbox::with_bin("with \"quote\"");
-    sandbox.neptune_core("with \"quote\"", "exit 0");
+    sandbox.neptune_core("with \"quote\"");
 
     let output = sandbox.run(&[], &[]);
 
@@ -335,7 +327,7 @@ fn a_path_to_neptune_defi_with_a_double_quote_is_refused() {
 #[test]
 fn the_notify_subcommand_fails_on_malformed_arguments_or_no_listener() {
     let sandbox = Sandbox::new();
-    sandbox.neptune_core("bin", "exit 0");
+    sandbox.neptune_core("bin");
     let id = "0".repeat(80);
     let unused_port = std::net::TcpListener::bind("127.0.0.1:0")
         .unwrap()
