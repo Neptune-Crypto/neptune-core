@@ -6,6 +6,9 @@ use std::net::Ipv4Addr;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
+use neptune_primitives::data_directory::DataDirectory;
+use neptune_primitives::network::Network;
+
 /// The flags `neptune-defi` sets on `neptune-core` itself, so that the user
 /// may not.
 pub(crate) const FIXED_FLAGS: [&str; 5] = [
@@ -24,14 +27,31 @@ const RPC_MODULES: &str = "node,chain,mempool,mining,wallet,personal";
 const DEFAULT_LISTEN_RPC: SocketAddr =
     SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 9797);
 
+/// The flag of `neptune-defi`'s own that says where it listens for plugins. It
+/// is not passed on to `neptune-core`.
+pub(crate) const PLUGIN_LISTEN: &str = "--plugin-listen";
+
 /// Why `neptune-defi` cannot run with the arguments the user passed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ArgsError {
     /// A flag that `neptune-defi` sets itself.
     FixedFlag(&'static str),
 
-    /// A `--listen-rpc` value that is not a socket address.
-    InvalidListenRpc(String),
+    /// A value that a flag `neptune-defi` reads does not take.
+    InvalidValue {
+        flag: &'static str,
+        value: String,
+        expected: &'static str,
+    },
+
+    /// A flag that takes a value, given without one.
+    MissingValue {
+        flag: &'static str,
+        expected: &'static str,
+    },
+
+    /// The data directory cannot be determined.
+    NoDataDirectory(String),
 }
 
 impl fmt::Display for ArgsError {
@@ -42,16 +62,21 @@ impl fmt::Display for ArgsError {
                 "neptune-defi sets {flag} on neptune-core itself, so it cannot be \
                  passed. Every other neptune-core flag is passed through unchanged."
             ),
-            Self::InvalidListenRpc(value) => write!(
-                f,
-                "--listen-rpc takes a socket address such as {DEFAULT_LISTEN_RPC}, \
-                 not {value:?}."
-            ),
+            Self::InvalidValue {
+                flag,
+                value,
+                expected,
+            } => write!(f, "{flag} takes {expected}, not {value:?}."),
+            Self::MissingValue { flag, expected } => write!(f, "{flag} takes {expected}."),
+            Self::NoDataDirectory(error) => {
+                write!(f, "Cannot determine neptune-core's data directory: {error}")
+            }
         }
     }
 }
 
-/// How `neptune-defi` runs `neptune-core`.
+/// How `neptune-defi` runs `neptune-core`, and what it needs to know about the
+/// run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NodeCommand {
     /// The arguments `neptune-core` is spawned with.
@@ -59,19 +84,28 @@ pub(crate) struct NodeCommand {
 
     /// Where `neptune-core` serves JSON-RPC, which is where plugins reach it.
     pub(crate) rpc_address: SocketAddr,
+
+    /// The plugin cookie's file, next to `neptune-core`'s own RPC cookie in
+    /// its data directory.
+    pub(crate) cookie_path: PathBuf,
+
+    /// Where `neptune-defi` listens for plugins.
+    pub(crate) plugin_address: SocketAddr,
 }
 
 /// How to run `neptune-core`, given the arguments the user passed to
 /// `neptune-defi`.
 ///
-/// The user's arguments are passed through unchanged. `neptune-defi` parses
-/// only the flags whose values it needs, which is `--listen-rpc`, the way
-/// `neptune-core` parses them, and `neptune-core` validates the rest. The
-/// result is an error if the user passed one of [`FIXED_FLAGS`], in either
-/// the `--flag value` or the `--flag=value` form, or an invalid `--listen-rpc`
-/// address. Otherwise `neptune-defi` appends `--listen-rpc` unless the user
-/// passed it, since plugins reach the node over JSON-RPC, then the RPC flags,
-/// and then `notify_flags`, which set the remaining fixed flags.
+/// The user's arguments are passed through unchanged, except for
+/// [`PLUGIN_LISTEN`], which is `neptune-defi`'s own. `neptune-defi` reads the
+/// flags whose values it needs, which are `--listen-rpc`, `--network` and
+/// `--data-dir`, the way `neptune-core` reads them, and `neptune-core`
+/// validates the rest. The result is an error if the user passed one of
+/// [`FIXED_FLAGS`], in either the `--flag value` or the `--flag=value` form, or
+/// an invalid or missing value for a flag `neptune-defi` reads. Otherwise
+/// `neptune-defi` appends `--listen-rpc` unless the user passed it, since
+/// plugins reach the node over JSON-RPC, then the RPC flags, and then
+/// `notify_flags`, which set the remaining fixed flags.
 pub(crate) fn node_command(
     user_args: &[String],
     notify_flags: &[String],
@@ -84,8 +118,36 @@ pub(crate) fn node_command(
     }
 
     let mut args = user_args.to_vec();
-    let rpc_address = match listen_rpc(user_args)? {
-        Some(address) => address,
+    let plugin_address = match find(&args, PLUGIN_LISTEN, None) {
+        Some(occurrence) => {
+            let address = required(PLUGIN_LISTEN, &occurrence, SOCKET_ADDRESS)?;
+            args.drain(occurrence.position..occurrence.position + occurrence.len);
+            address
+        }
+        None => neptune_defi::plugin::DEFAULT_ADDRESS,
+    };
+
+    let network = match find(&args, "--network", Some('n')) {
+        Some(occurrence) => required("--network", &occurrence, NETWORK)?,
+        None => Network::Main,
+    };
+    let data_dir = find(&args, "--data-dir", None)
+        .map(|occurrence| required::<PathBuf>("--data-dir", &occurrence, DIRECTORY))
+        .transpose()?;
+    let cookie_path = DataDirectory::get(data_dir, network)
+        .map_err(|error| ArgsError::NoDataDirectory(error.to_string()))?
+        .rpc_cookie_file_path()
+        .with_file_name(neptune_defi::plugin::COOKIE_FILE_NAME);
+
+    let rpc_address = match find(&args, "--listen-rpc", None) {
+        Some(Occurrence {
+            value: Some(value), ..
+        }) => value.parse().map_err(|_| ArgsError::InvalidValue {
+            flag: "--listen-rpc",
+            value: value.to_owned(),
+            expected: SOCKET_ADDRESS,
+        })?,
+        Some(Occurrence { value: None, .. }) => DEFAULT_LISTEN_RPC,
         None => {
             args.push(format!("--listen-rpc={DEFAULT_LISTEN_RPC}"));
             DEFAULT_LISTEN_RPC
@@ -95,41 +157,88 @@ pub(crate) fn node_command(
     args.push("--unsafe-rpc".to_owned());
     args.extend_from_slice(notify_flags);
 
-    Ok(NodeCommand { args, rpc_address })
+    Ok(NodeCommand {
+        args,
+        rpc_address,
+        cookie_path,
+        plugin_address,
+    })
 }
+
+const SOCKET_ADDRESS: &str = "a socket address such as 127.0.0.1:9797";
+const NETWORK: &str = "a network such as main, testnet or regtest";
+const DIRECTORY: &str = "a directory";
 
 /// The flag an argument names, without a value joined to it by `=`.
 fn flag_name(arg: &str) -> &str {
     arg.split('=').next().unwrap_or(arg)
 }
 
-/// The address `--listen-rpc` gives among `user_args`, or `None` if the flag
-/// is absent.
+/// Where a flag occurs among the arguments, and its value.
+struct Occurrence {
+    /// The index of the argument that names the flag.
+    position: usize,
+
+    /// The number of arguments the flag and its value take up: two if the
+    /// value is the next argument, and one otherwise.
+    len: usize,
+
+    /// The flag's value, if it has one.
+    value: Option<String>,
+}
+
+/// The first occurrence of the flag `long`, or of its short form `short`,
+/// among `args`, read the way `neptune-core`'s argument parser reads it.
 ///
-/// This reads the flag the way `neptune-core` does: `--listen-rpc ADDR` and
-/// `--listen-rpc=ADDR` give `ADDR`, and the flag followed by nothing or by
-/// another flag gives [`DEFAULT_LISTEN_RPC`].
-fn listen_rpc(user_args: &[String]) -> Result<Option<SocketAddr>, ArgsError> {
-    const FLAG: &str = "--listen-rpc";
-    let Some(position) = user_args.iter().position(|arg| flag_name(arg) == FLAG) else {
-        return Ok(None);
-    };
+/// `--long=VALUE`, `-sVALUE` and `-s=VALUE` carry their value in the same
+/// argument. `--long VALUE` and `-s VALUE` take the next argument as the value
+/// unless it starts with `-`, in which case the flag has no value.
+fn find(args: &[String], long: &str, short: Option<char>) -> Option<Occurrence> {
+    let short = short.map(|short| format!("-{short}"));
+    args.iter().enumerate().find_map(|(position, arg)| {
+        let joined = if flag_name(arg) == long {
+            arg.strip_prefix(long).map(|rest| rest.strip_prefix('='))?
+        } else {
+            let short = short.as_deref().filter(|short| arg.starts_with(short))?;
+            let rest = &arg[short.len()..];
+            if rest.is_empty() {
+                None
+            } else {
+                Some(rest.strip_prefix('=').unwrap_or(rest))
+            }
+        };
 
-    let value = match user_args[position].strip_prefix(&format!("{FLAG}=")) {
-        Some(joined) => Some(joined),
-        None => user_args
-            .get(position + 1)
-            .map(String::as_str)
-            .filter(|next| !next.starts_with('-')),
-    };
-    let Some(value) = value else {
-        return Ok(Some(DEFAULT_LISTEN_RPC));
-    };
+        if let Some(joined) = joined {
+            return Some(Occurrence {
+                position,
+                len: 1,
+                value: Some(joined.to_owned()),
+            });
+        }
+        let next = args.get(position + 1).filter(|next| !next.starts_with('-'));
+        Some(Occurrence {
+            position,
+            len: 1 + usize::from(next.is_some()),
+            value: next.cloned(),
+        })
+    })
+}
 
-    value
-        .parse()
-        .map(Some)
-        .map_err(|_| ArgsError::InvalidListenRpc(value.to_owned()))
+/// The value of a flag that requires one, parsed.
+fn required<T: std::str::FromStr>(
+    flag: &'static str,
+    occurrence: &Occurrence,
+    expected: &'static str,
+) -> Result<T, ArgsError> {
+    let value = occurrence
+        .value
+        .as_deref()
+        .ok_or(ArgsError::MissingValue { flag, expected })?;
+    value.parse().map_err(|_| ArgsError::InvalidValue {
+        flag,
+        value: value.to_owned(),
+        expected,
+    })
 }
 
 /// The `neptune-core` executable: the one next to `neptune-defi` if there is
@@ -304,7 +413,11 @@ mod tests {
             (args(&["--listen-rpc", "nonsense"]), "nonsense"),
         ] {
             assert_eq!(
-                Err(ArgsError::InvalidListenRpc(value.to_owned())),
+                Err(ArgsError::InvalidValue {
+                    flag: "--listen-rpc",
+                    value: value.to_owned(),
+                    expected: SOCKET_ADDRESS,
+                }),
                 node_command(&user, &notify()),
                 "{user:?}"
             );
@@ -320,5 +433,156 @@ mod tests {
             Err(ArgsError::FixedFlag("--unsafe-rpc")),
             node_command(&user, &notify())
         );
+    }
+
+    fn cookie_path(data_dir: Option<&str>, network: Network) -> PathBuf {
+        DataDirectory::get(data_dir.map(PathBuf::from), network)
+            .unwrap()
+            .rpc_cookie_file_path()
+            .with_file_name(neptune_defi::plugin::COOKIE_FILE_NAME)
+    }
+
+    /// `--network` and its short form `-n` are read in every shape the
+    /// argument parser of `neptune-core` accepts, and pass through unchanged.
+    #[test]
+    fn the_network_is_read_as_neptune_core_reads_it() {
+        for user in [
+            args(&["--network", "regtest"]),
+            args(&["--network=regtest"]),
+            args(&["-n", "regtest"]),
+            args(&["-nregtest"]),
+            args(&["-n=regtest"]),
+            args(&["--peers", "1.2.3.4:5", "-n", "regtest", "--notx"]),
+        ] {
+            let node = node_command(&user, &notify()).unwrap();
+            assert_eq!(
+                cookie_path(None, Network::RegTest),
+                node.cookie_path,
+                "{user:?}"
+            );
+            assert_eq!([user, appended(true)].concat(), node.args);
+        }
+
+        let node = node_command(&args(&["--network", "testnet-3"]), &notify()).unwrap();
+        assert_eq!(cookie_path(None, Network::Testnet(3)), node.cookie_path);
+
+        let node = node_command(&[], &notify()).unwrap();
+        assert_eq!(cookie_path(None, Network::Main), node.cookie_path);
+    }
+
+    /// The plugin cookie lies in `neptune-core`'s data directory for the
+    /// network, wherever `--data-dir` puts it.
+    #[test]
+    fn the_cookie_lies_in_the_data_directory() {
+        for user in [
+            args(&["--data-dir", "/srv/neptune data", "-n", "regtest"]),
+            args(&["--data-dir=/srv/neptune data", "--network=regtest"]),
+        ] {
+            let node = node_command(&user, &notify()).unwrap();
+            assert_eq!(
+                cookie_path(Some("/srv/neptune data"), Network::RegTest),
+                node.cookie_path
+            );
+            assert!(node.cookie_path.starts_with("/srv/neptune data"));
+        }
+    }
+
+    #[test]
+    fn a_missing_or_invalid_network_or_data_directory_is_refused() {
+        for (user, error) in [
+            (
+                args(&["--network", "nonsense"]),
+                ArgsError::InvalidValue {
+                    flag: "--network",
+                    value: "nonsense".to_owned(),
+                    expected: NETWORK,
+                },
+            ),
+            (
+                args(&["-ntestnet-x"]),
+                ArgsError::InvalidValue {
+                    flag: "--network",
+                    value: "testnet-x".to_owned(),
+                    expected: NETWORK,
+                },
+            ),
+            (
+                args(&["--network"]),
+                ArgsError::MissingValue {
+                    flag: "--network",
+                    expected: NETWORK,
+                },
+            ),
+            (
+                args(&["-n", "--notx"]),
+                ArgsError::MissingValue {
+                    flag: "--network",
+                    expected: NETWORK,
+                },
+            ),
+            (
+                args(&["--data-dir"]),
+                ArgsError::MissingValue {
+                    flag: "--data-dir",
+                    expected: DIRECTORY,
+                },
+            ),
+        ] {
+            assert_eq!(Err(error), node_command(&user, &notify()), "{user:?}");
+        }
+    }
+
+    /// `--plugin-listen` is `neptune-defi`'s own, so it is read and then
+    /// removed, value and all, from what `neptune-core` receives.
+    #[test]
+    fn the_plugin_address_is_read_and_not_passed_on() {
+        let given: SocketAddr = "127.0.0.1:4000".parse().unwrap();
+        for (user, rest) in [
+            (
+                args(&["--plugin-listen", "127.0.0.1:4000", "-n", "regtest"]),
+                args(&["-n", "regtest"]),
+            ),
+            (
+                args(&["-n", "regtest", "--plugin-listen=127.0.0.1:4000"]),
+                args(&["-n", "regtest"]),
+            ),
+        ] {
+            let node = node_command(&user, &notify()).unwrap();
+            assert_eq!(given, node.plugin_address);
+            assert_eq!([rest, appended(true)].concat(), node.args);
+        }
+
+        let node = node_command(&[], &notify()).unwrap();
+        assert_eq!(neptune_defi::plugin::DEFAULT_ADDRESS, node.plugin_address);
+    }
+
+    #[test]
+    fn a_missing_or_invalid_plugin_address_is_refused() {
+        for (user, error) in [
+            (
+                args(&["--plugin-listen"]),
+                ArgsError::MissingValue {
+                    flag: PLUGIN_LISTEN,
+                    expected: SOCKET_ADDRESS,
+                },
+            ),
+            (
+                args(&["--plugin-listen", "--notx"]),
+                ArgsError::MissingValue {
+                    flag: PLUGIN_LISTEN,
+                    expected: SOCKET_ADDRESS,
+                },
+            ),
+            (
+                args(&["--plugin-listen=localhost:4000"]),
+                ArgsError::InvalidValue {
+                    flag: PLUGIN_LISTEN,
+                    value: "localhost:4000".to_owned(),
+                    expected: SOCKET_ADDRESS,
+                },
+            ),
+        ] {
+            assert_eq!(Err(error), node_command(&user, &notify()), "{user:?}");
+        }
     }
 }

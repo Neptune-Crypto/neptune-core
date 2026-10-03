@@ -4028,6 +4028,8 @@ dependencies = [
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.10.3",
+ "serde",
+ "serde_json",
  "tasm-lib",
  "test-strategy 0.3.1",
  "tokio",

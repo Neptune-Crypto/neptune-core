@@ -2,7 +2,8 @@
 //! in its place. It is built only with the `test-stand-in` feature.
 //!
 //! It writes the arguments it receives, one per line, to a file named `args`
-//! next to its own executable. If `STAND_IN_NOTIFY` is set, it then runs every
+//! next to its own executable. If `STAND_IN_NOTIFY` is set, it then waits the
+//! number of milliseconds in `STAND_IN_DELAY`, if that is set, runs every
 //! notify command among its arguments, as `neptune-core` does on an event,
 //! with the variable's value in place of `%s`, and waits a second for the
 //! notifications to be taken in. It exits with the code in `STAND_IN_EXIT`,
@@ -24,6 +25,8 @@ fn main() -> ExitCode {
         .expect("the stand-in can record its arguments");
 
     if let Ok(id) = std::env::var("STAND_IN_NOTIFY") {
+        let delay = std::env::var("STAND_IN_DELAY").map_or(0, |ms| ms.parse().expect("a delay"));
+        std::thread::sleep(Duration::from_millis(delay));
         let commands = args
             .iter()
             .filter_map(|arg| arg.split_once('='))

@@ -5,11 +5,14 @@
 //! `neptune-core` run `neptune-defi notify`, which hands the running
 //! `neptune-defi` each notification.
 
+mod cookie;
 mod node;
 mod notify;
+mod plugins;
 
 use std::process::ExitCode;
 
+use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 
 const INSTALL_URL: &str = "https://github.com/Neptune-Crypto/neptune-core#installing";
@@ -68,6 +71,29 @@ async fn run(user_args: Vec<String>) -> ExitCode {
         }
     };
 
+    let cookie = match cookie::write(&node_command.cookie_path) {
+        Ok(cookie) => cookie,
+        Err(error) => {
+            eprintln!(
+                "Could not write the plugin cookie to {}: {error}",
+                node_command.cookie_path.display()
+            );
+            return ExitCode::FAILURE;
+        }
+    };
+    let plugin_listener = match tokio::net::TcpListener::bind(node_command.plugin_address).await {
+        Ok(listener) => listener,
+        Err(error) => {
+            eprintln!(
+                "Could not listen for plugins on {}: {error}. Pass {} with another \
+                 address to use one.",
+                node_command.plugin_address,
+                node::PLUGIN_LISTEN
+            );
+            return ExitCode::FAILURE;
+        }
+    };
+
     let Some(executable) = node::find_executable() else {
         eprintln!(
             "neptune-defi runs neptune-core, which was found neither next to \
@@ -95,6 +121,21 @@ async fn run(user_args: Vec<String>) -> ExitCode {
     let (sender, mut notifications) = mpsc::unbounded_channel();
     tokio::spawn(notify::listen(listener, sender));
 
+    let plugin_address = plugin_listener
+        .local_addr()
+        .expect("a bound listener has an address");
+    let (to_plugins, _) = broadcast::channel(plugins::BACKLOG);
+    let terms = plugins::Terms {
+        cookie: cookie::hex(&cookie).into(),
+        rpc: node_command.rpc_address,
+    };
+    tokio::spawn(plugins::serve(plugin_listener, terms, to_plugins.clone()));
+    eprintln!(
+        "neptune-defi: listening for plugins on {}, with the cookie in {}",
+        plugin_address,
+        node_command.cookie_path.display()
+    );
+
     // An interrupt from the terminal reaches neptune-core as well, which
     // shuts down on it. So neptune-defi waits for that, rather than exiting
     // first and leaving neptune-core behind.
@@ -108,6 +149,10 @@ async fn run(user_args: Vec<String>) -> ExitCode {
             _ = tokio::signal::ctrl_c() => {}
             Some(notification) = notifications.recv() => {
                 eprintln!("neptune-defi: {notification}");
+
+                // With no plugin connected, the notification has no one to
+                // go to, which is not an error.
+                let _ = to_plugins.send(notification);
             }
         }
     };
