@@ -34,6 +34,9 @@ tasm-lib = "9.0.0"
 neptune-consensus = { version = "0.19.0", path = "../neptune-consensus" }
 neptune-mutator-set = { version = "0.19.0", path = "../neptune-mutator-set" }
 neptune-primitives = { version = "0.19.0", path = "../neptune-primitives" }
+rand = "0.10"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 tokio = { version = "1.47", features = ["macros", "net", "process", "rt-multi-thread", "signal", "time"] }
 
 [dev-dependencies]
@@ -47,7 +50,6 @@ neptune-rpc-api = { version = "0.19.0", path = "../neptune-rpc/api" }
 neptune-rpc-client = { version = "0.19.0", path = "../neptune-rpc/client" }
 neptune-wallet = { version = "0.19.0", path = "../neptune-wallet" }
 num-traits = "0.2"
-rand = "0.10"
 
 proptest = "1.7"
 proptest-arbitrary-interop = "0.1"

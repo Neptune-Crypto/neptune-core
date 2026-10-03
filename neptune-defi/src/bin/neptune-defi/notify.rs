@@ -15,10 +15,10 @@ use std::net::Ipv4Addr;
 use std::net::SocketAddr;
 use std::net::TcpStream;
 use std::path::Path;
-use std::str::FromStr;
 use std::time::Duration;
 
-use neptune_defi::tasm_lib::prelude::Digest;
+use neptune_defi::plugin::Kind;
+use neptune_defi::plugin::Notification;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncReadExt;
 use tokio::io::BufReader;
@@ -32,78 +32,12 @@ pub(crate) const SUBCOMMAND: &str = "notify";
 /// digest in hex.
 const MAX_LINE_LENGTH: u64 = 128;
 
-/// What a notification is about.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Kind {
-    /// A new tip; the id is the block's hash.
-    Block,
-
-    /// A transaction entered the mempool; the id is its transaction id.
-    Tx,
-
-    /// The node adopted a block proposal; the id is the hash of its body.
-    Proposal,
-}
-
-impl Kind {
-    pub(crate) const ALL: [Kind; 3] = [Kind::Block, Kind::Tx, Kind::Proposal];
-
-    /// The `neptune-core` flag that runs the command for this kind.
-    pub(crate) fn flag(self) -> &'static str {
-        match self {
-            Kind::Block => "--block-notify",
-            Kind::Tx => "--tx-notify",
-            Kind::Proposal => "--proposal-notify",
-        }
-    }
-}
-
-impl fmt::Display for Kind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let name = match self {
-            Kind::Block => "block",
-            Kind::Tx => "tx",
-            Kind::Proposal => "proposal",
-        };
-        write!(f, "{name}")
-    }
-}
-
-impl FromStr for Kind {
-    type Err = ();
-
-    fn from_str(name: &str) -> Result<Self, Self::Err> {
-        Kind::ALL
-            .into_iter()
-            .find(|kind| kind.to_string() == name)
-            .ok_or(())
-    }
-}
-
-/// One notification: what happened, and the id of what it happened to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Notification {
-    pub(crate) kind: Kind,
-    pub(crate) id: Digest,
-}
-
-impl fmt::Display for Notification {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} {}", self.kind, self.id.to_hex())
-    }
-}
-
-impl FromStr for Notification {
-    type Err = ();
-
-    /// Parse `<kind> <id>`, with the id in hex, as the `notify` subcommand
-    /// writes it.
-    fn from_str(line: &str) -> Result<Self, Self::Err> {
-        let (kind, id) = line.split_once(' ').ok_or(())?;
-        Ok(Notification {
-            kind: kind.parse()?,
-            id: Digest::try_from_hex(id).map_err(|_| ())?,
-        })
+/// The `neptune-core` flag that runs the notify command for `kind`.
+fn flag(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Block => "--block-notify",
+        Kind::Tx => "--tx-notify",
+        Kind::Proposal => "--proposal-notify",
     }
 }
 
@@ -157,7 +91,7 @@ pub(crate) fn notify_flags(executable: &Path, port: u16) -> Result<Vec<String>, 
 
     Ok(Kind::ALL
         .into_iter()
-        .map(|kind| format!("{}={path} {SUBCOMMAND} {port} {kind} %s", kind.flag()))
+        .map(|kind| format!("{}={path} {SUBCOMMAND} {port} {kind} %s", flag(kind)))
         .collect())
 }
 
@@ -220,36 +154,12 @@ pub(crate) async fn listen(
 mod tests {
     use std::path::PathBuf;
 
+    use neptune_defi::tasm_lib::prelude::Digest;
+
     use super::*;
 
     fn digest() -> Digest {
         rand::random()
-    }
-
-    #[test]
-    fn a_notification_reads_back_from_its_line() {
-        for kind in Kind::ALL {
-            let notification = Notification { kind, id: digest() };
-            assert_eq!(Ok(notification), notification.to_string().parse());
-        }
-    }
-
-    #[test]
-    fn lines_that_are_not_notifications_are_refused() {
-        let hex = digest().to_hex();
-        for line in [
-            String::new(),
-            "block".to_owned(),
-            hex.clone(),
-            format!("blocks {hex}"),
-            format!("Block {hex}"),
-            format!("block  {hex}"),
-            format!("block {hex} extra"),
-            format!("block {}", &hex[1..]),
-            format!("block {}g", &hex[1..]),
-        ] {
-            assert_eq!(Err(()), line.parse::<Notification>(), "{line:?}");
-        }
     }
 
     #[test]

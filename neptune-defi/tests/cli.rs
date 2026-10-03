@@ -88,12 +88,25 @@ impl Sandbox {
         dir
     }
 
-    /// Run `neptune-defi` with `args`, with `PATH` set to `path`, and with the
-    /// stand-in's environment variables set as `stand_in` says.
+    /// The arguments every run starts with: a data directory in the sandbox,
+    /// which holds the plugin cookie, and a plugin port the operating system
+    /// chooses, so that runs in parallel do not collide.
+    fn base_args(&self) -> Vec<String> {
+        vec![
+            "--data-dir".to_owned(),
+            self.dir.join("data").display().to_string(),
+            "--plugin-listen=127.0.0.1:0".to_owned(),
+        ]
+    }
+
+    /// Run `neptune-defi` with [`Self::base_args`] and `args`, with `PATH` set
+    /// to `path`, and with the stand-in's environment variables set as
+    /// `stand_in` says.
     fn run_with(&self, args: &[&str], path: &[&Path], stand_in: &[(&str, &str)]) -> Output {
         let path = std::env::join_paths(path).unwrap();
         let _executables = executables();
         Command::new(self.exe())
+            .args(self.base_args())
             .args(args)
             .env("PATH", path)
             .envs(stand_in.iter().copied())
@@ -105,15 +118,29 @@ impl Sandbox {
         self.run_with(args, path, &[])
     }
 
-    /// The arguments the stand-in in `dir` received, up to the notify flags,
-    /// or `None` if it did not run.
+    /// Run `neptune-defi notify` with `args`, as `neptune-core` does: with
+    /// nothing before the subcommand.
+    fn run_notify(&self, args: &[&str]) -> Output {
+        let _executables = executables();
+        Command::new(self.exe())
+            .arg("notify")
+            .args(args)
+            .output()
+            .unwrap()
+    }
+
+    /// The arguments the stand-in in `dir` received after the data
+    /// directory and before the notify flags, or `None` if it did not run.
     ///
-    /// The notify flags come last, and name this sandbox's `neptune-defi` and
-    /// a port the operating system chose, so they are checked here by shape
-    /// and left out of the result.
+    /// The data directory comes first, from [`Self::base_args`], whose plugin
+    /// port `neptune-defi` keeps to itself. The notify flags come last, and
+    /// name this sandbox's `neptune-defi` and a port the operating system
+    /// chose, so they are checked here by shape and left out of the result.
     fn received(&self, dir: &str) -> Option<Vec<String>> {
         let args = fs::read_to_string(self.dir.join(dir).join("args")).ok()?;
         let args = args.lines().map(str::to_owned).collect::<Vec<_>>();
+        let (data_dir, args) = args.split_at(2);
+        assert_eq!(self.base_args()[..2], *data_dir);
         let (args, notify_flags) = args.split_at(args.len() - 3);
 
         let exe = self.exe().display().to_string();
@@ -336,30 +363,106 @@ fn the_notify_subcommand_fails_on_malformed_arguments_or_no_listener() {
         .port();
 
     for args in [
-        vec!["notify".to_owned()],
-        vec!["notify".to_owned(), "1".to_owned(), "block".to_owned()],
-        vec![
-            "notify".to_owned(),
-            "1".to_owned(),
-            "nonsense".to_owned(),
-            id.clone(),
-        ],
-        vec![
-            "notify".to_owned(),
-            "1".to_owned(),
-            "block".to_owned(),
-            "beef".to_owned(),
-        ],
-        vec![
-            "notify".to_owned(),
-            unused_port.to_string(),
-            "block".to_owned(),
-            id.clone(),
-        ],
+        vec![],
+        vec!["1".to_owned(), "block".to_owned()],
+        vec!["1".to_owned(), "nonsense".to_owned(), id.clone()],
+        vec!["1".to_owned(), "block".to_owned(), "beef".to_owned()],
+        vec![unused_port.to_string(), "block".to_owned(), id.clone()],
     ] {
         let args = args.iter().map(String::as_str).collect::<Vec<_>>();
-        let output = sandbox.run(&args, &[]);
+        let output = sandbox.run_notify(&args);
         assert_eq!(Some(1), output.status.code(), "{args:?}");
         assert_eq!(None, sandbox.received("bin"));
     }
+}
+
+/// A plugin that reads the cookie from the data directory is welcomed, told
+/// where `neptune-core` serves JSON-RPC, and sent the notifications it
+/// subscribed to.
+#[test]
+fn a_plugin_receives_the_notifications_it_subscribed_to() {
+    use std::io::BufRead;
+    use std::io::BufReader;
+    use std::io::Write;
+
+    use neptune_defi::plugin::FromPlugin;
+    use neptune_defi::plugin::Hello;
+    use neptune_defi::plugin::Kind;
+    use neptune_defi::plugin::ToPlugin;
+    use neptune_defi::plugin::COOKIE_FILE_NAME;
+    use neptune_defi::plugin::PROTOCOL_VERSION;
+
+    let sandbox = Sandbox::new();
+    sandbox.neptune_core("bin");
+    let id = "0".repeat(80);
+    let mut defi = {
+        let _executables = executables();
+        Command::new(sandbox.exe())
+            .args(sandbox.base_args())
+            .args(["--network", "regtest"])
+            .env("STAND_IN_NOTIFY", &id)
+            .env("STAND_IN_DELAY", "2000")
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap()
+    };
+
+    // neptune-defi says where it listens for plugins, and where the cookie
+    // is, before neptune-core sends its first notification.
+    let mut stderr = BufReader::new(defi.stderr.take().unwrap()).lines();
+    let listening = stderr
+        .by_ref()
+        .map(Result::unwrap)
+        .find(|line| line.contains("listening for plugins on "))
+        .unwrap();
+    let address = listening
+        .split("listening for plugins on ")
+        .nth(1)
+        .and_then(|rest| rest.split(',').next())
+        .unwrap()
+        .to_owned();
+    // The cookie lies next to neptune-core's own, in its data directory for
+    // the network, which is where a plugin looks for it.
+    let cookie_path = neptune_primitives::data_directory::DataDirectory::get(
+        Some(sandbox.dir.join("data")),
+        neptune_primitives::network::Network::RegTest,
+    )
+    .unwrap()
+    .rpc_cookie_file_path()
+    .with_file_name(COOKIE_FILE_NAME);
+    let cookie = fs::read(cookie_path)
+        .unwrap()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+
+    let stream = std::net::TcpStream::connect(&address).unwrap();
+    let mut lines = BufReader::new(stream.try_clone().unwrap()).lines();
+    let hello = FromPlugin::Hello(Hello {
+        name: "test".to_owned(),
+        protocol: PROTOCOL_VERSION,
+        cookie,
+        subscribe: vec![Kind::Proposal],
+    });
+    writeln!(&stream, "{}", serde_json::to_string(&hello).unwrap()).unwrap();
+
+    let mut receive = || serde_json::from_str::<ToPlugin>(&lines.next().unwrap().unwrap()).unwrap();
+    match receive() {
+        ToPlugin::Welcome(welcome) => {
+            assert_eq!(
+                "127.0.0.1:9797".parse::<std::net::SocketAddr>().unwrap(),
+                welcome.rpc
+            );
+        }
+        other => panic!("not a welcome: {other:?}"),
+    }
+    match receive() {
+        ToPlugin::Notification(notification) => {
+            assert_eq!(Kind::Proposal, notification.kind);
+            assert_eq!(id, notification.id.to_hex());
+        }
+        other => panic!("not a notification: {other:?}"),
+    }
+
+    assert_eq!(Some(0), defi.wait().unwrap().code());
 }
