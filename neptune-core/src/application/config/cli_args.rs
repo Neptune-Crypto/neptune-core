@@ -83,8 +83,9 @@ pub struct Args {
     ///
     /// If external command cannot be started, the entire node is stopped.
     ///
-    /// Anything after the 1st space is interpreted as an argument. So the file
-    /// used here may not contain spaces.
+    /// Spaces separate the program from its arguments, and the arguments from
+    /// each other, except inside double quotes, which may enclose a path that
+    /// contains spaces. Backslashes and single quotes are ordinary characters.
     #[clap(long, value_name = "CMD")]
     pub(crate) block_notify: Option<String>,
 
