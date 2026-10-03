@@ -96,11 +96,28 @@ impl Sandbox {
             .unwrap()
     }
 
-    /// The arguments the stand-in in `dir` received, or `None` if it did not
-    /// run.
+    /// The arguments the stand-in in `dir` received, up to the notify flags,
+    /// or `None` if it did not run.
+    ///
+    /// The notify flags come last, and name this sandbox's `neptune-defi` and
+    /// a port the operating system chose, so they are checked here by shape
+    /// and left out of the result.
     fn received(&self, dir: &str) -> Option<Vec<String>> {
         let args = fs::read_to_string(self.dir.join(dir).join("args")).ok()?;
-        Some(args.lines().map(str::to_owned).collect())
+        let args = args.lines().map(str::to_owned).collect::<Vec<_>>();
+        let (args, notify_flags) = args.split_at(args.len() - 3);
+
+        let exe = self.dir.join("bin/neptune-defi");
+        for (flag, kind) in notify_flags.iter().zip(["block", "tx", "proposal"]) {
+            let prefix = format!("--{kind}-notify={} notify ", exe.display());
+            let port = flag
+                .strip_prefix(&prefix)
+                .and_then(|rest| rest.strip_suffix(&format!(" {kind} %s")))
+                .unwrap_or_else(|| panic!("not a {kind} notify flag: {flag}"));
+            port.parse::<u16>().unwrap();
+        }
+
+        Some(args.to_vec())
     }
 }
 
@@ -245,4 +262,99 @@ fn a_neptune_core_that_cannot_be_executed_is_reported() {
 
     assert_eq!(Some(1), output.status.code());
     assert!(stderr(&output).contains("Could not start"));
+}
+
+/// The stand-in runs every notify command it was given, the way
+/// `neptune-core` does on an event, and `neptune-defi` takes in each
+/// notification.
+#[test]
+fn notifications_from_neptune_core_reach_neptune_defi() {
+    let sandbox = Sandbox::new();
+    let id = "0".repeat(80);
+    sandbox.neptune_core(
+        "bin",
+        &format!(
+            "for arg in \"$@\"; do\n\
+             \x20 case \"$arg\" in\n\
+             \x20   --*-notify=*) $(printf '%s' \"${{arg#*=}}\" | sed 's/%s/{id}/') ;;\n\
+             \x20 esac\n\
+             done\n\
+             sleep 1\n\
+             exit 0"
+        ),
+    );
+
+    let output = sandbox.run(&[], &[Path::new("/bin"), Path::new("/usr/bin")]);
+
+    assert_eq!(Some(0), output.status.code(), "{}", stderr(&output));
+    for kind in ["block", "tx", "proposal"] {
+        assert!(
+            stderr(&output).contains(&format!("neptune-defi: {kind} {id}")),
+            "{}",
+            stderr(&output)
+        );
+    }
+}
+
+#[test]
+fn a_path_to_neptune_defi_with_a_space_is_refused() {
+    let sandbox = Sandbox::new();
+    sandbox.neptune_core("with space", "exit 0");
+    let exe = sandbox.dir.join("with space/neptune-defi");
+    {
+        let _executables = executables();
+        fs::copy(env!("CARGO_BIN_EXE_neptune-defi"), &exe).unwrap();
+    }
+
+    let output = {
+        let _executables = executables();
+        Command::new(&exe).env("PATH", "").output().unwrap()
+    };
+
+    assert_eq!(Some(1), output.status.code());
+    assert!(stderr(&output).contains("may not contain one"));
+    assert!(!sandbox.dir.join("with space/args").exists());
+}
+
+/// The `notify` subcommand on its own, without a `neptune-defi` listening:
+/// malformed arguments and an unreachable port are failures, and neither
+/// starts `neptune-core`.
+#[test]
+fn the_notify_subcommand_fails_on_malformed_arguments_or_no_listener() {
+    let sandbox = Sandbox::new();
+    sandbox.neptune_core("bin", "exit 0");
+    let id = "0".repeat(80);
+    let unused_port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+
+    for args in [
+        vec!["notify".to_owned()],
+        vec!["notify".to_owned(), "1".to_owned(), "block".to_owned()],
+        vec![
+            "notify".to_owned(),
+            "1".to_owned(),
+            "nonsense".to_owned(),
+            id.clone(),
+        ],
+        vec![
+            "notify".to_owned(),
+            "1".to_owned(),
+            "block".to_owned(),
+            "beef".to_owned(),
+        ],
+        vec![
+            "notify".to_owned(),
+            unused_port.to_string(),
+            "block".to_owned(),
+            id.clone(),
+        ],
+    ] {
+        let args = args.iter().map(String::as_str).collect::<Vec<_>>();
+        let output = sandbox.run(&args, &[]);
+        assert_eq!(Some(1), output.status.code(), "{args:?}");
+        assert_eq!(None, sandbox.received("bin"));
+    }
 }

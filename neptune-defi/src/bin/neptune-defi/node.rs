@@ -69,10 +69,13 @@ pub(crate) struct NodeCommand {
 /// `neptune-core` parses them, and `neptune-core` validates the rest. The
 /// result is an error if the user passed one of [`FIXED_FLAGS`], in either
 /// the `--flag value` or the `--flag=value` form, or an invalid `--listen-rpc`
-/// address. Otherwise `neptune-defi` appends the fixed flags, and
-/// `--listen-rpc` unless the user passed it, since plugins reach the node over
-/// JSON-RPC.
-pub(crate) fn node_command(user_args: &[String]) -> Result<NodeCommand, ArgsError> {
+/// address. Otherwise `neptune-defi` appends `--listen-rpc` unless the user
+/// passed it, since plugins reach the node over JSON-RPC, then the RPC flags,
+/// and then `notify_flags`, which set the remaining fixed flags.
+pub(crate) fn node_command(
+    user_args: &[String],
+    notify_flags: &[String],
+) -> Result<NodeCommand, ArgsError> {
     if let Some(fixed) = user_args
         .iter()
         .find_map(|arg| FIXED_FLAGS.into_iter().find(|f| *f == flag_name(arg)))
@@ -90,6 +93,7 @@ pub(crate) fn node_command(user_args: &[String]) -> Result<NodeCommand, ArgsErro
     };
     args.push(format!("--rpc-modules={RPC_MODULES}"));
     args.push("--unsafe-rpc".to_owned());
+    args.extend_from_slice(notify_flags);
 
     Ok(NodeCommand { args, rpc_address })
 }
@@ -154,6 +158,10 @@ mod tests {
         args.iter().map(|arg| (*arg).to_owned()).collect()
     }
 
+    fn notify() -> Vec<String> {
+        args(&["--block-notify=notify-command %s"])
+    }
+
     /// The fixed flags `neptune-defi` appends, after the user's arguments.
     fn appended(listen_rpc: bool) -> Vec<String> {
         let mut appended = vec![];
@@ -162,6 +170,7 @@ mod tests {
         }
         appended.push("--rpc-modules=node,chain,mempool,mining,wallet,personal".to_owned());
         appended.push("--unsafe-rpc".to_owned());
+        appended.extend(notify());
         appended
     }
 
@@ -187,7 +196,7 @@ mod tests {
                     }
                     assert_eq!(
                         Err(ArgsError::FixedFlag(flag)),
-                        node_command(&user),
+                        node_command(&user, &notify()),
                         "{user:?}"
                     );
                 }
@@ -203,7 +212,7 @@ mod tests {
         let user = args(&["--peers", "--unsafe-rpc"]);
         assert_eq!(
             Err(ArgsError::FixedFlag("--unsafe-rpc")),
-            node_command(&user)
+            node_command(&user, &notify())
         );
     }
 
@@ -219,14 +228,14 @@ mod tests {
             args(&["--data-dir", "/tmp/--rpc-modules=chain"]),
             args(&["-unsafe-rpc"]),
         ] {
-            let node = node_command(&user).unwrap();
+            let node = node_command(&user, &notify()).unwrap();
             assert_eq!([user, appended(true)].concat(), node.args);
         }
     }
 
     #[test]
     fn no_arguments_give_only_the_fixed_flags() {
-        let node = node_command(&[]).unwrap();
+        let node = node_command(&[], &notify()).unwrap();
         assert_eq!(appended(true), node.args);
         assert_eq!(DEFAULT_LISTEN_RPC, node.rpc_address);
     }
@@ -242,7 +251,7 @@ mod tests {
             args(&["--no-such-flag", "positional", "--", "--anything"]),
             args(&["--data-dir", "/path with spaces/", "--peers="]),
         ] {
-            let node = node_command(&user).unwrap();
+            let node = node_command(&user, &notify()).unwrap();
             assert_eq!([user, appended(true)].concat(), node.args);
             assert_eq!(DEFAULT_LISTEN_RPC, node.rpc_address);
         }
@@ -267,7 +276,7 @@ mod tests {
                 v4,
             ),
         ] {
-            let node = node_command(&user).unwrap();
+            let node = node_command(&user, &notify()).unwrap();
             assert_eq!(address, node.rpc_address, "{user:?}");
             assert_eq!([user, appended(false)].concat(), node.args);
         }
@@ -278,7 +287,7 @@ mod tests {
     #[test]
     fn a_repeated_listen_rpc_is_passed_through() {
         let user = args(&["--listen-rpc=127.0.0.1:1", "--listen-rpc=127.0.0.1:2"]);
-        let node = node_command(&user).unwrap();
+        let node = node_command(&user, &notify()).unwrap();
         assert_eq!([user, appended(false)].concat(), node.args);
     }
 
@@ -296,7 +305,7 @@ mod tests {
         ] {
             assert_eq!(
                 Err(ArgsError::InvalidListenRpc(value.to_owned())),
-                node_command(&user),
+                node_command(&user, &notify()),
                 "{user:?}"
             );
         }
@@ -309,7 +318,7 @@ mod tests {
         let user = args(&["--listen-rpc=nonsense", "--unsafe-rpc"]);
         assert_eq!(
             Err(ArgsError::FixedFlag("--unsafe-rpc")),
-            node_command(&user)
+            node_command(&user, &notify())
         );
     }
 }
