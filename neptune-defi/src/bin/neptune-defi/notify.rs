@@ -110,9 +110,10 @@ impl FromStr for Notification {
 /// Why `neptune-defi` cannot have `neptune-core` notify it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CommandError {
-    /// `neptune-core` splits a notify command at spaces, so the path to the
-    /// executable may not contain one.
-    SpaceInPath(String),
+    /// `neptune-core` groups words between double quotes, and no character
+    /// escapes another, so the path to the executable may not contain a double
+    /// quote.
+    QuoteInPath(String),
 
     /// The path to the executable is not valid UTF-8.
     NotUtf8,
@@ -121,12 +122,11 @@ pub(crate) enum CommandError {
 impl fmt::Display for CommandError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::SpaceInPath(path) => write!(
+            Self::QuoteInPath(path) => write!(
                 f,
-                "neptune-core runs neptune-defi to notify it, and splits that \
-                 command at spaces, so the path to neptune-defi may not contain \
-                 one. Please move or link neptune-defi to a path without spaces; \
-                 it is now at {path:?}."
+                "neptune-core runs neptune-defi to notify it, and cannot run a \
+                 program whose path contains a double quote. Please move or link \
+                 neptune-defi to a path without one; it is now at {path:?}."
             ),
             Self::NotUtf8 => write!(
                 f,
@@ -139,11 +139,21 @@ impl fmt::Display for CommandError {
 
 /// The `neptune-core` flags that make it notify `executable` on `port`, one
 /// per [`Kind`].
+///
+/// `neptune-core` splits a notify command into words at spaces outside double
+/// quotes, so a path containing a space is quoted. A path without one is not,
+/// because a `neptune-core` older than that rule splits at every space and
+/// would keep the quotes as part of the path.
 pub(crate) fn notify_flags(executable: &Path, port: u16) -> Result<Vec<String>, CommandError> {
     let path = executable.to_str().ok_or(CommandError::NotUtf8)?;
-    if path.contains(' ') {
-        return Err(CommandError::SpaceInPath(path.to_owned()));
+    if path.contains('"') {
+        return Err(CommandError::QuoteInPath(path.to_owned()));
     }
+    let path = if path.contains(' ') {
+        format!("\"{path}\"")
+    } else {
+        path.to_owned()
+    };
 
     Ok(Kind::ALL
         .into_iter()
@@ -256,13 +266,25 @@ mod tests {
     }
 
     #[test]
-    fn a_path_with_a_space_is_refused() {
-        let path = PathBuf::from("/opt/neptune defi/neptune-defi");
+    fn a_path_with_a_space_is_quoted() {
+        for path in [
+            r"/opt/neptune defi/neptune-defi",
+            r"C:\Program Files\Neptune\neptune-defi.exe",
+        ] {
+            let flags = notify_flags(&PathBuf::from(path), 4321).unwrap();
+            assert_eq!(
+                format!("--block-notify=\"{path}\" notify 4321 block %s"),
+                flags[0]
+            );
+        }
+    }
+
+    #[test]
+    fn a_path_with_a_double_quote_is_refused() {
+        let path = r#"/opt/"neptune"/neptune-defi"#;
         assert_eq!(
-            Err(CommandError::SpaceInPath(
-                "/opt/neptune defi/neptune-defi".to_owned()
-            )),
-            notify_flags(&path, 4321)
+            Err(CommandError::QuoteInPath(path.to_owned())),
+            notify_flags(&PathBuf::from(path), 4321)
         );
     }
 

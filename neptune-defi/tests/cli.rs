@@ -48,21 +48,30 @@ fn executables() -> MutexGuard<'static, ()> {
 /// that what lies next to the executable is up to the test.
 struct Sandbox {
     dir: PathBuf,
+
+    /// The directory within `dir` that holds `neptune-defi`.
+    bin: &'static str,
 }
 
 impl Sandbox {
     fn new() -> Self {
+        Self::with_bin("bin")
+    }
+
+    /// A sandbox whose `neptune-defi` lives in `dir/bin`.
+    fn with_bin(bin: &'static str) -> Self {
         let dir = std::env::temp_dir()
             .join("neptune-defi-cli-tests")
             .join(format!("{:016x}", rand::random::<u64>()));
-        fs::create_dir_all(dir.join("bin")).unwrap();
+        fs::create_dir_all(dir.join(bin)).unwrap();
+        let sandbox = Self { dir, bin };
         let _executables = executables();
-        fs::copy(
-            env!("CARGO_BIN_EXE_neptune-defi"),
-            dir.join("bin/neptune-defi"),
-        )
-        .unwrap();
-        Self { dir }
+        fs::copy(env!("CARGO_BIN_EXE_neptune-defi"), sandbox.exe()).unwrap();
+        sandbox
+    }
+
+    fn exe(&self) -> PathBuf {
+        self.dir.join(self.bin).join("neptune-defi")
     }
 
     /// Put a stand-in `neptune-core` in `dir`. It writes its arguments, one
@@ -89,7 +98,7 @@ impl Sandbox {
     fn run(&self, args: &[&str], path: &[&Path]) -> Output {
         let path = std::env::join_paths(path).unwrap();
         let _executables = executables();
-        Command::new(self.dir.join("bin/neptune-defi"))
+        Command::new(self.exe())
             .args(args)
             .env("PATH", path)
             .output()
@@ -107,9 +116,14 @@ impl Sandbox {
         let args = args.lines().map(str::to_owned).collect::<Vec<_>>();
         let (args, notify_flags) = args.split_at(args.len() - 3);
 
-        let exe = self.dir.join("bin/neptune-defi");
+        let exe = self.exe().display().to_string();
+        let program = if exe.contains(' ') {
+            format!("\"{exe}\"")
+        } else {
+            exe
+        };
         for (flag, kind) in notify_flags.iter().zip(["block", "tx", "proposal"]) {
-            let prefix = format!("--{kind}-notify={} notify ", exe.display());
+            let prefix = format!("--{kind}-notify={program} notify ");
             let port = flag
                 .strip_prefix(&prefix)
                 .and_then(|rest| rest.strip_suffix(&format!(" {kind} %s")))
@@ -264,56 +278,55 @@ fn a_neptune_core_that_cannot_be_executed_is_reported() {
     assert!(stderr(&output).contains("Could not start"));
 }
 
-/// The stand-in runs every notify command it was given, the way
-/// `neptune-core` does on an event, and `neptune-defi` takes in each
-/// notification.
+/// A stand-in that runs every notify command it was given, the way
+/// `neptune-core` does on an event, with `id` for `%s`, and then exits. It
+/// runs a command with `eval`, which keeps a double-quoted path one word, as
+/// `neptune-core` does.
+fn notifying_neptune_core(id: &str) -> String {
+    format!(
+        "for arg in \"$@\"; do\n\
+         \x20 case \"$arg\" in\n\
+         \x20   --*-notify=*) eval \"$(printf '%s' \"${{arg#*=}}\" | sed 's/%s/{id}/')\" ;;\n\
+         \x20 esac\n\
+         done\n\
+         sleep 1\n\
+         exit 0"
+    )
+}
+
+/// `neptune-defi` takes in each notification its `neptune-core` sends,
+/// whether or not the path to `neptune-defi` contains a space.
 #[test]
 fn notifications_from_neptune_core_reach_neptune_defi() {
-    let sandbox = Sandbox::new();
-    let id = "0".repeat(80);
-    sandbox.neptune_core(
-        "bin",
-        &format!(
-            "for arg in \"$@\"; do\n\
-             \x20 case \"$arg\" in\n\
-             \x20   --*-notify=*) $(printf '%s' \"${{arg#*=}}\" | sed 's/%s/{id}/') ;;\n\
-             \x20 esac\n\
-             done\n\
-             sleep 1\n\
-             exit 0"
-        ),
-    );
+    for bin in ["bin", "with space"] {
+        let sandbox = Sandbox::with_bin(bin);
+        let id = "0".repeat(80);
+        sandbox.neptune_core(bin, &notifying_neptune_core(&id));
 
-    let output = sandbox.run(&[], &[Path::new("/bin"), Path::new("/usr/bin")]);
+        let output = sandbox.run(&[], &[Path::new("/bin"), Path::new("/usr/bin")]);
 
-    assert_eq!(Some(0), output.status.code(), "{}", stderr(&output));
-    for kind in ["block", "tx", "proposal"] {
-        assert!(
-            stderr(&output).contains(&format!("neptune-defi: {kind} {id}")),
-            "{}",
-            stderr(&output)
-        );
+        assert_eq!(Some(0), output.status.code(), "{}", stderr(&output));
+        for kind in ["block", "tx", "proposal"] {
+            assert!(
+                stderr(&output).contains(&format!("neptune-defi: {kind} {id}")),
+                "{bin}: {}",
+                stderr(&output)
+            );
+        }
+        assert!(sandbox.received(bin).is_some());
     }
 }
 
 #[test]
-fn a_path_to_neptune_defi_with_a_space_is_refused() {
-    let sandbox = Sandbox::new();
-    sandbox.neptune_core("with space", "exit 0");
-    let exe = sandbox.dir.join("with space/neptune-defi");
-    {
-        let _executables = executables();
-        fs::copy(env!("CARGO_BIN_EXE_neptune-defi"), &exe).unwrap();
-    }
+fn a_path_to_neptune_defi_with_a_double_quote_is_refused() {
+    let sandbox = Sandbox::with_bin("with \"quote\"");
+    sandbox.neptune_core("with \"quote\"", "exit 0");
 
-    let output = {
-        let _executables = executables();
-        Command::new(&exe).env("PATH", "").output().unwrap()
-    };
+    let output = sandbox.run(&[], &[]);
 
     assert_eq!(Some(1), output.status.code());
-    assert!(stderr(&output).contains("may not contain one"));
-    assert!(!sandbox.dir.join("with space/args").exists());
+    assert!(stderr(&output).contains("contains a double quote"));
+    assert_eq!(None, sandbox.received("with \"quote\""));
 }
 
 /// The `notify` subcommand on its own, without a `neptune-defi` listening:
