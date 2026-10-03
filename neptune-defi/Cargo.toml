@@ -25,6 +25,7 @@ tasm-lib = "9.0.0"
 neptune-consensus = { version = "0.19.0", path = "../neptune-consensus" }
 neptune-mutator-set = { version = "0.19.0", path = "../neptune-mutator-set" }
 neptune-primitives = { version = "0.19.0", path = "../neptune-primitives" }
+tokio = { version = "1.47", features = ["macros", "net", "process", "rt-multi-thread", "signal", "time"] }
 
 [dev-dependencies]
 # Depending on this crate with the `arbitrary-impls` feature turns that feature
@@ -37,7 +38,6 @@ neptune-rpc-client = { version = "0.19.0", path = "../neptune-rpc/client" }
 neptune-wallet = { version = "0.19.0", path = "../neptune-wallet" }
 num-traits = "0.2"
 rand = "0.10"
-tokio = { version = "1.47", features = ["macros", "rt-multi-thread", "net", "time"] }
 
 proptest = "1.7"
 proptest-arbitrary-interop = "0.1"
