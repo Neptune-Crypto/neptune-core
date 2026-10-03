@@ -18,6 +18,15 @@ arbitrary-impls = [
     "neptune-primitives/arbitrary-impls",
 ]
 
+# builds `neptune-core-stand-in`, which `neptune-defi`'s integration tests run
+# in place of `neptune-core`
+test-stand-in = []
+
+[[bin]]
+name = "neptune-core-stand-in"
+path = "src/bin/neptune-core-stand-in.rs"
+required-features = ["test-stand-in"]
+
 [dependencies]
 arbitrary = { version = "1.4.1", features = ["derive"], optional = true }
 tasm-lib = "9.0.0"
@@ -28,9 +37,10 @@ neptune-primitives = { version = "0.19.0", path = "../neptune-primitives" }
 tokio = { version = "1.47", features = ["macros", "net", "process", "rt-multi-thread", "signal", "time"] }
 
 [dev-dependencies]
-# Depending on this crate with the `arbitrary-impls` feature turns that feature
-# on for the crate under test and its dependencies when running `cargo test`.
-neptune-defi = { path = ".", features = ["arbitrary-impls"] }
+# Depending on this crate with the `arbitrary-impls` and `test-stand-in`
+# features turns them on for the crate under test and its dependencies when
+# running `cargo test`.
+neptune-defi = { path = ".", features = ["arbitrary-impls", "test-stand-in"] }
 
 neptune-cash = { version = "0.19.0", path = "../neptune-core" }
 neptune-rpc-api = { version = "0.19.0", path = "../neptune-rpc/api" }
