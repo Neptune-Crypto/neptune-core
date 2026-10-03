@@ -732,9 +732,10 @@ D_max  =  D₀ + (K-1)·G  ≥  t + 3 years
 ```
 
 The accepter knows `t` exactly — it is their own transaction's timestamp — but
-it is not final. A composer rebuilds or re-times the coinbase when the mempool
-changes, and a grid point sitting *just* above `t + 3 years` may fail to clear
-`t' + 3 years` afterwards, forcing them to bump `k` and re-prove path (b). So
+it is not final. The plugin rebuilds the coinbase transaction whenever the tip
+moves (§4.9), with a fresh timestamp each time, and a grid point sitting *just*
+above `t + 3 years` may fail to clear `t' + 3 years` afterwards, forcing it to
+bump `k` and re-prove path (b). So
 the accepter takes a step of headroom rather than the tightest point that
 clears: above the cliff it costs them nothing, and the proposer at most one
 extra grid step.
@@ -781,7 +782,9 @@ X  ≥  g·C
 Below that line the fill is still constructible — locking more than half is
 always allowed — but part of the reward is then funded from coins the composer
 was not forced to lock. Above it the reward is covered entirely by the forced
-lock. A composer keeping the whole subsidy is always above the line; one paying
+lock, and the forced lock exceeds the reward by `(X − g·C)/2`, which the
+composer locks out of their own outputs. A composer keeping the whole subsidy
+therefore locks half the offered amount on top of the reward. A composer keeping the whole subsidy is always above the line; one paying
 half of it to a guesser is never above it, because that would need `X ≥ C/2`,
 which is `Y`. So order-filling is for composers who guess their own blocks.
 
@@ -799,27 +802,26 @@ bounded by taking at most one order per block. There is nothing for a fee to
 reimburse. A proposer who wants to be filled sooner raises `X`, which is the one
 number orders differ in.
 
-**Where the policy lives: `CoinbaseDistribution`.** That struct is already the
-composer's statement of where a block's money goes, already the one place it is
-validated (`try_new`, `coinbase_distribution.rs:65-73`), and already has an
-override latch and an RPC (`set_coinbase_distribution`). The fill belongs in it
-rather than beside it, which is also what makes the validation possible:
-checking "locked is at least half of total output" requires the total output,
-and the order's incoming `X` is part of that total.
+**Where the policy lives: in the plugin.** The SOFuN plugin writes the whole
+coinbase transaction of a block that fills an order (§4.9), so it applies the
+rule itself, with `X` in the total it halves. The node's `CoinbaseDistribution`
+is not consulted for that block.
 
 ### 4.8 The order index
 
 Someone has to remember which orders are open. The question is who.
 
-**The node.** Three reasons, in order of weight. The composer consults the index
-while building a block template, which happens inside the node — putting an
-external service on that path would be absurd. The two facts the index needs are
-already parsed out of every block by the node: the announcements it carries, and
-the removal records that tell you which order UTXOs have just been spent.
-And reorganizations, which are the only hard part of keeping such a thing
-correct, are handled in the node already; every consumer that built its own
-index would be rewriting that logic, each in their own way, against a chain
-whose history changes underneath them.
+**The SOFuN plugin.** The node knows nothing about orders and must not: an
+overlay protocol is a separate application, and the node's whole part in SOFuN
+is to accept a coinbase transaction someone else built (§4.9). So the index
+lives in the SOFuN plugin, a separate process that `neptune-defi` serves.
+`neptune-defi` spawns the node, receives its notifications of new blocks,
+mempool transactions and block proposals, and relays them to every plugin
+connected to it. A plugin reads whatever else it needs from the node over
+JSON-RPC. The two facts the index needs from a block are fields of its
+transaction kernel: the announcements it carries, and the removal records that
+tell which order UTXOs have just been spent. The plugin that fills orders is
+also the one that consults the index, so the index sits where it is used.
 
 **It is shaped like the mempool, not like the wallet.** It holds other people's
 standing offers rather than the operator's own belongings, it is kept in step
@@ -842,47 +844,44 @@ order under it may demand an amount the composer cannot pay. Answering from the
 front of a queue means one queue per demanded amount, maintained on every
 insert, every retirement and every rollback, and `demanding` (§4.10) does the
 filter and the ranking in one pass instead. It is a few thousand comparisons
-once per template build. When a template build measurably notices, bucket by
-demanded amount and keep a queue on `X` within each bucket.
+once per coinbase transaction the plugin builds. When that measurably notices,
+bucket by demanded amount and keep a queue on `X` within each bucket.
 
 **Verify on insert, not on query.** An announcement is a hint (§4.3, §7.3), so
 admitting one to the index means rebuilding the lock script from it, computing
 the order UTXO's addition record, and finding that record among the outputs of
 the announcement's own block (§4.10). Done once
 when the announcement is first seen, a row in the index is a verified order, and
-the composer building a template can take the top of the queue without checking
-anything.
+the plugin building a coinbase transaction can take the best row without
+checking it again.
 
-**The driver runs off the block-processing path.** Verifying an announcement
-is work an attacker chooses: an announcement is a permissionless write, and
-checking one means building a Triton program of `K` addition records and
-hashing it. That cannot sit inside the write that sets the tip, where every
-other consumer of the node waits behind it. So the driver is a task of its own.
+**Verification runs outside the node.** Verifying an announcement is work an
+attacker chooses: an announcement is a permissionless write, and checking one
+means building a Triton program of `K` addition records and hashing it. The
+plugin is a process of its own, so that work never sits inside the write that
+sets the node's tip, and its cost falls on the plugin alone.
 
-**The node sends the driver how the tip moved.** Every time `set_new_tip` runs,
-it sends each subscribed driver a `TipMoved` event: the last block the old and
-the new tip share, the abandoned blocks above it, and the blocks after it up to
-the new tip. When the tip extends, that is the old tip and the one new block.
-After a reorganization it is the whole connecting path, both halves, which the
-node works out, since the node is what just switched branches. The order book
-needs only the shared block from the abandoned half, because it keeps closed
-orders and reopens them by height, but another protocol may need the
-abandoned blocks themselves, so the event carries them. The driver never reads a block the
-event did not bring, so it keeps no history and asks the node for none. The
-channel is unbounded and sending on it never waits, so a slow driver cannot
-hold up the write that sets the tip; an event is never dropped, because a book
-that missed the block spending an order would go on listing it. The composer
-reaches the book through a handle to the same task, by sending a query and
-awaiting the answer, which the task gives between two events.
+**The plugin learns of each new tip from a notification.** The node runs its
+`--block-notify` command on every new tip, and `neptune-defi` relays it to the
+plugin, whose driver fetches the block over JSON-RPC. If the block's parent is
+the book's tip, the driver observes the block and applies the result. If it is
+not, the chain reorganized: the driver walks the new branch back by parent hash
+until it reaches a block it applied before, rolls the book back to that block,
+and applies the new branch oldest first. To recognize such a block, the driver
+keeps the identities of the blocks it applied, as deep as the book keeps closed
+orders. Notifications can arrive faster than the driver handles them; none is
+dropped, because a book that missed the block spending an order would go on
+listing it.
 
-The book therefore trails the node's tip by however long verification takes. An
-order confirmed in block *h* cannot be filled before block *h+1* in any case, so
-a driver that keeps up with block time costs a composer nothing, and one that
-falls behind costs it orders it would otherwise have filled, never a wrong fill.
+The book therefore trails the node's tip by however long fetching and
+verification take. An order confirmed in block *h* cannot be filled before
+block *h+1* in any case, so a driver that keeps up with block time costs a
+composer nothing, and one that falls behind costs it orders it would otherwise
+have filled, never a wrong fill.
 
 **On a reorg, roll back to the shared block.** The book only has to notice that
-a reorganization happened, which it does because the event's shared block is
-not its tip, and roll back to it. Closed entries stay in the book for that
+a reorganization happened, which it does because the new block's parent is not
+its tip, and roll back to the last block the two branches share. Closed entries stay in the book for that
 reason (§4.10). The mempool's answer to a reorg is to clear itself
 (`mempool.rs:1324-1333`), which is fine for transactions that will be
 re-broadcast, and wrong here: nothing re-broadcasts an order, and a book does
@@ -892,130 +891,115 @@ not replay history to find it again.
 starts a book does not go looking for older orders. The cost is that a freshly
 started composer sees an order book that fills up over an order's shelf life of
 six months rather than at once, and what it buys is that no part of the book
-needs a block the node has not just been sent.
+needs a block the plugin has not just been notified of.
 
-**Everyone else asks the node.** An RPC returning open orders keeps explorers
-and third-party wallets from reimplementing any of the above.
+**Everyone else asks the plugin.** A query for open orders, served through
+`neptune-defi`, keeps explorers and third-party wallets from reimplementing any
+of the above.
 
-**Nothing here needs archival state.** Admitting an order needs its own
-block's outputs, retiring one needs the inputs of the block that spends it, and
-both arrive in events. So a light node can index, as well as place and cancel
-orders, which are ordinary wallet operations on its own UTXOs.
+**Indexing needs no archival state.** Admitting an order needs its own block's
+outputs, retiring one needs the inputs of the block that spends it, and both are
+in the block the notification names. So a light node can index, as well as place
+and cancel orders, which are ordinary wallet operations on its own UTXOs.
 
-**Filling needs a membership proof, and the wallet keeps it.** Spending the
-order UTXO needs a mutator-set membership proof for a UTXO the composer does
-not own. Every ingredient is public — the item, both randomnesses and the AOCL
-leaf index — so a wallet can keep one from the moment the order is confirmed,
-the same way it keeps them for its own UTXOs: it proves membership against the
-accumulator of the block that confirmed the order and updates the proof with
-every block after. The driver hands the wallet each order it admits and each it
-retires. The cost is per-block work in proportion to the number of open orders,
-and it is borne only by nodes that compose.
+**Filling needs a membership proof, and the node restores it on demand.**
+Spending the order UTXO needs a mutator-set membership proof for a UTXO the
+composer does not own. Every ingredient is public — the item, both randomnesses
+and the AOCL leaf index — so the order's absolute index set is public too, and
+`wallet_restoreMembershipProof` returns the proof's chain-dependent parts for it,
+relative to the tip's mutator set. The plugin asks once per coinbase transaction
+it builds, and keeps nothing between blocks. The node answers from its archival
+mutator set, so a composer that fills orders runs an archival node.
 
 ### 4.9 How a composer executes a fill
 
-This is the one part of SOFuN that reaches into the mining path: the order UTXO
-becomes an input of the composer's coinbase transaction, which only the hard
-fork of §5 allows. The composer's node builds that transaction; the process
-that runs the book decides what goes into it, and the node knows nothing about
-orders.
+A fill is a coinbase transaction that spends the order UTXO through path (b) of
+its lock script and pays the reward at a point of the order's grid. The SOFuN
+plugin builds the whole transaction and hands it to the node with
+`mining_setCoinbaseTx`, as a primitive witness. The node proves it and uses it
+in place of the coinbase transaction it would have built. It knows nothing
+about orders. Only the hard fork of §5 makes such a transaction valid.
 
-**Less is missing than it looks.** `TransactionDetails::new` already takes
-inputs and a coinbase in the same call (`transaction_details.rs:242`);
-`new_with_coinbase` simply passes `TxInputs::empty()` (`:202`). And an input is
-not tied to a wallet key: `UnlockedUtxo::unlock` (`unlocked_utxo.rs:26`) takes a
-`LockScriptAndWitness`, which is a program plus raw nondeterminism. A foreign
-UTXO under a custom script is already representable. What is missing is a
-coinbase constructor that accepts one:
-`prepare_coinbase_transaction_stateless` (`composer_parameters.rs:188`) builds
-outputs and nothing else.
+**What the plugin builds.**
 
-**The witness depends on a kernel only the node builds.** The fill's witness
-must contain the transaction's output list and its authentication path against
-the kernel MAST hash (§4.2), and the index of the reward among the outputs. The
-node chooses the kernel, since the composer's own outputs, its timestamp and
-its other merges are its own, so the book process cannot compute the witness.
-But `TransactionDetails::transaction_kernel` (`transaction_details.rs:362-379`)
-builds removal records out of each input's UTXO and membership proof and never
-touches its `lock_script_and_witness`, so the kernel does not depend on the
-witness. The node assembles the details once with an empty witness on the fill
-input, takes the kernel, completes the witness against it, and assembles again.
+- *Input:* the order UTXO, with its lock script and the fill witness, and its
+  membership proof restored as §4.8 describes.
+- *Outputs:* the reward at the grid point §4.6 picks, and the composer's share,
+  paid to addresses of the node's own wallet from `personal_generateAddress`.
+  The node registers no expected UTXOs for a transaction it did not build, so
+  the composer's outputs carry on-chain notifications, which is how the wallet
+  finds them.
+- *Coinbase:* the block subsidy. *Fee:* the guesser's share.
+- *Announcements:* a lustration announcement for the order input whenever the
+  input's AOCL range requires one. On a young chain every input requires one.
+  Lustration reveals the input's amount, `X`, which the order announcement made
+  public already.
 
-**A witness template.** The book process hands the node the order input as its
-UTXO, lock script and membership proof, and a witness template: the tokens that
-do not depend on the kernel, and slots the node fills from the kernel it built.
-A slot asks for one of four things: a kernel field's encoding at a memory
-address, that field's size as a token, its authentication path among the
-digests, or the index of a given addition record among the outputs. The fill
-witness is the cancel-or-fill words, then the outputs field's size and the
-reward's index as tokens, the outputs field in memory, and its authentication
-path, which is five words and four slots. The node fills slots and knows nothing
-of what they are for, so the same template serves any lock script that
-authenticates kernel fields.
+**The witness depends on the kernel, and the kernel does not depend on the
+witness.** The fill witness contains the transaction's output list, its
+authentication path against the kernel MAST hash (§4.2), and the index of the
+reward among the outputs. The kernel's removal records are computed from each
+input's UTXO and membership proof, never from its lock script witness. So the
+plugin builds the transaction with any witness on the order input, takes the
+kernel, computes the fill witness against it, and puts it in place. The node
+has nothing to complete.
 
-**The amounts.** The order contributes `X` as an input and the reward takes `Y`
-out as an output, so the pool the composer distributes among their own outputs
-shrinks by the difference. Writing `C` for the subsidy and `f` for the guesser
-fee:
+**The amounts.** Write `C` for the subsidy and `f` for the fee. By
+`total_input + coinbase = total_output + fee`, the total output is
+`C − f + X`, and the composer's outputs receive what the reward leaves of it:
 
 ```
-pool  =  C - f - Y + X
+own  =  C − f + X − Y
 ```
 
-which is exactly what the no-inflation identity `total_input + coinbase =
-total_output + fee` requires, with `total_output = pool + Y`. In code this is
-one subtraction inside `ComposerParameters::tx_outputs`
-(`composer_parameters.rs:77-119`), which already computes a total to distribute
-and then splits it by promille, plus one appended output for the reward.
-
-**What `CoinbaseDistribution::try_new` should require.** Its present invariant
-is that at least half of the distributed amount is time-locked
-(`coinbase_distribution.rs:65-73`). Consensus wants time-locked output to be at
-least half of *total* output, and the reward counts on the time-locked side, so
-what the composer's own outputs must satisfy is
+The time-lock rule (§5) requires at least half of the total output to be
+time-locked, and the reward `Y = C/2` counts on the time-locked side. So the
+composer's own outputs must lock
 
 ```
-own_timelocked  ≥  (pool - Y) / 2
+own_timelocked  ≥  (X − f) / 2
 ```
 
-Today's rule is the `Y = 0` case of that. Applying the present rule unchanged to
-the reduced pool would still be *valid* — locking more than required always is —
-but it would over-lock, costing the composer liquidity they were entitled to. So
-the invariant generalizes rather than breaking, and the term it needs is `Y`,
-which is why the fill belongs inside the distribution rather than beside it
-(§4.7).
+which with `f = g·C` is §4.7's excess. A composer keeping the whole subsidy pays
+no fee and locks `X/2` of their own. The input raises the amount that must be
+locked; it never lowers it.
 
-**Where the choosing happens.** The book process picks the order, the best
-one asking for this block's time-locked subsidy, and sets the coinbase
-template over RPC: the reward output, stated in full, and the order input with
-its witness template. The node applies the template whenever it composes, and a
-re-time re-enters that path, so the witness is completed again against the new
-kernel with no special handling.
+**What the plugin checks before setting the transaction.** The book verified the
+order when it admitted it (§4.8), but a block may have arrived since. So the
+plugin checks that the membership proof was restored against the current tip,
+that `Y` equals this block's time-locked subsidy, and that `k` clears §4.6's
+bound with its headroom, and it validates the primitive witness, which runs
+every lock script and type script once. These checks are cheap next to
+proving, and they are where the composer commits their own money to a
+stranger's script.
 
-**What the composer checks before proving.** The index verified the order when
-it admitted it (§4.8), but a block may have arrived since, so the book process
-re-checks when it sets the template: the order's membership proof against the
-current mutator set (§4.8), the rebuilt lock script's hash against the UTXO's
-own, `Y` against this block's
-time-locked subsidy, and `k` against §4.6's bound with its headroom. These are
-cheap next to proving, and they are the boundary where the composer commits
-their own money to a stranger's script.
+**What the node checks, every time it composes.** It uses the transaction if and
+only if the consensus rules at the block's height allow coinbase inputs, and
+the transaction is valid, was built against the mutator set after the
+predecessor, claims a non-negative coinbase no greater than the block subsidy,
+pays a non-negative fee, is timestamped no earlier than the minimum block time
+after the predecessor, and lustrates every input that must lustrate, by no more
+than the lustration counter allows. A new block makes the transaction stale,
+since its membership proof and mutator set hash belong to the old tip, so the
+plugin builds a new one for every tip it is notified of.
 
-**A fill must never stop a block.** If anything fails — a check, the proof, a
-re-time that invalidates the witness — the node drops the template whole, the
-reward with the input, and composes the block without it. The block subsidy is worth more than any order, and no
-part of this may sit on the critical path in a way that can block it.
+**A fill must never stop a block.** If any check fails, the node composes the
+block with its own coinbase transaction. The block subsidy is worth more than
+any order, and no part of this may sit on the critical path in a way that can
+block it.
+
+**Before the fork.** `ConsensusRuleSet::allows_coinbase_inputs` decides whether
+the node accepts the transaction. It holds on RegTest, where blocks carry mock
+proofs and the rule the fork lifts never runs, and nowhere else until the fork
+sets its activation heights. A fill is tested end to end on RegTest.
 
 
 ### 4.10 Replicating the book, and what the interface has to be
 
-§4.8 settles where the index lives for the composer, which is in the node,
-because the composer consults it while building a template. Everyone else is a
-different problem: a wallet, a market-maker script, an explorer. The end state
-for those is a separate process that subscribes to a node, takes block and
-mempool updates, and answers queries from whatever else is running. Nothing
-below is a reason to build that now, and everything below is chosen so that
-building it later costs a day rather than a rewrite.
+§4.8 puts the index in the SOFuN plugin, because the plugin both keeps it and
+consults it. Other consumers — a wallet, a market-maker script, an explorer —
+replicate the same book, so the book is written once, as a library, and
+everything below is chosen so that any process can run it.
 
 **The book is a container, not a chain consumer.** Split the work in two. A
 *driver* touches the chain: it finds candidate announcements, decodes them under
@@ -1231,7 +1215,7 @@ configuration by name, as `demanding` is. No method of the generic book reads
 book of trait objects compiles. It solves a variation that cannot occur: a book
 replicates one pair, `pair_id` fixes that pair's schema, and every order in it
 was therefore decoded the same way. It also costs twice. The composer reads this
-structure on every template build and wants a contiguous run ordered by offered
+structure on every coinbase transaction it builds and wants a contiguous run ordered by offered
 amount, not a vector of pointers into separate allocations. And a SOFuN consumer
 holding `&dyn Order` cannot reach `d_zero`, so it either downcasts through `Any`,
 turning a compile-time fact into a runtime failure, or the trait grows a release
@@ -1301,44 +1285,19 @@ removal record rather than an announcement, and covers a fill and a cancel
 alike. A driver that watches only announcements builds a book that grows and
 never shrinks.
 
-**Two ways a driver talks to the node, and which protocol uses which.** A
-driver can run inside the node, as a tokio task the node holds a handle to, or
-outside it, as a separate process that registers with the node and receives a
-message whenever the tip moves. A third arrangement, a book owned by the node's
-state and updated by a direct call from `set_new_tip`, is ruled out by §4.8:
-verification is work an attacker chooses, and it would run under the write
-lock that sets the tip.
-
-A DeFi protocol layered on Neptune is in principle a separate application, and
-belongs in a separate process. SOFuN is the one exception. The composer is one
-of the two parties to every SOFuN trade, and the fill has to be built into the
-coinbase transaction the composer is already assembling (§4.9), so its driver
-runs inside the node as a task.
-
-Both drivers receive the same events, and only the way the events reach them
-differs. The task subscribes to `GlobalState` directly. A separate process
-needs a subscription endpoint that sends it the same events, which is not
-worth building before a second protocol needs it. Everything else is the same
-code in both, and lives in this crate.
-
-Nothing about the events or the loop that consumes them is specific to orders,
-and every protocol layered on Neptune follows the chain the same way. So both
-live in `neptune_defi::driver`, and a protocol supplies only the state the
-driver keeps in step with the chain. For standing swap orders that state is
-the book, and its `on_tip_moved` is a rollback to the event's ancestor followed by `observe` and
-`apply` on every arriving block:
+**The driver runs in the plugin, and talks to the node through `neptune-defi`
+and JSON-RPC.** A DeFi protocol layered on Neptune is a separate application,
+and SOFuN is no exception: the fill reaches the composer's block through
+`mining_setCoinbaseTx` (§4.9), so nothing about it needs to run inside the
+node. Every plugin follows the chain the same way — a notification names a
+block, the driver fetches it, and a parent other than the last block it applied
+means a rollback first (§4.8) — so that loop is written once in
+`neptune-defi`, and a protocol supplies only the state it keeps in step with the
+chain. For standing swap orders that state is the book, and each arriving block
+is turned into what the book reads and then passed to `observe` and `apply`:
 
 ```rust
-// neptune_defi::driver::chain
-
-/// The tip moved from the old tip to the new one. `ancestor` is the last
-/// block they share, `leaving` the abandoned blocks above it from the old tip
-/// down, and `arriving` the blocks after it up to the new tip, oldest first.
-pub struct TipMoved {
-    pub ancestor: BlockId,
-    pub leaving: Vec<ObservedBlock>,
-    pub arriving: Vec<ObservedBlock>,
-}
+// neptune_defi::chain
 
 /// What an overlay protocol needs to know about one block.
 pub struct ObservedBlock {
@@ -1350,42 +1309,30 @@ pub struct ObservedBlock {
     pub spent: Vec<AbsoluteIndexSet>,
 }
 
-// neptune_defi::driver
-
-/// State kept in step with the chain by a driver.
-pub trait Subscriber {
-    fn on_tip_moved(&mut self, event: TipMoved);
-}
-
-/// A driver that keeps `state` in step with `events`, and a handle whose
-/// `query(|state| ...)` answers between two events. The caller spawns the
-/// future.
-pub fn driver<F: Subscriber + Send + 'static>(
-    state: F,
-    events: mpsc::UnboundedReceiver<TipMoved>,
-) -> (DriverHandle<F>, impl Future<Output = ()> + Send);
-
 // neptune_defi::standing_swap_order::observe
 
-impl<C: Swappable> Subscriber for OrderBook<C> { ... }
+impl<C: Swappable> OrderBook<C> {
+    pub fn observe(&self, block: &ObservedBlock) -> BlockUpdate<C>;
+}
 ```
 
 **What is reversible, and what is not.** The process boundary is the cheapest
 thing here: discovery, validation, `apply` and `roll_back_to` are the same logic
-whether the node's own events drive them or a subscription does, and only the
-channel differs. What is permanent is the wire format of §4.3 — the flag value,
+whichever process runs the driver, and only the channel that brings the blocks
+differs. What is permanent is the wire format of §4.3 — the flag value,
 how `pair_id` is derived, the 28 elements and their two readings, the reverse
 field order, and `padding` being zero. Once orders exist on mainnet
 under generic version 1 or SOFuN version 0, those cannot be changed without a
 new version that fillers must adopt. Scrutiny belongs there rather than on which process runs the book.
 
-**One rule keeps the rest reversible: dependency direction.** `neptune-defi`
-depends on `neptune-consensus` and `neptune-primitives` and on nothing else in
-the tree, so a separate process can link it unchanged. Never add an edge
-pointing at node internals, which in particular means block processing must not
-call into the book. `apply` and `roll_back_to` take data, not a `Block` and not
-a handle to node state, so the node's events can drive them now and a
-subscription later without the book learning which.
+**One rule keeps the rest reversible: dependency direction.** The
+`neptune-defi` library depends on `neptune-consensus`, `neptune-mutator-set` and
+`neptune-primitives` and on no part of the node, so any process can link it
+unchanged; only its tests start a node, to fill an order end to end. The node
+never depends on `neptune-defi`, which in particular means block processing
+cannot call into the book. `apply` and `roll_back_to` take data, not a `Block`
+and not a handle to node state, so the book never learns which process feeds
+it.
 
 **Build nothing for mempool yet.** Going from "an order is in the book" to "an
 order has a state" is a mechanical change when the time comes, and a
@@ -1435,8 +1382,9 @@ inputs bring. An input therefore raises the amount that must be time-locked,
 never lowers it. For a fill, the order's `X` raises the total output to
 `(1-g)·C + X`, which is what §4.7's analysis of the composer's lock starts from.
 
-SOFuN is therefore, apart from the fork, a wallet-, lock-script- and
-announcement-layer feature.
+SOFuN is therefore, apart from the fork, a lock-script, announcement and
+plugin feature. The node's part is one RPC, `mining_setCoinbaseTx`, which takes
+a coinbase transaction and knows nothing about orders (§4.9).
 
 ## 6. Merging
 
@@ -1571,7 +1519,8 @@ randomness per order.
       transaction (§4.6)
 - [x] Discovery problem identified; design space enumerated (§2)
 - [x] All code-referenced claims verified against the tree at `28ff10f86`
-- [x] Existing `set_coinbase_distribution` latch found; only inputs are missing
+- [x] Fill interface settled: the plugin builds the whole coinbase transaction,
+      and the node takes it through `mining_setCoinbaseTx` (§4.9)
 - [x] Generalization goal recorded (§1.5)
 - [x] Name chosen for the general primitive: **standing swap order** (§1.5)
 - [x] Partial fills decided deliberately for the general case: out on grounds of
@@ -1626,38 +1575,47 @@ randomness per order.
 - [x] Order-announcement / lock-script consistency check (§7.3) as a library
       function: `StandingSwapOrder::order_utxo`, whose addition record an
       accepter or a validator compares with the UTXO being spent
-- [x] Order index in the node: insert-time verification, and the composer's
-      query by `Y` answered by a scan (§4.8)
+- [x] Order index: insert-time verification, and the composer's query by `Y`
+      answered by a scan (§4.8)
 - [x] The book takes `BlockUpdate` and performs no chain lookups; a row holds a
       `StandingSwapOrder` rather than repeating its fields (§4.10)
 - [x] The driver, which is the other half of that split: candidate
       announcements, §7.3's check against the outputs of the announcement's own
       block, and the AOCL leaf index a row is keyed by (§4.10)
-- [x] The driver's event loop written once, generic over any `Subscriber`, and run by the node as a task of its own, off the
-      write that sets the tip (§4.8, §4.10)
-- [x] `set_new_tip` sends every subscriber the path from the previous tip to
-      the new one, and never waits on a subscriber (§4.8)
-- [x] The composer's queries, answered by the task between events through its
-      handle (§4.8)
-- [x] No part of the book or the driver reads archival state; a book knows the
-      orders placed after it was created (§4.8)
-- [ ] The composer's wallet keeps a membership proof for every open order the
-      driver hands it, and drops it when the order closes (§4.8)
-- [ ] Deferred until a second protocol needs it: a subscription endpoint for
-      drivers in separate processes (§4.10)
+- [x] The node notifies on new blocks, mempool transactions and block proposals
+      (`--block-notify`, `--tx-notify`, `--proposal-notify`)
+- [ ] The driver loop in `neptune-defi`, written once for every plugin: fetch
+      each notified block, roll back on a parent the driver did not apply, and
+      apply (§4.8, §4.10)
+- [x] No part of the book reads archival state; a book knows the orders placed
+      after it was created (§4.8)
+- [x] The order UTXO's membership proof restored on demand over JSON-RPC
+      (`wallet_restoreMembershipProof`) (§4.8)
+- [ ] The `neptune-defi` binary: spawns the node with its flags fixed, relays
+      its notifications, and serves plugins that connect like peers
 - [x] Orders retired on a spent order UTXO, not only admitted on an
       announcement (§4.10)
 - [x] An order opened by its own block, closed by a block spending its UTXO,
-      and reopened by a reorganization abandoning that block, tested against
-      blocks set as the node's tip
-- [ ] A fill and a cancel through the lock script, tested against chain data
+      and reopened by a rollback abandoning that block, tested against observed
+      blocks
+- [x] A fill through the lock script, tested end to end on a RegTest node (§4.9)
+- [ ] A cancel through the lock script, tested against chain data
 - [x] Book rollback on reorg, and an update that does not extend the tip
       rejected rather than applied (§4.10)
 - [x] Closed entries retained for rollback and pruned once their closing block
       lies deeper than a depth given when the book is built (§4.10)
-- [ ] `neptune-defi` still depends on nothing below `neptune-consensus`, checked
-      in CI (§4.10)
-- [ ] RPC exposing open orders
+- [ ] The `neptune-defi` library depends on no part of the node, checked in CI
+      (§4.10)
+- [ ] Plugin query exposing open orders
+
+### Phase 2b — fill
+- [x] `ConsensusRuleSet::allows_coinbase_inputs`: true on RegTest, false
+      elsewhere until the fork (§4.9)
+- [x] `mining_setCoinbaseTx`, honored by every composer, with a fallback to the
+      node's own coinbase transaction whenever the set one does not fit (§4.9)
+- [ ] The SOFuN plugin: keeps the book, and builds and sets a fill for every
+      new tip (§4.9)
+- [ ] The fork's activation heights, once known (§5)
 
 ### Phase 3 — proposer side (wallet / `neptune-cli`)
 - [ ] Wallet API to place an order
