@@ -43,11 +43,6 @@ pub(crate) fn write(path: &Path) -> io::Result<Cookie> {
     Ok(cookie)
 }
 
-/// `cookie` in lowercase hex, as a plugin sends it.
-pub(crate) fn hex(cookie: &Cookie) -> String {
-    cookie.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -84,15 +79,5 @@ mod tests {
         assert_eq!(0o600, mode(&path));
         assert_eq!(0o700, mode(path.parent().unwrap()));
         let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn hex_is_lowercase_and_two_digits_per_byte() {
-        let mut cookie = [0; COOKIE_LENGTH];
-        cookie[0] = 0x0a;
-        cookie[1] = 0xff;
-        let hex = hex(&cookie);
-        assert_eq!(2 * COOKIE_LENGTH, hex.len());
-        assert!(hex.starts_with("0aff00"));
     }
 }

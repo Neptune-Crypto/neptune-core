@@ -126,7 +126,7 @@ async fn run(user_args: Vec<String>) -> ExitCode {
         .expect("a bound listener has an address");
     let (to_plugins, _) = broadcast::channel(plugins::BACKLOG);
     let terms = plugins::Terms {
-        cookie: cookie::hex(&cookie).into(),
+        cookie: neptune_defi::plugin::cookie_hex(&cookie).into(),
         rpc: node_command.rpc_address,
     };
     tokio::spawn(plugins::serve(plugin_listener, terms, to_plugins.clone()));

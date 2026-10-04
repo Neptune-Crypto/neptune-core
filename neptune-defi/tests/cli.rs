@@ -376,21 +376,18 @@ fn the_notify_subcommand_fails_on_malformed_arguments_or_no_listener() {
     }
 }
 
-/// A plugin that reads the cookie from the data directory is welcomed, told
-/// where `neptune-core` serves JSON-RPC, and sent the notifications it
-/// subscribed to.
+/// A plugin that connects with [`neptune_defi::plugin::connect`] is welcomed,
+/// told where `neptune-core` serves JSON-RPC, sent the notifications it
+/// subscribed to and no others, and disconnected when `neptune-core` exits.
 #[test]
 fn a_plugin_receives_the_notifications_it_subscribed_to() {
     use std::io::BufRead;
     use std::io::BufReader;
-    use std::io::Write;
 
-    use neptune_defi::plugin::FromPlugin;
-    use neptune_defi::plugin::Hello;
+    use neptune_defi::plugin::connect;
+    use neptune_defi::plugin::cookie_path;
+    use neptune_defi::plugin::Event;
     use neptune_defi::plugin::Kind;
-    use neptune_defi::plugin::ToPlugin;
-    use neptune_defi::plugin::COOKIE_FILE_NAME;
-    use neptune_defi::plugin::PROTOCOL_VERSION;
 
     let sandbox = Sandbox::new();
     sandbox.neptune_core("bin");
@@ -423,46 +420,38 @@ fn a_plugin_receives_the_notifications_it_subscribed_to() {
         .to_owned();
     // The cookie lies next to neptune-core's own, in its data directory for
     // the network, which is where a plugin looks for it.
-    let cookie_path = neptune_primitives::data_directory::DataDirectory::get(
-        Some(sandbox.dir.join("data")),
-        neptune_primitives::network::Network::RegTest,
-    )
-    .unwrap()
-    .rpc_cookie_file_path()
-    .with_file_name(COOKIE_FILE_NAME);
-    let cookie = fs::read(cookie_path)
-        .unwrap()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
+    let cookie_path = cookie_path(
+        &neptune_primitives::data_directory::DataDirectory::get(
+            Some(sandbox.dir.join("data")),
+            neptune_primitives::network::Network::RegTest,
+        )
+        .unwrap(),
+    );
 
-    let stream = std::net::TcpStream::connect(&address).unwrap();
-    let mut lines = BufReader::new(stream.try_clone().unwrap()).lines();
-    let hello = FromPlugin::Hello(Hello {
-        name: "test".to_owned(),
-        protocol: PROTOCOL_VERSION,
-        cookie,
-        subscribe: vec![Kind::Proposal],
+    // The stand-in sends one notification of each kind, and then exits,
+    // which makes neptune-defi exit and close the connection.
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let received = runtime.block_on(async {
+        let address = address.parse().unwrap();
+        let mut connection = connect(address, &cookie_path, "test", vec![Kind::Proposal])
+            .await
+            .unwrap();
+        assert_eq!(
+            "127.0.0.1:9797".parse::<std::net::SocketAddr>().unwrap(),
+            connection.rpc()
+        );
+
+        let mut received = vec![];
+        while let Some(event) = connection.next().await.unwrap() {
+            received.push(event);
+        }
+        received
     });
-    writeln!(&stream, "{}", serde_json::to_string(&hello).unwrap()).unwrap();
 
-    let mut receive = || serde_json::from_str::<ToPlugin>(&lines.next().unwrap().unwrap()).unwrap();
-    match receive() {
-        ToPlugin::Welcome(welcome) => {
-            assert_eq!(
-                "127.0.0.1:9797".parse::<std::net::SocketAddr>().unwrap(),
-                welcome.rpc
-            );
-        }
-        other => panic!("not a welcome: {other:?}"),
-    }
-    match receive() {
-        ToPlugin::Notification(notification) => {
-            assert_eq!(Kind::Proposal, notification.kind);
-            assert_eq!(id, notification.id.to_hex());
-        }
-        other => panic!("not a notification: {other:?}"),
-    }
-
+    let [Event::Notification(notification)] = received[..] else {
+        panic!("not one notification: {received:?}");
+    };
+    assert_eq!(Kind::Proposal, notification.kind);
+    assert_eq!(id, notification.id.to_hex());
     assert_eq!(Some(0), defi.wait().unwrap().code());
 }
