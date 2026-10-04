@@ -134,10 +134,9 @@ pub(crate) fn node_command(
     let data_dir = find(&args, "--data-dir", None)
         .map(|occurrence| required::<PathBuf>("--data-dir", &occurrence, DIRECTORY))
         .transpose()?;
-    let cookie_path = DataDirectory::get(data_dir, network)
-        .map_err(|error| ArgsError::NoDataDirectory(error.to_string()))?
-        .rpc_cookie_file_path()
-        .with_file_name(neptune_defi::plugin::COOKIE_FILE_NAME);
+    let data_directory = DataDirectory::get(data_dir, network)
+        .map_err(|error| ArgsError::NoDataDirectory(error.to_string()))?;
+    let cookie_path = neptune_defi::plugin::cookie_path(&data_directory);
 
     let rpc_address = match find(&args, "--listen-rpc", None) {
         Some(Occurrence {
@@ -436,10 +435,9 @@ mod tests {
     }
 
     fn cookie_path(data_dir: Option<&str>, network: Network) -> PathBuf {
-        DataDirectory::get(data_dir.map(PathBuf::from), network)
-            .unwrap()
-            .rpc_cookie_file_path()
-            .with_file_name(neptune_defi::plugin::COOKIE_FILE_NAME)
+        neptune_defi::plugin::cookie_path(
+            &DataDirectory::get(data_dir.map(PathBuf::from), network).unwrap(),
+        )
     }
 
     /// `--network` and its short form `-n` are read in every shape the
