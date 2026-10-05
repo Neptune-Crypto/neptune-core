@@ -1788,6 +1788,81 @@ pub(crate) mod tests {
             .is_none());
     }
 
+    /// The composer ignores a caller's coinbase transaction that claims more
+    /// than the block subsidy, was built against another mutator set, or pays
+    /// a negative fee, however valid it is otherwise, and composes a valid
+    /// block of its own instead.
+    #[apply(shared_tokio_runtime)]
+    async fn composer_ignores_a_caller_coinbase_tx_that_breaks_the_blocks_rules() {
+        use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+        use num_traits::CheckedSub;
+
+        let network = Network::RegTest;
+        let genesis_block = Block::genesis(network);
+        let in_time = genesis_block.header().timestamp + Timestamp::hours(1);
+        let now = genesis_block.header().timestamp + Timestamp::hours(2);
+        let excess = NativeCurrencyAmount::from_nau(1);
+
+        let mut rng = rand::rng();
+        let caller_address = GenerationReceivingAddress::derive_from_seed(rng.random());
+        let caller_parameters = ComposerParameters::new(
+            CoinbaseDistribution::solo(caller_address.into()),
+            rng.random(),
+            None,
+            0.5,
+            FeeNotificationPolicy::OnChainGeneration,
+        );
+        let (_, valid) = prepare_coinbase_transaction_stateless(
+            &genesis_block,
+            caller_parameters,
+            in_time,
+            network,
+        );
+        let subsidy = valid.coinbase.unwrap();
+
+        let mut too_rich = valid.clone();
+        too_rich.coinbase = Some(subsidy + excess);
+        too_rich.fee += excess;
+        assert!(too_rich.validate().await.is_ok());
+
+        let mut elsewhere = valid.clone();
+        elsewhere.mutator_set_accumulator = MutatorSetAccumulator::default();
+        assert!(elsewhere.validate().await.is_ok());
+
+        // The outputs stay; the coinbase shrinks by what the guesser had,
+        // and by `excess` more, which the fee then takes back.
+        let mut negative_fee = valid.clone();
+        negative_fee.coinbase = Some(subsidy.checked_sub(&(valid.fee + excess)).unwrap());
+        negative_fee.fee = -excess;
+
+        for (case, details) in [
+            ("more than the subsidy", too_rich),
+            ("another mutator set", elsewhere),
+            ("a negative fee", negative_fee),
+        ] {
+            let cli = cli_args::Args::default_with_network(network);
+            let mut state = mock_genesis_global_state(2, WalletEntropy::devnet_wallet(), cli).await;
+            let witness = details.primitive_witness();
+            state
+                .lock_guard_mut()
+                .await
+                .mining_state
+                .set_coinbase_tx(Some(witness.clone()));
+
+            let (block, _) = mock_compose_block(genesis_block.clone(), state, now).await;
+            assert!(block.is_valid(&genesis_block, now, network).await, "{case}");
+            let block_kernel = &block.body().transaction_kernel;
+            assert!(
+                !witness
+                    .kernel
+                    .outputs
+                    .iter()
+                    .any(|o| block_kernel.outputs.contains(o)),
+                "{case}"
+            );
+        }
+    }
+
     #[apply(shared_tokio_runtime)]
     async fn block_proposal_with_custom_coinbase_distribution_is_valid() {
         let network = Network::Testnet(42);
