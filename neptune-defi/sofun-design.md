@@ -494,6 +494,14 @@ rebuild the same order UTXO and name the same AOCL leaf. An order announced with
 a nonzero `padding` is still spendable on chain; a conforming consumer does not
 list it. Only software that departs from this document writes one.
 
+**The offered amount must not be negative.** An order is valid only if it
+offers a non-negative amount, in every configuration, so the constructor of
+each refuses a negative offer and decoding, which builds its result through the
+constructor, refuses one too. No UTXO can hold a negative amount, so the UTXO
+of such an order is never confirmed and no book would open the order; the rule
+makes the order type say so, rather than leave it to consensus, and keeps a
+fill from being computed from nonsense.
+
 **The body carries only the differences.** Both sides' type scripts are fixed by
 the pair, the release date is fixed by the grid, and both offered-side digests
 are derived (below), so none of them are on the wire. What is left is two
@@ -817,7 +825,10 @@ is to accept a coinbase transaction someone else built (§4.9). So the index
 lives in the SOFuN plugin, a separate process that `neptune-defi` serves.
 `neptune-defi` spawns the node, receives its notifications of new blocks,
 mempool transactions and block proposals, and relays them to every plugin
-connected to it. A plugin reads whatever else it needs from the node over
+connected to it. A plugin proves that it runs as the user who started
+`neptune-defi` with a cookie that `neptune-defi` writes anew at every start,
+next to the node's own RPC cookie in its data directory, where only that user
+can read it. A plugin reads whatever else it needs from the node over
 JSON-RPC. The two facts the index needs from a block are fields of its
 transaction kernel: the announcements it carries, and the removal records that
 tell which order UTXOs have just been spent. The plugin that fills orders is
@@ -869,9 +880,13 @@ not, the chain reorganized: the driver walks the new branch back by parent hash
 until it reaches a block it applied before, rolls the book back to that block,
 and applies the new branch oldest first. To recognize such a block, the driver
 keeps the identities of the blocks it applied, as deep as the book keeps closed
-orders. Notifications can arrive faster than the driver handles them; none is
-dropped, because a book that missed the block spending an order would go on
-listing it.
+orders. Notifications can arrive faster than a plugin takes them in.
+`neptune-defi` keeps up to 1024 for each plugin; past that it drops the oldest
+and tells the plugin how many it dropped. The driver then follows the tip as if
+it had been notified of it, and its walk back by parent hash brings in the
+blocks it missed. So a dropped notification never becomes a dropped block,
+which matters because a book that missed the block spending an order would go
+on listing it.
 
 The book therefore trails the node's tip by however long fetching and
 verification take. An order confirmed in block *h* cannot be filled before
@@ -925,11 +940,14 @@ about orders. Only the hard fork of §5 makes such a transaction valid.
 - *Input:* the order UTXO, with its lock script and the fill witness, and its
   membership proof restored as §4.8 describes.
 - *Outputs:* the reward at the grid point §4.6 picks, and the composer's share,
-  paid to addresses of the node's own wallet from `personal_generateAddress`.
+  paid to an address of the node's own wallet, which the plugin asks
+  `personal_generateAddress` for once, when it starts.
   The node registers no expected UTXOs for a transaction it did not build, so
   the composer's outputs carry on-chain notifications, which is how the wallet
   finds them.
-- *Coinbase:* the block subsidy. *Fee:* the guesser's share.
+- *Coinbase:* the block subsidy. *Fee:* none, so the composer keeps the
+  guesser's share; filling pays only a composer who guesses their own blocks
+  (§4.7).
 - *Announcements:* a lustration announcement for the order input whenever the
   input's AOCL range requires one. On a young chain every input requires one.
   Lustration reveals the input's amount, `X`, which the order announcement made
@@ -961,8 +979,8 @@ own_timelocked  ≥  (X − f) / 2
 ```
 
 which with `f = g·C` is §4.7's excess. A composer keeping the whole subsidy pays
-no fee and locks `X/2` of their own. The input raises the amount that must be
-locked; it never lowers it.
+no fee and locks `⌈X/2⌉` of their own, rounded up because the rule compares
+whole nau. The input raises the amount that must be locked; it never lowers it.
 
 **What the plugin checks before setting the transaction.** The book verified the
 order when it admitted it (§4.8), but a block may have arrived since. So the
@@ -1196,12 +1214,13 @@ offered amount, the parameters and the four digests, and sets the demanded
 amount to `Y` of the parameters' `epoch` (§4.1). Every SOFuN order therefore
 demands exactly `Y(epoch)`, the conversion to `SofunBody` is total, and decoding
 a body and encoding the result reproduces the body. Decoding is the direction
-that can fail, on a nonzero `padding` (§4.3), and it builds its result through
-`new` as well. Were the terms and the parameters two separate values, a caller
-could pair the terms of one order with the parameters of another, and encoding
-would write an order whose announced amount disagrees with its lock script. A
-configuration with no relation between its terms and its parameters, such as the
-`V1Swap` pair, takes both amounts as arguments.
+that can fail, on a nonzero `padding` or a negative offer (§4.3), and it builds
+its result through `new` as well. Were the terms and the parameters two
+separate values, a caller could pair the terms of one order with the parameters
+of another, and encoding would write an order whose announced amount disagrees
+with its lock script. A configuration with no relation between its terms and
+its parameters, such as the `V1Swap` pair, takes both amounts as arguments, and
+refuses only a negative offer.
 
 The configuration chooses the parameter type, and each order carries its own
 value of it — two SOFuN orders in one book have different `d_zero`. Keying the
@@ -1584,15 +1603,30 @@ randomness per order.
       block, and the AOCL leaf index a row is keyed by (§4.10)
 - [x] The node notifies on new blocks, mempool transactions and block proposals
       (`--block-notify`, `--tx-notify`, `--proposal-notify`)
-- [ ] The driver loop in `neptune-defi`, written once for every plugin: fetch
-      each notified block, roll back on a parent the driver did not apply, and
-      apply (§4.8, §4.10)
+- [x] The driver loop in `neptune-defi`, written once for every plugin
+      (`Driver`): fetch each notified block, roll back on a parent the driver
+      did not apply, and apply; a gap and a lag notice are followed alike, and
+      a reorganization deeper than the driver remembers is an error the plugin
+      handles (§4.8, §4.10)
+- [x] Blocks read over JSON-RPC by hash (`RpcChain`, `archival_getBlockKernel`)
+- [ ] A light node answers a block-by-hash query for recent blocks, so that a
+      plugin can follow the chain without an archival node
 - [x] No part of the book reads archival state; a book knows the orders placed
       after it was created (§4.8)
 - [x] The order UTXO's membership proof restored on demand over JSON-RPC
       (`wallet_restoreMembershipProof`) (§4.8)
-- [ ] The `neptune-defi` binary: spawns the node with its flags fixed, relays
-      its notifications, and serves plugins that connect like peers
+- [x] The `neptune-defi` binary: spawns the node, sets the flags it fixes and
+      refuses them from the user, and reads the few flags whose values it needs
+      as the node does
+- [x] Notifications from the node taken in through `neptune-defi notify`, and
+      relayed to the plugins that subscribed to them, with a notice to a plugin
+      that fell behind (§4.8)
+- [x] Plugins connect over TCP and speak JSON lines, authenticated by a cookie
+      in the node's data directory that only the user can read; plugins use
+      `plugin::connect` (§4.8)
+- [x] A negative offered amount refused in every configuration (§4.3)
+- [ ] `RpcChain` refuses a block whose AOCL leaf count is below its number of
+      outputs, rather than underflowing
 - [x] Orders retired on a spent order UTXO, not only admitted on an
       announcement (§4.10)
 - [x] An order opened by its own block, closed by a block spending its UTXO,
@@ -1613,8 +1647,15 @@ randomness per order.
       elsewhere until the fork (§4.9)
 - [x] `mining_setCoinbaseTx`, honored by every composer, with a fallback to the
       node's own coinbase transaction whenever the set one does not fit (§4.9)
-- [ ] The SOFuN plugin: keeps the book, and builds and sets a fill for every
-      new tip (§4.9)
+- [x] The SOFuN plugin, `neptune-sofun`: keeps the book, and builds,
+      validates and sets the fill of the best order for every new tip, or
+      unsets it when no order fits (§4.9)
+- [x] Tests that a fill already mined is not used again, that a spoofed
+      notification changes nothing, and that a plugin that missed too much
+      starts its book over
+- [ ] A fill merged with mempool transactions, proven with real proofs
+- [ ] A fill refused by the node when its lustration would overdraw the
+      counter, tested against a chain where lustration is in force
 - [ ] The fork's activation heights, once known (§5)
 
 ### Phase 3 — proposer side (wallet / `neptune-cli`)
