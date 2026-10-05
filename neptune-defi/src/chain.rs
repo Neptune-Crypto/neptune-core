@@ -25,7 +25,7 @@ pub struct BlockId {
 }
 
 /// What an overlay protocol needs to know about one block.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObservedBlock {
     pub id: BlockId,
     pub parent: Digest,
