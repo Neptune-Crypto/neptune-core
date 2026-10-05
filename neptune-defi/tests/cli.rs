@@ -24,7 +24,7 @@ const FIXED_FLAGS: [&str; 5] = [
 
 const APPENDED: [&str; 3] = [
     "--listen-rpc=127.0.0.1:9797",
-    "--rpc-modules=node,chain,mempool,mining,wallet,personal",
+    "--rpc-modules=node,chain,archival,mempool,mining,wallet,personal",
     "--unsafe-rpc",
 ];
 

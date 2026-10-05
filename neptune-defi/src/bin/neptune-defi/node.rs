@@ -20,7 +20,7 @@ pub(crate) const FIXED_FLAGS: [&str; 5] = [
 ];
 
 /// The JSON-RPC namespaces plugins read and write through.
-const RPC_MODULES: &str = "node,chain,mempool,mining,wallet,personal";
+const RPC_MODULES: &str = "node,chain,archival,mempool,mining,wallet,personal";
 
 /// The address `neptune-core` serves JSON-RPC on when `--listen-rpc` is given
 /// without one. `neptune-defi` uses it as well when the flag is absent.
@@ -276,7 +276,8 @@ mod tests {
         if listen_rpc {
             appended.push("--listen-rpc=127.0.0.1:9797".to_owned());
         }
-        appended.push("--rpc-modules=node,chain,mempool,mining,wallet,personal".to_owned());
+        appended
+            .push("--rpc-modules=node,chain,archival,mempool,mining,wallet,personal".to_owned());
         appended.push("--unsafe-rpc".to_owned());
         appended.extend(notify());
         appended
