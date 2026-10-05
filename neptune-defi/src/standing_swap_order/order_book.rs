@@ -306,7 +306,8 @@ mod tests {
                 Digest::default(),
                 Digest::default(),
                 Digest::default(),
-            ),
+            )
+            .unwrap(),
         }
     }
 

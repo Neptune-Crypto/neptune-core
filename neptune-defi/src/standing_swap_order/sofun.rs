@@ -47,6 +47,9 @@ pub enum SofunError {
     /// `padding` is nonzero
     NonzeroPadding,
 
+    /// The offered amount is negative, which no UTXO can hold.
+    NegativeOffer,
+
     /// `D_0 + (K - 1) * G` reaches `2^63` milliseconds, past which a release
     /// date would wrap the field.
     GridOutOfRange,
@@ -101,7 +104,8 @@ impl SofunParams {
 
 impl StandingSwapOrder<Sofun> {
     /// A SOFuN order, whose demanded amount is half the block subsidy of
-    /// generation `params.epoch`.
+    /// generation `params.epoch`, or an error if the offered amount is
+    /// negative or the grid reaches `RELEASE_DATE_BOUND`.
     pub fn new(
         offered_amount: NativeCurrencyAmount,
         params: SofunParams,
@@ -110,6 +114,9 @@ impl StandingSwapOrder<Sofun> {
         reward_lock_script_hash: Digest,
         reward_receiver_digest: Digest,
     ) -> Result<Self, SofunError> {
+        if offered_amount.is_negative() {
+            return Err(SofunError::NegativeOffer);
+        }
         // check the grid
         params.last_release_date()?;
 
@@ -345,17 +352,23 @@ impl<'a> arbitrary::Arbitrary<'a> for SofunBody {
 #[cfg(any(test, feature = "arbitrary-impls"))]
 impl<'a> arbitrary::Arbitrary<'a> for StandingSwapOrder<Sofun> {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        // `SofunParams` draws a grid that fits, so the constructor's only
-        // failure cannot occur here.
+        // `SofunParams` draws a grid that fits, and the offer is made
+        // non-negative, so the constructor cannot fail here.
+        let offered: NativeCurrencyAmount = u.arbitrary()?;
+        let offered = if offered.is_negative() {
+            -offered
+        } else {
+            offered
+        };
         Ok(Self::new(
-            u.arbitrary()?,
+            offered,
             u.arbitrary()?,
             u.arbitrary()?,
             u.arbitrary()?,
             u.arbitrary()?,
             u.arbitrary()?,
         )
-        .expect("an arbitrary grid fits"))
+        .expect("an arbitrary order is valid"))
     }
 }
 
@@ -903,5 +916,25 @@ mod tests {
 
         let best = book.best_fill(demanded, t);
         prop_assert_eq!(Some(OrderId(1)), best.map(|order| order.id));
+    }
+
+    /// No UTXO can hold a negative amount, so no order can offer one. An
+    /// announcement claiming one is not an order, whether or not a book would
+    /// ever find its UTXO.
+    #[proptest(cases = 10)]
+    fn an_order_offering_a_negative_amount_is_refused(
+        #[strategy(arb())] order: StandingSwapOrder<Sofun>,
+        #[strategy(1..i64::MAX)] nau: i64,
+    ) {
+        let negative = NativeCurrencyAmount::from_nau(-i128::from(nau));
+        let refused = StandingSwapOrder::<Sofun>::new(
+            negative,
+            order.params,
+            order.seed,
+            order.cancel_post_image,
+            order.reward_lock_script_hash,
+            order.reward_receiver_digest,
+        );
+        prop_assert_eq!(Some(SofunError::NegativeOffer), refused.err());
     }
 }
