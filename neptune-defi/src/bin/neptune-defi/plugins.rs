@@ -350,4 +350,62 @@ mod tests {
             );
         }
     }
+
+    /// A plugin that connects and says nothing is refused once the time for a
+    /// hello is up, rather than holding its task forever.
+    #[tokio::test]
+    async fn a_silent_plugin_is_refused_when_its_time_is_up() {
+        let server = server().await;
+        let mut plugin = Plugin::connect(&server).await;
+        match plugin.receive().await {
+            Some(ToPlugin::Refused(reason)) => assert!(reason.starts_with("no hello"), "{reason}"),
+            other => panic!("got {other:?}"),
+        }
+        assert_eq!(None, plugin.receive().await);
+    }
+
+    /// A hello longer than neptune-defi reads is refused, and only the limit
+    /// is read.
+    #[tokio::test]
+    async fn an_oversized_hello_is_refused() {
+        let server = server().await;
+        let mut plugin = Plugin::connect(&server).await;
+        let padding = "x".repeat(2 * MAX_HELLO_LENGTH as usize);
+        let hello = format!(
+            r#"{{"hello":{{"name":"{padding}","protocol":1,"cookie":"{COOKIE}","subscribe":[]}}}}"#
+        );
+        let _ = plugin
+            .write
+            .write_all(format!("{hello}\n").as_bytes())
+            .await;
+        match plugin.receive().await {
+            Some(ToPlugin::Refused(reason)) => {
+                assert!(reason.starts_with("not a hello"), "{reason}")
+            }
+            other => panic!("got {other:?}"),
+        }
+    }
+
+    /// One plugin leaving does not disturb another.
+    #[tokio::test]
+    async fn a_plugin_that_leaves_does_not_disturb_the_others() {
+        let server = server().await;
+        let leaving = Plugin::welcomed(&server, vec![Kind::Block]).await;
+        let mut staying = Plugin::welcomed(&server, vec![Kind::Block]).await;
+        drop(leaving);
+
+        let sent = (0..3)
+            .map(|_| notification(Kind::Block))
+            .collect::<Vec<_>>();
+        for notification in &sent {
+            server.notifications.send(*notification).unwrap();
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        for expected in &sent {
+            assert_eq!(
+                Some(ToPlugin::Notification(*expected)),
+                staying.receive().await
+            );
+        }
+    }
 }
