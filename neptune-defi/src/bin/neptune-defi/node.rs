@@ -50,6 +50,9 @@ pub(crate) enum ArgsError {
         expected: &'static str,
     },
 
+    /// A flag of `neptune-defi`'s own, given more than once.
+    Repeated(&'static str),
+
     /// The data directory cannot be determined.
     NoDataDirectory(String),
 }
@@ -68,6 +71,7 @@ impl fmt::Display for ArgsError {
                 expected,
             } => write!(f, "{flag} takes {expected}, not {value:?}."),
             Self::MissingValue { flag, expected } => write!(f, "{flag} takes {expected}."),
+            Self::Repeated(flag) => write!(f, "{flag} may be given only once."),
             Self::NoDataDirectory(error) => {
                 write!(f, "Cannot determine neptune-core's data directory: {error}")
             }
@@ -102,7 +106,8 @@ pub(crate) struct NodeCommand {
 /// `--data-dir`, the way `neptune-core` reads them, and `neptune-core`
 /// validates the rest. The result is an error if the user passed one of
 /// [`FIXED_FLAGS`], in either the `--flag value` or the `--flag=value` form, or
-/// an invalid or missing value for a flag `neptune-defi` reads. Otherwise
+/// an invalid or missing value for a flag `neptune-defi` reads, or
+/// [`PLUGIN_LISTEN`] more than once. Otherwise
 /// `neptune-defi` appends `--listen-rpc` unless the user passed it, since
 /// plugins reach the node over JSON-RPC, then the RPC flags, and then
 /// `notify_flags`, which set the remaining fixed flags.
@@ -122,6 +127,9 @@ pub(crate) fn node_command(
         Some(occurrence) => {
             let address = required(PLUGIN_LISTEN, &occurrence, SOCKET_ADDRESS)?;
             args.drain(occurrence.position..occurrence.position + occurrence.len);
+            if find(&args, PLUGIN_LISTEN, None).is_some() {
+                return Err(ArgsError::Repeated(PLUGIN_LISTEN));
+            }
             address
         }
         None => neptune_defi::plugin::DEFAULT_ADDRESS,
@@ -582,6 +590,33 @@ mod tests {
             ),
         ] {
             assert_eq!(Err(error), node_command(&user, &notify()), "{user:?}");
+        }
+    }
+
+    /// `--plugin-listen` is neptune-defi's own, so neptune-core never sees it.
+    /// A second one is refused, as neptune-core refuses a second of its own
+    /// options, in whatever shape and wherever it stands.
+    #[test]
+    fn a_repeated_plugin_address_is_refused() {
+        for user in [
+            args(&[
+                "--plugin-listen=127.0.0.1:4000",
+                "--plugin-listen=127.0.0.1:4001",
+            ]),
+            args(&[
+                "--plugin-listen",
+                "127.0.0.1:4000",
+                "-n",
+                "regtest",
+                "--plugin-listen=127.0.0.1:4000",
+            ]),
+            args(&["--plugin-listen=127.0.0.1:4000", "--plugin-listen"]),
+        ] {
+            assert_eq!(
+                Err(ArgsError::Repeated(PLUGIN_LISTEN)),
+                node_command(&user, &notify()),
+                "{user:?}"
+            );
         }
     }
 }
