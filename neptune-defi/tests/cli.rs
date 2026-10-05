@@ -455,3 +455,70 @@ fn a_plugin_receives_the_notifications_it_subscribed_to() {
     assert_eq!(id, notification.id.to_hex());
     assert_eq!(Some(0), defi.wait().unwrap().code());
 }
+
+/// With the plugin port taken, neptune-defi says so and does not start
+/// neptune-core.
+#[test]
+fn a_plugin_port_in_use_is_reported_without_starting_neptune_core() {
+    let sandbox = Sandbox::new();
+    sandbox.neptune_core("bin");
+    let taken = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = taken.local_addr().unwrap();
+
+    let output = {
+        let _executables = executables();
+        Command::new(sandbox.exe())
+            .args([
+                "--data-dir",
+                &sandbox.dir.join("data").display().to_string(),
+            ])
+            .arg(format!("--plugin-listen={address}"))
+            .output()
+            .unwrap()
+    };
+
+    assert_eq!(Some(1), output.status.code());
+    assert!(
+        stderr(&output).contains("Could not listen for plugins"),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(None, sandbox.received("bin"));
+}
+
+/// If the cookie cannot be written, neptune-defi says so and does not start
+/// neptune-core. Only Unix can deny a user the right to write a directory
+/// they own, and not even Unix denies it to the superuser, in which case
+/// there is nothing to test.
+#[cfg(unix)]
+#[test]
+fn a_cookie_that_cannot_be_written_is_reported_without_starting_neptune_core() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let sandbox = Sandbox::new();
+    sandbox.neptune_core("bin");
+    let read_only = sandbox.dir.join("read-only");
+    fs::create_dir_all(&read_only).unwrap();
+    fs::set_permissions(&read_only, fs::Permissions::from_mode(0o555)).unwrap();
+    if fs::write(read_only.join("probe"), b"").is_ok() {
+        return;
+    }
+
+    let output = {
+        let _executables = executables();
+        Command::new(sandbox.exe())
+            .args(["--data-dir", &read_only.join("data").display().to_string()])
+            .arg("--plugin-listen=127.0.0.1:0")
+            .output()
+            .unwrap()
+    };
+    fs::set_permissions(&read_only, fs::Permissions::from_mode(0o755)).unwrap();
+
+    assert_eq!(Some(1), output.status.code());
+    assert!(
+        stderr(&output).contains("Could not write the plugin cookie"),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(None, sandbox.received("bin"));
+}

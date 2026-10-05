@@ -343,4 +343,20 @@ mod tests {
         });
         assert_eq!(1, announcements(&terms));
     }
+
+    /// The fill is valid whatever the order offers: nothing, one nau, an odd
+    /// amount, or more than the block subsidy.
+    #[tokio::test]
+    async fn the_fill_is_valid_for_any_offered_amount() {
+        for offered in [
+            NativeCurrencyAmount::from_nau(0),
+            NativeCurrencyAmount::from_nau(1),
+            NativeCurrencyAmount::coins(13) + NativeCurrencyAmount::from_nau(1),
+            NativeCurrencyAmount::coins(1_000_000),
+        ] {
+            let (order, terms) = order_and_terms(offered);
+            let witness = fill_witness(&order, &terms).unwrap();
+            assert!(witness.validate().await.is_ok(), "{offered}");
+        }
+    }
 }

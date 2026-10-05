@@ -443,4 +443,41 @@ mod tests {
         );
         assert_eq!(&log(&["apply a"]), driver.state());
     }
+
+    /// A chain whose blocks name each other as parents, as a lying node may
+    /// serve, does not keep the driver walking forever.
+    #[tokio::test]
+    async fn a_cycle_of_parents_ends_in_an_error() {
+        let (mut chain, mut driver) = followed_a(10).await;
+        chain.add("b2", 2, "c2");
+        chain.add("c2", 3, "b2");
+
+        let followed = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            driver.on_block(hash("c2"), &chain),
+        )
+        .await
+        .expect("the driver stops walking");
+        assert_eq!(Err(DriverError::TooDeep { depth: 10 }), followed);
+        assert_eq!(&log(&["apply a"]), driver.state());
+    }
+
+    /// A driver of depth 1 remembers only the block it applied last: it
+    /// follows children and gaps of none, and refuses any other branch.
+    #[tokio::test]
+    async fn a_driver_of_depth_one_follows_children_only() {
+        let (mut chain, mut driver) = followed_a(1).await;
+        driver.on_block(hash("b"), &chain).await.unwrap();
+        chain.add("b2", 2, "a");
+        assert_eq!(
+            Err(DriverError::TooDeep { depth: 1 }),
+            driver.on_block(hash("b2"), &chain).await
+        );
+        assert_eq!(
+            Err(DriverError::TooDeep { depth: 1 }),
+            driver.on_block(hash("d"), &chain).await
+        );
+        driver.on_block(hash("c"), &chain).await.unwrap();
+        assert_eq!(&log(&["apply a", "apply b", "apply c"]), driver.state());
+    }
 }

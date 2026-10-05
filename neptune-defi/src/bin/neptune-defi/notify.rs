@@ -231,4 +231,44 @@ mod tests {
             assert!(send(&args).is_err(), "{args:?}");
         }
     }
+
+    /// Garbage, an oversized line, or a connection that says nothing does not
+    /// stop the listener from taking the notifications after it.
+    #[tokio::test]
+    async fn bad_connections_do_not_stop_the_listener() {
+        use tokio::io::AsyncWriteExt;
+
+        let listener = bind().await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (sender, mut receiver) = mpsc::unbounded_channel();
+        tokio::spawn(listen(listener, sender));
+
+        let _silent = tokio::net::TcpStream::connect(address).await.unwrap();
+        for bad in [
+            "garbage\n".to_owned(),
+            format!("block {}\n", "0".repeat(10_000)),
+        ] {
+            let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+            let _ = stream.write_all(bad.as_bytes()).await;
+        }
+
+        let sent = Notification {
+            kind: Kind::Block,
+            id: digest(),
+        };
+        let args = [
+            address.port().to_string(),
+            "block".to_owned(),
+            sent.id.to_hex(),
+        ];
+        tokio::task::spawn_blocking(move || send(&args))
+            .await
+            .unwrap()
+            .unwrap();
+
+        let received = tokio::time::timeout(std::time::Duration::from_secs(5), receiver.recv())
+            .await
+            .expect("the notification arrives");
+        assert_eq!(Some(sent), received);
+    }
 }
