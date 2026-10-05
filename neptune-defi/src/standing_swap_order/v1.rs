@@ -38,9 +38,16 @@ impl Swappable for V1Swap {
     }
 }
 
+/// Why a version 1 body is not a valid order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum V1Error {
+    /// The offered amount is negative, which no UTXO can hold.
+    NegativeOffer,
+}
+
 impl StandingSwapOrder<V1Swap> {
-    /// A version 1 order. No relation binds its terms, so every field is an
-    /// argument.
+    /// A version 1 order, or an error if the offered amount is negative. No
+    /// other relation binds its terms, so every field is an argument.
     pub fn new(
         offered_amount: NativeCurrencyAmount,
         demanded_amount: NativeCurrencyAmount,
@@ -48,8 +55,12 @@ impl StandingSwapOrder<V1Swap> {
         cancel_post_image: Digest,
         reward_lock_script_hash: Digest,
         reward_receiver_digest: Digest,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, V1Error> {
+        if offered_amount.is_negative() {
+            return Err(V1Error::NegativeOffer);
+        }
+
+        Ok(Self {
             offered_amount,
             demanded_amount,
             seed,
@@ -57,7 +68,7 @@ impl StandingSwapOrder<V1Swap> {
             reward_lock_script_hash,
             reward_receiver_digest,
             params: (),
-        }
+        })
     }
 }
 
@@ -74,8 +85,10 @@ impl From<StandingSwapOrder<V1Swap>> for StandingSwapOrderV1 {
     }
 }
 
-impl From<StandingSwapOrderV1> for StandingSwapOrder<V1Swap> {
-    fn from(body: StandingSwapOrderV1) -> Self {
+impl TryFrom<StandingSwapOrderV1> for StandingSwapOrder<V1Swap> {
+    type Error = V1Error;
+
+    fn try_from(body: StandingSwapOrderV1) -> Result<Self, Self::Error> {
         Self::new(
             body.offered_amount,
             body.demanded_amount,
@@ -90,14 +103,21 @@ impl From<StandingSwapOrderV1> for StandingSwapOrder<V1Swap> {
 #[cfg(any(test, feature = "arbitrary-impls"))]
 impl<'a> arbitrary::Arbitrary<'a> for StandingSwapOrder<V1Swap> {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let offered: NativeCurrencyAmount = u.arbitrary()?;
+        let offered = if offered.is_negative() {
+            -offered
+        } else {
+            offered
+        };
         Ok(Self::new(
+            offered,
             u.arbitrary()?,
             u.arbitrary()?,
             u.arbitrary()?,
             u.arbitrary()?,
             u.arbitrary()?,
-            u.arbitrary()?,
-        ))
+        )
+        .expect("a non-negative offer is valid"))
     }
 }
 
@@ -108,9 +128,33 @@ mod tests {
 
     use super::*;
 
+    /// A body decodes to an order if and only if its offered amount is not
+    /// negative, and the order encodes back to the body.
     #[proptest]
     fn v1swap_round_trip(#[strategy(arb())] body: StandingSwapOrderV1) {
-        let order = StandingSwapOrder::<V1Swap>::from(body);
-        assert_eq!(body, StandingSwapOrderV1::from(order));
+        match StandingSwapOrder::<V1Swap>::try_from(body) {
+            Ok(order) => assert_eq!(body, StandingSwapOrderV1::from(order)),
+            Err(error) => {
+                assert!(body.offered_amount.is_negative());
+                assert_eq!(V1Error::NegativeOffer, error);
+            }
+        }
+    }
+
+    #[proptest(cases = 10)]
+    fn an_order_offering_a_negative_amount_is_refused(
+        #[strategy(arb())] order: StandingSwapOrder<V1Swap>,
+        #[strategy(1..i64::MAX)] nau: i64,
+    ) {
+        let negative = NativeCurrencyAmount::from_nau(-i128::from(nau));
+        let refused = StandingSwapOrder::<V1Swap>::new(
+            negative,
+            order.demanded_amount,
+            order.seed,
+            order.cancel_post_image,
+            order.reward_lock_script_hash,
+            order.reward_receiver_digest,
+        );
+        assert_eq!(Some(V1Error::NegativeOffer), refused.err());
     }
 }
