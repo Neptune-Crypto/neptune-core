@@ -34,6 +34,7 @@ use tasm_lib::prelude::TasmObject;
 use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::triton_vm::stark::Stark;
+use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::verifier::own_program_digest::OwnProgramDigest;
 use tasm_lib::verifier::stark_verify::StarkVerify;
@@ -54,6 +55,7 @@ use super::removal_records_are_unique::RemovalRecordsAreUnique;
 use super::swbf_update::aggregation::SwbfUpdateAggregation;
 use super::swbf_update::leaf::CorrectSwbfUpdate;
 use super::swbf_update::removal_index_commitment::RemovalIndexCommitment;
+use super::swbf_update::swbfi_peaks_after_removals::SwbfiPeaksAfterRemovals;
 use super::swbf_update::INPUT_FIRST_LEAF_INDEX;
 use super::swbf_update::INPUT_LEN;
 use super::swbf_update::OUTPUT_COUNT;
@@ -94,6 +96,9 @@ pub struct PredecessorIsValidWitness {
     prev_block: Block,
     next_block_body: BlockBody,
     prev_block_transaction_mutator_set: MutatorSetAccumulator,
+
+    /// SWBFI peaks after the previous block's removals.
+    prev_block_swbfi_peaks_after_removals: Vec<Digest>,
 }
 
 impl PredecessorIsValidWitness {
@@ -105,11 +110,28 @@ impl PredecessorIsValidWitness {
         next_block_body: &BlockBody,
         prev_block_transaction_mutator_set: MutatorSetAccumulator,
     ) -> Self {
+        // From the kernel's own chunks, where it carries them and they apply;
+        // empty otherwise, to be supplied.
+        let prev_block_swbfi_peaks_after_removals = SwbfiPeaksAfterRemovals::try_apply_removals(
+            &prev_block.body().transaction_kernel.inputs,
+            &prev_block_transaction_mutator_set,
+        )
+        .map(|mutator_set_after| mutator_set_after.swbf_inactive.peaks())
+        .unwrap_or_default();
+
         Self {
             prev_block: prev_block.clone(),
             next_block_body: next_block_body.clone(),
             prev_block_transaction_mutator_set,
+            prev_block_swbfi_peaks_after_removals,
         }
+    }
+
+    /// With these peaks of the inactive SWBF after the previous block's
+    /// removals, for a block whose kernel carries its inputs without chunks.
+    pub fn with_swbfi_peaks_after_removals(mut self, peaks: Vec<Digest>) -> Self {
+        self.prev_block_swbfi_peaks_after_removals = peaks;
+        self
     }
 
     pub fn nondeterminism(
@@ -170,6 +192,7 @@ impl PredecessorIsValidWitness {
                 .extend(MutatorSetUpdateFromStateHash::divined_tokens(
                     &self.prev_block.body().transaction_kernel.inputs,
                     &self.prev_block_transaction_mutator_set,
+                    &self.prev_block_swbfi_peaks_after_removals,
                 ));
 
             // 2.o)
@@ -2463,7 +2486,6 @@ mod tests {
     use rand::SeedableRng;
     use tasm_lib::triton_vm::execution_trace_profiler::ExecutionTraceProfile;
     use tasm_lib::triton_vm::execution_trace_profiler::VMTableHeights;
-    use tasm_lib::twenty_first::prelude::Mmr;
 
     use super::super::swbf_update::aggregation::tests::claim_over_halves;
     use super::super::swbf_update::chunk_witness::ChunkWitness;
@@ -3085,6 +3107,39 @@ mod tests {
         (claim, proof.clone())
     }
 
+    /// The inactive SWBF's peaks after the removals of each fixture block that
+    /// carries its inputs without chunks, by the block's hash: what the
+    /// archival mutator set supplies the witness with under e1.
+    fn swbfi_peaks_after_removals() -> &'static std::sync::Mutex<HashMap<Digest, Vec<Digest>>> {
+        static PEAKS: OnceLock<std::sync::Mutex<HashMap<Digest, Vec<Digest>>>> = OnceLock::new();
+        PEAKS.get_or_init(Default::default)
+    }
+
+    fn remember_swbfi_peaks_after_removals(block: &Block, peaks: Vec<Digest>) {
+        swbfi_peaks_after_removals()
+            .lock()
+            .unwrap()
+            .insert(block.hash(), peaks);
+    }
+
+    /// The witness for the previous block, with the peaks from the registry
+    /// if the block carries its inputs without chunks.
+    fn witness_for(prev_block: &Block, next_body: &BlockBody) -> PredecessorIsValidWitness {
+        let witness = PredecessorIsValidWitness::new(
+            prev_block,
+            next_body,
+            transaction_mutator_set(prev_block),
+        );
+        match swbfi_peaks_after_removals()
+            .lock()
+            .unwrap()
+            .get(&prev_block.hash())
+        {
+            Some(peaks) => witness.with_swbfi_peaks_after_removals(peaks.clone()),
+            None => witness,
+        }
+    }
+
     /// Each block a fixture parent has been built on, by its hash.
     fn predecessors() -> &'static std::sync::Mutex<HashMap<Digest, Block>> {
         static PREDECESSORS: OnceLock<std::sync::Mutex<HashMap<Digest, Block>>> = OnceLock::new();
@@ -3475,11 +3530,7 @@ mod tests {
         epochs: &EpochTable,
     ) -> (Claim, NonDeterminism) {
         let claim = own_claim_with_epochs(program, prev_block, next_body, next_header, epochs);
-        let witness = PredecessorIsValidWitness::new(
-            prev_block,
-            next_body,
-            transaction_mutator_set(prev_block),
-        );
+        let witness = witness_for(prev_block, next_body);
 
         (claim, witness.nondeterminism(program, epochs))
     }
@@ -3930,6 +3981,65 @@ mod tests {
             header.pow.set_lustration_status(status);
 
             unproven_block(header, body, vec![])
+        }
+
+        /// The chain with the chunk data stripped from the previous block's
+        /// inputs, as blocks carry them under e1. The SWBF update claim
+        /// stays, since it was built from the chunks and reads only the index
+        /// sets; the own claim is recomputed for the new body, the proof of
+        /// work is redone, and the next body and header are rebuilt on the
+        /// new hash with the chain's own transaction, as [chain_with_inputs]
+        /// builds them.
+        fn without_chunk_data(
+            (prev_block, _, _): (Block, BlockBody, BlockHeader),
+        ) -> (Block, BlockBody, BlockHeader) {
+            let body = prev_block.body();
+            let kernel = &body.transaction_kernel;
+            let kernel_with_chunks = kernel.clone();
+            let mutator_set = transaction_mutator_set(&prev_block);
+            let grandparent = predecessor_by_hash(prev_block.header().prev_block_digest)
+                .expect("the chain's grandparent must be known");
+            let swbf_claim = prev_block
+                .appendix()
+                .claims()
+                .iter()
+                .find(|claim| claim.program_digest == SwbfUpdateAggregation::new().hash())
+                .cloned();
+            let inputs = kernel
+                .inputs
+                .iter()
+                .map(|record| RemovalRecord {
+                    absolute_indices: record.absolute_indices,
+                    target_chunks: ChunkDictionary::empty(),
+                })
+                .collect();
+            let kernel = TransactionKernelModifier::default()
+                .inputs(inputs)
+                .modify(kernel.clone());
+            let body = BlockBody::new(
+                kernel,
+                body.mutator_set_accumulator.clone(),
+                body.lock_free_mmr_accumulator.clone(),
+                body.block_mmr_accumulator.clone(),
+            );
+            let header = *prev_block.header();
+            let own_claim =
+                own_claim_with_epochs(&skipping(), &grandparent, &body, &header, &epochs());
+            let prev_block =
+                unproven_block_with_swbf_claim(header, body, vec![own_claim], swbf_claim);
+            let peaks =
+                SwbfiPeaksAfterRemovals::apply_removals(&kernel_with_chunks.inputs, &mutator_set)
+                    .swbf_inactive
+                    .peaks();
+            remember_swbfi_peaks_after_removals(&prev_block, peaks);
+            let (next_body, next_header) = next_body_and_header_with_transaction(
+                &prev_block,
+                0,
+                &kernel_with_chunks,
+                &mutator_set,
+            );
+
+            (prev_block, next_body, next_header)
         }
 
         /// A chain built without proofs: a grandparent built by this
@@ -4651,7 +4761,7 @@ mod tests {
             let mutator_set = transaction_mutator_set(prev_block);
             let window_start =
                 u128::from(mutator_set.swbf_inactive.num_leafs()) << CHUNK_SIZE.ilog2();
-            let inputs = RemovalRecordList::try_unpack(kernel.inputs.clone(), true).unwrap();
+            let inputs = &kernel.inputs;
             let indices_in_window = inputs
                 .iter()
                 .flat_map(|record| record.absolute_indices.to_array())
@@ -4734,6 +4844,8 @@ mod tests {
 
             let few = plain(FEW_INPUTS);
             let many = plain(MANY_INPUTS);
+            let few_chunkless = without_chunk_data(plain(FEW_INPUTS));
+            let many_chunkless = without_chunk_data(plain(MANY_INPUTS));
             let few_lustrating = lustrating(FEW_INPUTS);
             let many_lustrating = lustrating(MANY_INPUTS);
             let lustration_words = few_lustrating
@@ -4748,6 +4860,8 @@ mod tests {
             let chains = [
                 (format!("{FEW_INPUTS} inputs"), &few),
                 (format!("{MANY_INPUTS} inputs"), &many),
+                (format!("{FEW_INPUTS} chunkless inputs"), &few_chunkless),
+                (format!("{MANY_INPUTS} chunkless inputs"), &many_chunkless),
                 (format!("{FEW_INPUTS} inputs, {EXTRA_OUTPUTS} extra outputs"), &with_outputs),
                 (
                     format!("{FEW_INPUTS} inputs, {NUM_ANNOUNCEMENTS} announcements of {ANNOUNCEMENT_LEN} words"),
@@ -4762,11 +4876,12 @@ mod tests {
                 .zip(&profiles)
                 .map(|((name, chain), profile)| profile.markdown(name, &describe_chain(chain)))
                 .join("\n");
-            let [few, many, with_outputs, with_announcements, few_lustrating, many_lustrating] =
+            let [few, many, few_chunkless, many_chunkless, with_outputs, with_announcements, few_lustrating, many_lustrating] =
                 &profiles;
 
             let extra_inputs = (MANY_INPUTS - FEW_INPUTS) as i64;
             let per_input = many.per_unit(few, extra_inputs);
+            let per_chunkless_input = many_chunkless.per_unit(few_chunkless, extra_inputs);
             let per_output = with_outputs.per_unit(few, EXTRA_OUTPUTS as i64);
             let per_announcement = with_announcements.per_unit(few, NUM_ANNOUNCEMENTS as i64);
             let lustration = few_lustrating.per_unit(few, 1);
@@ -4807,7 +4922,7 @@ cargo nextest run -p neptune-consensus --run-ignored ignored-only \\
 
 Every check is a labelled subroutine, so Triton VM's execution-trace profiler
 (`VM::profile`) attributes the rows of every table to it, callees included.
-The test builds six previous blocks from the deterministic block primitive
+The test builds eight previous blocks from the deterministic block primitive
 witness generator, profiles each, and computes the differences.
 
 The padded height is the next power of two above the tallest table. The u32
@@ -4816,8 +4931,12 @@ table counts distinct entries only, so its rows do not add up across checks.
 The fixture transaction spends inputs whose {NUM_TRIALS} indices all lie in
 the inactive SWBF, needing about {chunks_per_input} chunks per input. An
 input whose indices lie in the active window needs no chunks and is much
-cheaper. The generator's transaction has no outputs; outputs and announcements
-are added on top of it.
+cheaper. The chunkless chains strip the chunk dictionaries from the previous
+block's inputs after its claims are built, leaving the index sets only, as
+blocks carry inputs under e1; `PredecessorIsValid` reads no chunk data, so
+their difference to the plain chains is the cost of carrying it. The
+generator's transaction has no outputs; outputs and announcements are added on
+top of it.
 
 ## Deltas per unit
 
@@ -4827,6 +4946,10 @@ of the checks that run only when the previous block is at or past the
 activation height.
 
 ### Per input ({MANY_INPUTS} inputs against {FEW_INPUTS})
+
+{}
+
+### Per input without chunk data ({MANY_INPUTS} chunkless inputs against {FEW_INPUTS})
 
 {}
 
@@ -4861,6 +4984,7 @@ ones):
   even when rule 1.d is not called.
 ",
                 table(&per_input),
+                table(&per_chunkless_input),
                 table(&per_output),
                 table(&per_announcement),
                 table(&lustration),
