@@ -1,3 +1,6 @@
+pub mod fill;
+pub mod plugin;
+
 use std::collections::HashSet;
 
 use neptune_consensus::block::Block;
