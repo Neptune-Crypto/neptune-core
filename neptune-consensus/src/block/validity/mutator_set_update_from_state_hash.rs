@@ -19,13 +19,11 @@ use tasm_lib::prelude::BasicSnippet;
 use tasm_lib::prelude::DataType;
 use tasm_lib::prelude::Library;
 use tasm_lib::triton_vm::prelude::*;
-use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
 use super::apply_addition_records::ApplyAdditionRecords;
 use super::mutator_set_hash::MutatorSetHash;
 use super::mutator_set_hash::MutatorSetHashFromComponents;
-use super::swbf_update::swbfi_peaks_after_removals::SwbfiPeaksAfterRemovals;
 use super::swbf_update::window_after_removals::WindowAfterRemovals;
 use crate::block::block_validation_error::BlockValidationRule;
 
@@ -220,18 +218,18 @@ impl MutatorSetUpdateFromStateHash {
     /// The tokens for the transaction: the window's, then the inactive
     /// SWBF's peaks after the removals, counted. There are no peaks for
     /// inputs that cannot be removed.
+    /// The tokens for these inputs on this mutator set: the window's, which
+    /// need only the index sets, then the inactive SWBF's peaks after the
+    /// removals, which whoever holds the chunks computes.
     pub(super) fn divined_tokens(
         inputs: &[RemovalRecord],
         mutator_set: &MutatorSetAccumulator,
+        swbfi_peaks_after_removals: &[Digest],
     ) -> Vec<BFieldElement> {
-        let peaks = SwbfiPeaksAfterRemovals::try_apply_removals(inputs, mutator_set)
-            .map(|mutator_set_after| mutator_set_after.swbf_inactive.peaks())
-            .unwrap_or_default();
-
         [
             WindowAfterRemovals::divined_tokens(inputs, mutator_set),
-            vec![bfe!(peaks.len() as u64)],
-            peaks
+            vec![bfe!(swbfi_peaks_after_removals.len() as u64)],
+            swbfi_peaks_after_removals
                 .iter()
                 .flat_map(|peak| peak.reversed().values())
                 .collect(),
@@ -244,6 +242,7 @@ impl MutatorSetUpdateFromStateHash {
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) mod tests {
     use neptune_mutator_set::addition_record::AdditionRecord;
+    use tasm_lib::twenty_first::prelude::Mmr;
 
     use super::*;
     use crate::proof_abstractions::tasm::builtins as tasm;

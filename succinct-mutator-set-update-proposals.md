@@ -703,14 +703,103 @@ would cut the roots' hash rows about fivefold and the roots' processor
 rows by two to three thousand per input; the per-chunk bookkeeping stays.
 Not taken while processor rows dominate and hash rows do not.
 
-The d1 aggregation `SwbfUpdateAggregation` exists and `PredecessorIsValid`
-accepts either program's claim as the root. Measured without the two proof
-verifications (ignored test `profile_aggregation`, two leaves of 8 inputs):
-8.4k processor rows and 1.4k RAM rows, of which the three peak computations
-are 86%, about 225 processor rows per appended digest, so about 450 per
-input beneath the node. At the root of a 1000-input block that is ~450k
-processor rows next to two STARK verifications, so an aggregation's padded
-height is the verifications'. Not yet enforced: the
-minimum leaf count. Next: the d2 union aggregation, then the comparison of
-the two trees as inputs grow, each also with the e1 and f variants of the
-leaf.
+The d1 aggregation `SwbfUpdateAggregation` exists. Measured without the
+two proof verifications (ignored test `profile_aggregation`, two leaves of 8
+inputs): 8.4k processor rows and 1.4k RAM rows, of which the three peak
+computations are 86%, about 225 processor rows per appended digest, so
+about 450 per input beneath the node. At the root of a 1000-input block
+that is ~450k processor rows next to two STARK verifications, so an
+aggregation's padded height is the verifications'. The d2 union was built
+and measured (see d) above), found not to reach the target, and removed
+again; `PredecessorIsValid` accepts only an aggregation as the root, so
+that the root attests the work beneath it, as the next section describes.
+
+### Work floor on the tree
+
+A block's SWBF update must cost its composer a minimum of proving work,
+so that leaving transactions out saves nothing and the marginal cost of
+the first inputs is zero. The epoch table carries the floor,
+`min_swbf_padded_rows`, zero for none. The target is 2^23 rows, four
+leaves at 2^21 (about 15 seconds each on a fast desktop) and three
+aggregations, which also means that the first 128 or so inputs of a block
+come free.
+
+The aggregation reads the padded height of each child's proof, which is
+the first item of the proof stream and which verification binds: a proof
+declaring 2^h verifies only if it was built at 2^h, so declaring more
+costs more. A leaf child contributes 2^h, an aggregation child the sum in
+its own output, and the aggregation outputs the sum as the claim's first
+word, a field element: a leaf adds at most 2^31, so wrapping the field
+takes over 2^33 verified leaf proofs. `PredecessorIsValid` splits the
+root's first word into u64 limbs and holds it to the epoch's floor. A leaf
+alone cannot attest its height and writes zero there, which is why the
+root must be an aggregation.
+
+Triton VM 9 has no interface for padding a trace to a chosen height, and
+the proving cost tracks the padded height whether the rows hold work or
+padding: every stage from the low-degree extension to FRI runs over the
+full padded trace. So a leaf short of its height idles up to it, four
+processor rows per iteration of a loop at the end of the program, with the
+count in witness memory, capped at 2^27 in the program and chosen by the
+composer from one trace of the leaf. A composer with a modified prover
+could over-pad instead, at the same cost.
+
+The empty leaf ends where it starts, so without more it would chain with
+itself and one idled proof could stand in for four. Every claim therefore
+carries its position: the index of its first leaf in its input, the index
+of its last in its output, a leaf's own on both ends, an aggregation's
+left child's first and right child's last. The aggregation requires the
+right child's first index to be the left child's last plus one, for leaf
+and aggregation children alike, and `PredecessorIsValid` requires the
+root's first index to be 1. Every leaf position in a block is then a
+distinct claim, hence a distinct proof.
+
+Reuse of a tree's proofs across competing blocks on the same parent needs
+no counter-measure: the block proof consumes every appendix claim's proof,
+so a block proposal exposes the claims and nothing a competitor could
+re-prove the block program with. Binding the leaves to the composer's
+coinbase output was built and reverted on that ground.
+
+The tree can be built to any height: adjacent nodes aggregate pairwise and
+an odd node waits for the next level (`SwbfUpdateAggregation::tree`), or
+a running root takes a new leaf as its right child, which lets a composer
+append transactions as they arrive at one leaf and one aggregation proof
+each. Appending across merges needs the block's inputs to keep the leaf
+order, which the merge's shuffle does not; that is open.
+
+### Costs of the tree as built
+
+Measured on 2026-10-05, at the arbitrary fixture, in processor rows unless
+said otherwise.
+
+The leaf (ignored test `profile_leaf`, 8 and 16 inputs): 545.6k and
+1,079.8k rows, so 66.8k per input, of which the chunk hashing and root
+walks are 48.9k, rule 2.a's resolution and chunk witness 11.8k, the
+witness audit 4.0k, the active window 1.4k and the index-set commitment
+0.5k. The index and the idle check cost about 20 rows, once. A leaf of
+2^21 holds 31 inputs, one of 2^22 holds 62. RAM rows are 48.6k and hash
+rows 29.2k per input, both below the processor.
+
+`PredecessorIsValid`, without the verification of the previous block's
+proof (ignored test `profile_skipping_program_by_transaction_shape`, which
+regenerates `predecessor-is-valid-cost-profile.md`): 11.4k rows per input
+while blocks carry the packed chunks, of which hashing the inputs into the
+kernel's MAST is 4.5k and 7.5k RAM rows, the witness audit 3.9k, and the
+rules 3.0k. With the chunk data stripped from the block's inputs, as e1
+has it, 3.1k per input: the 2.e completion from the root's hash 1.3k, the
+lustration scan 0.9k, the index-set peaks 0.5k, rule 2.c 0.3k. The
+chunkless chains are the profile's own, built by stripping the chunk
+dictionaries from a finished block and supplying them to the witness
+separately, as the archival mutator set will. Totals: a 2-input block
+costs 49.9k rows with chunks and 32.5k without, bound either way by the
+hash table's 84k of program attestation, so 2^17; a 20-input block 255.7k
+and 87.9k; a block of the maximum size, a million words, 641k processor
+and 1,008k RAM rows, so 2^20. The verification of the previous block's
+proof comes on top of each. Under e1 a 1000-input block costs
+`PredecessorIsValid` about 3M rows, a 2^22 proof, next to 32 leaf proofs
+of 2^21.
+
+Next: the host side of e1, which is where the 11.4k drops to 3.1k; the
+assessment of e'_1 and e'_2, the composer or guesser holding the archival
+mutator set; and the f prototype, a chunk hash over a Merkle tree, for the
+leaf numbers it gives.
