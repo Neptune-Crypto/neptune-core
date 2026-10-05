@@ -12,7 +12,7 @@
 //! leaves, so that no two leaves of one block share a claim, and no proof
 //! can stand in for two leaves. Light nodes check the tip's update from it
 //! on the host machine, and `PredecessorIsValid` checks the predecessor's
-//! from the predecessor's copy. It is a leaf of the SWBFI aggregation tree,
+//! from the predecessor's copy. It is a leaf of the SWBF aggregation tree,
 //! which reads the padded height of its proof, and sums these for all leaf
 //! programs verified in the aggregation tree. This sum is calculated to
 //! remove the incentive to mine empty blocks.
@@ -48,7 +48,7 @@ use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::proof_abstractions::SecretWitness;
 
 #[derive(Debug, Clone, BFieldCodec, GetSize, PartialEq, Eq, Serialize, Deserialize, TasmObject)]
-pub struct CorrectSwbfiUpdateWitness {
+pub struct CorrectSwbfUpdateWitness {
     /// The block transaction's inputs in the packed list's structure, with
     /// their chunks unpacked.
     inputs: Vec<RemovalRecord>,
@@ -63,7 +63,7 @@ pub struct CorrectSwbfiUpdateWitness {
     idle_iterations: BFieldElement,
 
     /// The leaf's position among the block's leaves, counted from
-    /// [`CorrectSwbfiUpdate::FIRST_LEAF_INDEX`] along the chain of segments.
+    /// [`CorrectSwbfUpdate::FIRST_LEAF_INDEX`] along the chain of segments.
     /// Part of the claim's public input, not read from memory.
     ///
     /// Exists to prevent the same leaf from being used twice to save work on
@@ -71,14 +71,14 @@ pub struct CorrectSwbfiUpdateWitness {
     leaf_index: BFieldElement,
 }
 
-impl CorrectSwbfiUpdateWitness {
+impl CorrectSwbfUpdateWitness {
     /// The witness for these packed inputs.
     pub fn new(inputs: Vec<RemovalRecord>, mutator_set: MutatorSetAccumulator) -> Self {
         Self {
             inputs: SwbfiPeaksAfterRemovals::witness_form(inputs, &mutator_set),
             mutator_set,
             idle_iterations: bfe!(0),
-            leaf_index: bfe!(CorrectSwbfiUpdate::FIRST_LEAF_INDEX),
+            leaf_index: bfe!(CorrectSwbfUpdate::FIRST_LEAF_INDEX),
         }
     }
 
@@ -109,7 +109,7 @@ impl CorrectSwbfiUpdateWitness {
                         &mut [],
                     )
                     .expect("segment must be removable");
-                witness.with_leaf_index(CorrectSwbfiUpdate::FIRST_LEAF_INDEX + position as u64)
+                witness.with_leaf_index(CorrectSwbfUpdate::FIRST_LEAF_INDEX + position as u64)
             })
             .collect()
     }
@@ -139,10 +139,10 @@ impl CorrectSwbfiUpdateWitness {
 
     /// # Panics
     ///
-    /// If the iterations exceed [`CorrectSwbfiUpdate::MAX_IDLE_ITERATIONS`].
+    /// If the iterations exceed [`CorrectSwbfUpdate::MAX_IDLE_ITERATIONS`].
     pub fn with_idle_iterations(mut self, idle_iterations: u64) -> Self {
         assert!(
-            idle_iterations <= CorrectSwbfiUpdate::MAX_IDLE_ITERATIONS,
+            idle_iterations <= CorrectSwbfUpdate::MAX_IDLE_ITERATIONS,
             "idle iterations exceed the cap"
         );
         self.idle_iterations = bfe!(idle_iterations);
@@ -196,12 +196,12 @@ impl CorrectSwbfiUpdateWitness {
         // grows the processor table, so that table will decide the padded
         // height after idling.
         let rows_short = target / 2 - aet.processor_trace.nrows();
-        let idle_iterations = rows_short / CorrectSwbfiUpdate::IDLE_ROWS_PER_ITERATION + 1;
+        let idle_iterations = rows_short / CorrectSwbfUpdate::IDLE_ROWS_PER_ITERATION + 1;
         witness.with_idle_iterations(idle_iterations as u64)
     }
 }
 
-impl SecretWitness for CorrectSwbfiUpdateWitness {
+impl SecretWitness for CorrectSwbfUpdateWitness {
     fn standard_input(&self) -> PublicInput {
         // - mutator set hash the leaf starts from: the one in the transaction
         //   kernel for the block's first leaf, the one the preceding leaf
@@ -209,7 +209,7 @@ impl SecretWitness for CorrectSwbfiUpdateWitness {
         // - leaf index: this leaf's position among the block's leaves (1 word)
         //   all n leafs must be enumerated 1..n for the proof tree to be
         //   accepted during block verification.
-        PublicInput::new(CorrectSwbfiUpdate::claim_input(
+        PublicInput::new(CorrectSwbfUpdate::claim_input(
             &self.mutator_set,
             self.leaf_index,
         ))
@@ -229,7 +229,7 @@ impl SecretWitness for CorrectSwbfiUpdateWitness {
         let mutator_set_after =
             SwbfiPeaksAfterRemovals::apply_removals(&self.packed_inputs(), &self.mutator_set);
         ClaimOutput {
-            padded_rows: bfe!(CorrectSwbfiUpdate::ATTESTED_PADDED_ROWS),
+            padded_rows: bfe!(CorrectSwbfUpdate::ATTESTED_PADDED_ROWS),
             count: self.inputs.len(),
             mutator_set_hash: mutator_set_after.hash(),
             last_leaf_index: self.leaf_index,
@@ -239,7 +239,7 @@ impl SecretWitness for CorrectSwbfiUpdateWitness {
     }
 
     fn program(&self) -> Program {
-        CorrectSwbfiUpdate.program()
+        CorrectSwbfUpdate.program()
     }
 
     fn nondeterminism(&self) -> NonDeterminism {
@@ -279,9 +279,9 @@ impl SecretWitness for CorrectSwbfiUpdateWitness {
 #[derive(
     Debug, Clone, Copy, Default, BFieldCodec, GetSize, PartialEq, Eq, Serialize, Deserialize,
 )]
-pub struct CorrectSwbfiUpdate;
+pub struct CorrectSwbfUpdate;
 
-impl CorrectSwbfiUpdate {
+impl CorrectSwbfUpdate {
     /// The first output word: the padded rows of the leaf proofs a claim
     /// attests, which an aggregation sums over its children. A leaf cannot
     /// attest its own proof's height, so it writes zero; the aggregation
@@ -289,7 +289,7 @@ impl CorrectSwbfiUpdate {
     pub const ATTESTED_PADDED_ROWS: u64 = 0;
 
     /// Processor rows one idle iteration costs; see
-    /// [`CorrectSwbfiUpdateWitness::with_padded_height`].
+    /// [`CorrectSwbfUpdateWitness::with_padded_height`].
     pub const IDLE_ROWS_PER_ITERATION: usize = 4;
 
     /// The index of a block's first leaf; the others follow in order of
@@ -304,7 +304,7 @@ impl CorrectSwbfiUpdate {
     /// The claim for a block's inputs on this mutator set as its only leaf,
     /// as its appendix carries it.
     pub fn claim(inputs: &[RemovalRecord], mutator_set: &MutatorSetAccumulator) -> Claim {
-        CorrectSwbfiUpdateWitness::new(inputs.to_vec(), mutator_set.clone()).versioned_claim()
+        CorrectSwbfUpdateWitness::new(inputs.to_vec(), mutator_set.clone()).versioned_claim()
     }
 
     /// The claim's input for a leaf with this index starting from this
@@ -321,18 +321,18 @@ impl CorrectSwbfiUpdate {
     }
 }
 
-impl TritonProgram for CorrectSwbfiUpdate {
+impl TritonProgram for CorrectSwbfUpdate {
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         let mut library = Library::new();
-        let audit_witness = library.import(Box::new(VerifyNdSiIntegrity::<
-            CorrectSwbfiUpdateWitness,
-        >::default()));
+        let audit_witness = library.import(Box::new(
+            VerifyNdSiIntegrity::<CorrectSwbfUpdateWitness>::default(),
+        ));
         let mutator_set_hash = library.import(Box::new(MutatorSetHash));
         let hash_after_removals = library.import(Box::new(MutatorSetHashAfterRemovals));
         let commitment = library.import(Box::new(RemovalIndexCommitment));
 
-        let write_peaks = "correct_swbfi_update_write_peaks".to_string();
-        let idle = "correct_swbfi_update_idle".to_string();
+        let write_peaks = "correct_swbf_update_write_peaks".to_string();
+        let idle = "correct_swbf_update_idle".to_string();
         let idle_loop = format!("{idle}_loop");
 
         let code = triton_asm!(
@@ -344,7 +344,7 @@ impl TritonProgram for CorrectSwbfiUpdate {
             dup 0 call {audit_witness} pop 1
             // _ [mutator_set_hash] *w
 
-            dup 0 {&field!(CorrectSwbfiUpdateWitness::mutator_set)}
+            dup 0 {&field!(CorrectSwbfUpdateWitness::mutator_set)}
             call {mutator_set_hash}
             // _ [mutator_set_hash] *w [witness_mutator_set_hash]
 
@@ -355,18 +355,18 @@ impl TritonProgram for CorrectSwbfiUpdate {
             pop {Digest::LEN}
             // _ *w
 
-            dup 0 {&field!(CorrectSwbfiUpdateWitness::inputs)}
+            dup 0 {&field!(CorrectSwbfUpdateWitness::inputs)}
             call {commitment}
             place 1
             // _ *peaks *w
 
-            dup 0 {&field!(CorrectSwbfiUpdateWitness::inputs)}
-            dup 1 {&field!(CorrectSwbfiUpdateWitness::mutator_set)}
+            dup 0 {&field!(CorrectSwbfUpdateWitness::inputs)}
+            dup 1 {&field!(CorrectSwbfUpdateWitness::mutator_set)}
             call {hash_after_removals}
             // _ *peaks *w [mutator_set_after_removals_hash]
 
             push {Self::ATTESTED_PADDED_ROWS} write_io 1
-            dup 5 {&field!(CorrectSwbfiUpdateWitness::inputs)} read_mem 1 pop 1 write_io 1
+            dup 5 {&field!(CorrectSwbfUpdateWitness::inputs)} read_mem 1 pop 1 write_io 1
             write_io {Digest::LEN}
             pop 1
             // _ *peaks
@@ -385,7 +385,7 @@ impl TritonProgram for CorrectSwbfiUpdate {
 
             pop 2
             push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
-            {&field!(CorrectSwbfiUpdateWitness::idle_iterations)} read_mem 1 pop 1
+            {&field!(CorrectSwbfUpdateWitness::idle_iterations)} read_mem 1 pop 1
             // _ idle_iterations
 
             // Crashes unless the count is a u32 at or below the cap.
@@ -461,10 +461,10 @@ pub(super) mod tests {
     use crate::proof_abstractions::tasm::builtins as tasm;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
 
-    impl TritonProgramSpecification for CorrectSwbfiUpdate {
+    impl TritonProgramSpecification for CorrectSwbfUpdate {
         fn source(&self) {
             let mutator_set_hash = tasm::tasmlib_io_read_stdin___digest();
-            let witness: CorrectSwbfiUpdateWitness =
+            let witness: CorrectSwbfUpdateWitness =
                 tasm::decode_from_memory(FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS);
 
             assert_eq!(mutator_set_hash, witness.mutator_set.hash());
@@ -494,13 +494,13 @@ pub(super) mod tests {
     /// remove from. The fixture's active window is random; the mutator set
     /// produces a sorted multiset of indices inside the window, so it is
     /// made one.
-    fn witness(num_inputs: usize, seed: u64) -> CorrectSwbfiUpdateWitness {
+    fn witness(num_inputs: usize, seed: u64) -> CorrectSwbfUpdateWitness {
         witness_on_aocl(num_inputs, seed, 1 << 20)
     }
 
     /// [witness] on an AOCL of this size: a small one keeps the inputs'
     /// index windows near the active window.
-    fn witness_on_aocl(num_inputs: usize, seed: u64, aocl_size: u64) -> CorrectSwbfiUpdateWitness {
+    fn witness_on_aocl(num_inputs: usize, seed: u64, aocl_size: u64) -> CorrectSwbfUpdateWitness {
         let mut rng = StdRng::seed_from_u64(seed);
         let mut msa_and_records = random_msa_and_records(&mut rng, num_inputs, aocl_size);
         let inputs = RemovalRecordList::pack(
@@ -528,7 +528,7 @@ pub(super) mod tests {
             "fixture inputs must be removable"
         );
 
-        CorrectSwbfiUpdateWitness::new(inputs, mutator_set)
+        CorrectSwbfUpdateWitness::new(inputs, mutator_set)
     }
 
     /// The witnesses of consecutive segments of these sizes of one block's
@@ -536,15 +536,15 @@ pub(super) mod tests {
     pub(in crate::block::validity) fn chained_witnesses(
         segment_sizes: &[usize],
         seed: u64,
-    ) -> Vec<CorrectSwbfiUpdateWitness> {
+    ) -> Vec<CorrectSwbfUpdateWitness> {
         let all = witness(segment_sizes.iter().sum(), seed);
-        CorrectSwbfiUpdateWitness::segments(&all.packed_inputs(), &all.mutator_set, segment_sizes)
+        CorrectSwbfUpdateWitness::segments(&all.packed_inputs(), &all.mutator_set, segment_sizes)
     }
 
     /// The mutator set the archival update computes for the witness's
     /// inputs.
     pub(in crate::block::validity) fn archival_mutator_set_after(
-        witness: &CorrectSwbfiUpdateWitness,
+        witness: &CorrectSwbfUpdateWitness,
     ) -> MutatorSetAccumulator {
         let unpacked =
             SwbfiPeaksAfterRemovals::unpacked_records(&witness.inputs, &witness.mutator_set)
@@ -563,10 +563,10 @@ pub(super) mod tests {
             let input = witness.standard_input();
             let nondeterminism = witness.nondeterminism();
 
-            let rust_output = CorrectSwbfiUpdate
+            let rust_output = CorrectSwbfUpdate
                 .run_rust(&input, nondeterminism.clone())
                 .unwrap();
-            let tasm_output = CorrectSwbfiUpdate.run_tasm(&input, nondeterminism).unwrap();
+            let tasm_output = CorrectSwbfUpdate.run_tasm(&input, nondeterminism).unwrap();
             assert_eq!(rust_output, tasm_output, "{num_inputs} inputs");
             assert_eq!(witness.output(), tasm_output, "{num_inputs} inputs");
 
@@ -583,7 +583,7 @@ pub(super) mod tests {
         let third = first.clone().with_leaf_index(3);
         assert_ne!(first.versioned_claim(), third.versioned_claim());
         for leaf in [&first, &third] {
-            let output = CorrectSwbfiUpdate
+            let output = CorrectSwbfUpdate
                 .run_tasm(&leaf.standard_input(), leaf.nondeterminism())
                 .unwrap();
             assert_eq!(leaf.output(), output);
@@ -601,7 +601,7 @@ pub(super) mod tests {
             .iter()
             .map(|witness| witness.leaf_index().value())
             .collect::<Vec<_>>();
-        let first = CorrectSwbfiUpdate::FIRST_LEAF_INDEX;
+        let first = CorrectSwbfUpdate::FIRST_LEAF_INDEX;
         assert_eq!(vec![first, first + 1, first + 2], indices);
     }
 
@@ -621,7 +621,7 @@ pub(super) mod tests {
         for witness in &witnesses {
             let input = witness.standard_input();
             let nondeterminism = witness.nondeterminism();
-            let tasm_output = CorrectSwbfiUpdate.run_tasm(&input, nondeterminism).unwrap();
+            let tasm_output = CorrectSwbfUpdate.run_tasm(&input, nondeterminism).unwrap();
             assert_eq!(witness.output(), tasm_output);
         }
     }
@@ -643,7 +643,7 @@ pub(super) mod tests {
         let mut input = witness.standard_input();
         input.individual_tokens[0] += bfe!(1);
 
-        CorrectSwbfiUpdate
+        CorrectSwbfUpdate
             .test_assertion_failure(
                 input,
                 witness.nondeterminism(),
@@ -652,8 +652,8 @@ pub(super) mod tests {
             .unwrap();
     }
 
-    fn assert_rejects(witness: &CorrectSwbfiUpdateWitness, error_id: i128) {
-        CorrectSwbfiUpdate
+    fn assert_rejects(witness: &CorrectSwbfUpdateWitness, error_id: i128) {
+        CorrectSwbfUpdate
             .test_assertion_failure(
                 witness.standard_input(),
                 witness.nondeterminism(),
@@ -668,7 +668,7 @@ pub(super) mod tests {
 
     /// A witness whose first input's chunk dictionary holds a chunk of the
     /// inactive SWBF.
-    fn witness_with_chunks() -> CorrectSwbfiUpdateWitness {
+    fn witness_with_chunks() -> CorrectSwbfUpdateWitness {
         let witness = witness(3, 7);
         let entries = witness.inputs[0].target_chunks.clone().into_inner();
         assert!(
@@ -681,7 +681,7 @@ pub(super) mod tests {
     /// [witness_with_chunks] with its chunk dictionary entries modified.
     fn witness_with_modified_entries(
         modify: impl FnOnce(&mut Vec<(u64, (MmrMembershipProof, Chunk))>),
-    ) -> CorrectSwbfiUpdateWitness {
+    ) -> CorrectSwbfUpdateWitness {
         let mut witness = witness_with_chunks();
         let mut entries = witness.inputs[0].target_chunks.clone().into_inner();
         modify(&mut entries);
@@ -714,7 +714,7 @@ pub(super) mod tests {
 
     /// The tree entries of the witness's inputs that hold a path list, as
     /// input and entry positions.
-    fn tree_entries(witness: &CorrectSwbfiUpdateWitness) -> Vec<(usize, usize)> {
+    fn tree_entries(witness: &CorrectSwbfUpdateWitness) -> Vec<(usize, usize)> {
         witness
             .inputs
             .iter()
@@ -734,7 +734,7 @@ pub(super) mod tests {
 
     /// The chunk dictionary entries of the witness's inputs that hold a
     /// chunk, as input and entry positions.
-    fn chunk_entries(witness: &CorrectSwbfiUpdateWitness) -> Vec<(usize, usize)> {
+    fn chunk_entries(witness: &CorrectSwbfUpdateWitness) -> Vec<(usize, usize)> {
         witness
             .inputs
             .iter()
@@ -755,11 +755,11 @@ pub(super) mod tests {
 
     /// The witness with one chunk dictionary entry of one input modified.
     fn with_modified_entry(
-        witness: &CorrectSwbfiUpdateWitness,
+        witness: &CorrectSwbfUpdateWitness,
         input: usize,
         entry: usize,
         modify: impl FnOnce(&mut (u64, (MmrMembershipProof, Chunk))),
-    ) -> CorrectSwbfiUpdateWitness {
+    ) -> CorrectSwbfUpdateWitness {
         let mut witness = witness.clone();
         let mut entries = witness.inputs[input].target_chunks.clone().into_inner();
         modify(&mut entries[entry]);
@@ -791,7 +791,7 @@ pub(super) mod tests {
                     continue;
                 }
                 let witness = with_modified_entry(&honest, input, entry, |entry| entry.0 = other);
-                CorrectSwbfiUpdate
+                CorrectSwbfUpdate
                     .test_assertion_failure(
                         witness.standard_input(),
                         witness.nondeterminism(),
@@ -895,7 +895,7 @@ pub(super) mod tests {
         let honest = witness_with_chunks();
         let chunks = spread(chunk_entries(&honest), 8);
         assert!(!chunks.is_empty(), "the test data must hold chunks");
-        let rejects = |witness: &CorrectSwbfiUpdateWitness| {
+        let rejects = |witness: &CorrectSwbfUpdateWitness| {
             assert_rejects(
                 witness,
                 BlockValidationRule::RemovalRecordsValidity.error_id(),
@@ -987,21 +987,21 @@ pub(super) mod tests {
 
     /// The witness with one input's indices set in its chunks: that input is
     /// The witness's tokens with the one at this position changed.
-    fn tampered_tokens(witness: &CorrectSwbfiUpdateWitness, position: usize) -> NonDeterminism {
+    fn tampered_tokens(witness: &CorrectSwbfUpdateWitness, position: usize) -> NonDeterminism {
         let mut nondeterminism = witness.nondeterminism();
         nondeterminism.individual_tokens[position] += bfe!(1);
         nondeterminism
     }
 
-    fn assert_rejects_tokens(witness: &CorrectSwbfiUpdateWitness, nondeterminism: NonDeterminism) {
-        assert!(CorrectSwbfiUpdate
+    fn assert_rejects_tokens(witness: &CorrectSwbfUpdateWitness, nondeterminism: NonDeterminism) {
+        assert!(CorrectSwbfUpdate
             .run_tasm(&witness.standard_input(), nondeterminism)
             .is_err());
     }
 
     /// The number of tokens the window insertion reads, at the end of the
     /// witness's tokens, and the number the peak mutation reads before them.
-    fn window_and_mutation_token_counts(witness: &CorrectSwbfiUpdateWitness) -> (usize, usize) {
+    fn window_and_mutation_token_counts(witness: &CorrectSwbfUpdateWitness) -> (usize, usize) {
         use super::super::chunk_insertions::ChunkInsertions;
         let inputs = &witness.inputs;
         let mutator_set = &witness.mutator_set;
@@ -1050,7 +1050,7 @@ pub(super) mod tests {
         // length. The Rust shadow reads past these tokens, so only the
         // program can reject.
         nondeterminism.individual_tokens[total - window - mutation] = bfe!(1 << 20);
-        let error = CorrectSwbfiUpdate
+        let error = CorrectSwbfUpdate
             .run_tasm(&witness.standard_input(), nondeterminism)
             .unwrap_err();
         assert!(format!("{error:?}").contains(
@@ -1184,7 +1184,7 @@ pub(super) mod tests {
     #[test]
     fn index_moved_to_a_chunk_edge_and_across_it() {
         let honest = witness_with_chunks();
-        let honest_output = CorrectSwbfiUpdate
+        let honest_output = CorrectSwbfUpdate
             .run_tasm(&honest.standard_input(), honest.nondeterminism())
             .unwrap();
         let window_start = SwbfiPeaksAfterRemovals::window_start(&honest.mutator_set);
@@ -1218,11 +1218,9 @@ pub(super) mod tests {
                 if present.contains(&((target / chunk_size) as u64)) {
                     // The paths follow the insertions, so an honest prover
                     // recomputes them.
-                    let witness = CorrectSwbfiUpdateWitness::new(
-                        witness.packed_inputs(),
-                        witness.mutator_set,
-                    );
-                    let output = CorrectSwbfiUpdate
+                    let witness =
+                        CorrectSwbfUpdateWitness::new(witness.packed_inputs(), witness.mutator_set);
+                    let output = CorrectSwbfUpdate
                         .run_tasm(&witness.standard_input(), witness.nondeterminism())
                         .unwrap();
                     assert_eq!(honest_output[..2], output[..2]);
@@ -1273,7 +1271,7 @@ pub(super) mod tests {
                 Some((witness, target.0, target.1))
             })
             .expect("some seed must give an input reaching the window start");
-        let honest_output = CorrectSwbfiUpdate
+        let honest_output = CorrectSwbfUpdate
             .run_tasm(&honest.standard_input(), honest.nondeterminism())
             .unwrap();
         let window_start = SwbfiPeaksAfterRemovals::window_start(&honest.mutator_set);
@@ -1290,8 +1288,8 @@ pub(super) mod tests {
                 // The paths follow the insertions, so an honest prover
                 // recomputes them.
                 let witness =
-                    CorrectSwbfiUpdateWitness::new(witness.packed_inputs(), witness.mutator_set);
-                let output = CorrectSwbfiUpdate
+                    CorrectSwbfUpdateWitness::new(witness.packed_inputs(), witness.mutator_set);
+                let output = CorrectSwbfUpdate
                     .run_tasm(&witness.standard_input(), witness.nondeterminism())
                     .unwrap();
                 assert_eq!(honest_output[..2], output[..2]);
@@ -1308,7 +1306,7 @@ pub(super) mod tests {
     #[test]
     fn index_moved_within_its_chunk_changes_the_commitment_only() {
         let honest = witness_with_chunks();
-        let honest_output = CorrectSwbfiUpdate
+        let honest_output = CorrectSwbfUpdate
             .run_tasm(&honest.standard_input(), honest.nondeterminism())
             .unwrap();
 
@@ -1322,8 +1320,8 @@ pub(super) mod tests {
         indices[position] -= 1;
         witness.inputs[0].absolute_indices = AbsoluteIndexSet::new(indices);
         // The paths follow the insertions, so an honest prover recomputes them.
-        let witness = CorrectSwbfiUpdateWitness::new(witness.packed_inputs(), witness.mutator_set);
-        let output = CorrectSwbfiUpdate
+        let witness = CorrectSwbfUpdateWitness::new(witness.packed_inputs(), witness.mutator_set);
+        let output = CorrectSwbfUpdate
             .run_tasm(&witness.standard_input(), witness.nondeterminism())
             .unwrap();
 
@@ -1338,7 +1336,7 @@ pub(super) mod tests {
 
     /// spent. The chunks are not yet authenticated, so the unspent rule
     /// alone must catch this.
-    fn witness_with_a_spent_input() -> CorrectSwbfiUpdateWitness {
+    fn witness_with_a_spent_input() -> CorrectSwbfUpdateWitness {
         let mut witness = witness_with_chunks();
         let swbfi_leaf_count = witness.mutator_set.swbf_inactive.num_leafs();
         let window_start = u128::from(swbfi_leaf_count) << CHUNK_SIZE.ilog2();
@@ -1380,7 +1378,7 @@ pub(super) mod tests {
     /// Prints how the program's cycles and table rows distribute over its
     /// subroutines, at the input counts a leaf of the aggregation tree is
     /// sized for.
-    fn processor_rows_and_padded_height(witness: &CorrectSwbfiUpdateWitness) -> (usize, usize) {
+    fn processor_rows_and_padded_height(witness: &CorrectSwbfUpdateWitness) -> (usize, usize) {
         let (aet, _) = VM::trace_execution(
             witness.program(),
             witness.standard_input(),
@@ -1395,14 +1393,14 @@ pub(super) mod tests {
         let witness = witness(2, 0);
         let idle = witness.clone().with_idle_iterations(1_000);
         assert_eq!(witness.versioned_claim(), idle.versioned_claim());
-        let output = CorrectSwbfiUpdate
+        let output = CorrectSwbfUpdate
             .run_tasm(&idle.standard_input(), idle.nondeterminism())
             .unwrap();
         assert_eq!(idle.output(), output);
 
         let (rows, _) = processor_rows_and_padded_height(&witness);
         let (idle_rows, _) = processor_rows_and_padded_height(&idle);
-        let per_iteration = CorrectSwbfiUpdate::IDLE_ROWS_PER_ITERATION;
+        let per_iteration = CorrectSwbfUpdate::IDLE_ROWS_PER_ITERATION;
         assert!(idle_rows - rows >= 1_000 * per_iteration);
         assert!(idle_rows - rows < 1_000 * per_iteration + 32);
     }
@@ -1410,16 +1408,16 @@ pub(super) mod tests {
     #[test]
     #[should_panic(expected = "idle iterations exceed the cap")]
     fn idle_iterations_are_capped() {
-        witness(1, 0).with_idle_iterations(CorrectSwbfiUpdate::MAX_IDLE_ITERATIONS + 1);
+        witness(1, 0).with_idle_iterations(CorrectSwbfUpdate::MAX_IDLE_ITERATIONS + 1);
     }
 
     #[test]
     fn program_rejects_idle_iterations_above_the_cap_or_beyond_u32() {
-        for idle_iterations in [CorrectSwbfiUpdate::MAX_IDLE_ITERATIONS + 1, 1 << 40] {
+        for idle_iterations in [CorrectSwbfUpdate::MAX_IDLE_ITERATIONS + 1, 1 << 40] {
             let mut witness = witness(1, 0);
             witness.idle_iterations = bfe!(idle_iterations);
             let result =
-                CorrectSwbfiUpdate.run_tasm(&witness.standard_input(), witness.nondeterminism());
+                CorrectSwbfUpdate.run_tasm(&witness.standard_input(), witness.nondeterminism());
             assert!(result.is_err(), "{idle_iterations} iterations");
         }
     }
@@ -1459,7 +1457,7 @@ pub(super) mod tests {
             let witness = witness(num_inputs, 6);
             let profile = tasm_lib::generate_full_profile(
                 &format!("{num_inputs} inputs"),
-                CorrectSwbfiUpdate.program(),
+                CorrectSwbfUpdate.program(),
                 &witness.standard_input(),
                 &witness.nondeterminism(),
             );

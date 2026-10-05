@@ -181,10 +181,10 @@ which the final merge decides. `PredecessorIsValid`, hashing the previous
 block anyway, recomputes the peaks from the inputs in one linear pass and
 requires them of the root claim. Only the root claim goes in the appendix.
 
-Programs. The leaf is a current-block program, `CorrectSwbfiUpdate`: input
+Programs. The leaf is a current-block program, `CorrectSwbfUpdate`: input
 the hash of the mutator set it starts from, output the number of leaves
 and of index sets it covers, the hash of the mutator set after those
-removals, and the peaks. `SwbfiUpdateAggregation` has the same input and
+removals, and the peaks. `SwbfUpdateAggregation` has the same input and
 output layout and verifies two children, each a leaf or an aggregation: the
 left child's input is its own, the right child's input is the left's output
 state, and the children's peaks are those of the witnessed digests. The
@@ -217,7 +217,7 @@ can ship a synced transaction with its leaf and raise its chance of
 inclusion, and the composer needs no native intermediate states. The leaf
 program is the same in both.
 
-Measured d2) union, `SwbfiUpdateUnion` (ignored test `profile_union`,
+Measured d2) union, `SwbfUpdateUnion` (ignored test `profile_union`,
 without the two proof verifications): it takes both children's inputs
 with their chunks and their union as one packed list, all relative to the
 shared state, checks the index sets are the children's in order, and
@@ -435,7 +435,7 @@ of the nullifier's first two elements, which leaves no honest key
 collision at any realistic chain size. Per input: derive the key, walk
 from the empty leaf to the current root, walk from the nullifier to the
 new root, both over the same siblings, divined into RAM and read with
-`merkle_step_mem`. Against the current leaf `CorrectSwbfiUpdate` (e1,
+`merkle_step_mem`. Against the current leaf `CorrectSwbfUpdate` (e1,
 structure-length check dropped, ignored test `profile_leaf`), both as
 slopes between the two measured input counts:
 
@@ -523,7 +523,7 @@ so that can follow as a second step.
 
 ## Proposed next step
 
-The leaf program `T` exists as `CorrectSwbfiUpdate`, built from
+The leaf program `T` exists as `CorrectSwbfUpdate`, built from
 `SwbfiPeaksAfterRemovals`, the part of the snippet that holds 2.a, 2.b/2.d
 and the SWBFI half of 2.e, with the claim's public input in place of the
 witness pointers. Measured on the arbitrary fixture (ignored test
@@ -703,7 +703,7 @@ would cut the roots' hash rows about fivefold and the roots' processor
 rows by two to three thousand per input; the per-chunk bookkeeping stays.
 Not taken while processor rows dominate and hash rows do not.
 
-The d1 aggregation `SwbfiUpdateAggregation` exists and `PredecessorIsValid`
+The d1 aggregation `SwbfUpdateAggregation` exists and `PredecessorIsValid`
 accepts either program's claim as the root. Measured without the two proof
 verifications (ignored test `profile_aggregation`, two leaves of 8 inputs):
 8.4k processor rows and 1.4k RAM rows, of which the three peak computations

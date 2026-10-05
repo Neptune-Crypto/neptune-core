@@ -149,16 +149,16 @@ pub enum BlockValidationError {
     #[error("Removal records must match the claim's index commitment")]
     RemovalIndexCommitmentMismatch,
 
-    /// An aggregated SWBFI update claim's children do not chain.
-    #[error("SWBFI update claims must chain across adjacent input ranges")]
-    SwbfiUpdateChaining,
+    /// An aggregated SWBF update claim's children do not chain.
+    #[error("SWBF update claims must chain across adjacent input ranges")]
+    SwbfUpdateChaining,
 
-    /// The leaf proofs of the SWBFI update claim must contain a certain amount
+    /// The leaf proofs of the SWBF update claim must contain a certain amount
     /// of proving work. This is to incentivize composers to pick up
     /// transactions with many inputs. The metric is the padded height of the
-    /// proofs of the leaf program execution in the SWBFI update tree.
-    #[error("SWBFI update leaf proofs must meet the epoch's padded rows")]
-    SwbfiUpdateBelowWorkFloor,
+    /// proofs of the leaf program execution in the SWBF update tree.
+    #[error("SWBF update leaf proofs must meet the epoch's padded rows")]
+    SwbfUpdateBelowWorkFloor,
 }
 
 impl From<RemovalRecordListUnpackError> for BlockValidationError {

@@ -1,4 +1,4 @@
-//! Two SWBFI update claims aggregated into one: from the mutator set the
+//! Two SWBF update claims aggregated into one: from the mutator set the
 //! left child starts on, removing both children's inputs yields the
 //! mutator set the right child ends on. The claim has the leaf's input and
 //! output layout, so a tree of aggregations over leaves is bound by its root
@@ -35,8 +35,8 @@ use tasm_lib::verifier::stark_verify::StarkVerify;
 use tasm_lib::verifier::vm_proof_iter::dequeue_next_as::DequeueNextAs;
 use tasm_lib::verifier::vm_proof_iter::new::New as NewProofIter;
 
-use super::leaf::CorrectSwbfiUpdate;
-use super::leaf::CorrectSwbfiUpdateWitness;
+use super::leaf::CorrectSwbfUpdate;
+use super::leaf::CorrectSwbfUpdateWitness;
 use super::removal_index_commitment::DigestPeaks;
 use super::removal_index_commitment::IndexSetDigests;
 use super::ClaimOutput;
@@ -55,7 +55,7 @@ use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::proof_abstractions::SecretWitness;
 
 #[derive(Debug, Clone, BFieldCodec, GetSize, PartialEq, Eq, Serialize, Deserialize, TasmObject)]
-pub struct SwbfiUpdateAggregationWitness {
+pub struct SwbfUpdateAggregationWitness {
     left_claim: Claim,
     left_proof: Proof,
     right_claim: Claim,
@@ -65,7 +65,7 @@ pub struct SwbfiUpdateAggregationWitness {
     index_set_digests: Vec<Digest>,
 }
 
-impl SwbfiUpdateAggregationWitness {
+impl SwbfUpdateAggregationWitness {
     pub fn new(
         left_claim: Claim,
         left_proof: Proof,
@@ -82,7 +82,7 @@ impl SwbfiUpdateAggregationWitness {
         }
     }
 
-    pub fn nondeterminism_for(&self, program: &SwbfiUpdateAggregation) -> NonDeterminism {
+    pub fn nondeterminism_for(&self, program: &SwbfUpdateAggregation) -> NonDeterminism {
         let mut nondeterminism = NonDeterminism::default();
         encode_to_memory(
             &mut nondeterminism.ram,
@@ -109,7 +109,7 @@ impl SwbfiUpdateAggregationWitness {
     /// The padded rows of the leaf proofs beneath a child: its proof's
     /// padded height for a leaf, its output's first word for an aggregation.
     fn child_padded_rows(claim: &Claim, proof: &Proof) -> BFieldElement {
-        if claim.program_digest == CorrectSwbfiUpdate.hash() {
+        if claim.program_digest == CorrectSwbfUpdate.hash() {
             let padded_height = proof
                 .padded_height()
                 .expect("child proof must declare its padded height");
@@ -120,7 +120,7 @@ impl SwbfiUpdateAggregationWitness {
     }
 
     /// The claim about this witness for this variant of the program.
-    fn claim_for(&self, program: &SwbfiUpdateAggregation) -> Claim {
+    fn claim_for(&self, program: &SwbfUpdateAggregation) -> Claim {
         Claim::about_program(&program.program())
             .with_input(self.standard_input().individual_tokens)
             .with_output(self.output())
@@ -133,11 +133,11 @@ impl SwbfiUpdateAggregationWitness {
 
     /// The claim about this witness, as a block's appendix carries it.
     pub fn versioned_claim(&self) -> Claim {
-        self.claim_for(&SwbfiUpdateAggregation::new())
+        self.claim_for(&SwbfUpdateAggregation::new())
     }
 }
 
-impl SecretWitness for SwbfiUpdateAggregationWitness {
+impl SecretWitness for SwbfUpdateAggregationWitness {
     fn standard_input(&self) -> PublicInput {
         PublicInput::new(self.left_claim.input.clone())
     }
@@ -160,18 +160,18 @@ impl SecretWitness for SwbfiUpdateAggregationWitness {
     }
 
     fn program(&self) -> Program {
-        SwbfiUpdateAggregation::new().program()
+        SwbfUpdateAggregation::new().program()
     }
 
     fn nondeterminism(&self) -> NonDeterminism {
-        self.nondeterminism_for(&SwbfiUpdateAggregation::new())
+        self.nondeterminism_for(&SwbfUpdateAggregation::new())
     }
 }
 
-/// Input and output as [`CorrectSwbfiUpdate`]'s, about both children's
+/// Input and output as [`CorrectSwbfUpdate`]'s, about both children's
 /// inputs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec)]
-pub struct SwbfiUpdateAggregation {
+pub struct SwbfUpdateAggregation {
     /// Whether to verify the children's proofs. Only ever false in tests.
     ///
     /// A compile-time variable from the TASM perspective: two different
@@ -179,7 +179,7 @@ pub struct SwbfiUpdateAggregation {
     verifies_children: bool,
 }
 
-impl SwbfiUpdateAggregation {
+impl SwbfUpdateAggregation {
     #[expect(
         clippy::new_without_default,
         reason = "the other variant is for tests only"
@@ -197,7 +197,7 @@ impl SwbfiUpdateAggregation {
     /// waits for the next level, and so on until one node remains. The prover
     /// is called for every leaf and every aggregation. A single leaf is
     /// returned as is, though a block's root must be an aggregation.
-    pub fn tree<P>(&self, leaves: &[CorrectSwbfiUpdateWitness], prove: P) -> (Claim, Proof)
+    pub fn tree<P>(&self, leaves: &[CorrectSwbfUpdateWitness], prove: P) -> (Claim, Proof)
     where
         P: Fn(&Claim, Program, NonDeterminism) -> Proof,
     {
@@ -211,7 +211,7 @@ impl SwbfiUpdateAggregation {
             .iter()
             .map(|leaf| {
                 let claim = leaf.versioned_claim();
-                let proof = prove(&claim, CorrectSwbfiUpdate.program(), leaf.nondeterminism());
+                let proof = prove(&claim, CorrectSwbfUpdate.program(), leaf.nondeterminism());
                 Node {
                     claim,
                     proof,
@@ -230,7 +230,7 @@ impl SwbfiUpdateAggregation {
                     break;
                 };
                 let index_set_digests = [left.index_set_digests, right.index_set_digests].concat();
-                let witness = SwbfiUpdateAggregationWitness::new(
+                let witness = SwbfUpdateAggregationWitness::new(
                     left.claim,
                     left.proof,
                     right.claim,
@@ -253,11 +253,11 @@ impl SwbfiUpdateAggregation {
     }
 }
 
-impl TritonProgram for SwbfiUpdateAggregation {
+impl TritonProgram for SwbfUpdateAggregation {
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         let mut library = Library::new();
         let audit_witness = library.import(Box::new(VerifyNdSiIntegrity::<
-            SwbfiUpdateAggregationWitness,
+            SwbfUpdateAggregationWitness,
         >::default()));
         let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
             Stark::default(),
@@ -275,13 +275,13 @@ impl TritonProgram for SwbfiUpdateAggregation {
         let padded_rows_alloc = library.kmalloc(1);
 
         let push_leaf_program_digest =
-            Literal::Digest(CorrectSwbfiUpdate.hash()).push_to_stack_code();
+            Literal::Digest(CorrectSwbfUpdate.hash()).push_to_stack_code();
         let version = ConsensusRuleSet::HardforkDelta
             .triton_proof_version()
             .version();
         let digests_are_equal = DataType::Digest.compare();
         let read_digest = triton_asm!(addi {Digest::LEN - 1} read_mem {Digest::LEN} pop 1);
-        let chaining = BlockValidationRule::SwbfiUpdateChaining.error_id();
+        let chaining = BlockValidationRule::SwbfUpdateChaining.error_id();
 
         // BEFORE: _ *list
         // AFTER:  _ [digest]
@@ -290,17 +290,17 @@ impl TritonProgram for SwbfiUpdateAggregation {
             call {hash_varlen}
         );
 
-        let check_child = "swbfi_update_aggregation_check_child".to_string();
-        let child_padded_rows = "swbfi_update_aggregation_child_padded_rows".to_string();
-        let audit_claim_output = "swbfi_update_aggregation_audit_output".to_string();
-        let write_peaks = "swbfi_update_aggregation_write_peaks".to_string();
+        let check_child = "swbf_update_aggregation_check_child".to_string();
+        let child_padded_rows = "swbf_update_aggregation_child_padded_rows".to_string();
+        let audit_claim_output = "swbf_update_aggregation_audit_output".to_string();
+        let write_peaks = "swbf_update_aggregation_write_peaks".to_string();
 
         // The verifier crashes on an invalid proof; that crash carries no
         // error ID.
         let verify_left = if self.verifies_children {
             triton_asm!(
                 // _ *w *left
-                dup 0 dup 2 {&field!(SwbfiUpdateAggregationWitness::left_proof)}
+                dup 0 dup 2 {&field!(SwbfUpdateAggregationWitness::left_proof)}
                 call {stark_verify}
             )
         } else {
@@ -309,7 +309,7 @@ impl TritonProgram for SwbfiUpdateAggregation {
         let verify_right = if self.verifies_children {
             triton_asm!(
                 // _ *w *left_output *right
-                dup 0 dup 3 {&field!(SwbfiUpdateAggregationWitness::right_proof)}
+                dup 0 dup 3 {&field!(SwbfUpdateAggregationWitness::right_proof)}
                 call {stark_verify}
             )
         } else {
@@ -334,7 +334,7 @@ impl TritonProgram for SwbfiUpdateAggregation {
             dup 0 call {audit_witness} pop 1
             // _ *w
 
-            dup 0 {&field!(SwbfiUpdateAggregationWitness::left_claim)}
+            dup 0 {&field!(SwbfUpdateAggregationWitness::left_claim)}
             call {check_child}
             // _ *w *left_claim left_first_leaf_index [left_mutator_set_hash]
 
@@ -362,7 +362,7 @@ impl TritonProgram for SwbfiUpdateAggregation {
             /* Read out left claim's "accumulated proof complexity count": The
                sum of the padded heights of proofs in the leafs verified by the
                left claim */
-            dup 0 dup 2 {&field!(SwbfiUpdateAggregationWitness::left_proof)}
+            dup 0 dup 2 {&field!(SwbfUpdateAggregationWitness::left_proof)}
             call {child_padded_rows}
             push {padded_rows_alloc.write_address()} write_mem 1 pop 1
             // _ *w *left_claim
@@ -371,7 +371,7 @@ impl TritonProgram for SwbfiUpdateAggregation {
             // _ *w *left_output
 
             /* Assert that right claim started where left claim ended */
-            dup 1 {&field!(SwbfiUpdateAggregationWitness::right_claim)}
+            dup 1 {&field!(SwbfUpdateAggregationWitness::right_claim)}
             call {check_child}
             // _ *w *left_output *right right_first_leaf_index [right_mutator_set_hash]
 
@@ -389,7 +389,7 @@ impl TritonProgram for SwbfiUpdateAggregation {
             // _ *w *left_output *right
 
             {&verify_right}
-            dup 0 dup 3 {&field!(SwbfiUpdateAggregationWitness::right_proof)}
+            dup 0 dup 3 {&field!(SwbfUpdateAggregationWitness::right_proof)}
             call {child_padded_rows}
 
             // The sum of the proving complexity (of the leaf executions) is a
@@ -403,7 +403,7 @@ impl TritonProgram for SwbfiUpdateAggregation {
             call {audit_claim_output}
             // _ *w *left_output *right_output
 
-            dup 2 {&field!(SwbfiUpdateAggregationWitness::index_set_digests)}
+            dup 2 {&field!(SwbfUpdateAggregationWitness::index_set_digests)}
             // _ *w *left_output *right_output *index_set_digests
 
             dup 0 read_mem 1 pop 1
@@ -608,12 +608,12 @@ pub(in crate::block::validity) mod tests {
     use crate::proof_abstractions::tasm::builtins::verify_stark;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
 
-    impl TritonProgramSpecification for SwbfiUpdateAggregation {
+    impl TritonProgramSpecification for SwbfUpdateAggregation {
         fn source(&self) {
             let own_program_digest = tasm::own_program_digest();
             let mutator_set_hash = tasm::tasmlib_io_read_stdin___digest();
             let first_leaf_index = tasm::tasmlib_io_read_stdin___bfe();
-            let witness: SwbfiUpdateAggregationWitness =
+            let witness: SwbfUpdateAggregationWitness =
                 tasm::decode_from_memory(FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS);
             let version = ConsensusRuleSet::HardforkDelta
                 .triton_proof_version()
@@ -621,7 +621,7 @@ pub(in crate::block::validity) mod tests {
 
             let check_child = |claim: &Claim| {
                 assert!(
-                    claim.program_digest == CorrectSwbfiUpdate.hash()
+                    claim.program_digest == CorrectSwbfUpdate.hash()
                         || claim.program_digest == own_program_digest
                 );
                 assert_eq!(version, claim.version);
@@ -654,7 +654,7 @@ pub(in crate::block::validity) mod tests {
             assert_eq!(left.peaks, DigestPeaks::peaks(&digests[..left.count]));
             assert_eq!(right.peaks, DigestPeaks::peaks(&digests[left.count..]));
 
-            let padded_rows = SwbfiUpdateAggregationWitness::child_padded_rows;
+            let padded_rows = SwbfUpdateAggregationWitness::child_padded_rows;
             let output = ClaimOutput {
                 padded_rows: padded_rows(&witness.left_claim, &witness.left_proof)
                     + padded_rows(&witness.right_claim, &witness.right_proof),
@@ -669,8 +669,8 @@ pub(in crate::block::validity) mod tests {
         }
     }
 
-    fn skipping() -> SwbfiUpdateAggregation {
-        SwbfiUpdateAggregation {
+    fn skipping() -> SwbfUpdateAggregation {
+        SwbfUpdateAggregation {
             verifies_children: false,
         }
     }
@@ -702,12 +702,9 @@ pub(in crate::block::validity) mod tests {
         log2_padded_heights: [u32; 2],
     ) -> Claim {
         let split = inputs.len() / 2;
-        let leaves = CorrectSwbfiUpdateWitness::segments(
-            inputs,
-            mutator_set,
-            &[split, inputs.len() - split],
-        );
-        SwbfiUpdateAggregationWitness::new(
+        let leaves =
+            CorrectSwbfUpdateWitness::segments(inputs, mutator_set, &[split, inputs.len() - split]);
+        SwbfUpdateAggregationWitness::new(
             leaves[0].versioned_claim(),
             placeholder_proof(log2_padded_heights[0]),
             leaves[1].versioned_claim(),
@@ -718,7 +715,7 @@ pub(in crate::block::validity) mod tests {
     }
 
     /// The digests of these leaves' index sets, in order.
-    fn index_set_digests(leaves: &[CorrectSwbfiUpdateWitness]) -> Vec<Digest> {
+    fn index_set_digests(leaves: &[CorrectSwbfUpdateWitness]) -> Vec<Digest> {
         leaves
             .iter()
             .flat_map(|leaf| IndexSetDigests::digests(leaf.inputs()))
@@ -731,14 +728,11 @@ pub(in crate::block::validity) mod tests {
         left_size: usize,
         right_size: usize,
         seed: u64,
-    ) -> (
-        SwbfiUpdateAggregationWitness,
-        Vec<CorrectSwbfiUpdateWitness>,
-    ) {
+    ) -> (SwbfUpdateAggregationWitness, Vec<CorrectSwbfUpdateWitness>) {
         let leaves = chained_witnesses(&[left_size, right_size], seed);
         let (left, left_proof) = child(leaves[0].versioned_claim());
         let (right, right_proof) = child(leaves[1].versioned_claim());
-        let witness = SwbfiUpdateAggregationWitness::new(
+        let witness = SwbfUpdateAggregationWitness::new(
             left,
             left_proof,
             right,
@@ -748,7 +742,7 @@ pub(in crate::block::validity) mod tests {
         (witness, leaves)
     }
 
-    fn outputs(witness: &SwbfiUpdateAggregationWitness) -> Vec<BFieldElement> {
+    fn outputs(witness: &SwbfUpdateAggregationWitness) -> Vec<BFieldElement> {
         let input = witness.standard_input();
         let nondeterminism = witness.nondeterminism_for(&skipping());
         let rust_output = skipping().run_rust(&input, nondeterminism.clone()).unwrap();
@@ -758,12 +752,12 @@ pub(in crate::block::validity) mod tests {
         tasm_output
     }
 
-    fn assert_rejects(witness: &SwbfiUpdateAggregationWitness, input: Option<PublicInput>) {
+    fn assert_rejects(witness: &SwbfUpdateAggregationWitness, input: Option<PublicInput>) {
         skipping()
             .test_assertion_failure(
                 input.unwrap_or_else(|| witness.standard_input()),
                 witness.nondeterminism_for(&skipping()),
-                &[BlockValidationRule::SwbfiUpdateChaining.error_id()],
+                &[BlockValidationRule::SwbfUpdateChaining.error_id()],
             )
             .unwrap();
     }
@@ -796,7 +790,7 @@ pub(in crate::block::validity) mod tests {
         let leaves = chained_witnesses(&[1, 2, 3], 4);
         let (left, left_proof) = child(leaves[0].versioned_claim());
         let (middle, middle_proof) = child(leaves[1].versioned_claim());
-        let lower = SwbfiUpdateAggregationWitness::new(
+        let lower = SwbfUpdateAggregationWitness::new(
             left,
             left_proof,
             middle,
@@ -814,7 +808,7 @@ pub(in crate::block::validity) mod tests {
 
         let (lower_claim, lower_proof) = child(lower_claim);
         let (right, right_proof) = child(leaves[2].versioned_claim());
-        let upper = SwbfiUpdateAggregationWitness::new(
+        let upper = SwbfUpdateAggregationWitness::new(
             lower_claim,
             lower_proof,
             right,
@@ -963,11 +957,11 @@ pub(in crate::block::validity) mod tests {
         use crate::proof_abstractions::tasm::program::proof_cache::load_proof_or_produce_and_save;
 
         /// A leaf's claim with its proof from the proof cache.
-        fn proven_leaf(leaf: &CorrectSwbfiUpdateWitness) -> (Claim, Proof) {
+        fn proven_leaf(leaf: &CorrectSwbfUpdateWitness) -> (Claim, Proof) {
             let claim = leaf.versioned_claim();
             let proof = load_proof_or_produce_and_save(
                 &claim,
-                CorrectSwbfiUpdate.program(),
+                CorrectSwbfUpdate.program(),
                 leaf.nondeterminism(),
             );
             (claim, proof.into())
@@ -978,14 +972,14 @@ pub(in crate::block::validity) mod tests {
             let leaves = chained_witnesses(&[1, 2], 8);
             let (left, left_proof) = proven_leaf(&leaves[0]);
             let (right, right_proof) = proven_leaf(&leaves[1]);
-            let witness = SwbfiUpdateAggregationWitness::new(
+            let witness = SwbfUpdateAggregationWitness::new(
                 left,
                 left_proof,
                 right,
                 right_proof,
                 index_set_digests(&leaves),
             );
-            let program = SwbfiUpdateAggregation::new();
+            let program = SwbfUpdateAggregation::new();
             let input = witness.standard_input();
             let nondeterminism = witness.nondeterminism_for(&program);
 
