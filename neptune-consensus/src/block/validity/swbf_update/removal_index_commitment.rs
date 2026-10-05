@@ -1,5 +1,5 @@
 //! The commitment to a block transaction's inputs that
-//! [`CorrectSwbfiUpdate`](super::leaf::CorrectSwbfiUpdate)
+//! [`CorrectSwbfUpdate`](super::leaf::CorrectSwbfUpdate)
 //! binds, to their index sets and nothing else: the peaks of an MMR over
 //! the index sets, in block order.
 //!

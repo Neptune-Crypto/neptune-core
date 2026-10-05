@@ -34,10 +34,10 @@ pub struct Epoch {
     pub resets_lustration_status: BFieldElement,
 
     /// The least the padded heights of the leaf proofs beneath a block's
-    /// SWBFI update claim may sum to: proving work a block carries whatever
+    /// SWBF update claim may sum to: proving work a block carries whatever
     /// its inputs, so that leaving transactions out saves the composer
     /// nothing. Zero for no floor.
-    pub min_swbfi_padded_rows: BFieldElement,
+    pub min_swbf_padded_rows: BFieldElement,
 }
 
 /// Number of entries in an [`EpochTable`], used or not.

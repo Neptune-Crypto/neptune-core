@@ -1,4 +1,4 @@
-//! The SWBFI update claims: a block's removals proven piecewise and bound
+//! The SWBF update claims: a block's removals proven piecewise and bound
 //! by one root claim in its appendix.
 //!
 //! A [`leaf`] applies one segment of the block's inputs to the mutator
@@ -42,14 +42,14 @@ pub(super) mod window_after_removals;
 
 use tasm_lib::triton_vm::prelude::*;
 
-/// Where in an SWBFI update claim's input each part lies; see
-/// [`leaf::CorrectSwbfiUpdate`] for what each part means.
+/// Where in an SWBF update claim's input each part lies; see
+/// [`leaf::CorrectSwbfUpdate`] for what each part means.
 pub(super) const INPUT_MUTATOR_SET_HASH: usize = 0;
 pub(super) const INPUT_FIRST_LEAF_INDEX: usize = INPUT_MUTATOR_SET_HASH + Digest::LEN;
 pub(super) const INPUT_LEN: usize = INPUT_FIRST_LEAF_INDEX + 1;
 
-/// Where in an SWBFI update claim's output each part lies; see
-/// [`leaf::CorrectSwbfiUpdate`] for what each part means.
+/// Where in an SWBF update claim's output each part lies; see
+/// [`leaf::CorrectSwbfUpdate`] for what each part means.
 pub(super) const OUTPUT_PADDED_ROWS: usize = 0;
 pub(super) const OUTPUT_COUNT: usize = 1;
 pub(super) const OUTPUT_MUTATOR_SET_HASH: usize = 2;
@@ -57,13 +57,13 @@ pub(super) const OUTPUT_LAST_LEAF_INDEX: usize = OUTPUT_MUTATOR_SET_HASH + Diges
 pub(super) const OUTPUT_NUM_PEAKS: usize = OUTPUT_LAST_LEAF_INDEX + 1;
 pub(super) const OUTPUT_PEAKS: usize = OUTPUT_NUM_PEAKS + 1;
 
-/// An SWBFI update claim's output taken apart; the same for a leaf and an
-/// aggregation. See [`leaf::CorrectSwbfiUpdate`] for the input.
+/// An SWBF update claim's output taken apart; the same for a leaf and an
+/// aggregation. See [`leaf::CorrectSwbfUpdate`] for the input.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ClaimOutput {
     /// The padded heights of the leaf proofs beneath the claim, summed. A
     /// leaf cannot attest its own proof's height and writes zero; see
-    /// [`leaf::CorrectSwbfiUpdate::ATTESTED_PADDED_ROWS`].
+    /// [`leaf::CorrectSwbfUpdate::ATTESTED_PADDED_ROWS`].
     pub(super) padded_rows: BFieldElement,
 
     /// The number of inputs removed, which the peaks below commit to.
@@ -84,7 +84,7 @@ impl ClaimOutput {
     /// # Panics
     ///
     /// - If the output's length does not fit its number of peaks.
-    /// - If output does not match the output format of the SWBFI update tree
+    /// - If output does not match the output format of the SWBF update tree
     pub(super) fn parse(output: &[BFieldElement]) -> Self {
         let num_peaks = output[OUTPUT_NUM_PEAKS].value() as usize;
         assert_eq!(OUTPUT_PEAKS + Digest::LEN * num_peaks, output.len());

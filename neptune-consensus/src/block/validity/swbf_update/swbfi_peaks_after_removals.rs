@@ -8,7 +8,7 @@
 //! yields the inactive SWBF's new peaks.
 //!
 //! This is the part of the update that dominates its cost. It is the body of
-//! [`CorrectSwbfiUpdate`](super::leaf::CorrectSwbfiUpdate),
+//! [`CorrectSwbfUpdate`](super::leaf::CorrectSwbfUpdate),
 //! the claim that proves it for the current block.
 
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;

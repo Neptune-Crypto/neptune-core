@@ -51,8 +51,8 @@ use super::mutator_set_hash::MutatorSetHash;
 use super::mutator_set_hash::MutatorSetHashFromComponents;
 use super::mutator_set_update_from_state_hash::MutatorSetUpdateFromStateHash;
 use super::removal_records_are_unique::RemovalRecordsAreUnique;
-use super::swbf_update::aggregation::SwbfiUpdateAggregation;
-use super::swbf_update::leaf::CorrectSwbfiUpdate;
+use super::swbf_update::aggregation::SwbfUpdateAggregation;
+use super::swbf_update::leaf::CorrectSwbfUpdate;
 use super::swbf_update::removal_index_commitment::RemovalIndexCommitment;
 use super::swbf_update::INPUT_FIRST_LEAF_INDEX;
 use super::swbf_update::INPUT_LEN;
@@ -437,12 +437,12 @@ impl TritonProgram for PredecessorIsValid {
         let mutator_set_hash = library.import(Box::new(MutatorSetHash));
         let mutator_set_update = library.import(Box::new(MutatorSetUpdateFromStateHash));
         let removal_index_commitment = library.import(Box::new(RemovalIndexCommitment));
-        // What the SWBFI update claim in the previous block's appendix must
+        // What the SWBF update claim in the previous block's appendix must
         // bind: the mutator set after the previous block's predecessor, and
         // the previous block's inputs.
-        let swbfi_claim_mutator_set_alloc = library.kmalloc(Digest::LEN as u32);
-        let push_swbfi_aggregation_program_digest =
-            Literal::Digest(SwbfiUpdateAggregation::new().hash()).push_to_stack_code();
+        let swbf_claim_mutator_set_alloc = library.kmalloc(Digest::LEN as u32);
+        let push_swbf_aggregation_program_digest =
+            Literal::Digest(SwbfUpdateAggregation::new().hash()).push_to_stack_code();
         // The messages of the previous block's lustration announcements.
         let lustrations_alloc = library.kmalloc(1);
         // The hash of the mutator set after the previous block, for the
@@ -766,7 +766,7 @@ impl TritonProgram for PredecessorIsValid {
         let digests_are_equal = DataType::Digest.compare();
 
         // Claims of other proof versions are not this program's, nor the
-        // SWBFI update's, even if the program digests agree.
+        // SWBF update's, even if the program digests agree.
         let version = ConsensusRuleSet::HardforkDelta
             .triton_proof_version()
             .version();
@@ -1161,43 +1161,42 @@ impl TritonProgram for PredecessorIsValid {
         );
 
         // Whether the claim input, whose program digest and length already
-        // match the SWBFI update claim's, binds the mutator set after the
+        // match the SWBF update claim's, binds the mutator set after the
         // previous block's predecessor and starts at the first leaf.
-        let swbfi_claim_input_matches =
-            "predecessor_is_valid_swbfi_claim_input_matches".to_string();
-        let swbfi_claim_input_matches_code = triton_asm!(
+        let swbf_claim_input_matches = "predecessor_is_valid_swbf_claim_input_matches".to_string();
+        let swbf_claim_input_matches_code = triton_asm!(
             // BEFORE: _ *input 1
             // AFTER:  _ *input input_matches
-            {swbfi_claim_input_matches}:
+            {swbf_claim_input_matches}:
                 pop 1
                 dup 0 addi {Digest::LEN} read_mem {Digest::LEN} pop 1
                 swap 4 swap 1 swap 3 swap 1
                 // _ *input [mutator_set_hash_in_input]
 
-                push {swbfi_claim_mutator_set_alloc.read_address()} read_mem {Digest::LEN} pop 1
+                push {swbf_claim_mutator_set_alloc.read_address()} read_mem {Digest::LEN} pop 1
                 {&digests_are_equal}
                 // _ *input mutator_set_matches
 
                 dup 1 addi {1 + INPUT_FIRST_LEAF_INDEX} read_mem 1 pop 1
-                push {CorrectSwbfiUpdate::FIRST_LEAF_INDEX} eq mul
+                push {CorrectSwbfUpdate::FIRST_LEAF_INDEX} eq mul
                 // _ *input input_matches
 
                 return
         );
 
-        // Find the aggregated SWBFI update claim for the previous block's
+        // Find the aggregated SWBF update claim for the previous block's
         // transaction in the previous block's appendix. Sets the index to the
         // matching claim.
-        let find_swbfi_claim = "predecessor_is_valid_find_swbfi_claim".to_string();
-        let find_swbfi_claim_code = triton_asm!(
+        let find_swbf_claim = "predecessor_is_valid_find_swbf_claim".to_string();
+        let find_swbf_claim_code = triton_asm!(
             // INVARIANT: _ *claim[i]_si num_claims i
-            {find_swbfi_claim}:
+            {find_swbf_claim}:
                 dup 1 dup 1 eq
                 push 0 eq assert error_id {BlockValidationRule::AppendixMissingClaim.error_id()}
                 // _ *claim[i]_si num_claims i
 
                 dup 2 addi 1 {&field!(Claim::program_digest)} {&read_digest}
-                {&push_swbfi_aggregation_program_digest}
+                {&push_swbf_aggregation_program_digest}
                 {&digests_are_equal}
                 dup 3 addi 1 {&field!(Claim::version)} read_mem 1 pop 1
                 push {version} eq mul
@@ -1211,9 +1210,9 @@ impl TritonProgram for PredecessorIsValid {
                 pick 2 mul
                 // _ *claim[i]_si num_claims i *input shape_matches
 
-                dup 0 skiz call {swbfi_claim_input_matches}
+                dup 0 skiz call {swbf_claim_input_matches}
                 place 1 pop 1
-                // _ *claim[i]_si num_claims i is_swbfi_claim_about_prev_block
+                // _ *claim[i]_si num_claims i is_swbf_claim_about_prev_block
 
                 skiz return
                 // _ *claim[i]_si num_claims i
@@ -1245,14 +1244,14 @@ impl TritonProgram for PredecessorIsValid {
 
         // Rules 2.a, 2.b, 2.d and 2.e: the transaction applied to the
         // witness's mutator set yields the body's. The mutator set after the
-        // removals comes, by hash, from the SWBFI update claim the previous
+        // removals comes, by hash, from the SWBF update claim the previous
         // block carries, which its proof covers; the rest is computed here.
         // BEFORE: _ *w [prev_block_hash] *prev_claim_output
         // AFTER:  _ *w [prev_block_hash] *prev_claim_output
         let mutator_set_update_prev = triton_asm!(
             dup 0 addi {Self::output_mutator_set_offset() + Digest::LEN}
             read_mem {Digest::LEN} pop 1
-            push {swbfi_claim_mutator_set_alloc.write_address()} write_mem {Digest::LEN} pop 1
+            push {swbf_claim_mutator_set_alloc.write_address()} write_mem {Digest::LEN} pop 1
             // _ *w [prev_block_hash] *prev_claim_output
 
             dup 6 {&field!(PredecessorIsValidWitnessMemory::prev_block_appendix)}
@@ -1260,9 +1259,9 @@ impl TritonProgram for PredecessorIsValid {
             read_mem 1 addi 2 place 1 push 0
             // _ *w [prev_block_hash] *prev_claim_output *claim[0]_si num_claims 0
 
-            call {find_swbfi_claim}
+            call {find_swbf_claim}
             pop 2 addi 1 {&field!(Claim::output)}
-            // _ *w [prev_block_hash] *prev_claim_output *swbfi_claim_output
+            // _ *w [prev_block_hash] *prev_claim_output *swbf_claim_output
 
             // The output has the leaf's layout: the padded rows of the leaf
             // proofs beneath the claim, the number of index sets covered, the
@@ -1275,16 +1274,16 @@ impl TritonProgram for PredecessorIsValid {
             push {Digest::LEN} mul addi {OUTPUT_PEAKS} eq
             assert error_id {BlockValidationRule::MutatorSetUpdateIntegrity.error_id()}
             push {prev_epoch_alloc.read_address()} read_mem 1 pop 1
-            {&field!(Epoch::min_swbfi_padded_rows)} read_mem 1 pop 1 split
+            {&field!(Epoch::min_swbf_padded_rows)} read_mem 1 pop 1 split
             dup 2 addi {1 + OUTPUT_PADDED_ROWS} read_mem 1 pop 1 split
-            // _ *w [prev_block_hash] *prev_claim_output *swbfi_claim_output [min_padded_rows] [padded_rows]
+            // _ *w [prev_block_hash] *prev_claim_output *swbf_claim_output [min_padded_rows] [padded_rows]
 
             call {u64_lt} push 0 eq
-            assert error_id {BlockValidationRule::SwbfiUpdateBelowWorkFloor.error_id()}
+            assert error_id {BlockValidationRule::SwbfUpdateBelowWorkFloor.error_id()}
             dup 0 addi {1 + OUTPUT_COUNT} read_mem 1 pop 1
             dup 8 {&prev_block_txk} {&field!(TransactionKernel::inputs)} read_mem 1 pop 1 eq
             assert error_id {BlockValidationRule::RemovalIndexCommitmentMismatch.error_id()}
-            // _ *w [prev_block_hash] *prev_claim_output *swbfi_claim_output
+            // _ *w [prev_block_hash] *prev_claim_output *swbf_claim_output
 
             dup 7 {&prev_block_txk} {&field!(TransactionKernel::inputs)}
             call {removal_index_commitment}
@@ -1292,7 +1291,7 @@ impl TritonProgram for PredecessorIsValid {
             dup 5 addi {1 + OUTPUT_NUM_PEAKS} {&hash_digest_list}
             assert_vector error_id {BlockValidationRule::RemovalIndexCommitmentMismatch.error_id()}
             pop {Digest::LEN}
-            // _ *w [prev_block_hash] *prev_claim_output *swbfi_claim_output
+            // _ *w [prev_block_hash] *prev_claim_output *swbf_claim_output
 
             addi {OUTPUT_MUTATOR_SET_HASH + Digest::LEN} read_mem {Digest::LEN} pop 1
             // _ *w [prev_block_hash] *prev_claim_output [mutator_set_after_removals_hash]
@@ -2406,8 +2405,8 @@ impl TritonProgram for PredecessorIsValid {
             {&rule_0f_prev_code}
             {&rule_2t_prev_code}
             {&mutator_set_update_prev_code}
-            {&swbfi_claim_input_matches_code}
-            {&find_swbfi_claim_code}
+            {&swbf_claim_input_matches_code}
+            {&find_swbf_claim_code}
             {&rule_2q_prev_code}
             {&rules_2o_2p_2r_prev_code}
             {&lustration_reset_prev_code}
@@ -2468,7 +2467,7 @@ mod tests {
 
     use super::super::swbf_update::aggregation::tests::claim_over_halves;
     use super::super::swbf_update::chunk_witness::ChunkWitness;
-    use super::super::swbf_update::leaf::CorrectSwbfiUpdateWitness;
+    use super::super::swbf_update::leaf::CorrectSwbfUpdateWitness;
     use super::super::swbf_update::ClaimOutput;
     use super::*;
     use crate::block::block_kernel::BlockKernel;
@@ -2732,27 +2731,27 @@ mod tests {
                 );
 
                 // 2.a, 2.b, 2.d, 2.e) The previous block's appendix carries
-                // the aggregated SWBFI update claim about its transaction's
+                // the aggregated SWBF update claim about its transaction's
                 // removals on the mutator set it is built on; its proof was
                 // verified with the block's, and the leaf proofs beneath it
                 // must total the epoch's floor. The rest of the update is
                 // computed here.
-                let claim_input = CorrectSwbfiUpdate::claim_input(
+                let claim_input = CorrectSwbfUpdate::claim_input(
                     mutator_set,
-                    bfe!(CorrectSwbfiUpdate::FIRST_LEAF_INDEX),
+                    bfe!(CorrectSwbfUpdate::FIRST_LEAF_INDEX),
                 );
-                let swbfi_claim = witness
+                let swbf_claim = witness
                     .prev_block_appendix
                     .claims()
                     .iter()
                     .find(|claim| {
-                        claim.program_digest == SwbfiUpdateAggregation::new().hash()
+                        claim.program_digest == SwbfUpdateAggregation::new().hash()
                             && claim.version == version
                             && claim.input == claim_input
                     })
-                    .expect("previous block must carry the SWBFI update claim");
-                let output = ClaimOutput::parse(&swbfi_claim.output);
-                assert!(output.padded_rows.value() >= prev_epoch.min_swbfi_padded_rows.value());
+                    .expect("previous block must carry the SWBF update claim");
+                let output = ClaimOutput::parse(&swbf_claim.output);
+                assert!(output.padded_rows.value() >= prev_epoch.min_swbf_padded_rows.value());
                 assert_eq!(prev_transaction_kernel.inputs.len(), output.count);
                 assert_eq!(
                     RemovalIndexCommitment::peaks(&prev_transaction_kernel.inputs),
@@ -2911,12 +2910,12 @@ mod tests {
                 .unwrap(),
             lustration_counter_initial: lustration_counter_initial(),
             resets_lustration_status: bfe!(0),
-            min_swbfi_padded_rows: bfe!(2 << FIXTURE_LEAF_LOG2_PADDED_HEIGHT),
+            min_swbf_padded_rows: bfe!(2 << FIXTURE_LEAF_LOG2_PADDED_HEIGHT),
         }
     }
 
     /// The padded height of each of the two leaf proofs beneath a fixture
-    /// block's SWBFI update claim, which together reach the fixture epoch's
+    /// block's SWBF update claim, which together reach the fixture epoch's
     /// floor exactly.
     const FIXTURE_LEAF_LOG2_PADDED_HEIGHT: u32 = 19;
 
@@ -3210,13 +3209,13 @@ mod tests {
     /// transaction claim and then these claims, without a proof. For the
     /// program that skips proof verification.
     fn unproven_block(header: BlockHeader, body: BlockBody, claims: Vec<Claim>) -> Block {
-        let swbfi_claim = swbfi_update_claim(&header, &body);
-        unproven_block_with_swbfi_claim(header, body, claims, swbfi_claim)
+        let swbf_claim = swbf_update_claim(&header, &body);
+        unproven_block_with_swbf_claim(header, body, claims, swbf_claim)
     }
 
-    /// The SWBFI update claim a block's appendix must carry, if the fixtures
+    /// The SWBF update claim a block's appendix must carry, if the fixtures
     /// built the block on a known predecessor its transaction applies to.
-    fn swbfi_update_claim(header: &BlockHeader, body: &BlockBody) -> Option<Claim> {
+    fn swbf_update_claim(header: &BlockHeader, body: &BlockBody) -> Option<Claim> {
         let predecessor = predecessor_by_hash(header.prev_block_digest)?;
         let mutator_set = predecessor.mutator_set_accumulator_after().ok()?;
         let inputs = &body.transaction_kernel.inputs;
@@ -3232,12 +3231,12 @@ mod tests {
         ))
     }
 
-    /// As [unproven_block], with this SWBFI update claim, or none.
-    fn unproven_block_with_swbfi_claim(
+    /// As [unproven_block], with this SWBF update claim, or none.
+    fn unproven_block_with_swbf_claim(
         header: BlockHeader,
         body: BlockBody,
         claims: Vec<Claim>,
-        swbfi_claim: Option<Claim>,
+        swbf_claim: Option<Claim>,
     ) -> Block {
         let transaction_claim = single_proof_claim(
             body.transaction_kernel.mast_hash(),
@@ -3245,7 +3244,7 @@ mod tests {
         );
         let claims = [
             vec![transaction_claim],
-            swbfi_claim.into_iter().collect(),
+            swbf_claim.into_iter().collect(),
             claims,
         ]
         .concat();
@@ -3567,11 +3566,11 @@ mod tests {
             body: BlockBody,
             claims: Vec<(Claim, NeptuneProof)>,
         ) -> Block {
-            let swbfi_claim = swbfi_update_claim(&header, &body).map(|_| {
+            let swbf_claim = swbf_update_claim(&header, &body).map(|_| {
                 let predecessor = predecessor_by_hash(header.prev_block_digest).unwrap();
                 let inputs = &body.transaction_kernel.inputs;
                 let split = inputs.len() / 2;
-                let leaves = CorrectSwbfiUpdateWitness::segments(
+                let leaves = CorrectSwbfUpdateWitness::segments(
                     inputs,
                     &predecessor.mutator_set_accumulator_after().unwrap(),
                     &[split, inputs.len() - split],
@@ -3579,17 +3578,15 @@ mod tests {
                 .into_iter()
                 .map(|leaf| leaf.with_padded_height(FIXTURE_LEAF_LOG2_PADDED_HEIGHT))
                 .collect::<Vec<_>>();
-                let (claim, proof) = SwbfiUpdateAggregation::new().tree(
-                    &leaves,
-                    |claim, program, nondeterminism| {
+                let (claim, proof) =
+                    SwbfUpdateAggregation::new().tree(&leaves, |claim, program, nondeterminism| {
                         load_proof_or_produce_and_save(claim, program, nondeterminism).into()
-                    },
-                );
+                    });
                 (claim, NeptuneProof::from(proof))
             });
             let claims = [
                 vec![transaction_claim_and_proof_for(&body)],
-                swbfi_claim.into_iter().collect(),
+                swbf_claim.into_iter().collect(),
                 claims,
             ]
             .concat();
@@ -4375,7 +4372,7 @@ mod tests {
             /// The checks inside the mutator set update, by label.
             const MUTATOR_SET_UPDATE_RULES: [&str; 3] = [
                 "neptune_consensus_block_removal_index_commitment",
-                "predecessor_is_valid_find_swbfi_claim",
+                "predecessor_is_valid_find_swbf_claim",
                 "neptune_consensus_block_mutator_set_update_from_state_hash_rule_2e",
             ];
 
@@ -4536,7 +4533,7 @@ mod tests {
                     "neptune_consensus_block_removal_index_commitment" => {
                         "MMR peaks over the inputs' index sets"
                     }
-                    "find_swbfi_claim" => "find SWBFI update claim in appendix",
+                    "find_swbf_claim" => "find SWBF update claim in appendix",
                     "neptune_consensus_block_mutator_set_update_from_state_hash_rule_2e" => {
                         "2.e window, peaks, additions and comparison"
                     }
@@ -5468,10 +5465,10 @@ ones):
             );
             let own_claim =
                 own_claim_with_epochs(&skipping(), prev_prev_block, &body, &header, epochs);
-            let swbfi_claim = swbfi_update_claim(&header, &body);
+            let swbf_claim = swbf_update_claim(&header, &body);
             let claims = [
                 vec![transaction_claim],
-                swbfi_claim.into_iter().collect(),
+                swbf_claim.into_iter().collect(),
                 vec![own_claim],
             ]
             .concat();
@@ -5562,18 +5559,18 @@ ones):
             );
         }
 
-        /// The previous block on the shared grandparent, carrying this SWBFI
+        /// The previous block on the shared grandparent, carrying this SWBF
         /// update claim in place of the one its transaction calls for.
-        fn prev_block_with_swbfi_claim(
-            swbfi_claim: Option<Claim>,
+        fn prev_block_with_swbf_claim(
+            swbf_claim: Option<Claim>,
         ) -> (Block, BlockBody, BlockHeader) {
-            prev_block_with_swbfi_claim_under(swbfi_claim, &epochs())
+            prev_block_with_swbf_claim_under(swbf_claim, &epochs())
         }
 
-        /// As [prev_block_with_swbfi_claim], with its own claim under these
+        /// As [prev_block_with_swbf_claim], with its own claim under these
         /// epochs.
-        fn prev_block_with_swbfi_claim_under(
-            swbfi_claim: Option<Claim>,
+        fn prev_block_with_swbf_claim_under(
+            swbf_claim: Option<Claim>,
             epochs: &EpochTable,
         ) -> (Block, BlockBody, BlockHeader) {
             let grandparent = fixture_grandparent();
@@ -5581,16 +5578,16 @@ ones):
             let own_claim =
                 own_claim_with_epochs(&skipping(), &grandparent, &body, &header, epochs);
             let prev_block =
-                unproven_block_with_swbfi_claim(header, body, vec![own_claim], swbfi_claim);
+                unproven_block_with_swbf_claim(header, body, vec![own_claim], swbf_claim);
             let (next_body, next_header) = next_body_and_header(&prev_block, 0);
 
             (prev_block, next_body, next_header)
         }
 
-        /// The aggregated SWBFI update claim the shared transaction calls for
+        /// The aggregated SWBF update claim the shared transaction calls for
         /// on the shared grandparent, over leaf proofs of these padded
         /// heights.
-        fn fixture_swbfi_claim_over(log2_padded_heights: [u32; 2]) -> Claim {
+        fn fixture_swbf_claim_over(log2_padded_heights: [u32; 2]) -> Claim {
             let (kernel, _) = transaction_kernel_and_proof();
             let mutator_set = fixture_grandparent()
                 .mutator_set_accumulator_after()
@@ -5598,49 +5595,49 @@ ones):
             claim_over_halves(&kernel.inputs, &mutator_set, log2_padded_heights)
         }
 
-        /// As [fixture_swbfi_claim_over], with leaf proofs that reach the
+        /// As [fixture_swbf_claim_over], with leaf proofs that reach the
         /// fixture epoch's floor exactly.
-        fn fixture_swbfi_claim() -> Claim {
-            fixture_swbfi_claim_over([FIXTURE_LEAF_LOG2_PADDED_HEIGHT; 2])
+        fn fixture_swbf_claim() -> Claim {
+            fixture_swbf_claim_over([FIXTURE_LEAF_LOG2_PADDED_HEIGHT; 2])
         }
 
         #[test]
-        fn prev_block_with_its_swbfi_claim_passes() {
+        fn prev_block_with_its_swbf_claim_passes() {
             let (prev_block, next_body, next_header) =
-                prev_block_with_swbfi_claim(Some(fixture_swbfi_claim()));
+                prev_block_with_swbf_claim(Some(fixture_swbf_claim()));
             assert_accepts(&skipping(), &prev_block, &next_body, &next_header);
         }
 
         #[test]
-        fn prev_block_with_swbfi_leaf_proofs_above_the_floor_passes() {
-            let claim = fixture_swbfi_claim_over([FIXTURE_LEAF_LOG2_PADDED_HEIGHT + 1, 8]);
-            let (prev_block, next_body, next_header) = prev_block_with_swbfi_claim(Some(claim));
+        fn prev_block_with_swbf_leaf_proofs_above_the_floor_passes() {
+            let claim = fixture_swbf_claim_over([FIXTURE_LEAF_LOG2_PADDED_HEIGHT + 1, 8]);
+            let (prev_block, next_body, next_header) = prev_block_with_swbf_claim(Some(claim));
             assert_accepts(&skipping(), &prev_block, &next_body, &next_header);
         }
 
         #[test]
-        fn prev_block_with_swbfi_leaf_proofs_below_the_floor_fails() {
-            let claim = fixture_swbfi_claim_over([
+        fn prev_block_with_swbf_leaf_proofs_below_the_floor_fails() {
+            let claim = fixture_swbf_claim_over([
                 FIXTURE_LEAF_LOG2_PADDED_HEIGHT,
                 FIXTURE_LEAF_LOG2_PADDED_HEIGHT - 1,
             ]);
-            let (prev_block, next_body, next_header) = prev_block_with_swbfi_claim(Some(claim));
+            let (prev_block, next_body, next_header) = prev_block_with_swbf_claim(Some(claim));
             assert_rejects(
                 &skipping(),
                 &prev_block,
                 &next_body,
                 &next_header,
-                BlockValidationRule::SwbfiUpdateBelowWorkFloor.error_id(),
+                BlockValidationRule::SwbfUpdateBelowWorkFloor.error_id(),
             );
         }
 
         #[test]
-        fn epoch_without_a_floor_accepts_any_swbfi_leaf_proofs() {
-            let claim = fixture_swbfi_claim_over([8, 8]);
+        fn epoch_without_a_floor_accepts_any_swbf_leaf_proofs() {
+            let claim = fixture_swbf_claim_over([8, 8]);
             let (prev_block, next_body, next_header) =
-                prev_block_with_swbfi_claim(Some(claim.clone()));
+                prev_block_with_swbf_claim(Some(claim.clone()));
             let without_floor = EpochTable::new(&[Epoch {
-                min_swbfi_padded_rows: bfe!(0),
+                min_swbf_padded_rows: bfe!(0),
                 ..activation_epoch()
             }]);
             assert_rejects(
@@ -5648,10 +5645,10 @@ ones):
                 &prev_block,
                 &next_body,
                 &next_header,
-                BlockValidationRule::SwbfiUpdateBelowWorkFloor.error_id(),
+                BlockValidationRule::SwbfUpdateBelowWorkFloor.error_id(),
             );
             let (prev_block, next_body, next_header) =
-                prev_block_with_swbfi_claim_under(Some(claim), &without_floor);
+                prev_block_with_swbf_claim_under(Some(claim), &without_floor);
             assert_accepts_with_epochs(
                 &skipping(),
                 &prev_block,
@@ -5662,13 +5659,13 @@ ones):
         }
 
         #[test]
-        fn prev_block_with_a_leaf_as_swbfi_root_fails() {
+        fn prev_block_with_a_leaf_as_swbf_root_fails() {
             let (kernel, _) = transaction_kernel_and_proof();
             let mutator_set = fixture_grandparent()
                 .mutator_set_accumulator_after()
                 .unwrap();
-            let claim = CorrectSwbfiUpdate::claim(&kernel.inputs, &mutator_set);
-            let (prev_block, next_body, next_header) = prev_block_with_swbfi_claim(Some(claim));
+            let claim = CorrectSwbfUpdate::claim(&kernel.inputs, &mutator_set);
+            let (prev_block, next_body, next_header) = prev_block_with_swbf_claim(Some(claim));
             assert_rejects(
                 &skipping(),
                 &prev_block,
@@ -5679,8 +5676,8 @@ ones):
         }
 
         #[test]
-        fn prev_block_without_swbfi_claim_fails() {
-            let (prev_block, next_body, next_header) = prev_block_with_swbfi_claim(None);
+        fn prev_block_without_swbf_claim_fails() {
+            let (prev_block, next_body, next_header) = prev_block_with_swbf_claim(None);
             assert_rejects(
                 &skipping(),
                 &prev_block,
@@ -5691,10 +5688,10 @@ ones):
         }
 
         #[test]
-        fn prev_block_with_swbfi_claim_with_longer_input_fails() {
-            let mut claim = fixture_swbfi_claim();
+        fn prev_block_with_swbf_claim_with_longer_input_fails() {
+            let mut claim = fixture_swbf_claim();
             claim.input.push(bfe!(0));
-            let (prev_block, next_body, next_header) = prev_block_with_swbfi_claim(Some(claim));
+            let (prev_block, next_body, next_header) = prev_block_with_swbf_claim(Some(claim));
             assert_rejects(
                 &skipping(),
                 &prev_block,
@@ -5705,10 +5702,10 @@ ones):
         }
 
         #[test]
-        fn prev_block_with_swbfi_claim_of_other_version_fails() {
-            let mut claim = fixture_swbfi_claim();
+        fn prev_block_with_swbf_claim_of_other_version_fails() {
+            let mut claim = fixture_swbf_claim();
             claim.version += 1;
-            let (prev_block, next_body, next_header) = prev_block_with_swbfi_claim(Some(claim));
+            let (prev_block, next_body, next_header) = prev_block_with_swbf_claim(Some(claim));
             assert_rejects(
                 &skipping(),
                 &prev_block,
@@ -5737,10 +5734,10 @@ ones):
         }
 
         #[test]
-        fn prev_block_with_swbfi_claim_not_starting_at_the_first_leaf_fails() {
-            let mut claim = fixture_swbfi_claim();
+        fn prev_block_with_swbf_claim_not_starting_at_the_first_leaf_fails() {
+            let mut claim = fixture_swbf_claim();
             claim.input[INPUT_FIRST_LEAF_INDEX] += bfe!(1);
-            let (prev_block, next_body, next_header) = prev_block_with_swbfi_claim(Some(claim));
+            let (prev_block, next_body, next_header) = prev_block_with_swbf_claim(Some(claim));
             assert_rejects(
                 &skipping(),
                 &prev_block,
@@ -5751,10 +5748,10 @@ ones):
         }
 
         #[test]
-        fn prev_block_with_swbfi_claim_on_other_mutator_set_fails() {
-            let mut claim = fixture_swbfi_claim();
+        fn prev_block_with_swbf_claim_on_other_mutator_set_fails() {
+            let mut claim = fixture_swbf_claim();
             claim.input[0] += bfe!(1);
-            let (prev_block, next_body, next_header) = prev_block_with_swbfi_claim(Some(claim));
+            let (prev_block, next_body, next_header) = prev_block_with_swbf_claim(Some(claim));
             assert_rejects(
                 &skipping(),
                 &prev_block,
@@ -5765,10 +5762,10 @@ ones):
         }
 
         #[test]
-        fn prev_block_with_swbfi_claim_outputting_other_state_fails() {
-            let mut claim = fixture_swbfi_claim();
+        fn prev_block_with_swbf_claim_outputting_other_state_fails() {
+            let mut claim = fixture_swbf_claim();
             claim.output[OUTPUT_MUTATOR_SET_HASH] += bfe!(1);
-            let (prev_block, next_body, next_header) = prev_block_with_swbfi_claim(Some(claim));
+            let (prev_block, next_body, next_header) = prev_block_with_swbf_claim(Some(claim));
             assert_rejects(
                 &skipping(),
                 &prev_block,
@@ -5779,10 +5776,10 @@ ones):
         }
 
         #[test]
-        fn prev_block_with_swbfi_claim_with_other_peaks_fails() {
-            let mut claim = fixture_swbfi_claim();
+        fn prev_block_with_swbf_claim_with_other_peaks_fails() {
+            let mut claim = fixture_swbf_claim();
             claim.output[OUTPUT_PEAKS] += bfe!(1);
-            let (prev_block, next_body, next_header) = prev_block_with_swbfi_claim(Some(claim));
+            let (prev_block, next_body, next_header) = prev_block_with_swbf_claim(Some(claim));
             assert_rejects(
                 &skipping(),
                 &prev_block,
@@ -5793,10 +5790,10 @@ ones):
         }
 
         #[test]
-        fn prev_block_with_swbfi_claim_counting_other_index_sets_fails() {
-            let mut claim = fixture_swbfi_claim();
+        fn prev_block_with_swbf_claim_counting_other_index_sets_fails() {
+            let mut claim = fixture_swbf_claim();
             claim.output[OUTPUT_COUNT] += bfe!(1);
-            let (prev_block, next_body, next_header) = prev_block_with_swbfi_claim(Some(claim));
+            let (prev_block, next_body, next_header) = prev_block_with_swbf_claim(Some(claim));
             assert_rejects(
                 &skipping(),
                 &prev_block,
@@ -5807,10 +5804,10 @@ ones):
         }
 
         #[test]
-        fn prev_block_with_malformed_swbfi_claim_output_fails() {
-            let mut claim = fixture_swbfi_claim();
+        fn prev_block_with_malformed_swbf_claim_output_fails() {
+            let mut claim = fixture_swbf_claim();
             claim.output.push(bfe!(0));
-            let (prev_block, next_body, next_header) = prev_block_with_swbfi_claim(Some(claim));
+            let (prev_block, next_body, next_header) = prev_block_with_swbf_claim(Some(claim));
             assert_rejects(
                 &skipping(),
                 &prev_block,

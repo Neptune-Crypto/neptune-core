@@ -5,7 +5,7 @@
 //! expected accumulator.
 //!
 //! The hash comes from
-//! [`CorrectSwbfiUpdate`](super::swbf_update::leaf::CorrectSwbfiUpdate)'s
+//! [`CorrectSwbfUpdate`](super::swbf_update::leaf::CorrectSwbfUpdate)'s
 //! claim, so this needs no chunk data.
 
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;

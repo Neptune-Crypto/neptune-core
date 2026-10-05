@@ -146,7 +146,7 @@ Previous block of 16546 words: 2 inputs with 84 packed chunks and 0 of 90 indice
 | &nbsp;&nbsp;&nbsp;&nbsp;2.t transaction and witness mutator set hashes | 1,024 | 1,340 | 404 | 481 | 30 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.a to 2.e mutator set update (sum of the indented rows) | 8,751 | 7,562 | 2,260 | 1,071 | 4,010 |
 | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;commitment to the inputs' index sets | 953 | 771 | 207 | 80 | 235 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;find SWBFI update claim in appendix | 211 | 168 | 39 | 0 | 0 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;find SWBF update claim in appendix | 211 | 168 | 39 | 0 | 0 |
 | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2.e window, peaks, additions and comparison | 7,093 | 6,252 | 1,934 | 991 | 3,743 |
 | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(glue of the mutator set update) | 494 | 371 | 80 | 0 | 32 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.o to 2.r lustration update | 2,202 | 1,670 | 143 | 0 | 3,621 |
@@ -197,7 +197,7 @@ Previous block of 151788 words: 20 inputs with 826 packed chunks and 0 of 900 in
 | &nbsp;&nbsp;&nbsp;&nbsp;2.t transaction and witness mutator set hashes | 862 | 1,088 | 312 | 373 | 32 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.a to 2.e mutator set update (sum of the indented rows) | 37,736 | 29,468 | 4,503 | 1,701 | 32,405 |
 | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;commitment to the inputs' index sets | 5,817 | 4,995 | 1,821 | 926 | 423 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;find SWBFI update claim in appendix | 211 | 168 | 39 | 0 | 0 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;find SWBF update claim in appendix | 211 | 168 | 39 | 0 | 0 |
 | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2.e window, peaks, additions and comparison | 31,214 | 23,934 | 2,563 | 775 | 31,950 |
 | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(glue of the mutator set update) | 494 | 371 | 80 | 0 | 32 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.o to 2.r lustration update | 18,941 | 14,558 | 1,133 | 0 | 32,474 |
@@ -248,7 +248,7 @@ Previous block of 16631 words: 2 inputs with 84 packed chunks and 0 of 90 indice
 | &nbsp;&nbsp;&nbsp;&nbsp;2.t transaction and witness mutator set hashes | 1,024 | 1,340 | 404 | 481 | 63 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.a to 2.e mutator set update (sum of the indented rows) | 14,765 | 12,224 | 3,164 | 1,211 | 6,823 |
 | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;commitment to the inputs' index sets | 953 | 771 | 207 | 80 | 235 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;find SWBFI update claim in appendix | 211 | 168 | 39 | 0 | 0 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;find SWBF update claim in appendix | 211 | 168 | 39 | 0 | 0 |
 | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2.e window, peaks, additions and comparison | 13,107 | 10,914 | 2,838 | 1,131 | 6,556 |
 | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(glue of the mutator set update) | 494 | 371 | 80 | 0 | 32 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.o to 2.r lustration update | 2,202 | 1,670 | 143 | 0 | 3,621 |
@@ -299,7 +299,7 @@ Previous block of 17576 words: 2 inputs with 84 packed chunks and 0 of 90 indice
 | &nbsp;&nbsp;&nbsp;&nbsp;2.t transaction and witness mutator set hashes | 1,024 | 1,340 | 404 | 481 | 30 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.a to 2.e mutator set update (sum of the indented rows) | 8,751 | 7,562 | 2,260 | 1,071 | 4,010 |
 | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;commitment to the inputs' index sets | 953 | 771 | 207 | 80 | 235 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;find SWBFI update claim in appendix | 211 | 168 | 39 | 0 | 0 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;find SWBF update claim in appendix | 211 | 168 | 39 | 0 | 0 |
 | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2.e window, peaks, additions and comparison | 7,093 | 6,252 | 1,934 | 991 | 3,743 |
 | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(glue of the mutator set update) | 494 | 371 | 80 | 0 | 32 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.o to 2.r lustration update | 2,202 | 1,670 | 143 | 0 | 3,621 |
@@ -350,7 +350,7 @@ Previous block of 16615 words: 2 inputs with 84 packed chunks and 0 of 90 indice
 | &nbsp;&nbsp;&nbsp;&nbsp;2.t transaction and witness mutator set hashes | 1,024 | 1,340 | 404 | 481 | 30 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.a to 2.e mutator set update (sum of the indented rows) | 8,751 | 7,562 | 2,260 | 1,071 | 4,008 |
 | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;commitment to the inputs' index sets | 953 | 771 | 207 | 80 | 238 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;find SWBFI update claim in appendix | 211 | 168 | 39 | 0 | 0 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;find SWBF update claim in appendix | 211 | 168 | 39 | 0 | 0 |
 | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2.e window, peaks, additions and comparison | 7,093 | 6,252 | 1,934 | 991 | 3,738 |
 | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(glue of the mutator set update) | 494 | 371 | 80 | 0 | 32 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.o to 2.r lustration update | 11,208 | 8,002 | 1,119 | 272 | 12,859 |
@@ -401,7 +401,7 @@ Previous block of 152505 words: 20 inputs with 826 packed chunks and 0 of 900 in
 | &nbsp;&nbsp;&nbsp;&nbsp;2.t transaction and witness mutator set hashes | 862 | 1,088 | 312 | 373 | 32 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.a to 2.e mutator set update (sum of the indented rows) | 37,736 | 29,468 | 4,503 | 1,701 | 32,405 |
 | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;commitment to the inputs' index sets | 5,817 | 4,995 | 1,821 | 926 | 423 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;find SWBFI update claim in appendix | 211 | 168 | 39 | 0 | 0 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;find SWBF update claim in appendix | 211 | 168 | 39 | 0 | 0 |
 | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2.e window, peaks, additions and comparison | 31,214 | 23,934 | 2,563 | 775 | 31,950 |
 | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(glue of the mutator set update) | 494 | 371 | 80 | 0 | 32 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.o to 2.r lustration update | 108,998 | 77,878 | 10,893 | 2,720 | 121,894 |

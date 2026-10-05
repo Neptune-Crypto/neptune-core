@@ -1,7 +1,7 @@
 //! The hash of the mutator set after a transaction's removals, from the
 //! mutator set it is built on: the inactive SWBF's peaks and the active
 //! window after the removals, hashed with the unchanged AOCL. The body of
-//! the SWBFI update claims.
+//! the SWBF update claims.
 
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_mutator_set::removal_record::RemovalRecord;
