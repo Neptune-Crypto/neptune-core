@@ -8,6 +8,7 @@ use futures::StreamExt;
 use itertools::Itertools;
 use neptune_consensus::block::Block;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
 use neptune_consensus::transaction::transaction_kernel::TransactionLustrationError;
 use neptune_consensus::transaction::transaction_proof::TransactionProof;
 use neptune_consensus::transaction::Transaction;
@@ -1511,6 +1512,34 @@ impl RpcApi for RpcServer {
         Ok(SubmitBlockResponse { success })
     }
 
+    async fn set_coinbase_tx_call(
+        &self,
+        request: SetCoinbaseTxRequest,
+    ) -> RpcResult<SetCoinbaseTxResponse> {
+        // The transaction replaces this node's block reward.
+        if !self.unrestricted {
+            return Err(RpcError::RestrictedAccess);
+        }
+
+        let coinbase_tx = request
+            .tx
+            .map(PrimitiveWitness::try_from)
+            .transpose()
+            .map_err(RpcError::MalformedPrimitiveWitness)?;
+
+        let mut state = self.state.clone();
+        let mut state = state.lock_guard_mut().await;
+        let next_height = state.chain.tip().header().height.next();
+        if coinbase_tx.is_some()
+            && !ConsensusRuleSet::allows_coinbase_inputs(self.state.cli().network, next_height)
+        {
+            return Err(RpcError::CoinbaseInputsNotAllowed);
+        }
+        state.mining_state.set_coinbase_tx(coinbase_tx);
+
+        Ok(SetCoinbaseTxResponse {})
+    }
+
     /* Utxoindex */
 
     async fn block_heights_by_flags_call(
@@ -2759,6 +2788,70 @@ pub mod tests {
             rpc_server.reset_relay_reservations().await.unwrap_err()
         );
         assert_eq!(err, rpc_server.get_network_overview().await.unwrap_err());
+    }
+
+    /// Setting the coinbase transaction needs unrestricted access, a
+    /// well-formed primitive witness, and consensus rules that allow coinbase
+    /// inputs in the next block. With all three, the transaction reaches the
+    /// mining state, and no transaction unsets it.
+    #[apply(shared_tokio_runtime)]
+    async fn set_coinbase_tx_reaches_the_mining_state() {
+        use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
+        use neptune_rpc_api::model::mining::RpcPrimitiveWitness;
+        use proptest::strategy::Strategy;
+        use proptest::strategy::ValueTree;
+
+        let witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(1), 2, 2)
+            .new_tree(&mut proptest::test_runner::TestRunner::deterministic())
+            .unwrap()
+            .current();
+        let rpc_witness = RpcPrimitiveWitness::from(&witness);
+
+        let mut rpc_server =
+            test_rpc_server_with_cli_args(cli_args::Args::default_with_network(Network::RegTest))
+                .await;
+        assert_eq!(
+            RpcError::RestrictedAccess,
+            rpc_server
+                .set_coinbase_tx(Some(rpc_witness.clone()))
+                .await
+                .unwrap_err()
+        );
+
+        rpc_server.unrestricted = true;
+        let malformed: RpcPrimitiveWitness =
+            serde_json::from_str("\"0x0000000000000001\"").unwrap();
+        assert!(matches!(
+            rpc_server.set_coinbase_tx(Some(malformed)).await,
+            Err(RpcError::MalformedPrimitiveWitness(_))
+        ));
+
+        rpc_server
+            .set_coinbase_tx(Some(rpc_witness.clone()))
+            .await
+            .unwrap();
+        let mining_state_tx = || async {
+            rpc_server
+                .state
+                .lock_guard()
+                .await
+                .mining_state
+                .coinbase_tx()
+        };
+        assert_eq!(Some(witness), mining_state_tx().await);
+
+        rpc_server.set_coinbase_tx(None).await.unwrap();
+        assert_eq!(None, mining_state_tx().await);
+
+        let mut main_rpc_server = test_rpc_server().await;
+        main_rpc_server.unrestricted = true;
+        assert_eq!(
+            RpcError::CoinbaseInputsNotAllowed,
+            main_rpc_server
+                .set_coinbase_tx(Some(rpc_witness))
+                .await
+                .unwrap_err()
+        );
     }
 
     #[apply(shared_tokio_runtime)]

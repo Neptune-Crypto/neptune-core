@@ -6,6 +6,7 @@ use tasm_lib::prelude::Digest;
 use tracing::info;
 
 use super::error::RegTestError;
+use crate::application::loops::mine_loop::caller_coinbase_tx;
 use crate::application::loops::mine_loop::mock_block_generator::MockBlockGenerator;
 use crate::state::mining::block_proposal::BlockProposal;
 use crate::GlobalStateLock;
@@ -162,15 +163,35 @@ impl RegTestPrivate {
         drop(gs);
 
         let parent_difficulty = tip.header().difficulty;
-        let (mut block, composer_tx_outputs) = MockBlockGenerator::mock_successor_no_pow(
-            tip,
-            composer_parameters.clone(),
-            guesser_address,
-            timestamp,
-            seed,
-            txs_from_mempool,
-            network,
-        );
+        let (mut block, expected_utxos) = match caller_coinbase_tx(&tip, gsl).await {
+            Some(witness) => {
+                let block = MockBlockGenerator::mock_successor_from_coinbase_tx_no_pow(
+                    tip,
+                    MockBlockGenerator::mock_transaction_from_witness(witness),
+                    guesser_address,
+                    timestamp,
+                    seed,
+                    txs_from_mempool,
+                    network,
+                );
+                (block, vec![])
+            }
+            None => {
+                let (block, composer_tx_outputs) = MockBlockGenerator::mock_successor_no_pow(
+                    tip,
+                    composer_parameters.clone(),
+                    guesser_address,
+                    timestamp,
+                    seed,
+                    txs_from_mempool,
+                    network,
+                );
+                (
+                    block,
+                    composer_parameters.extract_expected_utxos(composer_tx_outputs),
+                )
+            }
+        };
 
         let lustration_status = block.header().pow.lustration_status().ok();
         let version = block.header().version;
@@ -183,10 +204,7 @@ impl RegTestPrivate {
             );
         }
 
-        (
-            block,
-            composer_parameters.extract_expected_utxos(composer_tx_outputs),
-        )
+        (block, expected_utxos)
     }
 
     // see description in [RegTest]

@@ -1768,4 +1768,54 @@ mod tests {
             "no update job may be handed out for a pruned transaction"
         );
     }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn mempool_insertion_invokes_tx_notify() {
+        use neptune_consensus::proof_abstractions::test_helpers::test_helper_data_dir;
+
+        use crate::tests::shared::files::unit_test_data_directory;
+        use crate::tests::shared::files::wait_for_file_to_exist;
+
+        #[cfg(not(windows))]
+        const NOTIFY_SCRIPT_NAME: &str = "block_notify_dummy.py";
+        #[cfg(windows)]
+        const NOTIFY_SCRIPT_NAME: &str = "block_notify_dummy.bat";
+
+        let network = Network::Main;
+        let mutator_set_hash = Block::genesis(network)
+            .mutator_set_accumulator_after()
+            .unwrap()
+            .hash();
+        let [mut tx] = make_plenty_mock_transaction_supported_by_invalid_single_proofs(1)
+            .try_into()
+            .unwrap();
+        tx.kernel = TransactionKernelModifier::default()
+            .mutator_set_hash(mutator_set_hash)
+            .modify(tx.kernel);
+
+        // The script creates an empty file named after its first argument, in
+        // the directory given as its second.
+        let tmp_dir = unit_test_data_directory(network).unwrap().root_dir_path();
+        let expected_file = tmp_dir.join(format!("{}.block", tx.kernel.txid()));
+        let cli = cli_args::Args {
+            tx_notify: Some(format!(
+                "{}{NOTIFY_SCRIPT_NAME} %s {}",
+                test_helper_data_dir().to_string_lossy(),
+                tmp_dir.to_string_lossy()
+            )),
+            network,
+            ..Default::default()
+        };
+        let mut alice = mock_genesis_global_state(2, WalletEntropy::new_random(), cli).await;
+
+        alice
+            .lock_guard_mut()
+            .await
+            .mempool_insert(tx, UpgradePriority::Irrelevant)
+            .await;
+
+        wait_for_file_to_exist(&expected_file).await.unwrap();
+        let _ = std::fs::remove_file(&expected_file);
+    }
 }

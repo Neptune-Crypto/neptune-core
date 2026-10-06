@@ -425,8 +425,13 @@ impl Block {
     /// The number of coins that can be printed into existence with the mining
     /// a block with this height.
     pub fn block_subsidy(block_height: BlockHeight) -> NativeCurrencyAmount {
+        Self::generation_subsidy(block_height.get_generation())
+    }
+
+    /// The subsidy of every block whose [`BlockHeight::get_generation`] is
+    /// `generation`.
+    pub fn generation_subsidy(generation: u64) -> NativeCurrencyAmount {
         let mut reward: NativeCurrencyAmount = INITIAL_BLOCK_SUBSIDY;
-        let generation = block_height.get_generation();
 
         for _ in 0..generation {
             reward.div_two();

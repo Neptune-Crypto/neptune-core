@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use itertools::Itertools;
+use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
 use neptune_wallet::coinbase_distribution::CoinbaseDistribution;
 use tasm_lib::prelude::Digest;
 use tracing::info;
@@ -16,6 +17,10 @@ pub const MAX_NUM_EXPORTED_BLOCK_PROPOSAL_STORED: usize = 10_000;
 #[derive(Debug, Default)]
 struct OverrideCoinbaseSettings {
     coinbase_distribution: Option<CoinbaseDistribution>,
+
+    /// A coinbase transaction an RPC caller set, which block proposals use in
+    /// place of the one this node builds.
+    coinbase_tx: Option<PrimitiveWitness>,
 }
 
 /// State related to the mining (composing and guessing) of the next block.
@@ -70,5 +75,24 @@ impl MiningState {
 
     pub(crate) fn unset_coinbase_distribution(&mut self) {
         self.override_coinbase_settings.coinbase_distribution = None;
+    }
+
+    pub(crate) fn coinbase_tx(&self) -> Option<PrimitiveWitness> {
+        self.override_coinbase_settings.coinbase_tx.clone()
+    }
+
+    /// Have this node's next block proposals use `coinbase_tx` in place of the
+    /// coinbase transaction this node builds, until it is set again. `None`
+    /// unsets it.
+    pub(crate) fn set_coinbase_tx(&mut self, coinbase_tx: Option<PrimitiveWitness>) {
+        info!(
+            "{} coinbase transaction set by RPC caller.",
+            if coinbase_tx.is_some() {
+                "Setting"
+            } else {
+                "Unsetting"
+            }
+        );
+        self.override_coinbase_settings.coinbase_tx = coinbase_tx;
     }
 }

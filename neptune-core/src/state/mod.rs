@@ -59,6 +59,7 @@ use neptune_locks::tokio as sync_tokio;
 use neptune_locks::tokio::AtomicRwReadGuard;
 use neptune_locks::tokio::AtomicRwWriteGuard;
 use neptune_mempool::mempool::Mempool;
+use neptune_mempool::mempool_event::MempoolEvent;
 use neptune_mempool::mempool_update_job::MempoolUpdateJob;
 use neptune_mempool::transaction_kernel_id::TransactionKernelId;
 use neptune_mempool::transaction_kernel_id::Txid;
@@ -118,6 +119,7 @@ use crate::application::loops::channel::ClaimUtxoData;
 use crate::application::loops::main_loop::proof_upgrader::ProofCollectionToSingleProof;
 use crate::application::loops::main_loop::proof_upgrader::UpdateMutatorSetDataJob;
 use crate::application::loops::main_loop::proof_upgrader::SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE;
+use crate::application::notify::spawn_notify_command;
 use crate::state::claim_error::ClaimError;
 use crate::state::mining::block_proposal::BlockProposalRejectError;
 use crate::state::utxo_validitor::UtxoValidator;
@@ -3148,9 +3150,7 @@ impl GlobalState {
             .await;
 
         debug!("Applying block mempool events.");
-        self.wallet_state
-            .handle_mempool_events(mempool_events)
-            .await;
+        self.handle_mempool_events(mempool_events).await;
 
         // Reset block proposal, as that field pertains to the block that
         // was just set as new tip. Also reset set of exported block proposals.
@@ -3401,7 +3401,7 @@ impl GlobalState {
     /// Remove one transaction from the mempool and notify wallet of changes.
     pub(crate) async fn mempool_remove(&mut self, transaction_id: TransactionKernelId) {
         let events = self.mempool.remove(transaction_id);
-        self.wallet_state.handle_mempool_events(events).await;
+        self.handle_mempool_events(events).await;
     }
 
     /// Record that upgrading the proofs of these transactions failed, so the
@@ -3416,30 +3416,42 @@ impl GlobalState {
         self.mempool.record_upgrade_failure(txids);
     }
 
+    /// Hand mempool events to the wallet, and run the tx-notify command for
+    /// every transaction that entered the mempool.
+    async fn handle_mempool_events(&mut self, events: impl IntoIterator<Item = MempoolEvent>) {
+        let events = events.into_iter().collect_vec();
+        for event in &events {
+            if let MempoolEvent::AddTx(kernel) = event {
+                spawn_notify_command(&self.cli().tx_notify, &kernel.txid().to_string());
+            }
+        }
+        self.wallet_state.handle_mempool_events(events).await
+    }
+
     /// clears all Tx from mempool and notifies wallet of changes.
     pub async fn mempool_clear(&mut self) {
         let events = self.mempool.clear();
-        self.wallet_state.handle_mempool_events(events).await
+        self.handle_mempool_events(events).await
     }
 
     /// adds Tx to mempool and notifies wallet of change. value represents
     /// the value that the transaction has to caller.
     pub async fn mempool_insert(&mut self, transaction: Transaction, priority: UpgradePriority) {
         let events = self.mempool.insert(transaction, priority);
-        self.wallet_state.handle_mempool_events(events).await
+        self.handle_mempool_events(events).await
     }
 
     /// adds link tx to mempool and notifies wallet of change. value represents
     /// the value that the link transaction has to caller.
     pub async fn mempool_insert_link(&mut self, link_tx: LinkTx, priority: UpgradePriority) {
         let events = self.mempool.insert_link(link_tx, priority);
-        self.wallet_state.handle_mempool_events(events).await
+        self.handle_mempool_events(events).await
     }
 
     /// prunes stale tx in mempool and notifies wallet of changes.
     pub async fn mempool_prune_stale_transactions(&mut self) {
         let events = self.mempool.prune_stale_transactions();
-        self.wallet_state.handle_mempool_events(events).await
+        self.handle_mempool_events(events).await
     }
 
     /// Update the primitive witness of a mempool transaction. Inserts the
@@ -3452,7 +3464,7 @@ impl GlobalState {
         let events = self
             .mempool
             .update_primitive_witness(transaction_id, new_primitive_witness);
-        self.wallet_state.handle_mempool_events(events).await
+        self.handle_mempool_events(events).await
     }
 
     pub(crate) async fn upgrade_proof_collection_job(
