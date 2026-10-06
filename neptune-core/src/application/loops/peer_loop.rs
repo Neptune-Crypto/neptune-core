@@ -6884,6 +6884,8 @@ mod tests {
         async fn stalled_announcer_is_punished() {
             let cli = cli_args::Args::default_with_network(Network::Testnet(42));
             let mut setup = genesis_setup(cli).await;
+            // The node's registered peer is asked without delay.
+            setup.peer_loop_handler.inbound_connection = false;
             let (notification, request) = proposal_announcement(&setup).await;
             let height = setup.genesis_block.header().height;
             let now = Timestamp::now();
@@ -6951,6 +6953,8 @@ mod tests {
         async fn invalid_delivery_leaves_the_request_to_the_fallback() {
             let cli = cli_args::Args::default_with_network(Network::Testnet(42));
             let mut setup = genesis_setup(cli).await;
+            // The node's registered peer is asked without delay.
+            setup.peer_loop_handler.inbound_connection = false;
             let block1 = fake_valid_block_for_tests(
                 &setup.peer_loop_handler.global_state_lock,
                 StdRng::seed_from_u64(5550003).random(),
@@ -7065,6 +7069,8 @@ mod tests {
             for kernel_is_rejected in [false, true] {
                 let cli = cli_args::Args::default_with_network(Network::Testnet(42));
                 let mut setup = genesis_setup(cli).await;
+                // The node's registered peer is asked without delay.
+                setup.peer_loop_handler.inbound_connection = false;
                 let height = setup.genesis_block.header().height;
                 let now = Timestamp::now();
                 let transaction = invalid_empty_single_proof_transaction();
