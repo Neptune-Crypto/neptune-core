@@ -547,7 +547,7 @@ impl CounterTreeLeafCase {
     fn from_list_form(list: &CorrectSwbfUpdateWitness) -> Self {
         let inputs = list.inputs();
         let mutator_set = list.mutator_set();
-        let chunks = list.chunks();
+        let chunks = &list.chunks();
         let (chunk_indices, insertions) =
             SwbfiPeaksAfterRemovals::chunk_indices_and_insertions(inputs, mutator_set);
         let estimate = WitnessLists::swbfi_leaf_count_estimate(list.tree_heights());

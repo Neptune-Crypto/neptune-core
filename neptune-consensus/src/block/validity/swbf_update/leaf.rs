@@ -42,6 +42,7 @@ use tasm_lib::twenty_first::prelude::MmrMembershipProof;
 use tracing::debug;
 
 use super::chunk_witness::ChunkWitness;
+use super::hash_blocks::HashBlocks;
 use super::mutate_swbfi_peaks::MutateSwbfiPeaks;
 use super::mutator_set_hash_after_removals::MutatorSetHashAfterRemovals;
 use super::removal_index_commitment::RemovalIndexCommitment;
@@ -67,8 +68,9 @@ pub struct CorrectSwbfUpdateWitness {
     mutator_set: MutatorSetAccumulator,
 
     /// The chunks of the inactive SWBF the inputs' indices fall in, in
-    /// ascending chunk index, each a sorted list of its set indices.
-    chunks: Vec<Vec<u32>>,
+    /// ascending chunk index, each in the storage
+    /// [`HashBlocks::chunk_storage`] describes.
+    chunks: Vec<Vec<BFieldElement>>,
 
     /// The heights of the trees of the inactive SWBF the chunks lie in,
     /// strictly increasing: the trees of the smallest inactive SWBF that
@@ -114,6 +116,10 @@ impl CorrectSwbfUpdateWitness {
         for input in &mut inputs {
             input.target_chunks = ChunkDictionary::empty();
         }
+        let chunks = chunks
+            .iter()
+            .map(|chunk| HashBlocks::chunk_storage(chunk))
+            .collect();
         Self {
             inputs,
             mutator_set,
@@ -161,6 +167,14 @@ impl CorrectSwbfUpdateWitness {
         &self.inputs
     }
 
+    /// The chunks' lists of set indices, out of their storage.
+    fn chunk_lists(&self) -> Vec<Vec<u32>> {
+        self.chunks
+            .iter()
+            .map(|storage| HashBlocks::chunk(storage))
+            .collect()
+    }
+
     /// The inputs in the packed list's form, which the host-side update
     /// takes.
     pub fn packed_inputs(&self) -> Vec<RemovalRecord> {
@@ -183,10 +197,11 @@ impl CorrectSwbfUpdateWitness {
         // Each chunk's path in its tree, from the tree's sequential paths:
         // the runs come from the highest tree down, the path lists in
         // ascending height.
-        let mut paths_of_chunk = vec![vec![]; self.chunks.len()];
+        let chunks = self.chunk_lists();
+        let mut paths_of_chunk = vec![vec![]; chunks.len()];
         let mut next_chunk = 0;
         for ((height, old_leafs, _), paths) in
-            MutateSwbfiPeaks::runs(estimate, &chunk_indices, &self.chunks, &insertions)
+            MutateSwbfiPeaks::runs(estimate, &chunk_indices, &chunks, &insertions)
                 .into_iter()
                 .zip(self.tree_paths.iter().rev())
         {
@@ -217,7 +232,7 @@ impl CorrectSwbfUpdateWitness {
                             .binary_search(&chunk_index)
                             .expect("the witness holds the chunk");
                         let chunk = Chunk {
-                            relative_indices: self.chunks[position].clone(),
+                            relative_indices: chunks[position].clone(),
                         };
                         let proof = MmrMembershipProof::new(paths_of_chunk[position].clone());
                         (chunk_index, (proof, chunk))
@@ -359,7 +374,7 @@ impl SecretWitness for CorrectSwbfUpdateWitness {
         nondeterminism.individual_tokens = MutatorSetHashAfterRemovals::divined_tokens(
             &self.inputs,
             &self.mutator_set,
-            &self.chunks,
+            &self.chunk_lists(),
             &self.tree_heights,
         );
 
@@ -569,8 +584,13 @@ pub(super) mod tests {
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
 
     impl CorrectSwbfUpdateWitness {
-        pub(in crate::block::validity) fn chunks(&self) -> &[Vec<u32>] {
-            &self.chunks
+        pub(in crate::block::validity) fn chunks(&self) -> Vec<Vec<u32>> {
+            self.chunk_lists()
+        }
+
+        /// Replaces the chunk at the position.
+        fn set_chunk(&mut self, position: usize, chunk: &[u32]) {
+            self.chunks[position] = HashBlocks::chunk_storage(chunk);
         }
 
         pub(in crate::block::validity) fn tree_heights(&self) -> &[u32] {
@@ -594,7 +614,7 @@ pub(super) mod tests {
             let peaks = SwbfiPeaksAfterRemovals::verify(
                 &witness.inputs,
                 &witness.mutator_set,
-                &witness.chunks,
+                &witness.chunk_lists(),
                 &witness.tree_heights,
                 &witness.tree_paths,
             );
@@ -678,7 +698,7 @@ pub(super) mod tests {
         let auth_structs = MutateSwbfiPeaks::tree_auth_structs(
             estimate,
             &chunk_indices,
-            &witness.chunks,
+            &witness.chunk_lists(),
             &insertions,
             &witness.tree_paths,
         );
@@ -694,7 +714,9 @@ pub(super) mod tests {
             }
             tree_paths.push(paths);
         }
-        witness.chunks = empty_chunks;
+        for position in 0..witness.chunks.len() {
+            witness.set_chunk(position, &[]);
+        }
         witness.tree_paths = tree_paths;
         witness.mutator_set.swbf_inactive = MmrAccumulator::init(peaks, leaf_count);
         witness
@@ -841,7 +863,9 @@ pub(super) mod tests {
     #[test]
     fn input_carrying_a_tampered_chunk_is_rejected() {
         let mut witness = witness_with_chunks();
-        witness.chunks[0].insert(0, 0);
+        let mut chunk = witness.chunks()[0].clone();
+        chunk.insert(0, 0);
+        witness.set_chunk(0, &chunk);
         assert_rejects(
             &witness,
             BlockValidationRule::RemovalRecordsValidity.error_id(),
@@ -934,7 +958,7 @@ pub(super) mod tests {
         let peaks_with_chunks = MutateSwbfiPeaks::runs(
             swbfi_leaf_count,
             &chunk_indices,
-            &honest.chunks,
+            &honest.chunks(),
             &insertions,
         )
         .into_iter()
@@ -976,17 +1000,23 @@ pub(super) mod tests {
                 BlockValidationRule::RemovalRecordsValidity.error_id(),
             );
         };
+        let lists = honest.chunks();
         for chunk in chunks {
             let mut witness = honest.clone();
-            witness.chunks[chunk].insert(0, 0);
+            let mut list = lists[chunk].clone();
+            list.insert(0, 0);
+            witness.set_chunk(chunk, &list);
             rejects(&witness);
-            for index in spread((0..honest.chunks[chunk].len()).collect(), 3) {
+            for index in spread((0..lists[chunk].len()).collect(), 3) {
                 let mut witness = honest.clone();
-                let entry = &mut witness.chunks[chunk][index];
-                *entry = if *entry == 0 { 1 } else { *entry - 1 };
+                let mut list = lists[chunk].clone();
+                list[index] = if list[index] == 0 { 1 } else { list[index] - 1 };
+                witness.set_chunk(chunk, &list);
                 rejects(&witness);
                 let mut witness = honest.clone();
-                witness.chunks[chunk].remove(index);
+                let mut list = lists[chunk].clone();
+                list.remove(index);
+                witness.set_chunk(chunk, &list);
                 rejects(&witness);
             }
         }
@@ -1024,7 +1054,7 @@ pub(super) mod tests {
     #[test]
     fn input_carrying_a_superfluous_chunk_is_rejected() {
         let mut witness = witness_with_chunks();
-        witness.chunks.push(vec![]);
+        witness.chunks.push(HashBlocks::chunk_storage(&[]));
         assert_rejects(
             &witness,
             BlockValidationRule::RemovalRecordsUnpackFailure.error_id(),
@@ -1069,7 +1099,7 @@ pub(super) mod tests {
         let mutation = MutateSwbfiPeaks::divined_tokens(
             estimate,
             &chunk_indices,
-            &witness.chunks,
+            &witness.chunks(),
             &insertions,
         )
         .len();
@@ -1127,10 +1157,11 @@ pub(super) mod tests {
     #[test]
     fn input_carrying_a_chunk_with_an_index_removed_is_rejected() {
         let mut witness = witness_with_chunks();
-        let chunk = (0..witness.chunks.len())
-            .find(|&chunk| !witness.chunks[chunk].is_empty())
+        let lists = witness.chunks();
+        let chunk = (0..lists.len())
+            .find(|&chunk| !lists[chunk].is_empty())
             .expect("the test data must hold a chunk with indices");
-        witness.chunks[chunk].pop();
+        witness.set_chunk(chunk, &lists[chunk][..lists[chunk].len() - 1]);
         assert_rejects(
             &witness,
             BlockValidationRule::RemovalRecordsValidity.error_id(),
@@ -1395,13 +1426,17 @@ pub(super) mod tests {
             .map(|input| input.absolute_indices.to_array())
             .find(|indices| indices.iter().all(|index| *index < window_start))
             .expect("some input must lie in the inactive SWBF");
+        let mut lists = witness.chunks();
         for index in indices {
             let chunk_index = (index >> CHUNK_SIZE.ilog2()) as u64;
             let position = chunk_indices.binary_search(&chunk_index).unwrap();
             let relative_index = (index % u128::from(CHUNK_SIZE)) as u32;
-            let chunk = &mut witness.chunks[position];
+            let chunk = &mut lists[position];
             let at = chunk.partition_point(|&set| set < relative_index);
             chunk.insert(at, relative_index);
+        }
+        for (position, list) in lists.iter().enumerate() {
+            witness.set_chunk(position, list);
         }
         witness
     }

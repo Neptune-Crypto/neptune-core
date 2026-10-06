@@ -375,16 +375,17 @@ against the host (`profile_both_forms` in
 
 | Per input | List form, 410 per chunk | List form, empty chunks | Counter form |
 |---|---:|---:|---:|
-| Processor rows | 66,774 (60,180 flat) | 54,381 (47,787 flat) | 15,972 |
+| Processor rows | 66,774 (58,360 flat, padded) | 54,381 (45,015 flat, padded) | 15,972 |
 | U32 rows | 14,687 | 12,466 | 20,601 |
 | Hash rows | 29,176 | 8,820 | 14,893 |
 | RAM rows | 48,559 | 12,820 | 14,373 |
-| Tallest table | 66,774 (60,180 flat) | 54,381 (47,787 flat) | 20,601 |
+| Tallest table | 66,774 (58,360 flat, padded) | 54,381 (45,015 flat, padded) | 20,601 |
 | Inputs per 2^21 leaf | 31 | 38 | 101 |
 
 The tallest table sets what a leaf buys: 21k rows per input against 67k,
-a factor 3.2, or 2.9 against the list form with the flattened witness
-of 2026-10-07 ("flat" in the table), which the counter form shares. The counter form is u32-bound, 15.5k of its rows per input
+a factor 3.2, or 2.8 against the list form with the flattened witness
+of 2026-10-07 and the padded chunk storage of 2026-10-08 ("flat, padded"
+in the table), which the counter form shares. The counter form is u32-bound, 15.5k of its rows per input
 being the `merkle_step_mem` steps of the walks, 52 per index at this
 forest height of 26; that is the floor of this design. The list form at
 density zero (`witness_with_empty_chunks`, the fixture with every chunk
@@ -822,6 +823,20 @@ with it): 60.2k per input at the fixture's density of about 410 per chunk,
 47.8k with every chunk emptied. The RAM table stays at 48.1k per input,
 the two reads of every chunk's contents, so the next optimisation of the
 list form meets it at about 48k.
+
+The chunk hashing overhead, tried on 2026-10-08. The witness stores each
+chunk's encoding padded for the sponge, so the old hash absorbs its
+blocks straight from memory (`HashBlocks`): 58.2k per input at the
+fixture's density, 45.0k with empty chunks. A rewrite of the insertion
+hash that absorbs every block without an insertion straight from the
+padded storage at a one-word offset and assembles only the blocks with
+an insertion measured 71.7k at the fixture's density and 44.6k empty,
+and was dropped: the staging it replaced was never the cost, the control
+flow around the absorptions is, about six rows per absorbed block in
+either design against one for the absorption itself, so the floor of
+this approach is near the staging code's cost. The per-chunk cost of the
+two hashes is now about 180 rows of control per hash over 42
+absorptions; what remains above the RAM floor is the index bookkeeping.
 
 `PredecessorIsValid`, without the verification of the previous block's
 proof (ignored test `profile_skipping_program_by_transaction_shape`, which
