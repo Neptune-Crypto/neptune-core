@@ -140,6 +140,12 @@ neptune-cli block-height
 If you set up `neptune-core` to listen for RPC requests on a different port from the default, (9799),
 then the flag `--rpc-port <port>` is your friend.
 
+## Decentralized Finance
+
+`neptune-defi` runs `neptune-core` for decentralized-finance protocols, which connect to it as
+plugins. It is not part of the release; see [its README](neptune-defi/README.md) for how to install
+it from source.
+
 ## Setup for Development (Ubuntu)
 
 - build-essential (for `make`) -- `apt install build-essential`
