@@ -375,17 +375,18 @@ against the host (`profile_both_forms` in
 
 | Per input | List form, 410 per chunk | List form, empty chunks | Counter form |
 |---|---:|---:|---:|
-| Processor rows | 66,774 (55,882 now) | 54,381 (42,538 now) | 15,972 |
+| Processor rows | 66,774 (50,697 now) | 54,381 (40,754 now) | 15,972 |
 | U32 rows | 14,687 | 12,466 | 20,601 |
 | Hash rows | 29,176 | 8,820 | 14,893 |
 | RAM rows | 48,559 | 12,820 | 14,373 |
-| Tallest table | 66,774 (55,882 now) | 54,381 (42,538 now) | 20,601 |
+| Tallest table | 66,774 (50,697 now) | 54,381 (40,754 now) | 20,601 |
 | Inputs per 2^21 leaf | 31 | 38 | 101 |
 
 The tallest table sets what a leaf buys: 21k rows per input against 67k,
-a factor 3.2, or 2.7 against the list form after the flattened witness,
-the padded chunk storage and the merged resolution of 2026-10-07 and
-2026-10-08 ("now" in the table), which the counter form shares. The counter form is u32-bound, 15.5k of its rows per input
+a factor 3.2, or 2.5 against the list form after the flattened witness,
+the padded chunk storage, the merged resolution and the single-insertion
+hash of 2026-10-07 and 2026-10-08 ("now" in the table), which the counter
+form shares. The counter form is u32-bound, 15.5k of its rows per input
 being the `merkle_step_mem` steps of the walks, 52 per index at this
 forest height of 26; that is the floor of this design. The list form at
 density zero (`witness_with_empty_chunks`, the fixture with every chunk
@@ -844,6 +845,20 @@ inactive part resolves to its chunk once, counts the chunk's use and
 takes its slot in the chunk's sorted list in the same routine. 55.9k per
 input at the fixture's density, 42.5k with empty chunks; every table
 fell, the u32 table by 0.9k for the arithmetic no longer done twice.
+
+The insertion hash with a fast path for one insertion, 2026-10-08, the
+case of nearly every chunk: the storage's two length words are raised in
+place, the blocks before the insertion's are absorbed as they are, the
+insertion's block is assembled on the stack from reads of up to five
+words, the blocks after it are absorbed a word along, and a block of
+padding is absorbed as a constant when the new encoding is a block
+longer. Chunks with any other number of insertions keep the staging
+code. 50.7k per input at the fixture's density, 40.8k with empty chunks;
+RAM 45.8k. The hasher's tests sweep every number of insertions from none
+to eleven over chunk lengths of every residue modulo the block, and one
+insertion at every position of chunks around block boundaries, against
+the host's hashes of the old and the new chunk on one copy of the
+storage, as the peak mutation runs them.
 
 `PredecessorIsValid`, without the verification of the previous block's
 proof (ignored test `profile_skipping_program_by_transaction_shape`, which
