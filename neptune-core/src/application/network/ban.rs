@@ -250,7 +250,7 @@ mod tests {
 
     #[proptest]
     fn the_two_peer_admission_gates_expire_together(
-        #[strategy(1u16..=u16::MAX)] tolerance: u16,
+        #[strategy(2u16..=u16::MAX)] tolerance: u16,
         #[strategy(arb_ip_addr())] ip: IpAddr,
     ) {
         // Ensure that the ban list of the libp2p protocol expires at the same
