@@ -508,7 +508,7 @@ mod tests {
     }
 
     #[proptest]
-    fn recognize_checks_envelope_before_body(
+    fn recognize_checks_prefix_before_body(
         #[strategy(arb())] pair_id: BFieldElement,
         #[strategy(arb())] body: SofunBody,
         #[strategy(arb())]
@@ -521,7 +521,7 @@ mod tests {
         #[filter(#other_version != BFieldElement::new(Sofun::version()))]
         other_version: BFieldElement,
         #[filter(#padding != 0)] padding: u64,
-        #[strategy(1..VALID_LENGTH)] prefix_len: usize,
+        #[strategy(1..VALID_LENGTH)] truncated_len: usize,
         #[strategy(vec(arb::<BFieldElement>(),1..10))] suffix: Vec<BFieldElement>,
     ) {
         let version = BFieldElement::new(Sofun::version());
@@ -552,7 +552,10 @@ mod tests {
                 message(STANDING_SWAP_ORDER_FLAG, pair_id, version, padded),
                 UnrecognizedOrder::Malformed,
             ),
-            (valid[..prefix_len].to_vec(), UnrecognizedOrder::Malformed),
+            (
+                valid[..truncated_len].to_vec(),
+                UnrecognizedOrder::Malformed,
+            ),
             ([valid, suffix].concat(), UnrecognizedOrder::Malformed),
         ] {
             assert_eq!(Err(reason), recognize(message).map(|_| ()));
@@ -576,7 +579,7 @@ mod tests {
         assert_eq!(body, SofunBody::from(recognized));
     }
 
-    /// The length of a message: three envelope elements and a 28-element body.
+    /// The length of a message: three prefix elements and a 28-element body.
     const VALID_LENGTH: usize = 3 + 28;
 
     #[proptest]

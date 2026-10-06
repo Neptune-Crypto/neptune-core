@@ -142,7 +142,7 @@ determined when the order is created, its addition record is a single constant,
 and order is filled once the desired output is included — there is no
 transmission from accepter to proposer.
 
-The clean way to say it: path (b) asserts that **at least one member of an
+The clean way to say it: path (b) (Fill) asserts that **at least one member of an
 admissible set of addition records** appears among the transaction's outputs. A
 general swap order has a **one-element** set, computed by the proposer when the
 order is written. SOFuN needs a **larger**
@@ -391,9 +391,10 @@ only that the reward be paid.
 
 ### 4.3 Announcement
 
-The envelope is generic; the body has two readings of one fixed length. Three
-elements name the market and the schema, and `pair_id` alone decides which
-reading applies to the 28 that follow.
+An order announcement is 31 elements: a prefix of three elements, then a body
+of 28. The prefix has the same layout for every standing swap order. The body
+has two schemas, `StandingSwapOrderV1` and `SofunBody`, of the same length, and
+`pair_id` decides which one applies.
 
 ```
 element 0   flag      STANDING_SWAP_ORDER_FLAG = 1000
@@ -436,20 +437,16 @@ dead weight in a SOFuN order, and `d_zero` costs one of them. `epoch` takes a
 second and `padding` fills the remaining two, which keeps both schemas at 28
 elements and every shared field at the same offset.
 
-**The three envelope elements are read, not decoded.** None of them belong in a
+**The three prefix elements are read, not decoded.** None of them belong in a
 body, because all three are the key that chooses which body to decode: a reader
 must know the version before it can pick a struct, and the same holds for the
-flag and for `pair_id`. They are therefore a fixed-position prefix, assembled
+flag and for `pair_id`. They are therefore read at fixed positions, assembled
 and inspected element by element. That also matches how the node already treats
 announcements — `Announcement::looks_like_lustration`
 (`neptune-consensus/src/transaction/announcement.rs`) tests element 0 directly,
 and `AnnouncementFlag` (`neptune-primitives/src/announcement_flag.rs`) is
 defined as the first two elements, purpose and receiver id, with `pair_id`
 standing in the second slot.
-
-Do not be tempted to give the prefix a struct with a derived `BFieldCodec`. The
-reversal noted below would write it as `[version, pair_id, flag]`, putting the
-flag at element 2, where no existing scan looks for it.
 
 Nothing further is needed to bind a body to its version. The prefix sits in the
 same announcement as the body, under the same block commitment, so a reader that
@@ -461,12 +458,13 @@ copies. The requirement is on consumers instead, and it is the ordinary one —
 read element 2, and reject a version you do not implement rather than assuming
 the one you do.
 
-**Both readings keep the derived codec.** The overload is one of whole typed
-fields, not of bits inside a field, so each schema is an ordinary struct with a
-derived `BFieldCodec` and neither needs an encoding of its own. Every field is
-fixed-length, so a body is the struct's encoding and nothing else, and the
-derived `decode` rejects a truncated record. Encoding an announcement is
-`[flag, pair_id, version]` concatenated with `body.encode()`.
+**Each body schema is a struct with a derived `BFieldCodec`.** Every field has
+a fixed length, so the derived encoding writes no length markers and a body is
+exactly its 28 elements. The derived `decode` rejects a body that is shorter or
+longer. An announcement is the three prefix elements followed by
+`body.encode()`. No hand-written encoding is needed, because `SofunBody`
+replaces `demanded_amount` with whole fields of its own, `d_zero`, `epoch` and
+`padding`, rather than packing values into its four elements.
 
 Two mechanical notes for anyone reading the wire format:
 
@@ -500,7 +498,7 @@ encoding, and anything that hashes, indexes or deduplicates announcements can
 compare the raw elements.
 
 The requirement costs no room for a later schema. The version is element 2 of
-the envelope, outside the body, and a consumer rejects a version it does not
+the prefix, outside the body, and a consumer rejects a version it does not
 implement before it decodes anything. A version 0 SOFuN decoder therefore never
 reads a version 1 SOFuN body, and version 1 may assign those two elements
 whatever meaning it needs, whatever version 0 required of them.
@@ -528,7 +526,7 @@ body is only decodable by a consumer who knows the pair's schema; an indexer tha
 does not can still bucket by `pair_id`, it just cannot read the terms. That is
 the right trade — the alternative is paying for two `coins` lists in every order,
 forever — but it means the version at element 2 is a *per-pair schema* version,
-and what §1.5's generic core shares with SOFuN is the envelope, the length, and
+and what §1.5's generic core shares with SOFuN is the prefix, the length, and
 the offsets of every field the two have in common, rather than the body itself.
 
 **`G` and `K` are not negotiable, so they are not on the wire.** SOFuN version 0 fixes
@@ -609,9 +607,9 @@ So `pair_id` is redundant *as data* — derivable from the body, and consumers
 should derive it rather than trust it. It earns its element by being the only
 part of the record the node can index on.
 
-**The version is element 2, deliberately outside that prefix.** Elements 0
-and 1 are the index, so anything put there becomes part of what consumers filter
-*on*. A consumer subscribed to `(SWAP_ORDER, v1, pair)` would be blind to `v2`
+**The version is element 2, deliberately outside the `AnnouncementFlag`.**
+Elements 0 and 1 are the index, so anything put there becomes part of what consumers filter
+*on*. A consumer subscribed to `(STANDING_SWAP_ORDER_FLAG, v1, pair)` would be blind to `v2`
 orders in its own market. It would see an empty book rather than an unreadable
 one. Keeping the version out of the index means every consumer of a pair sees
 every order in it and can say "version 2, not understood, skipping". Version
@@ -811,19 +809,22 @@ guesser gains only from an order offering more than the guesser's share, and
 loses on any other. So order-filling is for composers who guess their own
 blocks.
 
-**An order carries no fee subsidy.** The composer's compensation is the part of
-`X` the reward does not take back, `X/2`, paid as a liquid output. Routing part
-of `X` through the transaction's fee field instead would not sweeten anything: a block's fee *is* the guesser's
-reward (`block_body.rs:204-210`), so that money goes to the guesser rather than
-to the filler. For the composers who actually fill orders, who guess their own
-blocks, it would be the same pocket under a different name; for anyone else it
-would be a leak.
+**The composer is paid by an output, not by the fee.** A fill pays the
+composer one liquid output of `⌈(C + X)/2⌉`. Without the fill they would hold
+`C/2` liquid and `C/2` time-locked, so the fill gains them `X/2` liquid and
+costs them `C/2` time-locked. Paying any part of it as the transaction's fee
+instead would send that part to whoever guesses the block, since a block's fee
+is the guesser's reward (`block_body.rs:204-210`), and half of the guesser's
+reward is time-locked (`block_kernel.rs:54-73`). A composer who guesses their
+own block would get that part back half time-locked; any other composer would
+not get it at all.
 
-What a fill costs the composer is not currency in the first place. It is one
-removal record of kernel space and one more lock-script proof, and both are
-bounded by taking at most one order per block. There is nothing for a fee to
-reimburse. A proposer who wants to be filled sooner raises `X`, which is the one
-number orders differ in.
+Besides the exchange, a fill adds to the composer's transaction one input, a
+lustration announcement when the input requires one, and a run of the order's
+lock script to prove. The composer weighs that work against the `X/2` they
+gain, and nothing pays for it separately. Among the orders a composer can fill,
+they take the one with the largest `X`, so a proposer who wants to be filled
+sooner raises `X`.
 
 **Where the policy lives: in the plugin.** The SOFuN plugin writes the whole
 coinbase transaction of a block that fills an order (§4.9), so it applies the
@@ -1061,7 +1062,7 @@ stage is not a naming preference.
 | meant | `StandingSwapOrder<C>` | the full terms, the configuration's parameters, and the version; the asset pair is the book's |
 | observed | `Order<C>` | the terms, plus confirming height and AOCL leaf index |
 
-From body to logical order, the version comes from the envelope. The asset sets
+From body to logical order, the version comes from the prefix. The asset sets
 come from the consumer's own table: it looked this pair up on purpose and
 computed `pair_id` from those sets in order to query at all, so it already holds
 them, and it hands them to the book once, when the book is created, since every
@@ -1592,7 +1593,7 @@ randomness per order.
 - [x] `G` = 1 week and `K` = 26 defined once, and used by both the lock-script
       builder and the order verifier (§4.3)
 - [x] `StandingSwapOrderV1` and `SofunBody` with derived `BFieldCodec`; round-trip
-      proptest over both announcements, envelope included, plus a truncation
+      proptest over both announcements, prefix included, plus a truncation
       case and a check that both bodies are 28 elements with every shared field
       at the same offset
 - [x] Schema chosen from `pair_id` before decoding, never from which decoder
@@ -1602,7 +1603,7 @@ randomness per order.
 - [x] `pair_id` derived from an `AssetPair`, over sorted type script hashes, so
       that it does not depend on the order a consumer built the sets in; SOFuN's
       own pair stated once (§4.3)
-- [x] Announcement generator: the envelope, then the body, read back by
+- [x] Announcement generator: the prefix, then the body, read back by
       `recognize` in a round-trip proptest (§4.3)
 - [x] Order-announcement / lock-script consistency check (§7.3) as a library
       function: `StandingSwapOrder::order_utxo`, whose addition record an

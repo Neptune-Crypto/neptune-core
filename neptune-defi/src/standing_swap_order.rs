@@ -82,7 +82,7 @@ pub trait Swappable: Sized {
         + TryInto<StandingSwapOrder<Self>>;
 
     /// The schema version of [`Self::EncodingFormat`], written as element 2 of
-    /// the announcement envelope.
+    /// the announcement's prefix.
     fn version() -> u64;
 
     /// The UTXO holding an order's offered amount under the order's lock
@@ -132,7 +132,7 @@ pub enum UnrecognizedOrder {
     /// not implement. Consumers should report it rather than skip it silently.
     UnknownVersion(BFieldElement),
 
-    /// The flag and pair match, but the envelope is truncated or the body does
+    /// The flag and pair match, but the prefix is truncated or the body does
     /// not decode to a valid order.
     Malformed,
 }
@@ -160,14 +160,14 @@ pub struct StandingSwapOrder<C: Swappable> {
 impl<C: Swappable> StandingSwapOrder<C> {
     /// The message that announces this order.
     pub fn announce(self, pair: &AssetPair) -> Announcement {
-        let envelope = vec![
+        let prefix = vec![
             STANDING_SWAP_ORDER_FLAG,
             pair.pair_id(),
             BFieldElement::new(C::version()),
         ];
         let body = C::EncodingFormat::from(self).encode();
 
-        Announcement::new([envelope, body].concat())
+        Announcement::new([prefix, body].concat())
     }
 
     pub fn offered_amount(&self) -> NativeCurrencyAmount {
