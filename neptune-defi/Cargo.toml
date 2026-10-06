@@ -10,6 +10,11 @@ license = "Apache-2.0"
 homepage = "https://neptune.cash/"
 repository = "https://github.com/Neptune-Crypto/neptune-core/"
 
+# neptune-defi is not part of the release; its README says how to install it
+# from source.
+[package.metadata.dist]
+dist = false
+
 [features]
 # implements arbitrary::Arbitrary for various types
 arbitrary-impls = [
