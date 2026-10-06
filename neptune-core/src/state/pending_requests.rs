@@ -17,7 +17,7 @@ use tasm_lib::prelude::Digest;
 pub(crate) const BLOCK_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// How long a request for a transaction counts as pending.
-pub(crate) const TRANSACTION_REQUEST_TIMEOUT: Duration = Duration::from_secs(35);
+pub(crate) const TRANSACTION_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// How long an object announced by a peer on an inbound connection waits
 /// before it is requested from that peer. A peer on an outbound connection
