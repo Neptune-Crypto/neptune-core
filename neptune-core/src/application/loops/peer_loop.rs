@@ -6935,6 +6935,7 @@ mod tests {
         use super::block_proposals::genesis_setup;
         use super::block_proposals::TestSetup;
         use super::*;
+        use crate::state::pending_requests::HEDGE_DELAY;
         use crate::state::pending_requests::INBOUND_REQUEST_DELAY;
         use crate::state::pending_requests::TRANSACTION_REQUEST_TIMEOUT;
         use crate::tests::shared::blocks::fake_valid_successor_for_tests;
@@ -7029,6 +7030,56 @@ mod tests {
                 .run(stream, from_main, &mut setup.peer_state)
                 .await
                 .unwrap();
+            assert_eq!(None, latest_punishment(&setup));
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn verified_block_is_requested_from_second_announcer_after_hedge_delay() {
+            let cli = cli_args::Args::default_with_network(Network::Testnet(42));
+            let mut setup = genesis_setup(cli).await;
+            let (block1, with_witness) = notification_with_witness(&setup).await;
+            let notification = PeerMessage::BlockNotificationWithPowWitness(Box::new(with_witness));
+            let request = PeerMessage::BlockRequestByHeight(block1.header().height);
+            let now = Timestamp::now();
+            setup.peer_loop_handler.mock_now = Some(now);
+            let mut bob = peer_loop_at(&setup, 6, false, now);
+
+            // Alice announces and is asked.
+            let alice_stream = Mock::new(vec![
+                Action::Read(notification.clone()),
+                Action::Write(request.clone()),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let alice_from_main = setup.peer_broadcast_tx.subscribe();
+            setup
+                .peer_loop_handler
+                .run(alice_stream, alice_from_main, &mut setup.peer_state)
+                .await
+                .unwrap();
+
+            // Bob announces the same block and is not asked yet.
+            let bob_stream = Mock::new(vec![
+                Action::Read(notification),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let bob_from_main = setup.peer_broadcast_tx.subscribe();
+            let height = setup.genesis_block.header().height;
+            bob.run(
+                bob_stream,
+                bob_from_main,
+                &mut MutablePeerState::new(height),
+            )
+            .await
+            .unwrap();
+
+            // Alice has not delivered within the hedge delay, so bob is asked
+            // too.
+            let mut bob_stream_later = Mock::new(vec![Action::Write(request)]);
+            bob.mock_now = Some(after(now, HEDGE_DELAY));
+            bob.request_due_objects(&mut bob_stream_later)
+                .await
+                .unwrap();
+            assert!(bob_stream_later.is_done());
             assert_eq!(None, latest_punishment(&setup));
         }
 
