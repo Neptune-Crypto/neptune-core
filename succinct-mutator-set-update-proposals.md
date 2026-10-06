@@ -101,14 +101,14 @@ capacity instead, and the proofs run in parallel.
 | e'_1) Composer proves knowledge of the archival mutator set, or of historical blocks | not yet assessed | | | | |
 | e'_2) Guesser reveals one sampled chunk hash with its path | +a few hundred hash rows per block | unchanged | unchanged | none | hard, header rules |
 | e'') Composer reveals knowledge of the archival mutator set | not yet assessed | | | | |
-| f) Merkle-tree chunks in the SWBF | ~60k / ~25k | ~35 | 35 alone; block size with d | ~30 leaves + ~29 aggregations with d | hard, mutator set redesign |
+| f) Merkle-tree chunks in the SWBF | 21k tallest table (u32) per input, measured | ~100 | 100 alone; block size with d | ~10 leaves + ~9 aggregations with d, plus the window slide in `PredecessorIsValid` | hard, mutator set redesign |
 | g) Micro-optimisations | 420k / 146k | 5 | 5 | not reachable | none |
 | h) Increase block size | 510k / 146k | 4 | more than now | not reachable | hard, rules only |
 | i) Nullifier set in a sparse Merkle tree | 361 / 1.26k, binding U32 2.24k (prototype) | ~930 | block size | 1 at 2^22 | hard, mutator set redesign, transaction programs untouched |
 
 Combinations: d) + e1) is the soft-claim path to the target with existing
 transaction programs; d) + e1) + f) cuts the per-block proof count about
-four times; a) or e1) alone only double the single-proof cap.
+three times; a) or e1) alone only double the single-proof cap.
 
 ### a) Drop chunk packing
 
@@ -258,7 +258,7 @@ Cost per block at 2^21 per proof, ~300k RAM rows per verified child:
 
 Leaves are processor-bound at ~250k cycles per input (16 inputs at 2^22).
 Aggregation nodes are ~600k RAM rows and fit in 2^20. Under f) the leaf
-count drops roughly four times.
+count drops about three times.
 
 Transactions and the update branch are untouched: the tree is the
 composer's, built once per block from the previous block's state, and leaf
@@ -352,44 +352,77 @@ outright. Not yet assessed for proof cost or fork type.
 
 ### f) Merkle-tree chunks in the SWBF
 
-The dominant per-input cost is hashing 42 chunks of 412 words twice. With a
-chunk as a Merkle tree over its 4096 bits, an insertion is a 12-level path
-update: ~540 hash pairs per input instead of ~3500 sponge absorptions, and
-the witness per input shrinks from 17k words to under 3k. Roughly 25k RAM
-rows and 60k cycles per input, so 30 or more inputs per 2^21 proof and ~30
-proofs per block for 1000 inputs under d). A deep hard fork of the mutator
-set, but one that changes the order of magnitude. The filter counts, since
-an index can be set more than once and reversion must unset, so a leaf
-holds the index's count and an insertion increments it along its path; the
-counter vector is a canonical form of the multiset the sorted list encodes
-today. Open cost: a window slide must then build a chunk root from the slid
-counters, a few thousand hash pairs per slide even with a sparse tree over
-the mostly-zero leaves, against ~250 hash rows for hashing the list today.
-With hundreds of slides in an output-heavy block that becomes the dominant
-term, so it must be quantified before f) is ranked.
+A chunk as a Merkle tree over the counts of its 4096 indices instead of a
+sorted list, so that an insertion is a 12-level path update and the
+inactive SWBF, an MMR over chunk roots, is one Merkle forest down to the
+counts. A leaf holds an index's count, since an index can be set more
+than once and reversion must unset; the counter vector is a canonical
+form of the multiset the sorted list encodes today. A deep hard fork of
+the mutator set. Measured 2026-10-05 and 2026-10-06 in test-only code;
+the production programs are untouched.
 
-Activating f) on the live chain. A hard fork that changes how a chunk
-hashes must leave every chunk before it as it is, since the inactive SWBF
-is an MMR over chunk hashes and the peaks before the fork are history.
-So a chunk's form follows its index: chunks below the fork's batch index
-hash as lists, chunks at or above it as counter trees. The batch index is
-fixed the way the lustration counter's AOCL threshold is fixed at a
-reset: written into the PoW field's lustration words at the activating
-block, `LustrationStatus`-style, where every later block carries it and
-`PredecessorIsValid` reads it from the predecessor's header. `Chunk::hash`
-takes the form as a boolean, decided by comparing the chunk index with
-that threshold, and nothing else in the mutator set changes shape: the
-MMR, the chunk dictionaries and the removal records stay, only the leaf
-value of a new chunk is a tree root instead of a list hash. The boolean
-reaches exactly the places that hash a chunk: the mutator set's own
-membership and removal code on the host machine, and the leaf program's
-mutation of the inactive SWBF (`MutateSwbfiPeaks`), which hashes the
-chunks it verifies and rewrites. No transaction program hashes a chunk,
-so the transaction side is untouched. The leaf then carries the fork's
-batch index in its input beside the mutator set hash, or the composer
-proves it under the same rule set as the block, so that the form the
-program applies is the form the chain fixed. Not built here; the
-window-slide cost in the paragraph above is the number to measure first.
+**The leaf.** The leaf program with today's claim, the forest walked
+directly: a table of the forest's trees from the leaf count, then one
+pass over the records' indices, each index in the inactive part walked
+twice from its count's leaf through its chunk's root up to the peak of
+the divined tree, with the existing two-root walk against the peak in
+place. The witness is the index sets and one path of 26 digests per
+index; no chunks, no chunk list. The count each index found is what the
+unspent rule reads, and rule 2.a has no chunk left to be exactly right.
+Measured on the list form's fixture at 8 and 16 inputs, outputs checked
+against the host (`profile_both_forms` in
+`swbf_update/counter_tree_leaf.rs`):
+
+| Per input | List form, 410 per chunk | List form, empty chunks | Counter form |
+|---|---:|---:|---:|
+| Processor rows | 66,774 | 54,381 | 15,972 |
+| U32 rows | 14,687 | 12,466 | 20,601 |
+| Hash rows | 29,176 | 8,820 | 14,893 |
+| RAM rows | 48,559 | 12,820 | 14,373 |
+| Tallest table | 66,774 | 54,381 | 20,601 |
+| Inputs per 2^21 leaf | 31 | 38 | 101 |
+
+The tallest table sets what a leaf buys: 21k rows per input against 67k,
+a factor 3.2. The counter form is u32-bound, 15.5k of its rows per input
+being the `merkle_step_mem` steps of the walks, 52 per index at this
+forest height of 26; that is the floor of this design. The list form at
+density zero (`witness_with_empty_chunks`, the fixture with every chunk
+emptied) shows that chunk contents are only a fifth of its cost; the rest
+is index bookkeeping, per-chunk MMR walks and the dictionary audit, which
+the counter form does without. Two intermediate forms were dropped on the
+way: path updates with the list form's bookkeeping kept, 40,850 processor
+rows per input; and one merged pass with the per-chunk MMR walks kept,
+31,475.
+
+**The window slide.** Every 8 additions `PredecessorIsValid` must build
+the slid chunk's root, where today it hashes a list for about 250 hash
+rows. Measured as a sparse root over the slid chunk's sorted indices,
+zero subtrees by table (`profile_slide_root` in
+`swbf_update/counter_tree_root.rs`):
+
+| Indices in the slid chunk | Occupied nodes | Processor rows | Hash rows |
+|---:|---:|---:|---:|
+| 100 | 537 | 55.6k | 3.7k |
+| 250 | 1,061 | 104.3k | 6.5k |
+| 410 | 1,448 | 146.7k | 8.9k |
+| 1000 | 2,355 | 254.7k | 14.7k |
+
+About 100 processor rows per occupied node, one of them the hash; a
+tighter loop could reach 15k to 35k per slide, which is still 2k to 4k
+per output against 334 today, in the one sequential proof. The cost
+disappears if the active window is 256 chunk trees too, so that a slide
+pops a root and pushes the empty tree's; a wider and unmeasured change.
+
+**Activation.** The peaks before the fork are history. Either chunks
+keep their form by index, lists below the fork's batch index and counter
+trees above, with the threshold in the PoW field's lustration words like
+the lustration counter's, which keeps old items in the list form forever
+and both forms in the leaf; or the fork converts the whole inactive SWBF
+at once, an archival recomputation light nodes take from the activating
+block. No transaction program hashes a chunk. Not built.
+
+**Standing.** Leaf gain measured at a factor 3.2; the slide and the
+activation are open. Parked 2026-10-07, work continues without f).
 
 ### g) Micro-optimisations of the current program
 

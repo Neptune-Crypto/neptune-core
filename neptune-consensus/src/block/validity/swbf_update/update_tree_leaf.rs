@@ -47,7 +47,7 @@ impl UpdateTreeLeaf {
     /// The node indices of a tree's authentication structure for these leaf
     /// indices, from the highest down: the order the Merkle tree gives the
     /// structure's digests.
-    fn auth_struct_indices(tree_height: u32, leaf_indices: &[u64]) -> Vec<u64> {
+    pub(super) fn auth_struct_indices(tree_height: u32, leaf_indices: &[u64]) -> Vec<u64> {
         let num_leafs = 1 << tree_height;
         let mut needed = HashSet::new();
         let mut computable = HashSet::new();
@@ -68,7 +68,7 @@ impl UpdateTreeLeaf {
     }
 
     /// Sets a leaf in a tree of known nodes and recomputes its ancestors.
-    fn set_leaf(
+    pub(super) fn set_leaf(
         nodes: &mut HashMap<u64, Digest>,
         tree_height: u32,
         leaf_index: u64,

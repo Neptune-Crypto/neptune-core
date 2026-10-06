@@ -267,7 +267,7 @@ impl SwbfiPeaksAfterRemovals {
     /// The chunk indices, chunk contents and insertions of honest inputs in
     /// the witness's form or the packed list's with chunks unpacked, on
     /// this mutator set.
-    fn chunk_data(
+    pub(super) fn chunk_data(
         inputs: &[RemovalRecord],
         mutator_set: &MutatorSetAccumulator,
     ) -> (Vec<u64>, Vec<Vec<u32>>, Vec<Vec<u32>>) {
