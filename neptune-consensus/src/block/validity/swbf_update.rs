@@ -47,6 +47,7 @@ mod sorted_window_indices;
 pub(super) mod swbfi_peaks_after_removals;
 mod update_tree_leaf;
 pub(super) mod window_after_removals;
+mod witness_lists;
 
 use tasm_lib::triton_vm::prelude::*;
 

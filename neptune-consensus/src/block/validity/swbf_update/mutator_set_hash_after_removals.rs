@@ -16,7 +16,7 @@ use crate::block::validity::mutator_set_hash::MutatorSetHash;
 use crate::block::validity::mutator_set_hash::MutatorSetHashFromComponents;
 
 /// ```text
-/// BEFORE: _ *inputs *mutator_set
+/// BEFORE: _ *inputs *mutator_set *chunks *tree_heights *tree_paths
 /// AFTER:  _ [mutator_set_hash_after_removals]
 /// ```
 #[derive(Debug, Copy, Clone)]
@@ -26,9 +26,11 @@ impl MutatorSetHashAfterRemovals {
     pub(super) fn divined_tokens(
         inputs: &[RemovalRecord],
         mutator_set: &MutatorSetAccumulator,
+        chunks: &[Vec<u32>],
+        tree_heights: &[u32],
     ) -> Vec<BFieldElement> {
         [
-            SwbfiPeaksAfterRemovals::divined_tokens(inputs, mutator_set),
+            SwbfiPeaksAfterRemovals::divined_tokens(inputs, mutator_set, chunks, tree_heights),
             WindowAfterRemovals::divined_tokens(inputs, mutator_set),
         ]
         .concat()
@@ -37,10 +39,7 @@ impl MutatorSetHashAfterRemovals {
 
 impl BasicSnippet for MutatorSetHashAfterRemovals {
     fn parameters(&self) -> Vec<(DataType, String)> {
-        vec![
-            (DataType::VoidPointer, "*inputs".to_string()),
-            (DataType::VoidPointer, "*mutator_set".to_string()),
-        ]
+        SwbfiPeaksAfterRemovals.parameters()
     }
 
     fn return_values(&self) -> Vec<(DataType, String)> {
@@ -61,10 +60,11 @@ impl BasicSnippet for MutatorSetHashAfterRemovals {
             library.import(Box::new(MutatorSetHashFromComponents));
 
         triton_asm!(
-            // BEFORE: _ *inputs *mutator_set
+            // BEFORE: _ *inputs *mutator_set *chunks *tree_heights *tree_paths
             // AFTER:  _ [mutator_set_hash_after_removals]
             {self.entrypoint()}:
-                dup 1 dup 1 call {swbfi_peaks_after_removals}
+                dup 4 dup 4 dup 4 dup 4 dup 4 call {swbfi_peaks_after_removals}
+                place 3 pop 3
                 // _ *inputs *mutator_set *swbfi_peaks'
 
                 dup 2 dup 2 call {window_after_removals}

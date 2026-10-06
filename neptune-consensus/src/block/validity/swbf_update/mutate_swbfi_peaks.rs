@@ -191,25 +191,6 @@ impl MutateSwbfiPeaks {
             })
             .collect()
     }
-
-    /// The inverse of [`Self::tree_paths`]: the trees' authentication
-    /// structures from the witness's path lists.
-    pub(crate) fn tree_auth_structs(
-        swbfi_leaf_count: u64,
-        chunk_indices: &[u64],
-        chunks: &[Vec<u32>],
-        insertions: &[Vec<u32>],
-        tree_paths: &[Vec<Digest>],
-    ) -> Vec<Vec<Digest>> {
-        Self::runs(swbfi_leaf_count, chunk_indices, chunks, insertions)
-            .into_iter()
-            .rev()
-            .zip(tree_paths)
-            .map(|((height, old_leafs, _), paths)| {
-                UpdateTreeLeaf::auth_struct_from_paths(height, paths, &old_leafs)
-            })
-            .collect()
-    }
 }
 
 impl BasicSnippet for MutateSwbfiPeaks {
@@ -537,6 +518,27 @@ mod tests {
 
     use super::super::update_tree_leaf::UpdateTreeLeaf;
     use super::*;
+
+    impl MutateSwbfiPeaks {
+        /// The inverse of [`Self::tree_paths`]: the trees' authentication
+        /// structures from the witness's path lists.
+        pub(in crate::block::validity) fn tree_auth_structs(
+            swbfi_leaf_count: u64,
+            chunk_indices: &[u64],
+            chunks: &[Vec<u32>],
+            insertions: &[Vec<u32>],
+            tree_paths: &[Vec<Digest>],
+        ) -> Vec<Vec<Digest>> {
+            Self::runs(swbfi_leaf_count, chunk_indices, chunks, insertions)
+                .into_iter()
+                .rev()
+                .zip(tree_paths)
+                .map(|((height, old_leafs, _), paths)| {
+                    UpdateTreeLeaf::auth_struct_from_paths(height, paths, &old_leafs)
+                })
+                .collect()
+        }
+    }
 
     /// An inactive SWBF of chunks, with some chunks chosen for mutation.
     struct Fixture {

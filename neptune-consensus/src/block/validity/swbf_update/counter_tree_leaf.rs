@@ -35,7 +35,6 @@ use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
-use super::chunk_witness::ChunkWitness;
 use super::counter_tree_removals::CounterTreeRemovals;
 use super::counter_tree_root::counter_tree_root;
 use super::counter_tree_root::CounterTree;
@@ -47,6 +46,7 @@ use super::removal_records_are_unspent::RemovalRecordsAreUnspent;
 use super::swbfi_peaks_after_removals::SwbfiPeaksAfterRemovals;
 use super::update_tree_leaf::UpdateTreeLeaf;
 use super::window_after_removals::WindowAfterRemovals;
+use super::witness_lists::WitnessLists;
 use super::ClaimOutput;
 use crate::block::block_validation_error::BlockValidationRule;
 use crate::block::validity::mutator_set_hash::MutatorSetHash;
@@ -547,9 +547,10 @@ impl CounterTreeLeafCase {
     fn from_list_form(list: &CorrectSwbfUpdateWitness) -> Self {
         let inputs = list.inputs();
         let mutator_set = list.mutator_set();
-        let (chunk_indices, chunks, insertions) =
-            SwbfiPeaksAfterRemovals::chunk_data(inputs, mutator_set);
-        let estimate = ChunkWitness::swbfi_leaf_count_estimate(inputs);
+        let chunks = list.chunks();
+        let (chunk_indices, insertions) =
+            SwbfiPeaksAfterRemovals::chunk_indices_and_insertions(inputs, mutator_set);
+        let estimate = WitnessLists::swbfi_leaf_count_estimate(list.tree_heights());
         let leaf_count = mutator_set.swbf_inactive.num_leafs();
         let window_start = SwbfiPeaksAfterRemovals::window_start(mutator_set);
 
@@ -560,14 +561,14 @@ impl CounterTreeLeafCase {
         let auth_structs = MutateSwbfiPeaks::tree_auth_structs(
             estimate,
             &chunk_indices,
-            &chunks,
+            chunks,
             &insertions,
-            &ChunkWitness::tree_paths(inputs),
+            list.tree_paths(),
         );
         let runs = MutateSwbfiPeaks::runs_with(
             estimate,
             &chunk_indices,
-            &chunks,
+            chunks,
             &insertions,
             counter_tree_root,
         );
@@ -627,15 +628,10 @@ impl CounterTreeLeafCase {
         let first_count_token = 1;
         let tokens = [
             removal_tokens,
-            Self::unspent_tokens(inputs, &chunk_indices, &chunks, mutator_set),
+            Self::unspent_tokens(inputs, &chunk_indices, chunks, mutator_set),
             WindowAfterRemovals::divined_tokens(inputs, mutator_set),
         ]
         .concat();
-
-        let mut counter_inputs = inputs.to_vec();
-        for record in &mut counter_inputs {
-            record.target_chunks = Default::default();
-        }
 
         let list_after =
             SwbfiPeaksAfterRemovals::apply_removals(&list.packed_inputs(), mutator_set);
@@ -653,7 +649,7 @@ impl CounterTreeLeafCase {
 
         Self {
             witness: CounterTreeLeafWitness {
-                inputs: counter_inputs,
+                inputs: inputs.to_vec(),
                 mutator_set: counter_mutator_set,
                 counter_paths,
                 idle_iterations: bfe!(0),
