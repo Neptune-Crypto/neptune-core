@@ -273,8 +273,8 @@ The reward then discharges the whole forced lock, and the composer keeps the
 rest, `⌈(C + X)/2⌉`, liquid. An order demanding less leaves the composer to lock
 the difference out of their own outputs. One demanding more takes the excess
 out of the composer's liquid share. And two orders in one block demand
-`C + (X₁ + X₂)/2` against a forced lock of `(C + X₁ + X₂)/2`, so the second
-order is paid entirely out of the composer's liquid share. So an order is for
+`C + (X₁ + X₂)/2` against a forced lock of `(C + X₁ + X₂)/2`, so the composer
+pays the excess, `C/2`, out of their liquid share. So an order is for
 one block, filled by its composer, and `Y` follows from `C` and `X`.
 
 `C` depends on the block's generation, which the order names as `epoch`. The
@@ -790,9 +790,7 @@ lock script is rebuilt or any membership proof is fetched.
 
 Consensus, for its part, imposes no limit of its own. Its only rule is that at
 least half of everything the transaction pays out must be time-locked
-(`native_currency.rs:925-931`), and a reward output *is* time-locked, so a fill
-adds to the side of the ledger the rule wants larger. Filling never brings a
-transaction closer to breaking the rule.
+(`native_currency.rs:925-931`), and the reward alone is that half (§4.1).
 
 **A composer who intends to fill orders keeps the subsidy.** The guesser fee is
 a fee, not an output: it is computed as the coinbase minus the composer's share
@@ -813,9 +811,9 @@ guesser gains only from an order offering more than the guesser's share, and
 loses on any other. So order-filling is for composers who guess their own
 blocks.
 
-**An order carries no fee subsidy.** `X` is the whole of the compensation, paid
-as a plain output to the composer. Routing part of it through the transaction's
-fee field instead would not sweeten anything: a block's fee *is* the guesser's
+**An order carries no fee subsidy.** The composer's compensation is the part of
+`X` the reward does not take back, `X/2`, paid as a liquid output. Routing part
+of `X` through the transaction's fee field instead would not sweeten anything: a block's fee *is* the guesser's
 reward (`block_body.rs:204-210`), so that money goes to the guesser rather than
 to the filler. For the composers who actually fill orders, who guess their own
 blocks, it would be the same pocket under a different name; for anyone else it
