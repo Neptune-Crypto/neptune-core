@@ -1,28 +1,38 @@
 //! The hash of a chunk with sorted indices inserted, without writing the
-//! new chunk: the runs between insertions are absorbed straight from the old
-//! chunk's memory, ten words per instruction, and only the words around an
-//! insertion pass through a staging block. The digest is that of
-//! `Tip5::hash` of the new chunk.
+//! new chunk. With one insertion, the common case, the blocks of the new
+//! encoding are those of the chunk's padded storage, before the insertion
+//! as they are and after it at an offset of one word, and are absorbed
+//! straight from memory; only the block with the insertion is assembled,
+//! on the stack. With any other number, the runs between insertions are
+//! absorbed straight from the old chunk's memory, ten words per
+//! instruction, and only the words around an insertion pass through a
+//! staging block. The digest is that of `Tip5::hash` of the new chunk.
 
 use tasm_lib::prelude::BasicSnippet;
 use tasm_lib::prelude::DataType;
 use tasm_lib::prelude::Library;
 use tasm_lib::triton_vm::prelude::*;
 
+use super::absorb_blocks::AbsorbBlocks;
 use crate::block::block_validation_error::BlockValidationRule;
 
 /// ```text
-/// BEFORE: _ *chunk_encoding *sorted_indices
+/// BEFORE: _ *chunk_storage *sorted_indices
 /// AFTER:  _ [digest]
 /// ```
 ///
-/// The chunk is given by a pointer to its encoding, whose first word is the
-/// length of the rest, followed by the list of set indices in ascending
-/// order. The prover supplies for each index, in order, the position in the
-/// chunk's list where it goes, as for
+/// The chunk is given by a pointer to its storage, its encoding padded for
+/// the sponge (see [`HashBlocks::chunk_storage`](super::hash_blocks::HashBlocks::chunk_storage)):
+/// the length of the rest, then the list of set indices in ascending
+/// order. The prover supplies for each index, in order, the position in
+/// the chunk's list where it goes, as for
 /// [`InsertIntoWindow`](super::insert_into_window::InsertIntoWindow), and
 /// the same tokens serve. Positions must not decrease, and the entries
 /// around a position must enclose the index, with repetitions allowed.
+///
+/// With exactly one index to insert, the storage's two length words are
+/// raised by one in place: the storage then no longer hashes to the old
+/// chunk.
 ///
 /// Crashes with the error ID of rule 2.e if a position is out of order or
 /// its neighbours do not enclose the index.
@@ -49,12 +59,45 @@ impl BasicSnippet for HashChunkWithInsertions {
     }
 
     fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
+        let absorb_blocks = library.import(Box::new(AbsorbBlocks));
         // The block being filled, absorbed once it holds ten words, with nine
         // words after it that the padding may write into.
         let stage = library.kmalloc(19).write_address();
+        // The single insertion's chunk, list and length, the block its
+        // index lands in and its position in that block, and the blocks of
+        // the old encoding.
+        let chunk_alloc = library.kmalloc(1);
+        let sorted_alloc = library.kmalloc(1);
+        let length_alloc = library.kmalloc(1);
+        let block_alloc = library.kmalloc(1);
+        let rest_alloc = library.kmalloc(1);
+        let old_blocks_alloc = library.kmalloc(1);
         let error_id = BlockValidationRule::MutatorSetUpdateIntegrity.error_id();
 
         let entrypoint = self.entrypoint();
+        let general = format!("{entrypoint}_general");
+        let single = format!("{entrypoint}_single");
+        let single_before = format!("{entrypoint}_single_before");
+        let single_at = format!("{entrypoint}_single_at");
+        let final_block = format!("{entrypoint}_final_block");
+        let read_run = format!("{entrypoint}_read_run");
+        let take_five = format!("{entrypoint}_take_five");
+        let take_four = format!("{entrypoint}_take_four");
+        let take_three = format!("{entrypoint}_take_three");
+        let take_two = format!("{entrypoint}_take_two");
+        let take_one = format!("{entrypoint}_take_one");
+        let read = |alloc: &tasm_lib::library::StaticAllocation| triton_asm!(push {alloc.read_address()} read_mem 1 pop 1);
+        let write = |alloc: &tasm_lib::library::StaticAllocation| triton_asm!(push {alloc.write_address()} write_mem 1 pop 1);
+        // Reads this many words of a run onto the stack, the first on top.
+        // BEFORE: _ *last len
+        // AFTER:  _ [words] (*last - n) (len - n)
+        let take = |n: usize| {
+            triton_asm!(
+                swap 1 read_mem {n}
+                pick {n + 1} addi {-(n as i64)}
+                return
+            )
+        };
         let insertions_loop = format!("{entrypoint}_insertions_loop");
         let check_before = format!("{entrypoint}_check_before");
         let check_at = format!("{entrypoint}_check_at");
@@ -86,9 +129,134 @@ impl BasicSnippet for HashChunkWithInsertions {
         );
 
         triton_asm!(
-            // BEFORE: _ *chunk_encoding *sorted_indices
+            // BEFORE: _ *chunk_storage *sorted_indices
             // AFTER:  _ [digest]
             {entrypoint}:
+                dup 0 read_mem 1 pop 1 push 1 eq
+                dup 0 skiz call {single}
+                push 0 eq skiz call {general}
+                return
+
+            // The one index's block assembled, the others absorbed from the
+            // storage, before it as they are and after it a word along.
+            // BEFORE: _ *chunk_storage *sorted_indices 1
+            // AFTER:  _ [digest] 1
+            {single}:
+                pop 1
+                sponge_init
+                dup 1 {&write(&chunk_alloc)}
+                dup 0 {&write(&sorted_alloc)}
+                dup 1 addi 1 read_mem 1 pop 1
+                dup 0 {&write(&length_alloc)}
+                // _ *chunk *sorted length
+
+                divine 1
+                // The position does not exceed the chunk's length, and its
+                // neighbours enclose the index.
+                dup 0 dup 2 lt push 0 eq assert error_id {error_id}
+                dup 2 addi 1 read_mem 1 pop 1
+                // _ *chunk *sorted length position index
+
+                dup 1 push 0 eq push 0 eq skiz call {single_before}
+                dup 1 dup 3 eq push 0 eq skiz call {single_at}
+                pop 1
+                // _ *chunk *sorted length position
+
+                // The new encoding's length words, in place.
+                dup 1 addi 1 dup 2 addi 2 dup 5 write_mem 2 pop 1
+                // The index's position in the new encoding, as a block and
+                // a rest; and the old encoding's blocks.
+                addi 2 push 10 swap 1 div_mod
+                dup 0 {&write(&rest_alloc)}
+                dup 1 {&write(&block_alloc)}
+                dup 2 addi 12 push 10 swap 1 div_mod pop 1 {&write(&old_blocks_alloc)}
+                // _ *chunk *sorted length block rest
+
+                // The blocks before the index's.
+                pick 4 dup 2 call {absorb_blocks}
+                pop 4
+                // _
+
+                // The index's block: the run after the index, the index,
+                // then the run before it, so that the first word is on top.
+                {&read(&chunk_alloc)} {&read(&block_alloc)} push 10 mul add
+                dup 0 addi 8 push 9 {&read(&rest_alloc)} push -1 mul add
+                pick 2 pop 1
+                call {read_run}
+                {&read(&sorted_alloc)} addi 1 read_mem 1 pop 1
+                {&read(&chunk_alloc)} {&read(&block_alloc)} push 10 mul add
+                {&read(&rest_alloc)} add addi -1
+                {&read(&rest_alloc)}
+                call {read_run}
+                sponge_absorb
+                // _
+
+                // The blocks after the index's that the old encoding
+                // covers, a word along; then, if the new encoding is a block
+                // longer, the block of its padding, the one and nine zeros,
+                // since the old encoding's one is then the last word of its
+                // storage.
+                {&read(&chunk_alloc)} {&read(&block_alloc)} addi 1 push 10 mul add addi -1
+                {&read(&old_blocks_alloc)} {&read(&block_alloc)} push -1 mul add addi -1
+                call {absorb_blocks}
+                {&read(&length_alloc)} addi 3 push 10 swap 1 div_mod place 1 pop 1
+                push 0 eq skiz call {final_block}
+                sponge_squeeze
+                pick 9 pick 9 pick 9 pick 9 pick 9 pop 5
+                push 1
+                return
+
+            // The entry before the position must not exceed the index.
+            // BEFORE: _ ... position index
+            // AFTER:  _ ... position index
+            {single_before}:
+                {&read(&chunk_alloc)} dup 2 add addi 1 read_mem 1 pop 1
+                dup 1 lt push 0 eq assert error_id {error_id}
+                return
+
+            // The entry at the position must not fall below the index.
+            // BEFORE: _ ... position index
+            // AFTER:  _ ... position index
+            {single_at}:
+                {&read(&chunk_alloc)} dup 2 add addi 2 read_mem 1 pop 1
+                dup 1 swap 1 lt push 0 eq assert error_id {error_id}
+                return
+
+            // BEFORE: _
+            // AFTER:  _
+            {final_block}:
+                push 0 push 0 push 0 push 0 push 0 push 0 push 0 push 0 push 0 push 1
+                sponge_absorb
+                return
+
+            // Up to nine words of a run onto the stack, the first on top:
+            // five, then as many as remain.
+            // BEFORE: _ *last len
+            // AFTER:  _ [words]
+            {read_run}:
+                dup 0 push 4 lt skiz call {take_five}
+                dup 0 push 3 lt skiz call {take_four}
+                dup 0 push 2 lt skiz call {take_three}
+                dup 0 push 1 lt skiz call {take_two}
+                dup 0 push 0 lt skiz call {take_one}
+                pop 2
+                return
+
+            {take_five}:
+                {&take(5)}
+            {take_four}:
+                {&take(4)}
+            {take_three}:
+                {&take(3)}
+            {take_two}:
+                {&take(2)}
+            {take_one}:
+                {&take(1)}
+
+            // Any number of insertions, through the staging block.
+            // BEFORE: _ *chunk_storage *sorted_indices
+            // AFTER:  _ [digest]
+            {general}:
                 sponge_init
                 dup 1 addi 1 read_mem 1 pop 1
                 dup 1 read_mem 1 pop 1
@@ -309,6 +477,7 @@ mod tests {
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::prelude::Tip5;
     use tasm_lib::triton_vm::vm::VMState;
+    use tasm_lib::triton_vm::vm::VM;
 
     use super::super::insert_into_window::InsertIntoWindow;
     use super::super::mutate_swbfi_peaks::MutateSwbfiPeaks;
@@ -323,10 +492,8 @@ mod tests {
         let encoding_pointer = bfe!(1_000);
         let indices_pointer = bfe!(10_000);
         let mut nondeterminism = NonDeterminism::new(tokens);
-        // The encoding: the length of the rest, then the list.
-        let mut encoding = vec![bfe!(chunk.len() as u64 + 1), bfe!(chunk.len() as u64)];
-        encoding.extend(chunk.iter().map(|&index| bfe!(index)));
-        for (i, &word) in encoding.iter().enumerate() {
+        let storage = super::super::hash_blocks::HashBlocks::chunk_storage(chunk);
+        for (i, &word) in storage.iter().enumerate() {
             nondeterminism
                 .ram
                 .insert(encoding_pointer + bfe!(i as u64), word);
@@ -526,6 +693,103 @@ mod tests {
                 None,
                 tasm_digest(&chunk, &insertions, tokens.clone()),
                 "{tokens:?}"
+            );
+        }
+    }
+
+    /// The digests both snippets compute on one copy of the chunk's
+    /// storage, the old chunk's first, as the peak mutation runs them.
+    fn tasm_digests_on_storage(chunk: &[u32], insertions: &[u32]) -> Option<(Digest, Digest)> {
+        use super::super::hash_blocks::HashBlocks;
+
+        let storage_pointer = bfe!(1_000);
+        let indices_pointer = bfe!(10_000);
+        let storage = HashBlocks::chunk_storage(chunk);
+        let mut library = Library::new();
+        let hash_blocks = library.import(Box::new(HashBlocks));
+        let with_insertions = library.import(Box::new(HashChunkWithInsertions));
+        let program = Program::new(&triton_asm!(
+            push {storage_pointer} push {storage.len() / 10} call {hash_blocks}
+            push {storage_pointer} push {indices_pointer} call {with_insertions}
+            write_io 5 write_io 5
+            halt
+            {&library.all_imports()}
+        ));
+        let mut nondeterminism =
+            NonDeterminism::new(InsertIntoWindow::divined_tokens(chunk, insertions));
+        for (i, &word) in storage.iter().enumerate() {
+            nondeterminism
+                .ram
+                .insert(storage_pointer + bfe!(i as u64), word);
+        }
+        encode_to_memory(
+            &mut nondeterminism.ram,
+            indices_pointer,
+            &insertions.to_vec(),
+        );
+        let output = VM::run(program, PublicInput::default(), nondeterminism).ok()?;
+        let digest = |words: &[BFieldElement]| Digest::new(words.to_vec().try_into().unwrap());
+        Some((digest(&output[5..]), digest(&output[..5])))
+    }
+
+    /// Every number of insertions from none to eleven, into chunks of
+    /// every length modulo the block, so that the padding of the storage
+    /// and of the new encoding fall every way they can around the
+    /// insertions: the old hash and the new one both match the host.
+    #[test]
+    fn padding_holds_for_every_insertion_count_and_chunk_length() {
+        let mut rng = StdRng::seed_from_u64(9);
+        let chunk_lengths = (0..=25).chain(405..=415).collect::<Vec<usize>>();
+        for chunk_len in chunk_lengths {
+            for num_insertions in 0..=11 {
+                let chunk = sorted(&mut rng, chunk_len, 4096);
+                let insertions = sorted(&mut rng, num_insertions, 4096);
+                let old = Tip5::hash(&neptune_mutator_set::removal_record::chunk::Chunk {
+                    relative_indices: chunk.clone(),
+                });
+                let new = Tip5::hash(&neptune_mutator_set::removal_record::chunk::Chunk {
+                    relative_indices: MutateSwbfiPeaks::mutated(&chunk, &insertions),
+                });
+                assert_eq!(
+                    Some((old, new)),
+                    tasm_digests_on_storage(&chunk, &insertions),
+                    "{chunk_len} entries, {num_insertions} insertions"
+                );
+            }
+        }
+    }
+
+    /// One insertion at every position of chunks whose padding sits every
+    /// way around the last block, and at the ends.
+    #[test]
+    fn single_insertion_at_every_position_and_padding_boundary() {
+        for chunk_len in [0, 1, 6, 7, 8, 9, 16, 17, 18, 27, 37, 47] {
+            let chunk = (0..chunk_len as u32).map(|i| 3 * i + 1).collect::<Vec<_>>();
+            for position in 0..=chunk_len {
+                let index = 3 * position as u32;
+                let old = Tip5::hash(&neptune_mutator_set::removal_record::chunk::Chunk {
+                    relative_indices: chunk.clone(),
+                });
+                let new = Tip5::hash(&neptune_mutator_set::removal_record::chunk::Chunk {
+                    relative_indices: MutateSwbfiPeaks::mutated(&chunk, &[index]),
+                });
+                assert_eq!(
+                    Some((old, new)),
+                    tasm_digests_on_storage(&chunk, &[index]),
+                    "{chunk_len} entries, insertion at {position}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn single_insertion_out_of_place_or_not_enclosed_is_rejected() {
+        let chunk = vec![2, 4, 6, 8];
+        for (insertion, position) in [(3, 0), (3, 2), (3, 5), (9, 3), (1, 1)] {
+            assert_eq!(
+                None,
+                tasm_digest(&chunk, &[insertion], vec![bfe!(position)]),
+                "{insertion} at {position}"
             );
         }
     }
