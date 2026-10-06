@@ -102,6 +102,23 @@ impl MutateSwbfiPeaks {
         chunks: &[Vec<u32>],
         insertions: &[Vec<u32>],
     ) -> Vec<TreeRun> {
+        Self::runs_with(
+            swbfi_leaf_count,
+            chunk_indices,
+            chunks,
+            insertions,
+            Self::leaf_hash,
+        )
+    }
+
+    /// [`Self::runs`] with the chunks taken to leaves by this function.
+    pub(super) fn runs_with(
+        swbfi_leaf_count: u64,
+        chunk_indices: &[u64],
+        chunks: &[Vec<u32>],
+        insertions: &[Vec<u32>],
+        leaf_hash: fn(&[u32]) -> Digest,
+    ) -> Vec<TreeRun> {
         let mut next_chunk = 0;
         Self::trees(swbfi_leaf_count)
             .into_iter()
@@ -120,7 +137,7 @@ impl MutateSwbfiPeaks {
                             } else {
                                 chunks[position].clone()
                             };
-                            (chunk_indices[position] - start, Self::leaf_hash(&chunk))
+                            (chunk_indices[position] - start, leaf_hash(&chunk))
                         })
                         .collect_vec()
                 };

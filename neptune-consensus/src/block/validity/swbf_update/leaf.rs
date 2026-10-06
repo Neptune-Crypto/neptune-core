@@ -494,7 +494,10 @@ pub(super) mod tests {
     /// remove from. The fixture's active window is random; the mutator set
     /// produces a sorted multiset of indices inside the window, so it is
     /// made one.
-    fn witness(num_inputs: usize, seed: u64) -> CorrectSwbfUpdateWitness {
+    pub(in crate::block::validity) fn witness(
+        num_inputs: usize,
+        seed: u64,
+    ) -> CorrectSwbfUpdateWitness {
         witness_on_aocl(num_inputs, seed, 1 << 20)
     }
 
@@ -529,6 +532,49 @@ pub(super) mod tests {
         );
 
         CorrectSwbfUpdateWitness::new(inputs, mutator_set)
+    }
+
+    /// [witness] with every chunk emptied, and the inactive SWBF's peaks
+    /// and the trees' paths recomputed for the empty chunks: the cost of
+    /// the list form at a chunk density of zero.
+    pub(in crate::block::validity) fn witness_with_empty_chunks(
+        num_inputs: usize,
+        seed: u64,
+    ) -> CorrectSwbfUpdateWitness {
+        use super::super::update_tree_leaf::UpdateTreeLeaf;
+
+        let mut witness = witness(num_inputs, seed);
+        let (chunk_indices, chunks, insertions) =
+            SwbfiPeaksAfterRemovals::chunk_data(&witness.inputs, &witness.mutator_set);
+        let estimate = ChunkWitness::swbfi_leaf_count_estimate(&witness.inputs);
+        let leaf_count = witness.mutator_set.swbf_inactive.num_leafs();
+        let auth_structs = MutateSwbfiPeaks::tree_auth_structs(
+            estimate,
+            &chunk_indices,
+            &chunks,
+            &insertions,
+            &ChunkWitness::tree_paths(&witness.inputs),
+        );
+        let empty_chunks = vec![vec![]; chunks.len()];
+        let runs = MutateSwbfiPeaks::runs(estimate, &chunk_indices, &empty_chunks, &insertions);
+        let mut peaks = witness.mutator_set.swbf_inactive.peaks();
+        let mut tree_paths = vec![];
+        for ((height, old, new), auth_struct) in runs.iter().rev().zip(&auth_structs) {
+            let paths = UpdateTreeLeaf::sequential_paths(*height, auth_struct, old, new);
+            if !old.is_empty() {
+                let (root, _) = UpdateTreeLeaf::try_roots(*height, &paths, old, new).unwrap();
+                peaks[(leaf_count >> (height + 1)).count_ones() as usize] = root;
+            }
+            tree_paths.push(paths);
+        }
+        for record in &mut witness.inputs {
+            for (_, (_, chunk)) in record.target_chunks.iter_mut() {
+                chunk.relative_indices.clear();
+            }
+        }
+        ChunkWitness::set_tree_paths(&mut witness.inputs, tree_paths);
+        witness.mutator_set.swbf_inactive = MmrAccumulator::init(peaks, leaf_count);
+        witness
     }
 
     /// The witnesses of consecutive segments of these sizes of one block's

@@ -22,6 +22,14 @@ pub mod aggregation;
 mod chunk_insertions;
 pub(super) mod chunk_witness;
 mod copy_words;
+// The chunk form of proposal f), kept to measure a window slide; no program
+// uses it.
+#[cfg(test)]
+mod counter_tree_leaf;
+#[cfg(test)]
+mod counter_tree_removals;
+#[cfg(test)]
+mod counter_tree_root;
 mod divined_chunk_indices;
 mod hash_chunk_with_insertions;
 mod hash_words;
