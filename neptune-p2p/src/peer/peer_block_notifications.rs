@@ -1,4 +1,5 @@
 use neptune_consensus::block::Block;
+use neptune_consensus::block::block_header::BlockHeaderWithBlockHashWitness;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::difficulty_control::ProofOfWork;
 use serde::Deserialize;
@@ -12,6 +13,16 @@ pub struct PeerBlockNotification {
     pub hash: Digest,
     pub height: BlockHeight,
     pub cumulative_proof_of_work: ProofOfWork,
+}
+
+impl From<&BlockHeaderWithBlockHashWitness> for PeerBlockNotification {
+    fn from(with_witness: &BlockHeaderWithBlockHashWitness) -> Self {
+        PeerBlockNotification {
+            hash: with_witness.hash(),
+            height: with_witness.header().height,
+            cumulative_proof_of_work: with_witness.header().cumulative_proof_of_work,
+        }
+    }
 }
 
 impl From<&Block> for PeerBlockNotification {
