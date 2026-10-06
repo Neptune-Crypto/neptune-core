@@ -58,8 +58,8 @@ pub struct FillTerms {
 /// Why an order cannot be filled on the given terms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FillError {
-    /// The order demands an amount other than half the block's subsidy.
-    WrongAmount,
+    /// The order is for a generation whose block subsidy is not the block's.
+    WrongSubsidy,
 
     /// No point of the order's grid is time-locked for three years from the
     /// fill's timestamp.
@@ -69,7 +69,7 @@ pub enum FillError {
 impl fmt::Display for FillError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::WrongAmount => write!(f, "the order demands other than half the subsidy"),
+            Self::WrongSubsidy => write!(f, "the order is for another block subsidy"),
             Self::GridRunOut => write!(f, "the order's grid ends too early"),
         }
     }
@@ -85,14 +85,12 @@ impl std::error::Error for FillError {}
 /// only when they guess their own blocks. It spends the order UTXO, worth `X`,
 /// through the fill path of its lock script, and pays:
 ///
-///  - the reward, `⌊C/2⌋`, at the first point of the order's grid that is time
-///    locked for three years and one grid step from the timestamp, or for
-///    three years if none is, the step being headroom against a later
-///    timestamp;
-///  - `⌈X/2⌉` to the composer, time-locked for three years, which the rule
-///    that at least half of the total output `C + X` be time-locked asks for
-///    on top of the reward;
-///  - the rest, `⌈C/2⌉ + ⌊X/2⌋`, to the composer, liquid.
+///  - the reward, `⌊(C + X)/2⌋`, at the first point of the order's grid that
+///    is time-locked for three years and one grid step from the timestamp, or
+///    for three years if none is, the step being headroom against a later
+///    timestamp. The rule that at least half of the total output `C + X` be
+///    time-locked asks for exactly this much;
+///  - the rest, `⌈(C + X)/2⌉`, to the composer, liquid.
 ///
 /// It lustrates the order UTXO if the lustration status says it must.
 pub fn fill_witness(
@@ -100,9 +98,8 @@ pub fn fill_witness(
     terms: &FillTerms,
 ) -> Result<PrimitiveWitness, FillError> {
     let subsidy = Block::block_subsidy(terms.height);
-    let demanded = order.order.demanded_amount();
-    if demanded != subsidy.half() {
-        return Err(FillError::WrongAmount);
+    if order.order.subsidy() != subsidy {
+        return Err(FillError::WrongSubsidy);
     }
 
     let locked_until = terms.timestamp + MINING_REWARD_TIME_LOCK_PERIOD;
@@ -123,21 +120,9 @@ pub fn fill_witness(
         })
         .ok_or(FillError::GridRunOut)?;
 
-    let offered = order.order.offered_amount();
-    let own_locked = offered
-        .checked_sub(&offered.half())
-        .expect("half an amount is at most the amount");
-    let own_liquid = (subsidy + offered)
-        .checked_sub(&(demanded + own_locked))
-        .expect("the reward and the locked part are at most the total");
-    let composer_output = |amount, release_date: Option<Timestamp>| {
-        let utxo = Utxo::new_native_currency(terms.composer.lock_script_hash(), amount);
-        let utxo = match release_date {
-            Some(release_date) => utxo.with_time_lock(release_date),
-            None => utxo,
-        };
-        TxOutput::onchain_utxo(utxo, rand::random(), terms.composer.clone(), true)
-    };
+    let own = (subsidy + order.order.offered_amount())
+        .checked_sub(&order.order.demanded_amount())
+        .expect("the reward is half the total output");
 
     let order_utxo = order.order.order_utxo();
     let lustrations = terms
@@ -174,8 +159,12 @@ pub fn fill_witness(
                 false,
                 false,
             ),
-            composer_output(own_locked, Some(locked_until)),
-            composer_output(own_liquid, None),
+            TxOutput::onchain_utxo(
+                Utxo::new_native_currency(terms.composer.lock_script_hash(), own),
+                rand::random(),
+                terms.composer.clone(),
+                true,
+            ),
         ],
         NativeCurrencyAmount::zero(),
         Some(subsidy),
@@ -255,8 +244,9 @@ mod tests {
         (order, terms)
     }
 
-    /// The fill is valid, claims the whole subsidy without a fee, and pays the
-    /// reward at the first grid point a step clear of three years.
+    /// The fill is valid, claims the whole subsidy without a fee, pays the
+    /// reward at the first grid point a step clear of three years, and locks
+    /// nothing of the composer's.
     #[tokio::test]
     async fn the_fill_is_valid_and_pays_the_reward_with_headroom() {
         let (order, terms) = order_and_terms(NativeCurrencyAmount::coins(10));
@@ -274,10 +264,18 @@ mod tests {
             .kernel
             .outputs
             .contains(&order.order.reward(0).unwrap().addition_record()));
+
+        let time_locked = witness
+            .output_utxos
+            .utxos
+            .iter()
+            .filter(|utxo| utxo.release_date().is_some())
+            .count();
+        assert_eq!(1, time_locked);
     }
 
-    /// An odd offered amount is valid too: the composer locks the larger half
-    /// of it, which keeps the time-locked part at half of the total.
+    /// An odd total output is valid too: the reward is its smaller half, which
+    /// is what the time-lock rule asks for, since it rounds down.
     #[tokio::test]
     async fn an_odd_offered_amount_gives_a_valid_fill() {
         let offered = NativeCurrencyAmount::coins(10) + NativeCurrencyAmount::from_nau(1);
@@ -316,7 +314,7 @@ mod tests {
         let (order, mut terms) = order_and_terms(NativeCurrencyAmount::coins(10));
         terms.height = BlockHeight::new((BLOCKS_PER_GENERATION + 1).into());
         assert_eq!(
-            Err(FillError::WrongAmount),
+            Err(FillError::WrongSubsidy),
             fill_witness(&order, &terms).map(|_| ())
         );
     }

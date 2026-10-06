@@ -159,8 +159,8 @@ impl<C: RpcApi + Clone> SofunPlugin<C> {
 
         let height = tip.height.next();
         let timestamp = Timestamp::now().max(header.timestamp + self.network.minimum_block_time());
-        let demanded = Block::block_subsidy(height).half();
-        let Some(order) = self.book().best_fill(demanded, timestamp) else {
+        let subsidy = Block::block_subsidy(height);
+        let Some(order) = self.book().best_fill(subsidy, timestamp) else {
             client.set_coinbase_tx(None).await?;
             return Ok(Outcome::NoOrder);
         };
