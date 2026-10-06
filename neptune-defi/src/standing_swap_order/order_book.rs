@@ -134,7 +134,7 @@ impl<C: Swappable> OrderBook<C> {
     /// Every open order, in no particular order.
     ///
     /// Queries that depend on what an order means live with the configuration
-    /// that gives it that meaning, as `demanding` does on
+    /// that gives it that meaning, as `for_subsidy` does on
     /// `OrderBook<Sofun>`, and build on this.
     pub fn open_orders(&self) -> impl Iterator<Item = &Order<C>> {
         self.entries

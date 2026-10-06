@@ -12,6 +12,7 @@ use neptune_consensus::type_scripts::native_currency::NativeCurrency;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_consensus::type_scripts::time_lock::TimeLock;
 use neptune_primitives::timestamp::Timestamp;
+use num_traits::CheckedAdd;
 use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldCodec;
 
@@ -49,6 +50,10 @@ pub enum SofunError {
 
     /// The offered amount is negative, which no UTXO can hold.
     NegativeOffer,
+
+    /// The offered amount and the subsidy together exceed the largest amount
+    /// there can be, so no fill's total output can hold them.
+    ExcessiveOffer,
 
     /// `D_0 + (K - 1) * G` reaches `2^63` milliseconds, past which a release
     /// date would wrap the field.
@@ -103,9 +108,14 @@ impl SofunParams {
 }
 
 impl StandingSwapOrder<Sofun> {
-    /// A SOFuN order, whose demanded amount is half the block subsidy of
-    /// generation `params.epoch`, or an error if the offered amount is
-    /// negative or the grid reaches `RELEASE_DATE_BOUND`.
+    /// A SOFuN order, or an error if the offered amount is negative or too
+    /// large, or the grid reaches `RELEASE_DATE_BOUND`.
+    ///
+    /// The demanded amount is `⌊(C + X)/2⌋`, where `C` is the block subsidy of
+    /// generation `params.epoch` and `X` the offered amount. A fill's total
+    /// output is `C + X`, and at least half of it must be time-locked, rounded
+    /// down. The reward is exactly that half, so the composer who fills the
+    /// order locks nothing of their own.
     pub fn new(
         offered_amount: NativeCurrencyAmount,
         params: SofunParams,
@@ -120,7 +130,10 @@ impl StandingSwapOrder<Sofun> {
         // check the grid
         params.last_release_date()?;
 
-        let demanded_amount = Block::generation_subsidy(u64::from(params.epoch)).half();
+        let demanded_amount = Block::generation_subsidy(u64::from(params.epoch))
+            .checked_add(&offered_amount)
+            .ok_or(SofunError::ExcessiveOffer)?
+            .half();
         Ok(Self {
             offered_amount,
             demanded_amount,
@@ -267,54 +280,61 @@ pub struct SofunParams {
     pub d_zero: Timestamp,
 
     /// The generation, as [`BlockHeight::get_generation`] counts it, whose
-    /// block subsidy the demanded amount is half of.
+    /// block subsidy the demanded amount is computed from.
     ///
     /// [`BlockHeight::get_generation`]: neptune_primitives::block_height::BlockHeight::get_generation
     pub epoch: u32,
 }
 
 impl OrderBook<Sofun> {
-    /// Open orders asking exactly `demanded`, richest offer first.
+    /// Open orders for blocks whose subsidy is `subsidy`, richest offer first.
     ///
-    /// The filter comes before the ranking because a composer cannot fill an
-    /// order demanding anything other than half of its own block's subsidy.
-    /// There is no best order in general, only a best order for a given block,
-    /// which is why the amount is an argument. Every order that survives the
-    /// filter demands the same amount, so ranking by the offered amount is
-    /// ranking by price.
+    /// The filter comes before the ranking. An order for a smaller subsidy
+    /// demands less than the composer must lock, so the composer would lock the
+    /// rest themselves; one for a larger subsidy demands more, which the
+    /// composer would pay out of their liquid share. There is no best order in
+    /// general, only a best order for a given block, which is why the subsidy
+    /// is an argument. Among the orders that survive the filter, the composer
+    /// keeps `C + X` less the reward, which is `⌈(C + X)/2⌉`, so ranking by the
+    /// offered amount `X` is ranking by what the composer keeps.
     ///
     /// Callers still skip orders that are not
     /// [fillable](StandingSwapOrder::is_fillable_at) at their timestamp.
     //
     // ponytail: scan and sort per query, O(n log n) in the whole book. Replace
-    // with a priority queue on the offered amount, bucketed by demanded amount,
-    // when a composer's template build measurably notices.
-    pub fn demanding(&self, demanded: NativeCurrencyAmount) -> Vec<&Order<Sofun>> {
+    // with a priority queue on the offered amount, bucketed by subsidy, when a
+    // composer's template build measurably notices.
+    pub fn for_subsidy(&self, subsidy: NativeCurrencyAmount) -> Vec<&Order<Sofun>> {
         let mut matching = self
             .open_orders()
-            .filter(|order| order.order.demanded_amount() == demanded)
+            .filter(|order| order.order.subsidy() == subsidy)
             .collect::<Vec<_>>();
         matching.sort_unstable_by_key(|order| std::cmp::Reverse(order.order.offered_amount()));
 
         matching
     }
 
-    /// The order to fill in a transaction with timestamp `timestamp` that
-    /// redirects `demanded`: of the open orders demanding exactly `demanded`
-    /// and fillable at `timestamp`, the one that offers the most. `None` if no
-    /// open order qualifies.
+    /// The order to fill in a block with subsidy `subsidy` and a transaction
+    /// with timestamp `timestamp`: of the open orders for that subsidy and
+    /// fillable at `timestamp`, the one that offers the most. `None` if no open
+    /// order qualifies.
     pub fn best_fill(
         &self,
-        demanded: NativeCurrencyAmount,
+        subsidy: NativeCurrencyAmount,
         timestamp: Timestamp,
     ) -> Option<&Order<Sofun>> {
-        self.demanding(demanded)
+        self.for_subsidy(subsidy)
             .into_iter()
             .find(|order| order.order.is_fillable_at(timestamp))
     }
 }
 
 impl StandingSwapOrder<Sofun> {
+    /// The block subsidy of the generation this order is for.
+    pub fn subsidy(&self) -> NativeCurrencyAmount {
+        Block::generation_subsidy(u64::from(self.params.epoch))
+    }
+
     /// Whether a fill in a transaction with timestamp `timestamp` can release
     /// the reward at a point of this order's grid that counts toward the
     /// composer's time-locked half, which is true if and only if the grid's
@@ -384,6 +404,7 @@ mod tests {
     use neptune_primitives::block_height::BlockHeight;
     use neptune_primitives::block_height::BLOCKS_PER_GENERATION;
     use neptune_primitives::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
+    use num_traits::CheckedSub;
     use proptest::collection::hash_map;
     use proptest::collection::hash_set;
     use proptest::collection::vec;
@@ -757,14 +778,14 @@ mod tests {
         );
     }
 
-    /// `demanding` returns the open orders whose demanded amount is `demanded`,
+    /// `for_subsidy` returns the open orders for blocks with subsidy `subsidy`,
     /// and no others, in order of non-increasing offered amount.
     ///
     /// Epochs are drawn from a range small enough that orders share them, so
     /// the filter both keeps and drops orders. Keying the terms on the order ID
     /// makes the IDs distinct.
     #[proptest]
-    fn demanding_filters_by_demanded_amount_then_ranks_by_offered_amount(
+    fn for_subsidy_filters_by_subsidy_then_ranks_by_offered_amount(
         #[strategy(hash_map(arb::<OrderId>(), (arb::<SofunBody>(), 0_u32..4), 0..20))]
         terms: HashMap<OrderId, (SofunBody, u32)>,
         #[strategy(0_u32..4)] epoch: u32,
@@ -792,17 +813,15 @@ mod tests {
         })
         .unwrap();
 
-        let demanded = Block::generation_subsidy(u64::from(epoch)).half();
-        let found = book.demanding(demanded);
+        let subsidy = Block::generation_subsidy(u64::from(epoch));
+        let found = book.for_subsidy(subsidy);
 
         let matching = orders
             .iter()
-            .filter(|order| order.order.demanded_amount() == demanded)
+            .filter(|order| order.order.subsidy() == subsidy)
             .count();
         assert_eq!(matching, found.len());
-        assert!(found
-            .iter()
-            .all(|order| order.order.demanded_amount() == demanded));
+        assert!(found.iter().all(|order| order.order.subsidy() == subsidy));
         assert!(found
             .windows(2)
             .all(|pair| pair[0].order.offered_amount() >= pair[1].order.offered_amount()));
@@ -855,7 +874,7 @@ mod tests {
         .unwrap();
 
         let ids = book
-            .demanding(Block::block_subsidy(height).half())
+            .for_subsidy(Block::block_subsidy(height))
             .iter()
             .map(|order| order.id)
             .collect::<Vec<_>>();
@@ -903,7 +922,7 @@ mod tests {
         let expired = order(0, 3, Timestamp::years(1));
         let fillable = order(1, 2, t + MINING_REWARD_TIME_LOCK_PERIOD);
         let poorer = order(2, 1, t + MINING_REWARD_TIME_LOCK_PERIOD);
-        let demanded = expired.order.demanded_amount();
+        let subsidy = expired.order.subsidy();
 
         let mut book = OrderBook::<Sofun>::new(Sofun::asset_pair(), u64::MAX);
         book.apply(BlockUpdate::<Sofun> {
@@ -914,7 +933,7 @@ mod tests {
         })
         .unwrap();
 
-        let best = book.best_fill(demanded, t);
+        let best = book.best_fill(subsidy, t);
         prop_assert_eq!(Some(OrderId(1)), best.map(|order| order.id));
     }
 
@@ -936,5 +955,38 @@ mod tests {
             order.reward_receiver_digest,
         );
         prop_assert_eq!(Some(SofunError::NegativeOffer), refused.err());
+    }
+
+    /// The demanded amount is half of the subsidy and the offer together,
+    /// rounded down, and an offer is refused if and only if that sum exceeds
+    /// the largest amount there can be.
+    #[proptest(cases = 10)]
+    fn the_demanded_amount_is_half_the_subsidy_and_the_offer(
+        #[strategy(arb())] order: StandingSwapOrder<Sofun>,
+    ) {
+        let subsidy = order.subsidy();
+        let build = |offered| {
+            StandingSwapOrder::<Sofun>::new(
+                offered,
+                order.params,
+                order.seed,
+                order.cancel_post_image,
+                order.reward_lock_script_hash,
+                order.reward_receiver_digest,
+            )
+        };
+
+        let demanded =
+            NativeCurrencyAmount::from_nau((subsidy.to_nau() + order.offered_amount.to_nau()) / 2);
+        prop_assert_eq!(demanded, order.demanded_amount);
+
+        let largest = NativeCurrencyAmount::from_nau(NativeCurrencyAmount::MAX_NAU)
+            .checked_sub(&subsidy)
+            .unwrap();
+        prop_assert!(build(largest).is_ok());
+        prop_assert_eq!(
+            Some(SofunError::ExcessiveOffer),
+            build(largest + NativeCurrencyAmount::from_nau(1)).err()
+        );
     }
 }

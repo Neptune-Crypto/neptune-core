@@ -19,9 +19,17 @@ reference implementation at `:925-931`). Guesser rewards are split the same way
 (`block_kernel.rs:54-73`). A miner therefore cannot be paid entirely in liquid
 NPT. Every block hands them a three-year position whether they want one or not.
 
-Note the rule is stated over *total output*, not over the coinbase. The
-distinction is easy to misread, and it is the rule any validator of a fill has
-to check.
+The rule counts the transaction's total output, not its coinbase, and the two
+differ once the transaction has inputs. Since
+`total_input + coinbase = total_output + fee`, every input adds to the total
+output, and half of what it adds must be time-locked. Take a block subsidy of
+128 NPT and no fee. Without inputs, the total output is 128, and the composer
+locks 64 and keeps 64 liquid. Now let the same transaction also spend a 6 NPT
+input and pay 67 NPT time-locked to a third party. The total output is 134, so
+67 must be locked, and the payment is exactly that. The composer locks nothing
+of their own and ends with 67 liquid, where they had 64 liquid and 64
+time-locked. Of the 6 NPT the input brought, 3 go to the composer and 3 into
+the payment.
 
 Composers have real, immediate, denominated-in-fiat costs: electricity,
 hardware, hosting, salaries. Half their revenue arriving three years late is a
@@ -123,7 +131,7 @@ Against that, the cost of doing without is small and lands on the right party:
 granularity is chosen at order creation, by the proposer, who pays one
 announcement and one UTXO per piece. The mismatch it cannot express is a taker
 who wants a size no proposer offered — which for SOFuN cannot arise, since every
-order is exactly one block's slot (§4.1), and for the general case is a reason
+order takes the whole mandatory lock of one block (§4.1), and for the general case is a reason
 to revisit the primitive rather than to complicate this one.
 
 **One divergence is already known, and it is the largest.** SOFuN's demanded
@@ -211,8 +219,8 @@ B dominates. **We choose B and reject C**; nothing below relies on C.
 |---|---|---|
 | Release date `D` | Chosen by the accepter from a **grid** `D ∈ {D₀ + k·G : 0 ≤ k < K}` named by the proposer | Makes the reward enumerable by the proposer (§2) while letting `D` track the actual fill time. Shelf life `K·G` and waiting time `≈3 years + G` are then **independent knobs**, which is what a single fixed date cannot give. |
 | Payout announcement | **None** | Not needed once the reward is enumerable. Saves a field authentication, block space, and any reliance on accepter cooperation. |
-| Partial fills | **Not supported**, deliberately | One order = one UTXO = one fill; a proposer wanting granularity places several orders and chooses the granularity themselves. Moot for SOFuN, where one order is exactly one block's slot (§4.1). Deferred rather than rejected for the general case — see §1.5. |
-| Reward amount `Y` | **Fixed**: half the block subsidy | Every block mints exactly that much time-locked coin, so one order fits one block exactly. Orders then differ only in price `X`, which makes them fungible and the composer's choice among them trivial (§4.1, §4.7). |
+| Partial fills | **Not supported**, deliberately | One order = one UTXO = one fill; a proposer wanting granularity places several orders and chooses the granularity themselves. Moot for SOFuN, where one order takes the whole mandatory lock of one block (§4.1). Deferred rather than rejected for the general case — see §1.5. |
+| Reward amount `Y` | **Determined**: `⌊(C + X)/2⌋`, half of the subsidy and the offer together | That is exactly the time lock a fill's total output `C + X` requires, so the reward discharges all of it and the composer keeps their whole share liquid. One order fills one block exactly. Orders for the same subsidy differ only in `X`, and the composer takes the largest (§4.1, §4.7). |
 | Who may fill | **Anyone** | The lock script does not and should not care. Only a coinbase transaction has a mandatory time-lock for the reward to discharge (§4.6), so composers select themselves; no restriction needs enforcing. |
 
 
@@ -241,7 +249,7 @@ AR(D)   = commit( Hash(utxo(D)), sender_randomness*, receiver_digest* )
 where `commit` is the mutator set operation, *i.e.*,
 `hash_pair(hash_pair(item, sender_randomness), receiver_digest)`.
 
-The proposer fixes `Y`, the reward lock script hash, `sender_randomness*`,
+The proposer fixes `X` and hence `Y`, the reward lock script hash, `sender_randomness*`,
 `receiver_digest*`, and the grid `(D₀, G, K)`, of which only `D₀` is theirs to
 choose — `G` and `K` are protocol constants (§4.3). From those they compute
 `AR(D₀ + k·G)` for every `0 ≤ k < K` and hard-code the `K` records into the lock
@@ -251,22 +259,30 @@ transmitted — it is not transaction data, not nondeterministic input, and does
 not appear on-chain; the composer's choice is visible only as which of the `K`
 records the block pays. Write `D_max = D₀ + (K−1)·G` for the last grid point.
 
-**`Y` is not a free parameter either.** Every block mints a fixed amount of
-time-locked coin: half the subsidy. It is half however the composer splits the
-subsidy with a guesser, because the guesser's share is itself half time-locked
-(`block_kernel.rs:54-73`). An order for exactly that amount is filled by one
-composer out of one block and consumes the whole of what that block has to
-redirect. An order for less makes the composer take several to fill the same
-slot, and an order for more cannot be filled at all. So a proposer always asks
-for `Y = Block::block_subsidy(h) / 2` (`block/mod.rs:427`), and a composer only
-ever fills an order whose `Y` is half of their own block's subsidy.
+**`Y` is not a free parameter either.** Write `C` for the block subsidy,
+`Block::block_subsidy(h)` (`block/mod.rs:427`). A coinbase transaction that
+fills an order and pays no fee has a total output of `C + X`, and the time-lock
+rule requires `⌊(C + X)/2⌋` of it to be time-locked. An order demands exactly
+that:
 
-The subsidy halves every three years (`BLOCKS_PER_GENERATION = 160815` at 588
+```
+Y  =  ⌊(C + X)/2⌋
+```
+
+The reward then discharges the whole forced lock, and the composer keeps the
+rest, `⌈(C + X)/2⌉`, liquid. An order demanding less leaves the composer to lock
+the difference out of their own outputs. One demanding more takes the excess
+out of the composer's liquid share. And two orders in one block demand
+`C + (X₁ + X₂)/2` against a forced lock of `(C + X₁ + X₂)/2`, so the second
+order is paid entirely out of the composer's liquid share. So an order is for
+one block, filled by its composer, and `Y` follows from `C` and `X`.
+
+`C` depends on the block's generation, which the order names as `epoch`. The
+subsidy halves every three years (`BLOCKS_PER_GENERATION = 160815` at 588
 second blocks, `block_height.rs:45-47`), which is six times an order's shelf
-life, so `Y` is stable for the life of any order. The exception is an order
-placed shortly before a halving: after it, no composer's block mints enough for
-the reward to fit, so the order simply stops being filled and the proposer
-cancels it.
+life. An order placed shortly before a halving names the generation it expects
+to be filled in, and a composer fills only orders that name their own block's
+generation.
 
 There is deliberately **no lower bound beyond `D₀`**. A smaller `D` is strictly
 better for the proposer and never cheaper for the accepter — flat in cost down
@@ -413,8 +429,9 @@ order has a one-element admissible set, no grid, and no origin to publish, so
 that the primitive be specifiable without reference to time locks at all.
 
 It does not need to. SOFuN's `demanded_amount` is not a free parameter: it is
-`Y`, half the block subsidy (§4.1), and `epoch` says which halving's subsidy that
-is, so the amount is determined rather than transmitted. Those four elements are
+`Y = ⌊(C + X)/2⌋` (§4.1), where `X` is `offered_amount` and `epoch` says which
+generation's subsidy `C` is, so the amount is determined rather than
+transmitted. Those four elements are
 dead weight in a SOFuN order, and `d_zero` costs one of them. `epoch` takes a
 second and `padding` fills the remaining two, which keeps both schemas at 28
 elements and every shared field at the same offset.
@@ -657,13 +674,13 @@ addition records `AR(D₀ + k·G)` and adds them to a watch set.
 
 **Cancel.** Proposer spends the order UTXO via path (a). Costs a transaction fee.
 
-**Fill.** A composer looks only at orders asking for exactly the time-locked
-subsidy of the block they are building, and ignores the rest (§4.7). Among
-those, they take the one offering the most `X`. They include, in the coinbase
-transaction, the order UTXO as an input (satisfying path (b)) and `AR(D)` as an
-output funded from the coinbase, choosing a small `k` whose reward output still
-counts toward their own mandatory lock, with a margin (§4.6). They keep `X` as
-liquid NPT.
+**Fill.** A composer looks only at orders naming the generation of the block
+they are building, and ignores the rest (§4.7). Among those, they take the one
+offering the most `X`. They include, in the coinbase transaction, the order UTXO
+as an input (satisfying path (b)) and `AR(D)` as an output, choosing a small `k`
+whose reward output still counts toward the mandatory lock, with a margin
+(§4.6). The reward is the whole mandatory lock, and they keep the rest,
+`⌈(C + X)/2⌉`, as liquid NPT.
 
 **Claim.** The proposer's wallet matches a block's addition records against the
 watch set, hits one, recovers `k` and hence the full reward UTXO, and registers
@@ -753,20 +770,21 @@ extra grid step.
 A composer filling orders is spending block money on strangers. How much, and
 how many at a time?
 
-Fixing `Y` at the block's time-locked mint (§4.1) answers both at once. One
-order consumes the whole of what one block can redirect, so a composer takes
-**at most one order per block**. There is no packing problem, no ceiling to
+Setting `Y` to the whole of a fill's forced lock (§4.1) answers both at once.
+One order consumes all of it, so a composer takes **at most one order per
+block**. There is no packing problem, no ceiling to
 tune, and no second lock-script proof to pay for.
 
-**The composer ignores every order that asks for a different amount.** Not
-prices it lower — ignores it. An order asking for less than the block's
-time-locked subsidy would leave part of the slot unused, and one asking for more
-cannot be paid out of the block at all, so neither is worth a moment's
-attention. What remains is a set of orders that are identical except in price,
-and the composer takes the one offering the largest `X`.
+**The composer ignores every order for another generation.** Not prices it
+lower — ignores it. Such an order computes `Y` from another subsidy. If that
+subsidy is smaller, the reward falls short of the forced lock and the composer
+locks the difference themselves; if it is larger, the reward exceeds the forced
+lock and the excess comes out of the composer's liquid share. What remains is a
+set of orders that differ only in `X`. The composer keeps `⌈(C + X)/2⌉` liquid,
+so they take the one offering the largest `X`.
 
 This also makes the first step of finding an order the cheapest possible one. An
-order's `Y` is a field in its announcement (§4.3), so the filter is a single
+order's `epoch` is a field in its announcement (§4.3), so the filter is a single
 comparison against a number the composer already knows, applied before any
 lock script is rebuilt or any membership proof is fetched.
 
@@ -781,20 +799,19 @@ a fee, not an output: it is computed as the coinbase minus the composer's share
 and handed to the transaction as its fee (`composer_parameters.rs:200-215`).
 Since `total_input + coinbase = total_output + fee`, a guesser fraction `g`
 leaves a total output of `(1-g)·C + X`, and the forced lock is half of that. The
-reward `Y = C/2` does not shrink to match. The two meet at
+reward `Y = (C + X)/2` does not shrink to match, so it exceeds the forced lock
+by `g·C/2`, which comes out of the composer's liquid share. The composer's
+liquid share is then `(C + X)/2 − g·C` against `(1-g)·C/2` without the fill, a
+gain of
 
 ```
-X  ≥  g·C
+(X − g·C) / 2
 ```
 
-Below that line the fill is still constructible — locking more than half is
-always allowed — but part of the reward is then funded from coins the composer
-was not forced to lock. Above it the reward is covered entirely by the forced
-lock, and the forced lock exceeds the reward by `(X − g·C)/2`, which the
-composer locks out of their own outputs. A composer keeping the whole subsidy
-therefore locks half the offered amount on top of the reward. A composer keeping the whole subsidy is always above the line; one paying
-half of it to a guesser is never above it, because that would need `X ≥ C/2`,
-which is `Y`. So order-filling is for composers who guess their own blocks.
+A composer keeping the whole subsidy gains `X/2` from every fill. One paying a
+guesser gains only from an order offering more than the guesser's share, and
+loses on any other. So order-filling is for composers who guess their own
+blocks.
 
 **An order carries no fee subsidy.** `X` is the whole of the compensation, paid
 as a plain output to the composer. Routing part of it through the transaction's
@@ -847,16 +864,16 @@ also the last ingredient of the order UTXO's absolute index set, which is how
 the book recognizes the block that spends it.
 
 **The composer's query is a scan.** It asks for the largest `X` among the
-orders demanding exactly this block's time-locked subsidy, and that amount is
-an argument rather than a property of the book, since `epoch` is the proposer's
-choice and orders naming the next generation's subsidy stand in the same book.
-An ordering by `X` alone therefore answers a question nobody asks: the first
-order under it may demand an amount the composer cannot pay. Answering from the
-front of a queue means one queue per demanded amount, maintained on every
-insert, every retirement and every rollback, and `demanding` (§4.10) does the
-filter and the ranking in one pass instead. It is a few thousand comparisons
-once per coinbase transaction the plugin builds. When that measurably notices,
-bucket by demanded amount and keep a queue on `X` within each bucket.
+orders for this block's subsidy, and that subsidy is an argument rather than a
+property of the book, since `epoch` is the proposer's choice and orders naming
+the next generation stand in the same book. An ordering by `X` alone therefore
+answers a question nobody asks: the first order under it may be for a subsidy
+other than the composer's. Answering from the front of a queue means one queue
+per subsidy, maintained on every insert, every retirement and every rollback,
+and `for_subsidy` (§4.10) does the filter and the ranking in one pass instead.
+It is a few thousand comparisons once per coinbase transaction the plugin
+builds. When that measurably notices, bucket by subsidy and keep a queue on `X`
+within each bucket.
 
 **Verify on insert, not on query.** An announcement is a hint (§4.3, §7.3), so
 admitting one to the index means rebuilding the lock script from it, computing
@@ -970,22 +987,17 @@ has nothing to complete.
 own  =  C − f + X − Y
 ```
 
-The time-lock rule (§5) requires at least half of the total output to be
-time-locked, and the reward `Y = C/2` counts on the time-locked side. So the
-composer's own outputs must lock
-
-```
-own_timelocked  ≥  (X − f) / 2
-```
-
-which with `f = g·C` is §4.7's excess. A composer keeping the whole subsidy pays
-no fee and locks `⌈X/2⌉` of their own, rounded up because the rule compares
-whole nau. The input raises the amount that must be locked; it never lowers it.
+The time-lock rule (§5) requires `⌊(C − f + X)/2⌋` of the total output to be
+time-locked, and the reward `Y = ⌊(C + X)/2⌋` is time-locked and at least that
+much. So the composer's own outputs lock nothing, and with no fee they receive
+`own = ⌈(C + X)/2⌉`, all of it liquid. The rule rounds half the total output
+down, so when `C + X` is odd the reward is the smaller half and the composer
+keeps the larger.
 
 **What the plugin checks before setting the transaction.** The book verified the
 order when it admitted it (§4.8), but a block may have arrived since. So the
 plugin checks that the membership proof was restored against the current tip,
-that `Y` equals this block's time-locked subsidy, and that `k` clears §4.6's
+that the order's `epoch` is this block's generation, and that `k` clears §4.6's
 bound with its headroom, and it validates the primitive witness, which runs
 every lock script and type script once. These checks are cheap next to
 proving, and they are where the composer commits their own money to a
@@ -1135,8 +1147,8 @@ impl<C: Swappable> OrderBook<C> {
 
 /// Queries that depend on what an order means live with the configuration.
 impl OrderBook<Sofun> {
-    /// Open orders asking exactly this amount, richest offer first.
-    pub fn demanding(&self, demanded: NativeCurrencyAmount)
+    /// Open orders for blocks with this subsidy, richest offer first.
+    pub fn for_subsidy(&self, subsidy: NativeCurrencyAmount)
         -> Vec<&Order<Sofun>>;
 }
 ```
@@ -1210,11 +1222,13 @@ fields of `StandingSwapOrder<C>` are private to its module, so a value exists
 only if a constructor in that module or one of its children built it, and each
 configuration supplies its own. `StandingSwapOrder<Sofun>::new` takes the
 offered amount, the parameters and the four digests, and sets the demanded
-amount to `Y` of the parameters' `epoch` (§4.1). Every SOFuN order therefore
-demands exactly `Y(epoch)`, the conversion to `SofunBody` is total, and decoding
-a body and encoding the result reproduces the body. Decoding is the direction
-that can fail, on a nonzero `padding` or a negative offer (§4.3), and it builds
-its result through `new` as well. Were the terms and the parameters two
+amount to `⌊(C + X)/2⌋`, with `C` the subsidy of the parameters' `epoch`
+(§4.1). Every SOFuN order therefore demands exactly what its offer and its
+`epoch` determine, the conversion to `SofunBody` is total, and decoding a body
+and encoding the result reproduces the body. Decoding is the direction that can
+fail, on a nonzero `padding`, a negative offer (§4.3), or an offer so large that
+`C + X` exceeds the largest amount there can be, and it builds its result
+through `new` as well. Were the terms and the parameters two
 separate values, a caller could pair the terms of one order with the parameters
 of another, and encoding would write an order whose announced amount disagrees
 with its lock script. A configuration with no relation between its terms and
@@ -1225,7 +1239,7 @@ The configuration chooses the parameter type, and each order carries its own
 value of it — two SOFuN orders in one book have different `d_zero`. Keying the
 book on the configuration rather than on the parameter type also means a query
 that only makes sense for one configuration is written against that
-configuration by name, as `demanding` is. No method of the generic book reads
+configuration by name, as `for_subsidy` is. No method of the generic book reads
 `params`.
 
 **Rejected: erasing the schema behind `Box<dyn Order>`.** A trait with `id`,
@@ -1248,14 +1262,15 @@ decoder from `pair_id` is dispatch over an open set with a uniform operation, an
 the type parameter reappears on the far side once the schema is known.
 
 **The query is a filter and then a maximum, in that order, and it belongs to
-SOFuN.** A composer cannot fill an order whose demanded amount differs from half
-its own block's subsidy (§4.1), so `demanding` takes that amount and yields the
-rest in descending offered amount. There is no global best order, only a best
-order for a given block, which is why the subsidy is an argument rather than a
-property of the book. Both halves are SOFuN's: the exact-amount filter is its
-constraint, and ranking by offered amount is ranking by price only because every
-SOFuN order demands the same amount. A taker in a general pair can pay many
-amounts and wants price across all of them. So `demanding` is defined on
+SOFuN.** A composer fills only orders for their own block's subsidy (§4.7), so
+`for_subsidy` takes that subsidy and yields the matching orders in descending
+offered amount. There is no global best order, only a best order for a given
+block, which is why the subsidy is an argument rather than a property of the
+book. Both halves are SOFuN's: the subsidy filter is its constraint, and
+ranking by offered amount is ranking by what the composer keeps only because
+every surviving order demands half of the subsidy and its own offer. A taker in
+a general pair can pay many amounts and wants price across all of them. So
+`for_subsidy` is defined on
 `OrderBook<Sofun>` alone, built on the generic `open_orders`, and the
 generic book encodes nothing about what makes one order better than another.
 
@@ -1450,11 +1465,12 @@ free. The same applies to `n` orders.
 
 The grid widens this rather than narrowing it: two orders agreeing on `Y`,
 reward lock script hash, `sender_randomness*` and `receiver_digest*` collide at
-any grid point their grids share, and the accepter chooses `k`. Fixing `Y`
-(§4.1), `G` and `K` (§4.3) narrows the gap further still — every order in the
-market now agrees on three of those parameters by construction, and one wallet's
-orders agree on the fourth. The seed is the only thing left keeping two of a
-proposer's own orders apart.
+any grid point their grids share, and the accepter chooses `k`. Fixing `G` and
+`K` (§4.3) and deriving `Y` from the subsidy and the offer (§4.1) narrow the gap
+further still — every order in the market shares the grid's step and length,
+two orders offering the same amount in one generation demand the same `Y`, and
+one wallet's orders may share a reward address. The seed is the only thing left
+keeping two of a proposer's own orders apart.
 
 Mitigation: every order must use a fresh seed, hence fresh
 `sender_randomness*` (§4.3), which makes the commitments distinct for *every*
@@ -1487,18 +1503,19 @@ hand over `Y` for a UTXO that pays nothing.
 
 Orders are permissionless writes to a public index. Very small orders cost the
 proposer a fee and cost every node the indexing work. Probably fine; worth a cap
-or a minimum `X` in the indexer if it becomes a problem. Note that the fixed `Y`
-already disposes of the cheapest kind of junk: an announcement asking for
-anything other than the block's time-locked subsidy is discarded on one integer
-comparison, before any lock script is rebuilt (§4.7).
+or a minimum `X` in the indexer if it becomes a problem. Note that the composer's
+filter on `epoch` already disposes of the cheapest kind of junk: an
+announcement for any other generation is discarded on one integer comparison,
+before any lock script is rebuilt (§4.7).
 
 ---
 
 ## 8. Privacy
 
 SOFuN is public by construction. An order reveals `X`, its grid origin `D₀`,
-and the fact that some party wants to buy future NPT. `Y`, `G` and `K` are the
-same for every order (§4.1, §4.3), so they reveal nothing about this one.
+and the fact that some party wants to buy future NPT. `Y` follows from `X` and
+the generation (§4.1), and `G` and `K` are the same for every order (§4.3), so
+they reveal nothing more about this one.
 
 **Creation of the reward is fully public.** The grid is published, so anyone —
 not just the proposer — can enumerate the `K` candidate addition records and
@@ -1592,8 +1609,8 @@ randomness per order.
 - [x] Order-announcement / lock-script consistency check (§7.3) as a library
       function: `StandingSwapOrder::order_utxo`, whose addition record an
       accepter or a validator compares with the UTXO being spent
-- [x] Order index: insert-time verification, and the composer's query by `Y`
-      answered by a scan (§4.8)
+- [x] Order index: insert-time verification, and the composer's query by
+      subsidy answered by a scan (§4.8)
 - [x] The book takes `BlockUpdate` and performs no chain lookups; a row holds a
       `StandingSwapOrder` rather than repeating its fields (§4.10)
 - [x] The driver, which is the other half of that split: candidate
@@ -1641,6 +1658,9 @@ randomness per order.
 - [ ] Plugin query exposing open orders
 
 ### Phase 2b — fill
+- [x] `Y = ⌊(C + X)/2⌋`, so a fill leaves the composer no time-locked output of
+      their own, and an offer for which `C + X` exceeds the largest amount
+      refused (§4.1, §4.9)
 - [x] `ConsensusRuleSet::allows_coinbase_inputs`: true on RegTest, false
       elsewhere until the fork (§4.9)
 - [x] `mining_setCoinbaseTx`, honored by every composer, with a fallback to the
