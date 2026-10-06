@@ -198,7 +198,7 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::MissingLustrationAnnouncement => -1,
             NegativePeerSanction::LustrationsWouldMakeCounterNegative => -1,
             NegativePeerSanction::InvalidSyncCoverage => -100,
-            NegativePeerSanction::StalledRequest => -5,
+            NegativePeerSanction::StalledRequest => -1,
         }
     }
 }

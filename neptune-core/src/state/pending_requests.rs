@@ -19,6 +19,17 @@ pub(crate) const BLOCK_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 /// How long a request for a transaction counts as pending.
 pub(crate) const TRANSACTION_REQUEST_TIMEOUT: Duration = Duration::from_secs(35);
 
+/// How long an object announced by a peer on an inbound connection waits
+/// before it is requested from that peer. A peer on an outbound connection
+/// that announces the object within this delay is asked instead, since
+/// outbound connections are harder for an attacker to monopolize.
+///
+/// Integration tests run nodes that only have each other, so they do not wait.
+#[cfg(not(all(not(test), feature = "test-helpers")))] // production and unit tests
+pub(crate) const INBOUND_REQUEST_DELAY: Duration = Duration::from_secs(2);
+#[cfg(all(not(test), feature = "test-helpers"))] // integration tests
+pub(crate) const INBOUND_REQUEST_DELAY: Duration = Duration::ZERO;
+
 /// How many requests may be in flight to one peer at a time. Further objects
 /// the peer announced wait until earlier requests are answered or go stale.
 const MAX_IN_FLIGHT_PER_PEER: usize = 20;
@@ -69,6 +80,26 @@ pub(crate) struct Announcer {
     pub(crate) inbound: bool,
 }
 
+/// An announcement of an object by a peer that has not been asked for it.
+#[derive(Debug, Clone, Copy)]
+struct Announcement {
+    announcer: Announcer,
+
+    /// When the object was announced.
+    at: SystemTime,
+}
+
+impl Announcement {
+    /// Whether the announcer may be asked for the object at `now`. Announcers
+    /// on inbound connections wait out [`INBOUND_REQUEST_DELAY`].
+    fn is_due(&self, now: SystemTime) -> bool {
+        !self.announcer.inbound
+            || now
+                .duration_since(self.at)
+                .is_ok_and(|elapsed| elapsed >= INBOUND_REQUEST_DELAY)
+    }
+}
+
 #[derive(Debug, Clone)]
 struct PendingRequest {
     /// The peer the object was last requested from, and when. `None` if the
@@ -78,7 +109,7 @@ struct PendingRequest {
 
     /// Peers that announced the object and have not been asked for it, most
     /// preferred first.
-    announcers: VecDeque<Announcer>,
+    announcers: VecDeque<Announcement>,
 }
 
 impl PendingRequest {
@@ -100,7 +131,7 @@ impl PendingRequest {
             || self
                 .announcers
                 .iter()
-                .any(|announcer| announcer.peer == peer)
+                .any(|announcement| announcement.announcer.peer == peer)
     }
 }
 
@@ -121,6 +152,11 @@ struct PeerLoad {
 /// other reason. Later announcers are remembered as fallbacks and take over,
 /// one at a time, if the request is not answered within
 /// the object's [request timeout](AnnouncedObject::request_timeout).
+///
+/// Peers on outbound connections are preferred over peers on inbound
+/// connections. An object announced only by inbound peers is requested after
+/// [`INBOUND_REQUEST_DELAY`], and an outbound peer announcing it meanwhile is
+/// asked right away instead.
 ///
 /// Per peer, at most [`MAX_IN_FLIGHT_PER_PEER`] requests are in flight and at
 /// most [`MAX_PENDING_PER_PEER`] objects are tracked, so that no peer can
@@ -180,17 +216,20 @@ impl PendingRequests {
             pending
                 .announcers
                 .iter()
-                .position(|queued| queued.inbound)
+                .position(|queued| queued.announcer.inbound)
                 .unwrap_or(pending.announcers.len())
         };
-        pending.announcers.insert(position, announcer);
+        pending
+            .announcers
+            .insert(position, Announcement { announcer, at: now });
 
         Self::request_now(pending, loads, stalled, peer, now, object.request_timeout())
     }
 
     /// Every object that `peer` should request now: those it is the most
-    /// preferred announcer of, and that are not in flight to a peer that is
-    /// still expected to deliver, up to capacity.
+    /// preferred announcer of, that are not in flight to a peer that is
+    /// still expected to deliver, and that it is not too early to request,
+    /// up to capacity.
     ///
     /// Stale requests without remaining announcers are forgotten.
     pub(crate) fn due_requests(&mut self, peer: PeerId, now: SystemTime) -> Vec<AnnouncedObject> {
@@ -234,8 +273,8 @@ impl PendingRequests {
         if let Some((in_flight, _)) = pending.in_flight {
             Self::release_in_flight(&mut self.loads, in_flight);
         }
-        for announcer in pending.announcers {
-            Self::release_pending(&mut self.loads, announcer.peer);
+        for announcement in pending.announcers {
+            Self::release_pending(&mut self.loads, announcement.announcer.peer);
         }
     }
 
@@ -247,7 +286,7 @@ impl PendingRequests {
         self.requests.retain(|_, pending| {
             pending
                 .announcers
-                .retain(|announcer| announcer.peer != peer);
+                .retain(|announcement| announcement.announcer.peer != peer);
             if pending
                 .in_flight
                 .is_some_and(|(requested_from, _)| requested_from == peer)
@@ -258,9 +297,9 @@ impl PendingRequests {
         });
     }
 
-    /// Return whether the peer is the most preferred announcer, whether it
-    /// should request the object now. Marks the request for an object as in
-    /// flight to this peer if that's the case.
+    /// Return whether the peer is the most preferred announcer and its
+    /// announcement is due, whether it should request the object now. Marks
+    /// the request for an object as in flight to this peer if that's the case.
     ///
     /// Returns false otherwise.
     fn request_now(
@@ -277,7 +316,7 @@ impl PendingRequests {
         let Some(next) = pending.announcers.front() else {
             return false;
         };
-        if next.peer != peer {
+        if next.announcer.peer != peer || !next.is_due(now) {
             return false;
         }
         if loads
@@ -478,6 +517,42 @@ mod tests {
         let later = then + block.request_timeout();
         assert!(pending.due_requests(bob.peer, later).is_empty());
         assert_eq!(vec![block], pending.due_requests(carol.peer, later));
+    }
+
+    #[test]
+    fn inbound_announcer_is_asked_after_the_delay() {
+        let mut pending = PendingRequests::default();
+        let alice = inbound();
+        let block = block();
+        let then = SystemTime::now();
+
+        assert!(!pending.record_announcement(block, alice, then));
+        let soon = then + INBOUND_REQUEST_DELAY / 2;
+        assert!(pending.due_requests(alice.peer, soon).is_empty());
+        assert!(!pending.record_announcement(block, alice, soon));
+
+        let later = then + INBOUND_REQUEST_DELAY;
+        assert_eq!(vec![block], pending.due_requests(alice.peer, later));
+        assert!(pending.due_requests(alice.peer, later).is_empty());
+        assert_eq!(0, pending.take_stalls(alice.peer));
+    }
+
+    #[test]
+    fn outbound_announcer_preempts_delayed_inbound_one() {
+        let mut pending = PendingRequests::default();
+        let (alice, bob) = (inbound(), outbound());
+        let block = block();
+        let then = SystemTime::now();
+
+        assert!(!pending.record_announcement(block, alice, then));
+        let soon = then + INBOUND_REQUEST_DELAY / 2;
+        assert!(pending.record_announcement(block, bob, soon));
+
+        // Alice is the fallback now, and waits for bob's request to go stale.
+        let later = then + INBOUND_REQUEST_DELAY;
+        assert!(pending.due_requests(alice.peer, later).is_empty());
+        let latest = soon + block.request_timeout();
+        assert_eq!(vec![block], pending.due_requests(alice.peer, latest));
     }
 
     #[test]
