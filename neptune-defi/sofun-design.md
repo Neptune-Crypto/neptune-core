@@ -1,7 +1,8 @@
 # SOFuN — Standing Orders for Future Neptune
 
-Status: **design draft**. Nothing implemented yet.
-Last updated: 2026-10-02.
+Status: the lock script, the announcement, the order book and the fill are
+implemented (§9, phases 1 to 2b); the proposer side is not.
+Last updated: 2026-10-06.
 
 ---
 
@@ -11,7 +12,7 @@ Last updated: 2026-10-02.
 
 Consensus requires that, in any transaction bearing a coinbase, **at least half
 of the total output** be time-locked for
-`MINING_REWARD_TIME_LOCK_PERIOD = 3 years` (`block/mod.rs:100`; the check is
+`MINING_REWARD_TIME_LOCK_PERIOD = 3 years` (`block/mod.rs:97`; the check is
 `assert_half_output_amount_timelocked`, `native_currency.rs:180-209`, with the
 reference implementation at `:925-931`). Guesser rewards are split the same way
 — exactly half, time-locked three years from the block header timestamp
@@ -86,14 +87,13 @@ or native currency.
 
 **Standing swap order** is the name, and the code should use it rather than
 SOFuN's wherever the thing named is general: the announcement flag is
-`STANDING_SWAP_ORDER` and the generic body struct is `StandingSwapOrderV1`
+`STANDING_SWAP_ORDER_FLAG` and the generic body struct is `StandingSwapOrderV1`
 (§4.3). SOFuN's name appears only on what belongs to SOFuN alone: the `Sofun`
 configuration, its per-order `SofunParams`, and `SofunBody`, which is the
 generic body's second reading — the same 28 elements, with the demanded-amount
 window carrying each SOFuN order's own parameters instead. "Standing" says the
 offer rests until its owner withdraws it, "swap" says both sides move at once,
-and "order" is what a book is made of. SOFuN is then one configuration of a standing swap order, and its own
-name belongs only to that configuration.
+and "order" is what a book is made of.
 
 The intent is therefore that SOFuN be a *configuration* of that primitive rather
 than a thing of its own, and that wherever the two diverge the divergence is
@@ -106,7 +106,7 @@ reward, and returning the other half of the offer to the book — as a new UTXO
 under the same lock script. So the script must assert that an output exists
 whose lock script hash is its own, and it can. Triton initializes the op stack
 with the running program's digest, reversed, in its bottom five positions
-(`triton-isa-7.0.0/src/op_stack.rs:58-62`), so a program reads its own hash with
+(`triton-isa-9.0.0/src/op_stack.rs:58-62`), so a program reads its own hash with
 five `dup 15` and no divination at all; the VM's own tests do exactly that and
 label the result `own_digest`. Self-reference is available, and a continuation
 output can be constrained directly.
@@ -258,11 +258,11 @@ subsidy with a guesser, because the guesser's share is itself half time-locked
 composer out of one block and consumes the whole of what that block has to
 redirect. An order for less makes the composer take several to fill the same
 slot, and an order for more cannot be filled at all. So a proposer always asks
-for `Y = Block::block_subsidy(h) / 2` (`block/mod.rs:430`), and a composer only
+for `Y = Block::block_subsidy(h) / 2` (`block/mod.rs:427`), and a composer only
 ever fills an order whose `Y` is half of their own block's subsidy.
 
 The subsidy halves every three years (`BLOCKS_PER_GENERATION = 160815` at 588
-second blocks, `block_height.rs:44-46`), which is six times an order's shelf
+second blocks, `block_height.rs:45-47`), which is six times an order's shelf
 life, so `Y` is stable for the life of any order. The exception is an order
 placed shortly before a halving: after it, no composer's block mints enough for
 the reward to fit, so the order simply stops being filled and the proposer
@@ -345,13 +345,13 @@ soundness problem.
 
 `authenticate_txk_field` already exists
 (`neptune-consensus/src/transaction/validity/tasm/authenticate_txk_field.rs`);
-the field is `TransactionKernelField::Outputs` (`transaction_kernel.rs:312`).
+the field is `TransactionKernelField::Outputs` (`transaction_kernel.rs:329`).
 The grid needs no additional field authentication. The membership check is a
 linear scan, so path (b) costs O(outputs), which dominates everything else here.
 
 **The grid bound moved out of the script, so it must hold where the set is
 built.** `Timestamp` is a single `BFieldElement`
-(`neptune-primitives/src/timestamp.rs:47`) and its `Add` is that field's
+(`neptune-primitives/src/timestamp.rs:48`) and its `Add` is that field's
 addition, which wraps mod `p` in silence; its `Mul` panics rather than reports.
 A `D₀` within half a year of the field bound would therefore give a grid whose
 last points are wrapped-around dates in the distant past — release dates that
@@ -380,7 +380,7 @@ elements name the market and the schema, and `pair_id` alone decides which
 reading applies to the 28 that follow.
 
 ```
-element 0   flag      STANDING_SWAP_ORDER = 1000
+element 0   flag      STANDING_SWAP_ORDER_FLAG = 1000
 element 1   pair_id   Hash(offered type scripts ‖ demanded type scripts)[0]
 element 2   version   1 for the generic body, 0 for SOFuN
 ------------------------------------------------------- body, generic
@@ -898,7 +898,7 @@ have filled, never a wrong fill.
 a reorganization happened, which it does because the new block's parent is not
 its tip, and roll back to the last block the two branches share. Closed entries stay in the book for that
 reason (§4.10). The mempool's answer to a reorg is to clear itself
-(`mempool.rs:1324-1333`), which is fine for transactions that will be
+(`neptune-mempool/src/mempool.rs:1746-1753`), which is fine for transactions that will be
 re-broadcast, and wrong here: nothing re-broadcasts an order, and a book does
 not replay history to find it again.
 
@@ -908,9 +908,9 @@ started composer sees an order book that fills up over an order's shelf life of
 six months rather than at once, and what it buys is that no part of the book
 needs a block the plugin has not just been notified of.
 
-**Everyone else asks the plugin.** A query for open orders, served through
-`neptune-defi`, keeps explorers and third-party wallets from reimplementing any
-of the above.
+**Everyone else is to ask the plugin.** A query for open orders, served through
+`neptune-defi`, would keep explorers and third-party wallets from reimplementing
+any of the above. It is not built yet (§9).
 
 **Indexing needs no archival state.** Admitting an order needs its own block's
 outputs, retiring one needs the inputs of the block that spends it, and both are
@@ -1021,11 +1021,7 @@ everything below is chosen so that any process can run it.
 
 **The book is a container, not a chain consumer.** Split the work in two. A
 *driver* touches the chain: it finds candidate announcements, decodes them under
-the schema `pair_id` names, and performs §7.3's check, which means rebuilding the
-lock script, deriving the order UTXO's addition record, and finding that record
-among the outputs of the announcement's block — whose position gives the leaf
-index the row is then keyed by, so the identifier falls out of the verification
-rather than costing a second lookup. A *book* holds what survived and answers
+the schema `pair_id` names, and performs §7.3's check. A *book* holds what survived and answers
 questions about it. Only the driver reads blocks, and only the book needs to be
 fast to query.
 
@@ -1034,8 +1030,7 @@ the block it was handed and nothing else: it rebuilds the lock script from the
 body, derives the order UTXO's addition record, and looks for that record among
 that block's own outputs. The leaf index the row is keyed by is the AOCL's leaf
 count before the block plus the record's position among its outputs, so the
-identifier still falls out of the verification, and no second lookup pays for
-it.
+identifier falls out of the verification, and no second lookup pays for it.
 
 The rule costs a proposer nothing, because one transaction creates the order
 UTXO and carries the announcement. What it buys is that the book is a function
@@ -1175,13 +1170,16 @@ pub trait Swappable: Sized {
         + TryInto<StandingSwapOrder<Self>>;
     fn version() -> u64;
 
+    /// The UTXO holding the offered amount under the order's lock script.
+    fn order_utxo(order: &StandingSwapOrder<Self>) -> UtxoTriple;
+
     /// Provided: checks flag, `pair_id` and version, in that order, then
     /// decodes the body.
     fn recognize(pair_id: BFieldElement, message: &[BFieldElement])
-        -> Result<StandingSwapOrder<Self>, Unrecognized>;
+        -> Result<StandingSwapOrder<Self>, UnrecognizedOrder>;
 }
 
-pub enum Unrecognized {
+pub enum UnrecognizedOrder {
     NotAnOrder,
     NotThisPair,
     UnknownVersion(BFieldElement),
@@ -1203,6 +1201,7 @@ impl Swappable for Sofun {
     type Params = SofunParams;
     type EncodingFormat = SofunBody;
     fn version() -> u64 { 0 }
+    fn order_utxo(order: &StandingSwapOrder<Self>) -> UtxoTriple { … }
 }
 ```
 
@@ -1345,8 +1344,9 @@ under generic version 1 or SOFuN version 0, those cannot be changed without a
 new version that fillers must adopt. Scrutiny belongs there rather than on which process runs the book.
 
 **One rule keeps the rest reversible: dependency direction.** The
-`neptune-defi` library depends on `neptune-consensus`, `neptune-mutator-set` and
-`neptune-primitives` and on no part of the node, so any process can link it
+`neptune-defi` library depends on `neptune-consensus`, `neptune-mutator-set`,
+`neptune-primitives`, `neptune-wallet`, `neptune-rpc-api` and
+`neptune-rpc-client`, and on no part of the node, so any process can link it
 unchanged; only its tests start a node, to fill an order end to end. The node
 never depends on `neptune-defi`, which in particular means block processing
 cannot call into the book. `apply` and `roll_back_to` take data, not a `Block`
@@ -1537,15 +1537,13 @@ randomness per order.
 - [x] Established that a fill pays for itself only inside a coinbase
       transaction (§4.6)
 - [x] Discovery problem identified; design space enumerated (§2)
-- [x] All code-referenced claims verified against the tree at `28ff10f86`
+- [x] All code-referenced claims verified against the tree at `1d9d6dfda`
 - [x] Fill interface settled: the plugin builds the whole coinbase transaction,
       and the node takes it through `mining_setCoinbaseTx` (§4.9)
 - [x] Generalization goal recorded (§1.5)
 - [x] Name chosen for the general primitive: **standing swap order** (§1.5)
 - [x] Partial fills decided deliberately for the general case: out on grounds of
-      cost and bookkeeping, with the upgrade path recorded (§1.5). An earlier
-      draft claimed they were structurally impossible because a Triton program
-      cannot hash itself; that is false, and the claim is removed.
+      cost and bookkeeping, with the upgrade path recorded (§1.5)
 - [x] Grid chosen over fixed `D` and over an enforced payout announcement
 - [x] Every open question resolved and written into the body
 - [ ] Design reviewed by a second pair of eyes
