@@ -40,7 +40,6 @@ mod mutate_swbfi_peaks;
 mod mutator_set_hash_after_removals;
 pub(super) mod removal_index_commitment;
 mod removal_records_are_unspent;
-mod resolve_chunk_indices;
 // Kept for the benchmark in `update_tree_leaf`; no program uses it.
 #[cfg(test)]
 mod roots_from_authentication_struct;

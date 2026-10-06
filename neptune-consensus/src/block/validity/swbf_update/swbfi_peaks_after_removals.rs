@@ -16,7 +16,6 @@ use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
 use neptune_mutator_set::removal_record::RemovalRecord;
 use neptune_mutator_set::shared::CHUNK_SIZE;
 use neptune_mutator_set::shared::WINDOW_SIZE;
-use tasm_lib::arithmetic::u128::shift_left_static::ShiftLeftStatic;
 use tasm_lib::field;
 use tasm_lib::list::new::New;
 use tasm_lib::memory::memcpy::MemCpy;
@@ -31,7 +30,6 @@ use super::chunk_insertions::ChunkInsertions;
 use super::divined_chunk_indices::DivinedChunkIndices;
 use super::mutate_swbfi_peaks::MutateSwbfiPeaks;
 use super::removal_records_are_unspent::RemovalRecordsAreUnspent;
-use super::resolve_chunk_indices::ResolveChunkIndices;
 use super::witness_lists::WitnessLists;
 use crate::consensus_rule_set::ConsensusRuleSet;
 
@@ -78,12 +76,9 @@ impl BasicSnippet for SwbfiPeaksAfterRemovals {
         let memcpy = library.import(Box::new(MemCpy));
         let witness_lists = library.import(Box::new(WitnessLists));
         let divined_chunk_indices = library.import(Box::new(DivinedChunkIndices));
-        let resolve_chunk_indices = library.import(Box::new(ResolveChunkIndices));
         let removal_records_are_unspent = library.import(Box::new(RemovalRecordsAreUnspent));
         let chunk_insertions = library.import(Box::new(ChunkInsertions));
         let mutate_swbfi_peaks = library.import(Box::new(MutateSwbfiPeaks));
-        let to_window_start =
-            library.import(Box::new(ShiftLeftStatic::<{ CHUNK_SIZE.ilog2() as u8 }>));
 
         // What the rules share: the chunks and path lists of the witness's
         // inputs, the estimate of the inactive SWBF's leaf count
@@ -140,7 +135,8 @@ impl BasicSnippet for SwbfiPeaksAfterRemovals {
 
             // The witness must hold the chunks the inputs' indices in the
             // inactive SWBF need, no more and no fewer, with the trees'
-            // heights in ascending order.
+            // heights in ascending order; the insertions into each chunk
+            // come out of the same pass.
             // BEFORE: _ *inputs *mutator_set *chunks *tree_heights *tree_paths
             // AFTER:  _ *inputs *mutator_set
             {rule_2a}:
@@ -163,7 +159,8 @@ impl BasicSnippet for SwbfiPeaksAfterRemovals {
                 dup 4 {&swbfi_leaf_count}
                 // _ [base] *inputs *chunk_indices [swbfi_leaf_count_estimate] [swbfi_leaf_count]
 
-                call {resolve_chunk_indices}
+                call {chunk_insertions}
+                push {insertions_alloc.write_address()} write_mem 1 pop 1
                 // _ [base]
 
                 return
@@ -195,16 +192,6 @@ impl BasicSnippet for SwbfiPeaksAfterRemovals {
             // BEFORE: _ *inputs *mutator_set
             // AFTER:  _ *inputs *mutator_set *swbfi_peaks_after
             {removals}:
-                dup 1
-                push {chunk_indices_alloc.read_address()} read_mem 1 pop 1
-                dup 2 {&swbfi_leaf_count}
-                push 0 push 0 pick 3 pick 3 call {to_window_start}
-                // _ [base] *inputs *chunk_indices [window_start]
-
-                call {chunk_insertions}
-                push {insertions_alloc.write_address()} write_mem 1 pop 1
-                // _ [base]
-
                 dup 0 {&field!(MutatorSetAccumulator::swbf_inactive)} {&field!(MmrAccumulator::peaks)}
                 {&copy_digest_list}
                 // _ [base] *swbfi_peaks_after
@@ -228,9 +215,9 @@ impl BasicSnippet for SwbfiPeaksAfterRemovals {
 
 impl SwbfiPeaksAfterRemovals {
     /// The tokens for the witness's inputs: the chunk indices, then the
-    /// position of the chunk of every index that lies in the inactive SWBF,
-    /// then the unset index of every record, then the sorted indices
-    /// inserted into each chunk with their positions, then the tokens that
+    /// sorted indices inserted into each chunk and the position of the
+    /// chunk and of the insertion of every index that lies in the inactive
+    /// SWBF, then the unset index of every record, then the tokens that
     /// recompute the inactive SWBF's peaks. A witness with more or fewer
     /// chunks than its indices need gets a list padded or cut to its number
     /// of chunks, which the program then rejects.
@@ -243,7 +230,7 @@ impl SwbfiPeaksAfterRemovals {
         let estimate = WitnessLists::swbfi_leaf_count_estimate(tree_heights);
         let swbfi_leaf_count = mutator_set.swbf_inactive.num_leafs();
         let mut chunk_indices =
-            ResolveChunkIndices::chunk_indices_below(inputs, estimate.max(swbfi_leaf_count));
+            ChunkInsertions::chunk_indices_below(inputs, estimate.max(swbfi_leaf_count));
         chunk_indices.truncate(chunks.len());
         while chunk_indices.len() < chunks.len() {
             let next = chunk_indices.last().map_or(0, |last| last + 1);
@@ -255,7 +242,7 @@ impl SwbfiPeaksAfterRemovals {
 
         [
             DivinedChunkIndices::divined_tokens(&chunk_indices),
-            ResolveChunkIndices::divined_tokens(inputs, &chunk_indices, estimate, swbfi_leaf_count),
+            ChunkInsertions::divined_tokens(inputs, &chunk_indices, estimate, swbfi_leaf_count),
             RemovalRecordsAreUnspent::divined_tokens(
                 inputs,
                 &chunk_indices,
@@ -263,7 +250,6 @@ impl SwbfiPeaksAfterRemovals {
                 &mutator_set.swbf_active,
                 swbfi_leaf_count,
             ),
-            ChunkInsertions::divined_tokens(inputs, &chunk_indices, window_start),
             MutateSwbfiPeaks::divined_tokens(estimate, &chunk_indices, chunks, &insertions),
         ]
         .concat()
@@ -276,7 +262,7 @@ impl SwbfiPeaksAfterRemovals {
         mutator_set: &MutatorSetAccumulator,
     ) -> (Vec<u64>, Vec<Vec<u32>>) {
         let chunk_indices =
-            ResolveChunkIndices::chunk_indices_below(inputs, mutator_set.swbf_inactive.num_leafs());
+            ChunkInsertions::chunk_indices_below(inputs, mutator_set.swbf_inactive.num_leafs());
         let insertions =
             ChunkInsertions::insertions(inputs, &chunk_indices, Self::window_start(mutator_set));
         (chunk_indices, insertions)
@@ -365,6 +351,14 @@ pub(in crate::block::validity) mod tests {
             let use_start = window_start(estimate);
             let true_window_start = Self::window_start(mutator_set);
             let resolve_start = use_start.max(true_window_start);
+            // The insertion lists are read and ignored; the peaks are
+            // computed directly from the records.
+            let insertions = ChunkInsertions::insertions(inputs, &chunk_indices, true_window_start);
+            for list in &insertions {
+                for _ in 0..=list.len() {
+                    tasm::tasmlib_io_read_secin___bfe();
+                }
+            }
             let mut used = vec![false; num_chunks];
             for index in inputs
                 .iter()
@@ -378,6 +372,9 @@ pub(in crate::block::validity) mod tests {
                 assert_eq!(Some(&chunk_index), chunk_indices.get(position));
                 if index < use_start {
                     used[position] = true;
+                }
+                if index < true_window_start {
+                    tasm::tasmlib_io_read_secin___bfe();
                 }
             }
             assert!(used.iter().all(|&used| used), "every chunk must be used");
@@ -411,17 +408,9 @@ pub(in crate::block::validity) mod tests {
                 }
             }
 
-            // The insertions and peak tokens are read and ignored; the peaks
-            // are computed directly from the unpacked records.
-            let insertions = ChunkInsertions::insertions(inputs, &chunk_indices, true_window_start);
+            // The peak tokens are read and ignored.
             let num_tokens =
-                ChunkInsertions::divined_tokens(inputs, &chunk_indices, true_window_start).len()
-                    + MutateSwbfiPeaks::divined_tokens(
-                        estimate,
-                        &chunk_indices,
-                        chunks,
-                        &insertions,
-                    )
+                MutateSwbfiPeaks::divined_tokens(estimate, &chunk_indices, chunks, &insertions)
                     .len();
             for _ in 0..num_tokens {
                 tasm::tasmlib_io_read_secin___bfe();

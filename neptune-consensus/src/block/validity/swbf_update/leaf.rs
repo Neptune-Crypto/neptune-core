@@ -41,12 +41,12 @@ use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::prelude::MmrMembershipProof;
 use tracing::debug;
 
+use super::chunk_insertions::ChunkInsertions;
 use super::chunk_witness::ChunkWitness;
 use super::hash_blocks::HashBlocks;
 use super::mutate_swbfi_peaks::MutateSwbfiPeaks;
 use super::mutator_set_hash_after_removals::MutatorSetHashAfterRemovals;
 use super::removal_index_commitment::RemovalIndexCommitment;
-use super::resolve_chunk_indices::ResolveChunkIndices;
 use super::swbfi_peaks_after_removals::SwbfiPeaksAfterRemovals;
 use super::update_tree_leaf::UpdateTreeLeaf;
 use super::witness_lists::WitnessLists;
@@ -188,8 +188,7 @@ impl CorrectSwbfUpdateWitness {
     /// its indices need and their membership proofs in the inactive SWBF.
     pub(in crate::block::validity) fn unpacked_records(&self) -> Vec<RemovalRecord> {
         let swbfi_leaf_count = self.mutator_set.swbf_inactive.num_leafs();
-        let chunk_indices =
-            ResolveChunkIndices::chunk_indices_below(&self.inputs, swbfi_leaf_count);
+        let chunk_indices = ChunkInsertions::chunk_indices_below(&self.inputs, swbfi_leaf_count);
         let (_, insertions) =
             SwbfiPeaksAfterRemovals::chunk_indices_and_insertions(&self.inputs, &self.mutator_set);
         let estimate = WitnessLists::swbfi_leaf_count_estimate(&self.tree_heights);
@@ -576,7 +575,6 @@ pub(super) mod tests {
     use tasm_lib::twenty_first::prelude::Mmr;
     use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
-    use super::super::chunk_insertions::ChunkInsertions;
     use super::super::chunk_witness::tests::random_msa_and_records;
     use super::super::window_after_removals::WindowAfterRemovals;
     use super::*;
@@ -949,7 +947,7 @@ pub(super) mod tests {
         let inputs = &honest.inputs;
         let mutator_set = &honest.mutator_set;
         let swbfi_leaf_count = mutator_set.swbf_inactive.num_leafs();
-        let chunk_indices = ResolveChunkIndices::chunk_indices_below(inputs, swbfi_leaf_count);
+        let chunk_indices = ChunkInsertions::chunk_indices_below(inputs, swbfi_leaf_count);
         let insertions = ChunkInsertions::insertions(
             inputs,
             &chunk_indices,
@@ -1188,7 +1186,7 @@ pub(super) mod tests {
     fn index_moved_to_a_chunk_the_witness_lacks_is_rejected() {
         let mut witness = witness_with_chunks();
         let swbfi_leaf_count = witness.mutator_set.swbf_inactive.num_leafs();
-        let present = ResolveChunkIndices::chunk_indices_below(&witness.inputs, swbfi_leaf_count);
+        let present = ChunkInsertions::chunk_indices_below(&witness.inputs, swbfi_leaf_count);
         let window_start = SwbfiPeaksAfterRemovals::window_start(&witness.mutator_set);
         let mut indices = witness.inputs[0].absolute_indices.to_array();
         let position = indices
@@ -1266,7 +1264,7 @@ pub(super) mod tests {
             .unwrap();
         let window_start = SwbfiPeaksAfterRemovals::window_start(&honest.mutator_set);
         let leaf_count = honest.mutator_set.swbf_inactive.num_leafs();
-        let present = ResolveChunkIndices::chunk_indices_below(&honest.inputs, leaf_count);
+        let present = ChunkInsertions::chunk_indices_below(&honest.inputs, leaf_count);
         let chunk_size = u128::from(CHUNK_SIZE);
         let (mut seen_present, mut seen_absent) = (false, false);
         for input in 0..honest.inputs.len() {
@@ -1353,7 +1351,7 @@ pub(super) mod tests {
             .unwrap();
         let window_start = SwbfiPeaksAfterRemovals::window_start(&honest.mutator_set);
         let leaf_count = honest.mutator_set.swbf_inactive.num_leafs();
-        let present = ResolveChunkIndices::chunk_indices_below(&honest.inputs, leaf_count);
+        let present = ChunkInsertions::chunk_indices_below(&honest.inputs, leaf_count);
         let indices = honest.inputs[input].absolute_indices.to_array();
 
         for target in [window_start, window_start - 1] {
@@ -1418,8 +1416,7 @@ pub(super) mod tests {
         let mut witness = witness_with_chunks();
         let swbfi_leaf_count = witness.mutator_set.swbf_inactive.num_leafs();
         let window_start = u128::from(swbfi_leaf_count) << CHUNK_SIZE.ilog2();
-        let chunk_indices =
-            ResolveChunkIndices::chunk_indices_below(&witness.inputs, swbfi_leaf_count);
+        let chunk_indices = ChunkInsertions::chunk_indices_below(&witness.inputs, swbfi_leaf_count);
         let indices = witness
             .inputs
             .iter()

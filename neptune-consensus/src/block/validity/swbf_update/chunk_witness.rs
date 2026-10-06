@@ -101,7 +101,6 @@ impl ChunkWitness {
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(in crate::block::validity) mod tests {
     use neptune_mutator_set::msa_and_records::MsaAndRecords;
-    use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
     use proptest::arbitrary::Arbitrary;
     use proptest::strategy::Strategy;
     use proptest::strategy::ValueTree;
@@ -126,35 +125,5 @@ pub(in crate::block::validity) mod tests {
             .new_tree(&mut runner)
             .unwrap()
             .current()
-    }
-
-    /// An entry of a packed chunk dictionary, by what it holds.
-    pub(in crate::block::validity) enum PackedEntry {
-        Tree { height: u32 },
-        ChunkOnly,
-    }
-
-    /// The entries of the packed list's chunk dictionaries in order, or the
-    /// tree height that does not classify.
-    pub(in crate::block::validity) fn packed_entries(
-        removal_records: &[RemovalRecord],
-    ) -> Result<Vec<PackedEntry>, u64> {
-        let offset = RemovalRecordList::ENCODING_TREE_HEIGHT_OFFSET;
-        let mut entries = vec![];
-        for record in removal_records {
-            for (tree_height, _) in record.target_chunks.iter() {
-                let entry = if *tree_height < 2 * offset {
-                    PackedEntry::Tree {
-                        height: (*tree_height % offset) as u32,
-                    }
-                } else if *tree_height == RemovalRecordList::ENCODING_DELIMITER_IGNORE_TREE_HEIGHT {
-                    PackedEntry::ChunkOnly
-                } else {
-                    return Err(*tree_height);
-                };
-                entries.push(entry);
-            }
-        }
-        Ok(entries)
     }
 }
