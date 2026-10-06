@@ -78,6 +78,10 @@ pub(crate) struct Announcer {
 
     /// Whether the peer initiated the connection to the node.
     pub(crate) inbound: bool,
+
+    /// Whether the announcement proved that the object exists, so that
+    /// requesting it is worthwhile without waiting for a preferred announcer.
+    pub(crate) verified: bool,
 }
 
 /// An announcement of an object by a peer that has not been asked for it.
@@ -90,10 +94,12 @@ struct Announcement {
 }
 
 impl Announcement {
-    /// Whether the announcer may be asked for the object at `now`. Announcers
-    /// on inbound connections wait out [`INBOUND_REQUEST_DELAY`].
+    /// Whether the announcer may be asked for the object at `now`. Unverified
+    /// announcements from inbound connections wait out
+    /// [`INBOUND_REQUEST_DELAY`].
     fn is_due(&self, now: SystemTime) -> bool {
         !self.announcer.inbound
+            || self.announcer.verified
             || now
                 .duration_since(self.at)
                 .is_ok_and(|elapsed| elapsed >= INBOUND_REQUEST_DELAY)
@@ -156,7 +162,8 @@ struct PeerLoad {
 /// Peers on outbound connections are preferred over peers on inbound
 /// connections. An object announced only by inbound peers is requested after
 /// [`INBOUND_REQUEST_DELAY`], and an outbound peer announcing it meanwhile is
-/// asked right away instead.
+/// asked right away instead. Announcements that prove the object exists are
+/// requested right away regardless.
 ///
 /// Per peer, at most [`MAX_IN_FLIGHT_PER_PEER`] requests are in flight and at
 /// most [`MAX_PENDING_PER_PEER`] objects are tracked, so that no peer can
@@ -372,6 +379,7 @@ mod tests {
         Announcer {
             peer: PeerId::random(),
             inbound: false,
+            verified: false,
         }
     }
 
@@ -379,6 +387,7 @@ mod tests {
         Announcer {
             peer: PeerId::random(),
             inbound: true,
+            verified: false,
         }
     }
 
@@ -535,6 +544,18 @@ mod tests {
         assert_eq!(vec![block], pending.due_requests(alice.peer, later));
         assert!(pending.due_requests(alice.peer, later).is_empty());
         assert_eq!(0, pending.take_stalls(alice.peer));
+    }
+
+    #[test]
+    fn verified_announcement_from_inbound_peer_is_requested_at_once() {
+        let mut pending = PendingRequests::default();
+        let alice = Announcer {
+            verified: true,
+            ..inbound()
+        };
+        let now = SystemTime::now();
+
+        assert!(pending.record_announcement(block(), alice, now));
     }
 
     #[test]

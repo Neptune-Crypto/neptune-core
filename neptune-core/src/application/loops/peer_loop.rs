@@ -15,6 +15,8 @@ use futures::stream::TryStreamExt;
 use futures::FutureExt;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
+use neptune_consensus::block::block_header::BlockHeaderWithBlockHashWitness;
+use neptune_consensus::block::block_header::HeaderToBlockHashWitness;
 use neptune_consensus::block::Block;
 use neptune_consensus::chaintx::link_tx::LinkTx;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
@@ -30,6 +32,7 @@ use neptune_mempool::tx_admission::TxAdmissionError;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_mutator_set::removal_record::RemovalRecordValidityError;
 use neptune_p2p::peer::handshake_data::HandshakeData;
+use neptune_p2p::peer::peer_block_notifications::PeerBlockNotification;
 use neptune_p2p::peer::peer_info::PeerConnectionInfo;
 use neptune_p2p::peer::peer_info::PeerInfo;
 use neptune_p2p::peer::transfer_block::TransferBlock;
@@ -163,12 +166,27 @@ impl PeerLoopHandler {
         }
     }
 
+    /// The message that notifies the connected peer of `block`, in the form
+    /// its version understands.
+    fn block_notification(&self, block: &Block) -> PeerMessage {
+        if self.peer_handshake_data.version.announces_blocks_with_pow() {
+            let with_witness = BlockHeaderWithBlockHashWitness::new(
+                *block.header(),
+                HeaderToBlockHashWitness::from(block),
+            );
+            PeerMessage::BlockNotificationWithPowWitness(Box::new(with_witness))
+        } else {
+            PeerMessage::BlockNotification(block.into())
+        }
+    }
+
     /// The connected peer, as the announcer of an object it has notified us
     /// about.
     fn announcer(&self) -> Announcer {
         Announcer {
             peer: self.peer_id,
             inbound: self.inbound_connection,
+            verified: false,
         }
     }
 
@@ -1025,16 +1043,79 @@ impl PeerLoopHandler {
             PeerMessage::BlockNotificationRequest => {
                 debug!("Got BlockNotificationRequest");
 
-                peer.send(PeerMessage::BlockNotification(
-                    self.global_state_lock.lock_guard().await.chain.tip().into(),
-                ))
-                .await?;
+                let notification = {
+                    let state = self.global_state_lock.lock_guard().await;
+                    self.block_notification(state.chain.tip())
+                };
+                peer.send(notification).await?;
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
-            PeerMessage::BlockNotification(block_notification) => {
+            PeerMessage::BlockNotification(_) | PeerMessage::BlockNotificationWithPowWitness(_) => {
                 const SYNC_CHALLENGE_COOLDOWN: Timestamp = Timestamp::minutes(10);
 
+                let (block_notification, verified) = match msg {
+                    PeerMessage::BlockNotification(block_notification) => {
+                        if self.peer_handshake_data.version.announces_blocks_with_pow() {
+                            warn!(
+                                "Peer of version {} announced a block without its proof of work",
+                                self.peer_handshake_data.version
+                            );
+                            self.punish(NegativePeerSanction::UnwantedMessage).await?;
+                            return Ok(KEEP_CONNECTION_ALIVE);
+                        }
+                        (block_notification, false)
+                    }
+                    PeerMessage::BlockNotificationWithPowWitness(with_witness) => {
+                        // The notification is verified against the parent if that
+                        // is known. Otherwise, it is treated like a notification
+                        // without witness.
+                        let network = self.global_state_lock.cli().network;
+                        let parent_digest = with_witness.header().prev_block_digest;
+                        let parent = {
+                            let state = self.global_state_lock.lock_guard().await;
+                            let tip = state.chain.tip();
+                            if tip.hash() == parent_digest {
+                                Some(*tip.header())
+                            } else if state.chain.is_archival_node() {
+                                state
+                                    .chain
+                                    .archival_state()
+                                    .get_block_header(parent_digest)
+                                    .await
+                            } else {
+                                None
+                            }
+                        };
+                        let verified = match parent {
+                            Some(parent) => {
+                                if let Err(error) =
+                                    with_witness.validate_against_parent(&parent, network)
+                                {
+                                    warn!(
+                                        "Block notification from {} is invalid: {error}",
+                                        self.peer_id
+                                    );
+                                    self.punish(NegativePeerSanction::InvalidBlock((
+                                        with_witness.header().height,
+                                        with_witness.hash(),
+                                    )))
+                                    .await?;
+                                    return Ok(KEEP_CONNECTION_ALIVE);
+                                }
+                                true
+                            }
+                            None => {
+                                debug!(
+                                    "Cannot verify block notification; parent {parent_digest} is unknown"
+                                );
+                                false
+                            }
+                        };
+                        (PeerBlockNotification::from(with_witness.as_ref()), verified)
+                    }
+                    _ => unreachable!(),
+                };
                 let (tip_header, sync_anchor_height) = {
                     let state = self.global_state_lock.lock_guard().await;
                     (
@@ -1134,7 +1215,14 @@ impl PeerLoopHandler {
                     let request_now = self
                         .global_state_lock
                         .pending_requests()
-                        .record_announcement(block, self.announcer(), self.system_time());
+                        .record_announcement(
+                            block,
+                            Announcer {
+                                verified,
+                                ..self.announcer()
+                            },
+                            self.system_time(),
+                        );
                     if !request_now {
                         debug!("block announcement recorded; not requesting it now");
                         return Ok(KEEP_CONNECTION_ALIVE);
@@ -2611,11 +2699,10 @@ impl PeerLoopHandler {
                 // own miner. It's always shared through this logic.
                 let new_block_height = block.kernel.header.height;
                 if new_block_height > peer_state_info.highest_shared_block_height {
-                    debug!("Sending PeerMessage::BlockNotification");
                     peer_state_info.highest_shared_block_height = new_block_height;
-                    peer.send(PeerMessage::BlockNotification(block.as_ref().into()))
-                        .await?;
-                    debug!("Sent PeerMessage::BlockNotification");
+                    let notification = self.block_notification(&block);
+                    debug!("Sending {}", notification.get_type());
+                    peer.send(notification).await?;
                 }
                 Ok(KEEP_CONNECTION_ALIVE)
             }
@@ -3062,7 +3149,7 @@ mod tests {
     use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
     use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use neptune_mempool::upgrade_priority::UpgradePriority;
-    use neptune_p2p::peer::peer_block_notifications::PeerBlockNotification;
+    use neptune_p2p::peer::handshake_data::VersionString;
     use neptune_p2p::peer::peer_info::pseudorandom_peer_id;
     use neptune_p2p::peer::transaction_notification::TransactionNotification;
     use neptune_p2p::peer::Sanction;
@@ -5105,6 +5192,11 @@ mod tests {
             ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network))
                 .await
                 .unwrap();
+            // Peers of this version announce blocks without proof of work.
+            let hsd = HandshakeData {
+                version: VersionString::new_from_str("0.19.0"),
+                ..hsd
+            };
             let block_1 = fake_valid_block_for_tests(&state_lock, rng.random()).await;
             let notification_height1 = (&block_1).into();
             let mock = Mock::new(vec![
@@ -5648,6 +5740,11 @@ mod tests {
                 mut state_lock,
                 hsd,
             ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network)).await?;
+            // Peers of this version announce blocks without proof of work.
+            let hsd = HandshakeData {
+                version: VersionString::new_from_str("0.19.0"),
+                ..hsd
+            };
             let peer_socket_address: SocketAddr = get_dummy_socket_address(0);
             let genesis_block: Block = state_lock
                 .lock_guard()
@@ -6838,7 +6935,9 @@ mod tests {
         use super::block_proposals::genesis_setup;
         use super::block_proposals::TestSetup;
         use super::*;
+        use crate::state::pending_requests::INBOUND_REQUEST_DELAY;
         use crate::state::pending_requests::TRANSACTION_REQUEST_TIMEOUT;
+        use crate::tests::shared::blocks::fake_valid_successor_for_tests;
 
         /// A peer loop for another peer of the same node, at a mocked time.
         fn peer_loop_at(
@@ -6878,6 +6977,257 @@ mod tests {
 
         fn after(now: Timestamp, delay: Duration) -> Timestamp {
             now + Timestamp::millis(u64::try_from(delay.as_millis()).unwrap())
+        }
+
+        /// A notification with pow witness of the block of height 1, together
+        /// with the block.
+        async fn notification_with_witness(
+            setup: &TestSetup,
+        ) -> (Block, BlockHeaderWithBlockHashWitness) {
+            let block1 = fake_valid_block_for_tests(
+                &setup.peer_loop_handler.global_state_lock,
+                StdRng::seed_from_u64(5550004).random(),
+            )
+            .await;
+            let with_witness = BlockHeaderWithBlockHashWitness::new(
+                *block1.header(),
+                HeaderToBlockHashWitness::from(&block1),
+            );
+            (block1, with_witness)
+        }
+
+        fn latest_punishment(setup: &TestSetup) -> Option<NegativePeerSanction> {
+            setup
+                .peer_loop_handler
+                .global_state_lock
+                .peers()
+                .with_connected(|connected| {
+                    connected[&setup.peer_loop_handler.peer_id]
+                        .standing
+                        .latest_punishment
+                        .map(|(sanction, _)| sanction)
+                })
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn notification_with_pow_witness_from_inbound_peer_is_requested_at_once() {
+            let cli = cli_args::Args::default_with_network(Network::Testnet(42));
+            let mut setup = genesis_setup(cli).await;
+            let (block1, with_witness) = notification_with_witness(&setup).await;
+            assert!(setup.peer_loop_handler.inbound_connection);
+
+            let stream = Mock::new(vec![
+                Action::Read(PeerMessage::BlockNotificationWithPowWitness(Box::new(
+                    with_witness,
+                ))),
+                Action::Write(PeerMessage::BlockRequestByHeight(block1.header().height)),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let from_main = setup.peer_broadcast_tx.subscribe();
+            setup
+                .peer_loop_handler
+                .run(stream, from_main, &mut setup.peer_state)
+                .await
+                .unwrap();
+            assert_eq!(None, latest_punishment(&setup));
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn legacy_block_notification_from_inbound_peer_waits() {
+            let cli = cli_args::Args::default_with_network(Network::Testnet(42));
+            let mut setup = genesis_setup(cli).await;
+            let (block1, _) = notification_with_witness(&setup).await;
+            let height = block1.header().height;
+            let now = Timestamp::now();
+            setup.peer_loop_handler.mock_now = Some(now);
+            setup.peer_loop_handler.peer_handshake_data.version =
+                VersionString::new_from_str("0.19.0");
+
+            let stream = Mock::new(vec![
+                Action::Read(PeerMessage::BlockNotification((&block1).into())),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let from_main = setup.peer_broadcast_tx.subscribe();
+            setup
+                .peer_loop_handler
+                .run(stream, from_main, &mut setup.peer_state)
+                .await
+                .unwrap();
+
+            let mut stream_later = Mock::new(vec![Action::Write(
+                PeerMessage::BlockRequestByHeight(height),
+            )]);
+            setup.peer_loop_handler.mock_now = Some(after(now, INBOUND_REQUEST_DELAY));
+            setup
+                .peer_loop_handler
+                .request_due_objects(&mut stream_later)
+                .await
+                .unwrap();
+            assert!(stream_later.is_done());
+            assert_eq!(None, latest_punishment(&setup));
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn notification_with_insufficient_pow_is_punished() {
+            let cli = cli_args::Args::default_with_network(Network::Testnet(42));
+            let mut setup = genesis_setup(cli).await;
+            let (_, mut with_witness) = notification_with_witness(&setup).await;
+            let target = with_witness.header().difficulty.target();
+            while with_witness.hash() <= target {
+                with_witness.header_mut().pow.nonce = rand::random();
+            }
+            let announced = (with_witness.header().height, with_witness.hash());
+
+            let stream = Mock::new(vec![
+                Action::Read(PeerMessage::BlockNotificationWithPowWitness(Box::new(
+                    with_witness,
+                ))),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let from_main = setup.peer_broadcast_tx.subscribe();
+            setup
+                .peer_loop_handler
+                .run(stream, from_main, &mut setup.peer_state)
+                .await
+                .unwrap();
+            assert_eq!(
+                Some(NegativePeerSanction::InvalidBlock(announced)),
+                latest_punishment(&setup)
+            );
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn notification_with_pow_witness_for_unknown_parent_is_requested_unverified() {
+            let cli = cli_args::Args::default_with_network(Network::Testnet(42));
+            let mut setup = genesis_setup(cli).await;
+            let (block1, _) = notification_with_witness(&setup).await;
+            let block2 = fake_valid_successor_for_tests(
+                &block1,
+                block1.header().timestamp + Timestamp::hours(1),
+                StdRng::seed_from_u64(5550005).random(),
+                Network::Testnet(42),
+            )
+            .await;
+            let with_witness = BlockHeaderWithBlockHashWitness::new(
+                *block2.header(),
+                HeaderToBlockHashWitness::from(&block2),
+            );
+            let now = Timestamp::now();
+            setup.peer_loop_handler.mock_now = Some(now);
+
+            // Block 1 is unknown, so the notification cannot be verified and
+            // the inbound peer is asked only after the delay.
+            let stream = Mock::new(vec![
+                Action::Read(PeerMessage::BlockNotificationWithPowWitness(Box::new(
+                    with_witness,
+                ))),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let from_main = setup.peer_broadcast_tx.subscribe();
+            setup
+                .peer_loop_handler
+                .run(stream, from_main, &mut setup.peer_state)
+                .await
+                .unwrap();
+            assert_eq!(None, latest_punishment(&setup));
+
+            let mut stream_later = Mock::new(vec![Action::Write(
+                PeerMessage::BlockRequestByHeight(block2.header().height),
+            )]);
+            setup.peer_loop_handler.mock_now = Some(after(now, INBOUND_REQUEST_DELAY));
+            setup
+                .peer_loop_handler
+                .request_due_objects(&mut stream_later)
+                .await
+                .unwrap();
+            assert!(stream_later.is_done());
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn legacy_block_notification_from_new_peer_is_unwanted() {
+            let cli = cli_args::Args::default_with_network(Network::Testnet(42));
+            let mut setup = genesis_setup(cli).await;
+            let (block1, _) = notification_with_witness(&setup).await;
+            setup.peer_loop_handler.peer_handshake_data.version =
+                VersionString::new_from_str("0.19.1");
+
+            let stream = Mock::new(vec![
+                Action::Read(PeerMessage::BlockNotification((&block1).into())),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let from_main = setup.peer_broadcast_tx.subscribe();
+            setup
+                .peer_loop_handler
+                .run(stream, from_main, &mut setup.peer_state)
+                .await
+                .unwrap();
+            assert_eq!(
+                Some(NegativePeerSanction::UnwantedMessage),
+                latest_punishment(&setup)
+            );
+            assert!(setup
+                .peer_loop_handler
+                .global_state_lock
+                .pending_requests()
+                .due_requests(setup.peer_loop_handler.peer_id, SystemTime::now())
+                .is_empty());
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn new_blocks_are_notified_with_pow_witness_to_new_peers_only() {
+            let cli = cli_args::Args::default_with_network(Network::Testnet(42));
+            let mut setup = genesis_setup(cli).await;
+            let (block1, with_witness) = notification_with_witness(&setup).await;
+            let genesis = &setup.genesis_block;
+            let genesis_with_witness = BlockHeaderWithBlockHashWitness::new(
+                *genesis.header(),
+                HeaderToBlockHashWitness::from(genesis),
+            );
+
+            for (version, expected, expected_on_request) in [
+                (
+                    "0.19.0",
+                    PeerMessage::BlockNotification((&block1).into()),
+                    PeerMessage::BlockNotification(genesis.into()),
+                ),
+                (
+                    "0.19.1",
+                    PeerMessage::BlockNotificationWithPowWitness(Box::new(with_witness.clone())),
+                    PeerMessage::BlockNotificationWithPowWitness(Box::new(
+                        genesis_with_witness.clone(),
+                    )),
+                ),
+            ] {
+                setup.peer_loop_handler.peer_handshake_data.version =
+                    VersionString::new_from_str(version);
+                let mut peer_state = MutablePeerState::new(genesis.header().height);
+
+                // A new block from main
+                let mut stream = Mock::new(vec![Action::Write(expected)]);
+                setup
+                    .peer_loop_handler
+                    .handle_main_task_message(
+                        MainToPeerTask::Block(Box::new(block1.clone())),
+                        &mut stream,
+                        &mut peer_state,
+                    )
+                    .await
+                    .unwrap();
+                assert!(stream.is_done(), "version {version}");
+
+                // The peer asks for the tip, which is still genesis
+                let mut request_stream = Mock::new(vec![Action::Write(expected_on_request)]);
+                setup
+                    .peer_loop_handler
+                    .handle_peer_message(
+                        PeerMessage::BlockNotificationRequest,
+                        &mut request_stream,
+                        &mut peer_state,
+                    )
+                    .await
+                    .unwrap();
+                assert!(request_stream.is_done(), "version {version} on request");
+            }
         }
 
         #[apply(shared_tokio_runtime)]
@@ -7588,6 +7938,11 @@ mod tests {
                 bob.set_new_tip(block.clone()).await?;
             }
             let bob_tip = blocks.last().unwrap();
+            // Peers of this version announce blocks without proof of work.
+            let alice_hsd = HandshakeData {
+                version: VersionString::new_from_str("0.19.0"),
+                ..alice_hsd
+            };
 
             let block_notification_from_bob = PeerBlockNotification {
                 hash: bob_tip.hash(),

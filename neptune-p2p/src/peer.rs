@@ -541,6 +541,12 @@ pub enum PeerMessage {
 
     /// Send a full link transaction object to a peer.
     LinkTx(Box<TransferLinkTx>),
+
+    /// Notify a peer of a new block by its header and a witness to the block
+    /// hash, so that the receiver can verify the proof of work before
+    /// requesting the block. Peers with a version exceeding 0.19.0 send and
+    /// understand this message in place of [`PeerMessage::BlockNotification`].
+    BlockNotificationWithPowWitness(Box<BlockHeaderWithBlockHashWitness>),
     // New variants must be added here at the bottom to be backwards compatible.
 }
 
@@ -551,6 +557,9 @@ impl PeerMessage {
             PeerMessage::Block(_) => "block",
             PeerMessage::BlockNotificationRequest => "block notification request",
             PeerMessage::BlockNotification(_) => "block notification",
+            PeerMessage::BlockNotificationWithPowWitness(_) => {
+                "block notification with pow witness"
+            }
             PeerMessage::BlockRequestByHeight(_) => "block req by height",
             PeerMessage::BlockRequestByHash(_) => "block req by hash",
             PeerMessage::BlockRequestBatch(_) => "block req batch",
@@ -584,6 +593,7 @@ impl PeerMessage {
             PeerMessage::Block(_) => false,
             PeerMessage::BlockNotificationRequest => false,
             PeerMessage::BlockNotification(_) => false,
+            PeerMessage::BlockNotificationWithPowWitness(_) => false,
             PeerMessage::BlockRequestByHeight(_) => false,
             PeerMessage::BlockRequestByHash(_) => false,
             PeerMessage::BlockRequestBatch(_) => false,
@@ -617,6 +627,7 @@ impl PeerMessage {
             PeerMessage::Block(_) => false,
             PeerMessage::BlockNotificationRequest => false,
             PeerMessage::BlockNotification(_) => false,
+            PeerMessage::BlockNotificationWithPowWitness(_) => false,
             PeerMessage::BlockRequestByHeight(_) => false,
             PeerMessage::BlockRequestByHash(_) => false,
             PeerMessage::BlockRequestBatch(_) => false,
@@ -651,6 +662,7 @@ impl PeerMessage {
             PeerMessage::Block(_) => true,
             PeerMessage::BlockNotificationRequest => true,
             PeerMessage::BlockNotification(_) => true,
+            PeerMessage::BlockNotificationWithPowWitness(_) => true,
             PeerMessage::BlockRequestByHeight(_) => true,
             PeerMessage::BlockRequestByHash(_) => true,
             PeerMessage::BlockRequestBatch(_) => true,
