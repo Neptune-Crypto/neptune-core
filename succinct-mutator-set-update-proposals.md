@@ -375,15 +375,16 @@ against the host (`profile_both_forms` in
 
 | Per input | List form, 410 per chunk | List form, empty chunks | Counter form |
 |---|---:|---:|---:|
-| Processor rows | 66,774 | 54,381 | 15,972 |
+| Processor rows | 66,774 (60,180 flat) | 54,381 (47,787 flat) | 15,972 |
 | U32 rows | 14,687 | 12,466 | 20,601 |
 | Hash rows | 29,176 | 8,820 | 14,893 |
 | RAM rows | 48,559 | 12,820 | 14,373 |
-| Tallest table | 66,774 | 54,381 | 20,601 |
+| Tallest table | 66,774 (60,180 flat) | 54,381 (47,787 flat) | 20,601 |
 | Inputs per 2^21 leaf | 31 | 38 | 101 |
 
 The tallest table sets what a leaf buys: 21k rows per input against 67k,
-a factor 3.2. The counter form is u32-bound, 15.5k of its rows per input
+a factor 3.2, or 2.9 against the list form with the flattened witness
+of 2026-10-07 ("flat" in the table), which the counter form shares. The counter form is u32-bound, 15.5k of its rows per input
 being the `merkle_step_mem` steps of the walks, 52 per index at this
 forest height of 26; that is the floor of this design. The list form at
 density zero (`witness_with_empty_chunks`, the fixture with every chunk
@@ -812,6 +813,15 @@ witness audit 4.0k, the active window 1.4k and the index-set commitment
 0.5k. The index and the idle check cost about 20 rows, once. A leaf of
 2^21 holds 31 inputs, one of 2^22 holds 62. RAM rows are 48.6k and hash
 rows 29.2k per input, both below the processor.
+
+With the witness flattened on 2026-10-07 (the chunks, the tree heights and
+the trees' paths as three lists beside the inputs' index sets, instead of
+the packed list's chunk dictionaries; `WitnessLists` reads them in place
+of the dictionary parser, and the audit of the nested dictionaries goes
+with it): 60.2k per input at the fixture's density of about 410 per chunk,
+47.8k with every chunk emptied. The RAM table stays at 48.1k per input,
+the two reads of every chunk's contents, so the next optimisation of the
+list form meets it at about 48k.
 
 `PredecessorIsValid`, without the verification of the previous block's
 proof (ignored test `profile_skipping_program_by_transaction_shape`, which

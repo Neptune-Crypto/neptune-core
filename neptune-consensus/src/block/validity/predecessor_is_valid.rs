@@ -4751,7 +4751,7 @@ mod tests {
         /// need, in total and per input.
         fn describe_chunks(prev_block: &Block) -> (usize, usize) {
             let kernel = &prev_block.body().transaction_kernel;
-            let num_chunks = ChunkWitness::num_chunks(&kernel.inputs);
+            let num_chunks = ChunkWitness::chunks(&kernel.inputs).len();
             (num_chunks, num_chunks / kernel.inputs.len().max(1))
         }
 

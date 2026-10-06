@@ -160,17 +160,13 @@ impl UpdateTreeLeaf {
         Some((old_root, running))
     }
 
-    /// The inverse of [`Self::sequential_paths`]: the tree's authentication
-    /// structure for the leaves, from their sequential paths and old
-    /// digests. A path's sibling is an old node unless an earlier leaf's
-    /// change reached it, in which case the earlier leaf's old walk knows
-    /// it.
-    pub(super) fn auth_struct_from_paths(
+    /// The nodes of the tree before any leaf changed that these leaves'
+    /// sequential paths and old digests determine, by node index.
+    pub(super) fn old_nodes(
         tree_height: u32,
         paths: &[Digest],
         old_leafs: &[(u64, Digest)],
-    ) -> Vec<Digest> {
-        let leaf_indices = old_leafs.iter().map(|(index, _)| *index).collect_vec();
+    ) -> HashMap<u64, Digest> {
         let mut path = paths.iter().copied();
         let mut nodes = HashMap::new();
         for &(leaf_index, digest) in old_leafs {
@@ -182,10 +178,22 @@ impl UpdateTreeLeaf {
             }
             Self::set_leaf(&mut nodes, tree_height, leaf_index, digest);
         }
-        Self::auth_struct_indices(tree_height, &leaf_indices)
-            .into_iter()
-            .map(|node| nodes.get(&node).copied().unwrap_or_default())
-            .collect()
+        nodes
+    }
+
+    /// A leaf's siblings up the tree, from these nodes.
+    pub(super) fn path_in(
+        nodes: &HashMap<u64, Digest>,
+        tree_height: u32,
+        leaf_index: u64,
+    ) -> Vec<Digest> {
+        let mut node = leaf_index + (1 << tree_height);
+        let mut path = vec![];
+        while node > 1 {
+            path.push(nodes.get(&(node ^ 1)).copied().unwrap_or_default());
+            node /= 2;
+        }
+        path
     }
 }
 
@@ -302,6 +310,26 @@ mod tests {
     use tasm_lib::twenty_first::util_types::merkle_tree::MerkleTree;
 
     use super::*;
+
+    impl UpdateTreeLeaf {
+        /// The inverse of [`Self::sequential_paths`]: the tree's authentication
+        /// structure for the leaves, from their sequential paths and old
+        /// digests. A path's sibling is an old node unless an earlier leaf's
+        /// change reached it, in which case the earlier leaf's old walk knows
+        /// it.
+        pub(in crate::block::validity) fn auth_struct_from_paths(
+            tree_height: u32,
+            paths: &[Digest],
+            old_leafs: &[(u64, Digest)],
+        ) -> Vec<Digest> {
+            let leaf_indices = old_leafs.iter().map(|(index, _)| *index).collect_vec();
+            let nodes = Self::old_nodes(tree_height, paths, old_leafs);
+            Self::auth_struct_indices(tree_height, &leaf_indices)
+                .into_iter()
+                .map(|node| nodes.get(&node).copied().unwrap_or_default())
+                .collect()
+        }
+    }
 
     type IndexedLeafs = Vec<(u64, Digest)>;
 

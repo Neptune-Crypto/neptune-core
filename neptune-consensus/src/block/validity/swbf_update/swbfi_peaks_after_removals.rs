@@ -1,6 +1,6 @@
 //! Rules 2.a, 2.b and 2.d and the inactive-SWBF half of 2.e, in the design
 //! where the witness supplies the chunks of the inactive SWBF that the
-//! inputs' indices fall in.
+//! inputs' indices fall in, with the trees' heights and paths.
 //!
 //! From the mutator set the transaction is built on: the witness's inputs
 //! must hold exactly the chunks their indices need (2.a, 2.b), every input
@@ -28,11 +28,11 @@ use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
 use super::chunk_insertions::ChunkInsertions;
-use super::chunk_witness::ChunkWitness;
 use super::divined_chunk_indices::DivinedChunkIndices;
 use super::mutate_swbfi_peaks::MutateSwbfiPeaks;
 use super::removal_records_are_unspent::RemovalRecordsAreUnspent;
 use super::resolve_chunk_indices::ResolveChunkIndices;
+use super::witness_lists::WitnessLists;
 use crate::consensus_rule_set::ConsensusRuleSet;
 
 /// Computes the inactive SWBF's peaks after a transaction's removals, from
@@ -40,9 +40,11 @@ use crate::consensus_rule_set::ConsensusRuleSet;
 /// insertions.
 ///
 /// ```text
-/// BEFORE: _ *inputs *mutator_set
+/// BEFORE: _ *inputs *mutator_set *chunks *tree_heights *tree_paths
 /// AFTER:  _ *swbfi_peaks_after
 /// ```
+///
+/// The lists are the witness's, as [`WitnessLists`] reads them.
 #[derive(Debug, Copy, Clone)]
 pub(in crate::block::validity) struct SwbfiPeaksAfterRemovals;
 
@@ -51,6 +53,12 @@ impl BasicSnippet for SwbfiPeaksAfterRemovals {
         vec![
             (DataType::VoidPointer, "*inputs".to_string()),
             (DataType::VoidPointer, "*mutator_set".to_string()),
+            (DataType::VoidPointer, "*chunks".to_string()),
+            (
+                DataType::List(Box::new(DataType::U32)),
+                "*tree_heights".to_string(),
+            ),
+            (DataType::VoidPointer, "*tree_paths".to_string()),
         ]
     }
 
@@ -68,7 +76,7 @@ impl BasicSnippet for SwbfiPeaksAfterRemovals {
     fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
         let new_list = library.import(Box::new(New));
         let memcpy = library.import(Box::new(MemCpy));
-        let chunk_witness = library.import(Box::new(ChunkWitness));
+        let witness_lists = library.import(Box::new(WitnessLists));
         let divined_chunk_indices = library.import(Box::new(DivinedChunkIndices));
         let resolve_chunk_indices = library.import(Box::new(ResolveChunkIndices));
         let removal_records_are_unspent = library.import(Box::new(RemovalRecordsAreUnspent));
@@ -119,7 +127,7 @@ impl BasicSnippet for SwbfiPeaksAfterRemovals {
         );
 
         triton_asm!(
-            // BEFORE: _ *inputs *mutator_set
+            // BEFORE: _ *inputs *mutator_set *chunks *tree_heights *tree_paths
             // AFTER:  _ *swbfi_peaks_after
             {entrypoint}:
                 call {rule_2a}
@@ -130,27 +138,25 @@ impl BasicSnippet for SwbfiPeaksAfterRemovals {
                 place 2 pop 2
                 return
 
-            // The witness's inputs must hold the chunks their indices in the
+            // The witness must hold the chunks the inputs' indices in the
             // inactive SWBF need, no more and no fewer, with the trees'
-            // path lists in ascending order.
-            // BEFORE: _ *inputs *mutator_set
+            // heights in ascending order.
+            // BEFORE: _ *inputs *mutator_set *chunks *tree_heights *tree_paths
             // AFTER:  _ *inputs *mutator_set
             {rule_2a}:
-                dup 1
-                // _ *inputs *mutator_set *inputs
-
-                dup 0 call {chunk_witness}
-                // _ [base] *inputs *chunks *tree_paths [swbfi_leaf_count_estimate]
+                call {witness_lists}
+                // _ [base] *chunk_pointers *path_pointers [swbfi_leaf_count_estimate]
 
                 push {swbfi_leaf_count_estimate_alloc.write_address()} write_mem 2 pop 1
                 push {tree_paths_alloc.write_address()} write_mem 1 pop 1
                 dup 0 push {chunks_alloc.write_address()} write_mem 1 pop 1
-                // _ [base] *inputs *chunks
+                // _ [base] *chunk_pointers
 
                 read_mem 1 pop 1 call {divined_chunk_indices}
-                // _ [base] *inputs *chunk_indices
+                // _ [base] *chunk_indices
 
                 dup 0 push {chunk_indices_alloc.write_address()} write_mem 1 pop 1
+                dup 2 swap 1
                 push {swbfi_leaf_count_estimate_alloc.read_address()} read_mem 2 pop 1
                 // _ [base] *inputs *chunk_indices [swbfi_leaf_count_estimate]
 
@@ -221,30 +227,29 @@ impl BasicSnippet for SwbfiPeaksAfterRemovals {
 }
 
 impl SwbfiPeaksAfterRemovals {
-    /// The tokens for the witness's inputs: the parts of the fields of
-    /// their chunks, the chunk indices, then the position of the chunk
-    /// of every index that lies in the inactive SWBF, then the unset index of
-    /// every record, then the sorted indices inserted into each chunk with
-    /// their positions, then the tokens that recompute the inactive SWBF's
-    /// peaks. A witness with more or fewer chunks than its indices need gets
-    /// a list padded or cut to its number of chunks, which the program then
-    /// rejects.
+    /// The tokens for the witness's inputs: the chunk indices, then the
+    /// position of the chunk of every index that lies in the inactive SWBF,
+    /// then the unset index of every record, then the sorted indices
+    /// inserted into each chunk with their positions, then the tokens that
+    /// recompute the inactive SWBF's peaks. A witness with more or fewer
+    /// chunks than its indices need gets a list padded or cut to its number
+    /// of chunks, which the program then rejects.
     pub(in crate::block::validity) fn divined_tokens(
         inputs: &[RemovalRecord],
         mutator_set: &MutatorSetAccumulator,
+        chunks: &[Vec<u32>],
+        tree_heights: &[u32],
     ) -> Vec<BFieldElement> {
-        let estimate = ChunkWitness::swbfi_leaf_count_estimate(inputs);
+        let estimate = WitnessLists::swbfi_leaf_count_estimate(tree_heights);
         let swbfi_leaf_count = mutator_set.swbf_inactive.num_leafs();
-        let num_chunks = ChunkWitness::num_chunks(inputs);
         let mut chunk_indices =
             ResolveChunkIndices::chunk_indices_below(inputs, estimate.max(swbfi_leaf_count));
-        chunk_indices.truncate(num_chunks);
-        while chunk_indices.len() < num_chunks {
+        chunk_indices.truncate(chunks.len());
+        while chunk_indices.len() < chunks.len() {
             let next = chunk_indices.last().map_or(0, |last| last + 1);
             chunk_indices.push(next);
         }
 
-        let chunks = ChunkWitness::chunks(inputs);
         let window_start = Self::window_start(mutator_set);
         let insertions = ChunkInsertions::insertions(inputs, &chunk_indices, window_start);
 
@@ -254,68 +259,27 @@ impl SwbfiPeaksAfterRemovals {
             RemovalRecordsAreUnspent::divined_tokens(
                 inputs,
                 &chunk_indices,
-                &chunks,
+                chunks,
                 &mutator_set.swbf_active,
                 swbfi_leaf_count,
             ),
             ChunkInsertions::divined_tokens(inputs, &chunk_indices, window_start),
-            MutateSwbfiPeaks::divined_tokens(estimate, &chunk_indices, &chunks, &insertions),
+            MutateSwbfiPeaks::divined_tokens(estimate, &chunk_indices, chunks, &insertions),
         ]
         .concat()
     }
 
-    /// The chunk indices, chunk contents and insertions of honest inputs in
-    /// the witness's form or the packed list's with chunks unpacked, on
-    /// this mutator set.
-    pub(super) fn chunk_data(
+    /// The chunk indices and the insertions into each chunk of honest
+    /// inputs on this mutator set.
+    pub(in crate::block::validity) fn chunk_indices_and_insertions(
         inputs: &[RemovalRecord],
         mutator_set: &MutatorSetAccumulator,
-    ) -> (Vec<u64>, Vec<Vec<u32>>, Vec<Vec<u32>>) {
+    ) -> (Vec<u64>, Vec<Vec<u32>>) {
         let chunk_indices =
             ResolveChunkIndices::chunk_indices_below(inputs, mutator_set.swbf_inactive.num_leafs());
-        let chunks = ChunkWitness::chunks(inputs);
         let insertions =
             ChunkInsertions::insertions(inputs, &chunk_indices, Self::window_start(mutator_set));
-        (chunk_indices, chunks, insertions)
-    }
-
-    /// The witness's form of these packed inputs on this mutator set: the
-    /// chunks' contents unpacked, and each tree's authentication structure
-    /// replaced by the paths of the tree's chunks.
-    pub(in crate::block::validity) fn witness_form(
-        packed_inputs: Vec<RemovalRecord>,
-        mutator_set: &MutatorSetAccumulator,
-    ) -> Vec<RemovalRecord> {
-        let allow_big_chunks = ConsensusRuleSet::HardforkDelta.allow_big_chunks();
-        let mut inputs = ChunkWitness::with_unpacked_chunks(packed_inputs, allow_big_chunks);
-        let (chunk_indices, chunks, insertions) = Self::chunk_data(&inputs, mutator_set);
-        let tree_paths = MutateSwbfiPeaks::tree_paths(
-            ChunkWitness::swbfi_leaf_count_estimate(&inputs),
-            &chunk_indices,
-            &chunks,
-            &insertions,
-            &ChunkWitness::tree_paths(&inputs),
-        );
-        ChunkWitness::set_tree_paths(&mut inputs, tree_paths);
-        inputs
-    }
-
-    /// The packed list's form of these witness inputs: the inverse of
-    /// [`Self::witness_form`].
-    pub(in crate::block::validity) fn packed_form(
-        mut inputs: Vec<RemovalRecord>,
-        mutator_set: &MutatorSetAccumulator,
-    ) -> Vec<RemovalRecord> {
-        let (chunk_indices, chunks, insertions) = Self::chunk_data(&inputs, mutator_set);
-        let auth_structs = MutateSwbfiPeaks::tree_auth_structs(
-            ChunkWitness::swbfi_leaf_count_estimate(&inputs),
-            &chunk_indices,
-            &chunks,
-            &insertions,
-            &ChunkWitness::tree_paths(&inputs),
-        );
-        ChunkWitness::set_tree_paths(&mut inputs, auth_structs);
-        ChunkWitness::with_packed_chunks(inputs, ConsensusRuleSet::HardforkDelta.allow_big_chunks())
+        (chunk_indices, insertions)
     }
 
     /// The first index of the active window.
@@ -367,26 +331,9 @@ impl SwbfiPeaksAfterRemovals {
 pub(in crate::block::validity) mod tests {
     use neptune_mutator_set::shared::NUM_TRIALS;
 
-    use super::super::chunk_witness::tests::packed_entries;
-    use super::super::chunk_witness::tests::PackedEntry;
     use super::super::update_tree_leaf::UpdateTreeLeaf;
     use super::*;
     use crate::proof_abstractions::tasm::builtins as tasm;
-
-    impl SwbfiPeaksAfterRemovals {
-        /// The witness's inputs as the archival update takes them: the list
-        /// unpacked.
-        pub(in crate::block::validity) fn unpacked_records(
-            inputs: &[RemovalRecord],
-            mutator_set: &MutatorSetAccumulator,
-        ) -> Option<Vec<RemovalRecord>> {
-            RemovalRecordList::try_unpack(
-                Self::packed_form(inputs.to_vec(), mutator_set),
-                ConsensusRuleSet::HardforkDelta.allow_big_chunks(),
-            )
-            .ok()
-        }
-    }
 
     impl SwbfiPeaksAfterRemovals {
         /// The host shadow: asserts what the snippet asserts, reading the
@@ -394,25 +341,18 @@ pub(in crate::block::validity) mod tests {
         pub(in crate::block::validity) fn verify(
             inputs: &[RemovalRecord],
             mutator_set: &MutatorSetAccumulator,
+            chunks: &[Vec<u32>],
+            tree_heights: &[u32],
+            tree_paths: &[Vec<Digest>],
         ) -> Vec<Digest> {
-            // 2.a) The witness's inputs describe an inactive SWBF by strictly
-            // increasing tree heights, and hold the chunks of exactly the
+            // 2.a) The witness describes an inactive SWBF by strictly
+            // increasing tree heights, and holds the chunks of exactly the
             // indices below its window start, while every index below the
             // true window start has its chunk.
-            let mut estimate = 0_u64;
-            let mut next_height = 0;
-            let mut num_chunks = 0;
-            for entry in packed_entries(inputs).expect("tree heights must classify") {
-                match entry {
-                    PackedEntry::Tree { height, chunk, .. } => {
-                        assert!(height >= next_height, "tree heights must increase");
-                        next_height = height + 1;
-                        estimate += 1 << height;
-                        num_chunks += usize::from(chunk.is_some());
-                    }
-                    PackedEntry::ChunkOnly => num_chunks += 1,
-                }
-            }
+            assert_eq!(tree_heights.len(), tree_paths.len());
+            assert!(tree_heights.windows(2).all(|pair| pair[0] < pair[1]));
+            let estimate = WitnessLists::swbfi_leaf_count_estimate(tree_heights);
+            let num_chunks = chunks.len();
             let chunk_indices = (0..num_chunks)
                 .map(|_| {
                     let hi = tasm::tasmlib_io_read_secin___bfe().value();
@@ -445,7 +385,6 @@ pub(in crate::block::validity) mod tests {
             // 2.b, 2.d) Every record has an unset index: the prover points
             // at it, and at the gap around it in its sorted chunk or in the
             // sorted active window.
-            let chunks = ChunkWitness::chunks(inputs);
             let window = &mutator_set.swbf_active.sbf;
             assert!(window.windows(2).all(|pair| pair[0] <= pair[1]));
             assert!(window.iter().all(|&set| set < WINDOW_SIZE));
@@ -480,7 +419,7 @@ pub(in crate::block::validity) mod tests {
                     + MutateSwbfiPeaks::divined_tokens(
                         estimate,
                         &chunk_indices,
-                        &chunks,
+                        chunks,
                         &insertions,
                     )
                     .len();
@@ -489,34 +428,30 @@ pub(in crate::block::validity) mod tests {
             }
 
             // The chunks must authenticate against the inactive SWBF: each
-            // tree's paths lead from its chunks to its peak.
-            let swbfi_peaks = mutator_set.swbf_inactive.peaks();
-            let tree_paths = ChunkWitness::tree_paths(inputs);
+            // tree's paths lead from its chunks to its peak, and the peaks
+            // after the removals are what its paths lead to from the
+            // mutated chunks.
+            let mut peaks = mutator_set.swbf_inactive.peaks();
             for ((height, old_leafs, new_leafs), paths) in
-                MutateSwbfiPeaks::runs(estimate, &chunk_indices, &chunks, &insertions)
+                MutateSwbfiPeaks::runs(estimate, &chunk_indices, chunks, &insertions)
                     .into_iter()
                     .rev()
-                    .zip(&tree_paths)
+                    .zip(tree_paths)
                     .filter(|((_, old_leafs, _), _)| !old_leafs.is_empty())
             {
                 let peak_index =
-                    (mutator_set.swbf_inactive.num_leafs() >> (height + 1)).count_ones();
-                let (old_root, _) =
+                    (mutator_set.swbf_inactive.num_leafs() >> (height + 1)).count_ones() as usize;
+                let (old_root, new_root) =
                     UpdateTreeLeaf::try_roots(height, paths, &old_leafs, &new_leafs)
                         .expect("chunks must sit in the running tree");
                 assert_eq!(
-                    swbfi_peaks.get(peak_index as usize),
+                    peaks.get(peak_index),
                     Some(&old_root),
                     "chunks must authenticate against the inactive SWBF"
                 );
+                peaks[peak_index] = new_root;
             }
-
-            Self::apply_removals(
-                &Self::packed_form(inputs.to_vec(), mutator_set),
-                mutator_set,
-            )
-            .swbf_inactive
-            .peaks()
+            peaks
         }
     }
 }
