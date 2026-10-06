@@ -14,8 +14,8 @@ use tasm_lib::prelude::DataType;
 use tasm_lib::prelude::Library;
 use tasm_lib::triton_vm::prelude::*;
 
+use super::hash_blocks::HashBlocks;
 use super::hash_chunk_with_insertions::HashChunkWithInsertions;
-use super::hash_words::HashWords;
 use super::insert_into_window::InsertIntoWindow;
 use super::update_tree_leaf::UpdateTreeLeaf;
 use crate::block::block_validation_error::BlockValidationRule;
@@ -31,9 +31,10 @@ use crate::block::block_validation_error::BlockValidationRule;
 /// ```
 ///
 /// `*chunk_indices` lists the chunks' leaf indices in ascending order,
-/// `*chunks` and `*insertions` pointers to the unpacked chunks, each
-/// preceded by the word that begins its encoding, and to the sorted indices
-/// inserted into each, in the same order. `*tree_paths` lists a pointer to
+/// `*chunks` and `*insertions` pointers to the chunks' lists, each a word
+/// past the start of the chunk's storage (see
+/// [`HashBlocks::chunk_storage`]), and to the sorted indices inserted
+/// into each, in the same order. `*tree_paths` lists a pointer to
 /// the path list of each tree of an inactive SWBF with the estimated leaf
 /// count, in ascending tree height, the way the witness describes it: the
 /// authentication paths of the tree's chunks back to back, each against
@@ -233,7 +234,7 @@ impl BasicSnippet for MutateSwbfiPeaks {
         let get_pointer = library.import(Box::new(Get::new(DataType::Bfe)));
         let get_digest = library.import(Box::new(Get::new(DataType::Digest)));
         let set_digest = library.import(Box::new(Set::new(DataType::Digest)));
-        let hash_words = library.import(Box::new(HashWords));
+        let hash_blocks = library.import(Box::new(HashBlocks));
         let log_2_floor = library.import(Box::new(Log2Floor));
         let pow2 = library.import(Box::new(Pow2));
         let popcount = library.import(Box::new(PopCount));
@@ -478,7 +479,8 @@ impl BasicSnippet for MutateSwbfiPeaks {
             // The hash of the chunk at a position before and after its
             // insertions. The chunk is sorted, as every chunk that hashes to
             // a leaf of the inactive SWBF is, so the insertion hashes the
-            // sorted union the mutator set produces.
+            // sorted union the mutator set produces. The storage holds the
+            // old encoding padded, so its blocks hash as they are.
             // BEFORE: _ p
             // AFTER:  _ [old] [new]
             {chunk_hashes}:
@@ -486,7 +488,8 @@ impl BasicSnippet for MutateSwbfiPeaks {
                 addi -1
                 // _ p *encoding
 
-                dup 0 dup 0 read_mem 1 pop 1 addi 1 call {hash_words}
+                dup 0 dup 0 addi 1 read_mem 1 pop 1 addi 12 push 10 swap 1 div_mod pop 1
+                call {hash_blocks}
                 // _ p *encoding [old]
 
                 dup 5
@@ -690,15 +693,22 @@ mod tests {
             let mut ram = HashMap::new();
             encode_to_memory(&mut ram, pointer(0), &self.chunk_indices);
             let mut next = pointer(5);
-            // The chunks lie in their encodings, a word past the length.
+            // The chunks lie in their storage, a word past its start.
             let chunks = self
                 .chunks()
-                .into_iter()
-                .map(|relative_indices| Chunk { relative_indices })
+                .iter()
+                .map(|chunk| HashBlocks::chunk_storage(chunk))
                 .collect_vec();
-            let chunks = lists_of_lists(&mut ram, &mut next, &chunks)
-                .into_iter()
-                .map(|encoding| encoding + bfe!(1))
+            let chunks = chunks
+                .iter()
+                .map(|storage| {
+                    let pointer = next;
+                    for (i, &word) in storage.iter().enumerate() {
+                        ram.insert(pointer + bfe!(i as u64), word);
+                    }
+                    next += bfe!(1 << 16);
+                    pointer + bfe!(1)
+                })
                 .collect_vec();
             encode_to_memory(&mut ram, pointer(1), &chunks);
             let insertions = lists_of_lists(&mut ram, &mut next, &self.insertions);

@@ -18,6 +18,7 @@
 //!
 //! The snippets the leaf is built from live here as well.
 
+mod absorb_blocks;
 pub mod aggregation;
 mod chunk_insertions;
 pub(super) mod chunk_witness;
@@ -31,8 +32,8 @@ mod counter_tree_removals;
 #[cfg(test)]
 mod counter_tree_root;
 mod divined_chunk_indices;
+mod hash_blocks;
 mod hash_chunk_with_insertions;
-mod hash_words;
 mod insert_into_window;
 pub mod leaf;
 mod mutate_swbfi_peaks;

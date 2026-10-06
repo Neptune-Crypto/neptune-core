@@ -16,12 +16,14 @@ use crate::block::block_validation_error::BlockValidationRule;
 /// AFTER:  _ *chunk_pointers *path_pointers [swbfi_leaf_count_estimate: u64]
 /// ```
 ///
-/// `*chunks` lists the chunks' index lists in ascending chunk index,
+/// `*chunks` lists the chunks' storage in ascending chunk index (see
+/// [`HashBlocks::chunk_storage`](super::hash_blocks::HashBlocks::chunk_storage)),
 /// `*tree_heights` the heights of the trees of an inactive SWBF the chunks
 /// lie in, strictly increasing, and `*tree_paths` one digest list per
-/// tree in the same order. `*chunk_pointers` and `*path_pointers` list
-/// pointers to each chunk's and each tree's list, and the estimate is the
-/// leaf count of the smallest inactive SWBF with those trees.
+/// tree in the same order. `*chunk_pointers` lists a pointer to each
+/// chunk's list, a word past its storage's first word, `*path_pointers` a
+/// pointer to each tree's digest list, and the estimate is the leaf count
+/// of the smallest inactive SWBF with those trees.
 ///
 /// Crashes with the error ID of rule 2.a unless the heights strictly
 /// increase and come one per path list.
@@ -88,8 +90,10 @@ impl BasicSnippet for WitnessLists {
                 // _ *chunks *tree_heights *tree_paths
                 dup 1 read_mem 1 pop 1 dup 1 read_mem 1 pop 1
                 eq assert error_id {error_id}
-                pick 2 call {pointers}
-                pick 1 call {pointers}
+                // A chunk's list sits two words past its element: past
+                // the element's own length and the storage's first word.
+                pick 2 push 2 call {pointers}
+                pick 1 push 0 call {pointers}
                 // _ *tree_heights *chunk_pointers *path_pointers
 
                 pick 2 call {estimate}
@@ -98,27 +102,28 @@ impl BasicSnippet for WitnessLists {
                 return
 
             // Collects a pointer to each element of a list of dynamically
-            // sized elements: to the word after the element's size.
-            // BEFORE: _ *list
+            // sized elements: to the word after the element's size, plus
+            // the offset.
+            // BEFORE: _ *list offset
             // AFTER:  _ *pointers
             {pointers}:
-                read_mem 1 addi 2
+                swap 1 read_mem 1 addi 2
                 call {new_list}
                 dup 2 dup 1 write_mem 1 pop 1
-                place 2 push 0
-                // _ *pointers len *element[0]_si 0
+                place 3 push 0
+                // _ *pointers offset len *element[0]_si 0
 
                 call {pointers_loop}
-                pop 3
+                pop 4
                 return
 
-            // INVARIANT: _ *pointers len *element[i]_si i
+            // INVARIANT: _ *pointers offset len *element[i]_si i
             {pointers_loop}:
                 dup 2 dup 1 eq skiz return
-                dup 1 addi 1
-                dup 4 dup 2 add addi 1
+                dup 1 addi 1 dup 4 add
+                dup 5 dup 2 add addi 1
                 write_mem 1 pop 1
-                // _ *pointers len *element[i]_si i
+                // _ *pointers offset len *element[i]_si i
 
                 pick 1 read_mem 1
                 // Crashes unless the size is a u32.
