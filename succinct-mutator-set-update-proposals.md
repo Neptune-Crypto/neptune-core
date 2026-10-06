@@ -375,17 +375,17 @@ against the host (`profile_both_forms` in
 
 | Per input | List form, 410 per chunk | List form, empty chunks | Counter form |
 |---|---:|---:|---:|
-| Processor rows | 66,774 (58,360 flat, padded) | 54,381 (45,015 flat, padded) | 15,972 |
+| Processor rows | 66,774 (55,882 now) | 54,381 (42,538 now) | 15,972 |
 | U32 rows | 14,687 | 12,466 | 20,601 |
 | Hash rows | 29,176 | 8,820 | 14,893 |
 | RAM rows | 48,559 | 12,820 | 14,373 |
-| Tallest table | 66,774 (58,360 flat, padded) | 54,381 (45,015 flat, padded) | 20,601 |
+| Tallest table | 66,774 (55,882 now) | 54,381 (42,538 now) | 20,601 |
 | Inputs per 2^21 leaf | 31 | 38 | 101 |
 
 The tallest table sets what a leaf buys: 21k rows per input against 67k,
-a factor 3.2, or 2.8 against the list form with the flattened witness
-of 2026-10-07 and the padded chunk storage of 2026-10-08 ("flat, padded"
-in the table), which the counter form shares. The counter form is u32-bound, 15.5k of its rows per input
+a factor 3.2, or 2.7 against the list form after the flattened witness,
+the padded chunk storage and the merged resolution of 2026-10-07 and
+2026-10-08 ("now" in the table), which the counter form shares. The counter form is u32-bound, 15.5k of its rows per input
 being the `merkle_step_mem` steps of the walks, 52 per index at this
 forest height of 26; that is the floor of this design. The list form at
 density zero (`witness_with_empty_chunks`, the fixture with every chunk
@@ -837,6 +837,13 @@ either design against one for the absorption itself, so the floor of
 this approach is near the staging code's cost. The per-chunk cost of the
 two hashes is now about 180 rows of control per hash over 42
 absorptions; what remains above the RAM floor is the index bookkeeping.
+
+Rule 2.a's resolution and the insertion lists in one pass, 2026-10-08
+(`ChunkInsertions` absorbs `ResolveChunkIndices`): each index of the
+inactive part resolves to its chunk once, counts the chunk's use and
+takes its slot in the chunk's sorted list in the same routine. 55.9k per
+input at the fixture's density, 42.5k with empty chunks; every table
+fell, the u32 table by 0.9k for the arithmetic no longer done twice.
 
 `PredecessorIsValid`, without the verification of the previous block's
 proof (ignored test `profile_skipping_program_by_transaction_shape`, which
