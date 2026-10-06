@@ -479,18 +479,24 @@ mod tests {
 
     /// The plugin cookie lies in `neptune-core`'s data directory for the
     /// network, wherever `--data-dir` puts it.
+    ///
+    /// The data directory is absolute on every platform. On Windows, a path
+    /// such as `/srv/neptune data` is not, since it names no drive, and
+    /// `neptune-core` puts it on the drive of the user's application data.
     #[test]
     fn the_cookie_lies_in_the_data_directory() {
+        let data_dir = std::env::temp_dir().join("neptune data");
+        let data_dir = data_dir.to_str().unwrap();
         for user in [
-            args(&["--data-dir", "/srv/neptune data", "-n", "regtest"]),
-            args(&["--data-dir=/srv/neptune data", "--network=regtest"]),
+            args(&["--data-dir", data_dir, "-n", "regtest"]),
+            args(&[&format!("--data-dir={data_dir}"), "--network=regtest"]),
         ] {
             let node = node_command(&user, &notify()).unwrap();
             assert_eq!(
-                cookie_path(Some("/srv/neptune data"), Network::RegTest),
+                cookie_path(Some(data_dir), Network::RegTest),
                 node.cookie_path
             );
-            assert!(node.cookie_path.starts_with("/srv/neptune data"));
+            assert!(node.cookie_path.starts_with(data_dir));
         }
     }
 
