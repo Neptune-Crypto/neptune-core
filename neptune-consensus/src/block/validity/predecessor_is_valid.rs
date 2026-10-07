@@ -2643,6 +2643,9 @@ mod tests {
     use tasm_lib::triton_vm::execution_trace_profiler::ExecutionTraceProfile;
     use tasm_lib::triton_vm::execution_trace_profiler::VMTableHeights;
 
+    use super::super::extension_claim::ExtensionClaim;
+    use super::super::extension_claim::ExtensionClaimWitness;
+    use super::super::extension_claim::ParentForExtension;
     use super::super::swbf_update::aggregation::tests::claim_over_halves;
     use super::super::swbf_update::chunk_witness::ChunkWitness;
     use super::super::swbf_update::leaf::CorrectSwbfUpdateWitness;
@@ -2663,6 +2666,7 @@ mod tests {
     use crate::proof_abstractions::tasm::program::proof_cache::load_proof_or_produce_and_save;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::proof_abstractions::test_runtime::tokio_runtime;
+    use crate::proof_abstractions::SecretWitness;
     use crate::transaction::announcement::Announcement;
     use crate::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::transaction::transparent_input::TransparentInput;
@@ -3928,6 +3932,34 @@ mod tests {
                     unproven_prev_block_and_next_body_and_header(seed);
                 assert_accepts(&skipping(), &prev_block, &next_body, &next_header);
             }
+        }
+
+        #[test]
+        fn prev_block_carrying_an_unknown_claim_is_accepted() {
+            let prev_prev_block = random_unproven_block(0);
+            let (body, header) = next_body_and_header(&prev_prev_block, 0);
+
+            // The new "extension" claim carries its *own* check that the
+            // claim was present in the parent. Together with the parent-proof
+            // verification in PredecessorIsValid, these two checks allow new
+            // rules to be added as a softfork, where the new rules enforce
+            // their own recursion, i.e., their own presence in the parent
+            // block.
+            let extension = ExtensionClaim::new(&skipping(), activation_height().value());
+            let extension_claim = extension.claim(prev_prev_block.hash(), body.mast_hash());
+            let own_claim = own_claim(&skipping(), &prev_prev_block, &body, &header);
+            let prev_block = unproven_block(header, body, vec![extension_claim, own_claim]);
+            let (next_body, next_header) = next_body_and_header(&prev_block, 0);
+            assert_accepts(&skipping(), &prev_block, &next_body, &next_header);
+
+            let witness = ExtensionClaimWitness::new(
+                extension,
+                prev_block.hash(),
+                next_body.mast_hash(),
+                ParentForExtension::new(&prev_block),
+            );
+            let input = witness.standard_input();
+            assert!(extension.run_tasm(&input, witness.nondeterminism()).is_ok());
         }
 
         #[test]
