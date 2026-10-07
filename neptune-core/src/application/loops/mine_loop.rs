@@ -30,6 +30,7 @@ use neptune_job_queue::errors::JobHandleError;
 use neptune_mempool::tx_upgrade_filter::TxUpgradeFilter;
 use neptune_mempool::upgrade_priority::UpgradePriority;
 use neptune_primitives::difficulty_control::difficulty_control;
+use neptune_primitives::mast_hash::MastHash;
 use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 use neptune_wallet::composer_parameters::prepare_coinbase_transaction_stateless;
@@ -102,9 +103,13 @@ pub(crate) async fn compose_block_helper(
     Ok((compose_result, composer_utxos))
 }
 
+/// How long the composer waits for an RPC caller to replace a coinbase
+/// transaction that no longer fits before it composes without one.
+const CALLER_COINBASE_TX_WAIT: Duration = Duration::from_secs(1);
+
 async fn compose_block(
     latest_block: Block,
-    global_state_lock: GlobalStateLock,
+    mut global_state_lock: GlobalStateLock,
     sender: oneshot::Sender<(Block, Vec<ExpectedUtxo>)>,
     cancel_compose_rx: tokio::sync::watch::Receiver<()>,
     now: Timestamp,
@@ -119,8 +124,69 @@ async fn compose_block(
         .proof_job_options(TritonVmJobPriority::High);
     job_options.cancel_job_rx = Some(cancel_compose_rx);
 
-    let (proposal, composer_utxos) =
-        compose_block_helper(latest_block, global_state_lock, timestamp, job_options).await?;
+    // An RPC caller who sets coinbase transactions hears of the new tip after
+    // this node does, so a transaction it set that does not fit this block was
+    // built for an older tip. The composer unsets it and gives the caller a
+    // moment to set one for this tip. A transaction that fits and arrives
+    // later still wins, also when none was set to begin with: the composition
+    // that began without it is dropped, which cancels its proof jobs, and
+    // begins again.
+    let mut caller_tx = global_state_lock
+        .lock_guard()
+        .await
+        .mining_state
+        .watch_coinbase_tx();
+    let stale = caller_tx
+        .borrow_and_update()
+        .as_ref()
+        .map(|tx| tx.kernel.mast_hash());
+    let mut late = true;
+    if let Some(stale) = stale {
+        if caller_coinbase_tx(&latest_block, &global_state_lock)
+            .await
+            .is_some()
+        {
+            late = false;
+        } else {
+            global_state_lock
+                .lock_guard_mut()
+                .await
+                .mining_state
+                .unset_coinbase_tx_if(stale);
+            late = time::timeout(CALLER_COINBASE_TX_WAIT, caller_tx.wait_for(Option::is_some))
+                .await
+                .is_err();
+        }
+    }
+
+    let compose = compose_block_helper(
+        latest_block.clone(),
+        global_state_lock.clone(),
+        timestamp,
+        job_options.clone(),
+    );
+    let composition = if late {
+        tokio::pin!(compose);
+        loop {
+            select! {
+                composition = &mut compose => break Some(composition),
+                Ok(_) = caller_tx.changed() => {
+                    if caller_coinbase_tx(&latest_block, &global_state_lock).await.is_some() {
+                        break None;
+                    }
+                }
+            }
+        }
+    } else {
+        Some(compose.await)
+    };
+    let (proposal, composer_utxos) = match composition {
+        Some(composition) => composition?,
+        None => {
+            info!("Coinbase transaction set by RPC caller arrived late; composing again.");
+            compose_block_helper(latest_block, global_state_lock, timestamp, job_options).await?
+        }
+    };
 
     // Please clap.
     match sender.send((proposal, composer_utxos)) {
@@ -1822,6 +1888,110 @@ pub(crate) mod tests {
         let (main_state, _) = state_with_caller_tx(Network::Main, in_time_on_main).await;
         assert!(caller_coinbase_tx(&main_genesis_block, &main_state)
             .await
+            .is_none());
+    }
+
+    /// A coinbase transaction an RPC caller set that does not fit the block
+    /// is unset, and the composer waits for the caller to set one that does.
+    /// It uses a transaction set within the wait, and composes without one
+    /// if none is.
+    #[apply(shared_tokio_runtime)]
+    async fn composer_replaces_a_caller_coinbase_tx_that_does_not_fit() {
+        let network = Network::RegTest;
+        let genesis_block = Block::genesis(network);
+        let genesis_timestamp = genesis_block.header().timestamp;
+        let now = genesis_timestamp + Timestamp::hours(2);
+
+        /// A coinbase transaction for block 1, timestamped `timestamp`, paying
+        /// an address outside the wallet.
+        fn caller_tx(genesis_block: &Block, timestamp: Timestamp) -> PrimitiveWitness {
+            let mut rng = rand::rng();
+            let caller_address = GenerationReceivingAddress::derive_from_seed(rng.random());
+            let caller_parameters = ComposerParameters::new(
+                CoinbaseDistribution::solo(caller_address.into()),
+                rng.random(),
+                None,
+                0.5,
+                FeeNotificationPolicy::OnChainGeneration,
+            );
+            let (_, details) = prepare_coinbase_transaction_stateless(
+                genesis_block,
+                caller_parameters,
+                timestamp,
+                Network::RegTest,
+            );
+            details.primitive_witness()
+        }
+
+        /// Compose block 1 on a state holding `stale`, while a caller sets
+        /// `fresh`, if any, a fifth of the wait after composition begins.
+        async fn compose(
+            genesis_block: &Block,
+            now: Timestamp,
+            stale: PrimitiveWitness,
+            fresh: Option<PrimitiveWitness>,
+        ) -> (Block, GlobalStateLock) {
+            let cli = cli_args::Args::default_with_network(Network::RegTest);
+            let mut state = mock_genesis_global_state(2, WalletEntropy::devnet_wallet(), cli).await;
+            state
+                .lock_guard_mut()
+                .await
+                .mining_state
+                .set_coinbase_tx(Some(stale));
+
+            let (sender, receiver) = oneshot::channel();
+            let (_cancel_compose_tx, cancel_compose_rx) = tokio::sync::watch::channel(());
+            let composer = tokio::spawn(compose_block(
+                genesis_block.clone(),
+                state.clone(),
+                sender,
+                cancel_compose_rx,
+                now,
+            ));
+            if let Some(fresh) = fresh {
+                sleep(CALLER_COINBASE_TX_WAIT / 5).await;
+                state
+                    .lock_guard_mut()
+                    .await
+                    .mining_state
+                    .set_coinbase_tx(Some(fresh));
+            }
+            composer.await.unwrap().unwrap();
+
+            (receiver.await.unwrap().0, state)
+        }
+
+        // Timestamped no later than its predecessor, a transaction does not
+        // fit.
+        let stale = caller_tx(&genesis_block, genesis_timestamp);
+        let fresh = caller_tx(&genesis_block, genesis_timestamp + Timestamp::hours(1));
+
+        let (block, _) = compose(&genesis_block, now, stale.clone(), Some(fresh.clone())).await;
+        assert!(block.is_valid(&genesis_block, now, network).await);
+        let block_kernel = &block.body().transaction_kernel;
+        assert!(fresh
+            .kernel
+            .outputs
+            .iter()
+            .all(|o| block_kernel.outputs.contains(o)));
+
+        let (unanswered_block, state) = compose(&genesis_block, now, stale.clone(), None).await;
+        assert!(
+            unanswered_block
+                .is_valid(&genesis_block, now, network)
+                .await
+        );
+        let unanswered_kernel = &unanswered_block.body().transaction_kernel;
+        assert!(!stale
+            .kernel
+            .outputs
+            .iter()
+            .any(|o| unanswered_kernel.outputs.contains(o)));
+        assert!(state
+            .lock_guard()
+            .await
+            .mining_state
+            .coinbase_tx()
             .is_none());
     }
 
