@@ -898,3 +898,22 @@ Next: the host side of e1, which is where the 11.4k drops to 3.1k; the
 assessment of e'_1 and e'_2, the composer or guesser holding the archival
 mutator set; and the f prototype, a chunk hash over a Merkle tree, for the
 leaf numbers it gives.
+
+### Soft forks of new claims
+
+The design admits new recursive rules without a new `PredecessorIsValid`.
+Rule 1.d builds the parent's block claim from the parent's appendix as
+divined and authenticated against the parent's hash, with the hash of every
+appendix claim as the claim's output, and verifies the parent's proof against
+it; so every claim in the parent's appendix is proven, whatever it is. A new
+program therefore enforces its own recursion: besides its rule it finds its
+own claim in the parent's appendix, with the parent's parent hash and body
+hash as input, accepting absence below its activation height. Old nodes
+verify the new claim's proof through the block program and never look for
+it, so requiring it is a soft fork; new nodes require it in the tip. Nothing
+in the predecessor program changes. Conditions: the predecessor claim is
+required, since it is the only proof verifier, and the new program activates
+no earlier than it. Upgrading such a program stacks the old one for as long
+as old nodes require it, at the cost of its own proof only. A tip's header
+cannot be bound by any claim, since proofs precede guessing, so header rules
+are checked for the parent, as the guesser's reveal is.
