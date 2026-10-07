@@ -30,6 +30,7 @@ pub mod correct_mutator_set_update;
 pub mod difficulty_control;
 pub mod epoch_table;
 mod guesser_fee_addition_records;
+pub mod knows_mutator_set;
 mod meets_threshold;
 pub mod mmr_membership;
 mod mutator_set_hash;

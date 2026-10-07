@@ -47,7 +47,9 @@ use super::epoch_table::Epoch;
 use super::epoch_table::EpochTable;
 use super::epoch_table::NUM_EPOCHS;
 use super::guesser_fee_addition_records::GuesserFeeAdditionRecords;
+use super::knows_mutator_set::KnowsMutatorSet;
 use super::meets_threshold::MeetsThreshold;
+use super::mutator_set_hash::BagPeaksFromList;
 use super::mutator_set_hash::MutatorSetHash;
 use super::mutator_set_hash::MutatorSetHashFromComponents;
 use super::mutator_set_update_from_state_hash::MutatorSetUpdateFromStateHash;
@@ -460,6 +462,13 @@ impl TritonProgram for PredecessorIsValid {
         let mutator_set_hash = library.import(Box::new(MutatorSetHash));
         let mutator_set_update = library.import(Box::new(MutatorSetUpdateFromStateHash));
         let removal_index_commitment = library.import(Box::new(RemovalIndexCommitment));
+        let bag_peaks = library.import(Box::new(BagPeaksFromList));
+        // What the claim to know the mutator set in the previous block's
+        // appendix must bind: the previous block's parent, its AOCL and its
+        // inactive SWBF.
+        let sample_claim_input_alloc = library.kmalloc(3 * Digest::LEN as u32);
+        let push_knows_mutator_set_program_digest =
+            Literal::Digest(KnowsMutatorSet.hash()).push_to_stack_code();
         // What the SWBF update claim in the previous block's appendix must
         // bind: the mutator set after the previous block's predecessor, and
         // the previous block's inputs.
@@ -1207,6 +1216,86 @@ impl TritonProgram for PredecessorIsValid {
                 return
         );
 
+        // Whether the claim input, whose program digest and length already
+        // match the claim to know the mutator set, binds the previous block's
+        // parent, AOCL and inactive SWBF.
+        let sample_claim_input_matches =
+            "predecessor_is_valid_sample_claim_input_matches".to_string();
+        let sample_claim_input_matches_code = triton_asm!(
+            // BEFORE: _ *input 1
+            // AFTER:  _ *input input_matches
+            {sample_claim_input_matches}:
+                pop 1
+                dup 0 addi {Digest::LEN} read_mem {Digest::LEN} pop 1
+                swap 4 swap 1 swap 3 swap 1
+                // _ *input [prev_prev_block_hash_in_input]
+                push {sample_claim_input_alloc.write_address()} {&read_digest}
+                {&digests_are_equal}
+                // _ *input parent_matches
+                dup 1 addi {2 * Digest::LEN} read_mem {Digest::LEN} pop 1
+                swap 4 swap 1 swap 3 swap 1
+                // _ *input parent_matches [bagged_aocl_peaks_in_input]
+                push {sample_claim_input_alloc.write_address()} addi {Digest::LEN} {&read_digest}
+                {&digests_are_equal}
+                mul
+                // _ *input parent_and_aocl_match
+                dup 1 addi {3 * Digest::LEN} read_mem {Digest::LEN} pop 1
+                swap 4 swap 1 swap 3 swap 1
+                // _ *input parent_and_aocl_match [bagged_swbfi_peaks_in_input]
+                push {sample_claim_input_alloc.write_address()} addi {2 * Digest::LEN} {&read_digest}
+                {&digests_are_equal}
+                mul
+                // _ *input input_matches
+                return
+        );
+
+        // Find the claim to know the previous block's mutator set in its
+        // appendix.
+        let find_sample_claim = "predecessor_is_valid_find_sample_claim".to_string();
+        let find_sample_claim_code = triton_asm!(
+            // INVARIANT: _ *claim[i]_si num_claims i
+            {find_sample_claim}:
+                dup 1 dup 1 eq
+                push 0 eq assert error_id {BlockValidationRule::AppendixMissingClaim.error_id()}
+                // _ *claim[i]_si num_claims i
+
+                dup 2 addi 1 {&field!(Claim::program_digest)} {&read_digest}
+                {&push_knows_mutator_set_program_digest}
+                {&digests_are_equal}
+                dup 3 addi 1 {&field!(Claim::version)} read_mem 1 pop 1
+                push {version} eq mul
+                // _ *claim[i]_si num_claims i program_and_version_match
+
+                dup 3 addi 1 {&field_with_size!(Claim::input)}
+                // _ *claim[i]_si num_claims i program_matches *input input_size
+
+                // The size counts the length word the pointer points at.
+                push {3 * Digest::LEN + 1} eq
+                pick 2 mul
+                // _ *claim[i]_si num_claims i *input shape_matches
+
+                dup 0 skiz call {sample_claim_input_matches}
+                place 1 pop 1
+                // _ *claim[i]_si num_claims i is_sample_claim_about_prev_block
+
+                skiz return
+                // _ *claim[i]_si num_claims i
+
+                pick 2 read_mem 1
+                // _ num_claims i claim_size (*claim[i]_si - 1)
+
+                // Crashes unless the size is a u32.
+                dup 1 pop_count pop 1
+
+                addi 2 add
+                // _ num_claims i *claim[i+1]_si
+
+                place 2 addi 1
+                // _ *claim[i+1]_si num_claims (i + 1)
+
+                recurse
+        );
+
         // Find the aggregated SWBF update claim for the previous block's
         // transaction in the previous block's appendix. Sets the index to the
         // matching claim.
@@ -1844,6 +1933,58 @@ impl TritonProgram for PredecessorIsValid {
         let (rule_2l_prev, rule_2l_prev_code) = subroutine("rule_2l_prev", rule_2l_prev);
         let (rule_2s_prev, rule_2s_prev_code) = subroutine("rule_2s_prev", rule_2s_prev);
 
+        // The mutator set after the previous block's parent, which its
+        // transaction is built on; rule 2.t authenticates it.
+        // BEFORE: _ *w
+        // AFTER:  _ *mutator_set
+        let prev_block_mutator_set = triton_asm!({
+            &field!(PredecessorIsValidWitnessMemory::prev_block_transaction_mutator_set)
+        });
+        // BEFORE: _ *mmr
+        // AFTER:  _ [bagged_peaks]
+        let bag_mmr = triton_asm!(
+            dup 0 {&field!(MmrAccumulator::peaks)}
+            swap 1 {&field!(MmrAccumulator::leaf_count)} addi 1 read_mem 2 pop 1
+            call {bag_peaks}
+        );
+
+        // 1.a) The claim to know the mutator set after the previous block's
+        // parent.
+        let swbfi_reveals_required_prev =
+            "predecessor_is_valid_swbfi_reveals_required_prev".to_string();
+        let swbfi_reveals_required_prev_code = triton_asm!(
+            // BEFORE: _ *w [prev_block_hash] *prev_claim_output
+            // AFTER:  _ *w [prev_block_hash] *prev_claim_output
+            {swbfi_reveals_required_prev}:
+                dup 6 {&prev_block_header} {&field!(BlockHeader::prev_block_digest)} {&read_digest}
+                push {sample_claim_input_alloc.write_address()} write_mem {Digest::LEN} pop 1
+                dup 6 {&prev_block_mutator_set} {&field!(MutatorSetAccumulator::aocl)} {&bag_mmr}
+                push {sample_claim_input_alloc.write_address()} addi {Digest::LEN}
+                write_mem {Digest::LEN} pop 1
+                dup 6 {&prev_block_mutator_set} {&field!(MutatorSetAccumulator::swbf_inactive)} {&bag_mmr}
+                push {sample_claim_input_alloc.write_address()} addi {2 * Digest::LEN}
+                write_mem {Digest::LEN} pop 1
+                // _ *w [prev_block_hash] *prev_claim_output
+
+                dup 6 {&field!(PredecessorIsValidWitnessMemory::prev_block_appendix)}
+                {&field!(BlockAppendix::claims)}
+                read_mem 1 addi 2 place 1 push 0
+                // _ *w [prev_block_hash] *prev_claim_output *claim[0]_si num_claims 0
+
+                call {find_sample_claim}
+                pop 3
+                // _ *w [prev_block_hash] *prev_claim_output
+                return
+        );
+
+        // BEFORE: _ *w [prev_block_hash] *prev_claim_output
+        // AFTER:  _ *w [prev_block_hash] *prev_claim_output
+        let swbfi_reveals_prev = triton_asm!(
+            push {prev_epoch_alloc.read_address()} read_mem 1 pop 1
+            {&field!(Epoch::requires_mutator_set_reveals)} read_mem 1 pop 1
+            skiz call {swbfi_reveals_required_prev}
+        );
+
         let prev_block_epoch_rules = "predecessor_is_valid_prev_block_epoch_rules".to_string();
         let prev_block_epoch_rules_code = triton_asm!(
             // BEFORE: _ *w [prev_block_hash]
@@ -1896,6 +2037,8 @@ impl TritonProgram for PredecessorIsValid {
                 // _ *w [prev_block_hash] *prev_claim_output
 
                 call {mutator_set_update_prev}
+                // _ *w [prev_block_hash] *prev_claim_output
+                {&swbfi_reveals_prev}
                 // _ *w [prev_block_hash] *prev_claim_output
 
                 {&prev_block_resets_lustration_status}
@@ -2430,6 +2573,9 @@ impl TritonProgram for PredecessorIsValid {
             {&mutator_set_update_prev_code}
             {&swbf_claim_input_matches_code}
             {&find_swbf_claim_code}
+            {&sample_claim_input_matches_code}
+            {&find_sample_claim_code}
+            {&swbfi_reveals_required_prev_code}
             {&rule_2q_prev_code}
             {&rules_2o_2p_2r_prev_code}
             {&lustration_reset_prev_code}
@@ -2786,6 +2932,17 @@ mod tests {
                     output.mutator_set_hash,
                     &witness.prev_block_body.mutator_set_accumulator,
                 );
+                // 1.a) The claim to know the mutator set after the previous
+                // block's parent, where the epoch requires it.
+                if !prev_epoch.requires_mutator_set_reveals.is_zero() {
+                    let mutator_set = &witness.prev_block_transaction_mutator_set;
+                    let sample_claim = KnowsMutatorSet::claim(
+                        witness.prev_block_header.prev_block_digest,
+                        mutator_set,
+                        ConsensusRuleSet::HardforkDelta,
+                    );
+                    assert!(witness.prev_block_appendix.contains(&sample_claim));
+                }
 
                 // 1.e)
                 assert!(
@@ -2933,6 +3090,7 @@ mod tests {
             lustration_counter_initial: lustration_counter_initial(),
             resets_lustration_status: bfe!(0),
             min_swbf_padded_rows: bfe!(2 << FIXTURE_LEAF_LOG2_PADDED_HEIGHT),
+            requires_mutator_set_reveals: bfe!(0),
         }
     }
 
@@ -5605,6 +5763,236 @@ ones):
             let (next_body, next_header) = next_body_and_header(&prev_block, 0);
 
             (prev_block, next_body, next_header)
+        }
+
+        mod swbfi_reveals {
+            use neptune_mutator_set::addition_record::AdditionRecord;
+            use neptune_mutator_set::shared::BATCH_SIZE;
+
+            use super::*;
+            use crate::block::validity::knows_mutator_set::tests::ArchivalSwbfi;
+
+            fn epochs_requiring_reveals() -> EpochTable {
+                EpochTable::new(&[Epoch {
+                    requires_mutator_set_reveals: bfe!(1),
+                    ..activation_epoch()
+                }])
+            }
+
+            /// A mutator set whose inactive SWBF this is, with an AOCL that
+            /// one block's output and guesser fee records do not slide the
+            /// window past.
+            fn mutator_set_with_swbfi(
+                rng: &mut StdRng,
+                swbfi: &ArchivalSwbfi,
+            ) -> MutatorSetAccumulator {
+                let num_aocl_leafs = u64::from(BATCH_SIZE) * swbfi.num_leafs() + 1;
+                let aocl_leafs = (0..num_aocl_leafs).map(|_| rng.random()).collect();
+                MutatorSetAccumulator {
+                    aocl: MmrAccumulator::new_from_leafs(aocl_leafs),
+                    swbf_inactive: swbfi.accumulator(),
+                    ..Default::default()
+                }
+            }
+
+            /// The mutator set after this header's parent, which the block's
+            /// transaction is built on.
+            fn parent_mutator_set(header: &BlockHeader) -> MutatorSetAccumulator {
+                predecessor_by_hash(header.prev_block_digest)
+                    .unwrap()
+                    .mutator_set_accumulator_after()
+                    .unwrap()
+            }
+
+            fn sample_claim(_: &BlockBody, header: &BlockHeader) -> Vec<Claim> {
+                vec![KnowsMutatorSet::claim(
+                    header.prev_block_digest,
+                    &parent_mutator_set(header),
+                    ConsensusRuleSet::HardforkDelta,
+                )]
+            }
+
+            /// A previous block at the activation height on a parent whose
+            /// inactive SWBF this is, carrying a transaction with one output
+            /// and no inputs with its claims and the skipping program's
+            /// claim, with its header edited and these claims added, given
+            /// its body and header, and a next body and header for it.
+            fn prev_block_with_swbfi(
+                swbfi: &ArchivalSwbfi,
+                epochs: &EpochTable,
+                edit_header: impl FnOnce(&BlockBody, BlockHeader) -> BlockHeader,
+                extra_claims: impl FnOnce(&BlockBody, &BlockHeader) -> Vec<Claim>,
+            ) -> (Block, BlockBody, BlockHeader) {
+                let mut rng = StdRng::seed_from_u64(0);
+                let height = activation_height().value() - 1;
+                let (header, body) = random_header_and_body(0, height, random_timestamp(0));
+                let body = body_with_mutator_set(body, mutator_set_with_swbfi(&mut rng, swbfi));
+                let prev_prev_block = unproven_block(header, body, vec![]);
+                let kernel = TransactionKernelModifier::default()
+                    .inputs(vec![])
+                    .outputs(vec![AdditionRecord::new(rng.random())])
+                    .mutator_set_hash(mutator_set_hash_after(&prev_prev_block))
+                    .modify(transaction_kernel_and_proof().0.clone());
+                let mutator_set = &prev_prev_block.body().mutator_set_accumulator;
+                let (body, header) = next_body_and_header_with_transaction(
+                    &prev_prev_block,
+                    0,
+                    &kernel,
+                    mutator_set,
+                );
+                let header = edit_header(&body, header);
+                let transaction_claim =
+                    single_proof_claim(kernel.mast_hash(), ConsensusRuleSet::HardforkDelta);
+                let own_claim =
+                    own_claim_with_epochs(&skipping(), &prev_prev_block, &body, &header, epochs);
+                let claims = [
+                    vec![transaction_claim],
+                    swbf_update_claim(&header, &body).into_iter().collect(),
+                    vec![own_claim],
+                    extra_claims(&body, &header),
+                ]
+                .concat();
+                let prev_block = block_solved_by_nonce_search(
+                    header,
+                    body,
+                    BlockAppendix::new(claims),
+                    BlockProof::Invalid,
+                );
+                let (next_body, next_header) =
+                    next_body_and_header_with_transaction(&prev_block, 0, &kernel, mutator_set);
+                (prev_block, next_body, next_header)
+            }
+
+            #[test]
+            fn prev_block_with_mutator_set_claim_is_accepted() {
+                let mut rng = StdRng::seed_from_u64(1);
+                let epochs = epochs_requiring_reveals();
+                for num_leafs in [1, 2, 3, 35, 64] {
+                    let swbfi = ArchivalSwbfi::random(&mut rng, num_leafs);
+                    let (prev_block, next_body, next_header) =
+                        prev_block_with_swbfi(&swbfi, &epochs, |_, header| header, sample_claim);
+                    let parent_mutator_set = parent_mutator_set(prev_block.header());
+                    assert_eq!(
+                        swbfi.accumulator().peaks(),
+                        parent_mutator_set.swbf_inactive.peaks()
+                    );
+                    assert_ne!(
+                        parent_mutator_set.hash(),
+                        prev_block.body().mutator_set_accumulator.hash()
+                    );
+                    assert_accepts_with_epochs(
+                        &skipping(),
+                        &prev_block,
+                        &next_body,
+                        &next_header,
+                        &epochs,
+                    );
+                }
+            }
+
+            #[test]
+            fn prev_block_without_sample_claim_fails() {
+                let mut rng = StdRng::seed_from_u64(5);
+                let epochs = epochs_requiring_reveals();
+                let swbfi = ArchivalSwbfi::random(&mut rng, 35);
+                let (prev_block, next_body, next_header) =
+                    prev_block_with_swbfi(&swbfi, &epochs, |_, header| header, |_, _| vec![]);
+                assert_rejects_with_epochs(
+                    &skipping(),
+                    &prev_block,
+                    &next_body,
+                    &next_header,
+                    &epochs,
+                    BlockValidationRule::AppendixMissingClaim.error_id(),
+                );
+            }
+
+            #[test]
+            fn sample_claim_about_another_parent_or_mutator_set_fails() {
+                let mut rng = StdRng::seed_from_u64(6);
+                let epochs = epochs_requiring_reveals();
+                let swbfi = ArchivalSwbfi::random(&mut rng, 35);
+                let other_parent = |_: &BlockBody, header: &BlockHeader| {
+                    let mut parent = header.prev_block_digest;
+                    parent.0[0] += bfe!(1);
+                    vec![KnowsMutatorSet::claim(
+                        parent,
+                        &parent_mutator_set(header),
+                        ConsensusRuleSet::HardforkDelta,
+                    )]
+                };
+                let other_aocl = |_: &BlockBody, header: &BlockHeader| {
+                    let mut mutator_set = parent_mutator_set(header);
+                    mutator_set.aocl.append(Digest::default());
+                    vec![KnowsMutatorSet::claim(
+                        header.prev_block_digest,
+                        &mutator_set,
+                        ConsensusRuleSet::HardforkDelta,
+                    )]
+                };
+                let other_swbfi = |_: &BlockBody, header: &BlockHeader| {
+                    let mut mutator_set = parent_mutator_set(header);
+                    mutator_set.swbf_inactive.append(Digest::default());
+                    vec![KnowsMutatorSet::claim(
+                        header.prev_block_digest,
+                        &mutator_set,
+                        ConsensusRuleSet::HardforkDelta,
+                    )]
+                };
+                // The block's own state, which the claim is not about.
+                let own_state = |body: &BlockBody, header: &BlockHeader| {
+                    vec![KnowsMutatorSet::claim(
+                        header.prev_block_digest,
+                        &body.mutator_set_accumulator,
+                        ConsensusRuleSet::HardforkDelta,
+                    )]
+                };
+                let (prev_block, next_body, next_header) =
+                    prev_block_with_swbfi(&swbfi, &epochs, |_, header| header, other_parent);
+                assert_rejects_with_epochs(
+                    &skipping(),
+                    &prev_block,
+                    &next_body,
+                    &next_header,
+                    &epochs,
+                    BlockValidationRule::AppendixMissingClaim.error_id(),
+                );
+                for other_claim in [other_aocl, other_swbfi, own_state] {
+                    let (prev_block, next_body, next_header) =
+                        prev_block_with_swbfi(&swbfi, &epochs, |_, header| header, other_claim);
+                    assert_rejects_with_epochs(
+                        &skipping(),
+                        &prev_block,
+                        &next_body,
+                        &next_header,
+                        &epochs,
+                        BlockValidationRule::AppendixMissingClaim.error_id(),
+                    );
+                }
+            }
+
+            #[test]
+            fn epoch_without_reveals_requires_no_claim() {
+                let mut rng = StdRng::seed_from_u64(7);
+                let swbfi = ArchivalSwbfi::random(&mut rng, 35);
+                let (prev_block, next_body, next_header) =
+                    prev_block_with_swbfi(&swbfi, &epochs(), |_, header| header, |_, _| vec![]);
+                assert_accepts(&skipping(), &prev_block, &next_body, &next_header);
+                let (prev_block, next_body, next_header) = prev_block_with_swbfi(
+                    &swbfi,
+                    &epochs_requiring_reveals(),
+                    |_, header| header,
+                    |_, _| vec![],
+                );
+                assert_rejects_with_epochs(
+                    &skipping(),
+                    &prev_block,
+                    &next_body,
+                    &next_header,
+                    &epochs_requiring_reveals(),
+                    BlockValidationRule::AppendixMissingClaim.error_id(),
+                );
+            }
         }
 
         /// The epoch table whose activation epoch allows this many outputs

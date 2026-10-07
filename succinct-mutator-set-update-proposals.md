@@ -305,7 +305,31 @@ the block-size cap.
 e2) keeps the data in blocks and stops checking it: same proof cost, same
 fork, larger blocks. Dominated by e1).
 
-### e'_1) Composer proves knowledge of the archival mutator set, or of historical blocks
+### e'_1) Composer proves knowledge of the archival mutator set
+
+Implemented 2026-10-07 in the consensus crate, `validity/knows_mutator_set.rs`,
+gated by the epoch flag `requires_mutator_set_reveals`. The block's appendix
+carries a claim of the program `KnowsMutatorSet`: input the parent's hash and
+the bagged peaks of the AOCL and inactive SWBF after the parent, the mutator
+set the block's transaction is built on (the active window is in the parent's
+body), no output. The program divines the two MMRs, which must bag to the
+input, two chunks and one AOCL leaf with their authentication paths, and
+checks them at the leafs the parent's hash samples: the words of
+`hash_pair(parent_hash, 0)`, the first two modulo the SWBF's leaf count, the
+third modulo the AOCL's, any tree of either, since the composer cannot grind
+the parent's hash. An empty MMR leaves nothing to prove on its side. Three
+samples rather than one because the proof makes them cheap for everyone but
+the composer, and a composer who holds only a fraction of the set fails all
+three with the cube of the odds. `PredecessorIsValid` requires the claim as it
+requires the SWBF update claim: program digest, version and input length
+first, then the fifteen input words, with both MMRs bagged from the
+transaction's mutator set in memory, which rule 2.t authenticates. The block
+proof covers the claim's proof, and the claim depends on the parent alone, so
+the composer proves it as soon as the parent lands, in parallel with the
+rest. The guarantee is not that the composer holds the whole set, but that
+one without it fetches unpredictable pieces per block from someone who does. Cost: in the claim two chunk hashes and three
+paths, in `PredecessorIsValid` a claim search and two bags of peaks. Not yet
+wired: building the claim in the composer and the tip check on the host.
 
 ### e'_2) Guesser proves knowledge of the archival mutator set
 
@@ -345,10 +369,9 @@ sibling.
 
 ### e'') Composer reveals knowledge of the archival mutator set
 
-e'_1) and e'') are variants from the office mapping of who must hold the
-archival data once blocks stop carrying chunk data: the composer proves it,
-or proves the historical blocks instead; or the composer reveals it
-outright. Not yet assessed for proof cost or fork type.
+A variant of e'_1) where the composer reveals the sampled pieces outright in
+the block instead of proving them. Not assessed; e'_1) as implemented makes it
+moot unless the claim's proof turns out to be the composer's bottleneck.
 
 ### f) Merkle-tree chunks in the SWBF
 
