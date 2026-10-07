@@ -159,6 +159,12 @@ pub enum BlockValidationError {
     /// proofs of the leaf program execution in the SWBF update tree.
     #[error("SWBF update leaf proofs must meet the epoch's padded rows")]
     SwbfUpdateBelowWorkFloor,
+
+    /// 2.v) The guesser's proof-of-work field reveals a leaf of the first
+    ///      Merkle tree of the inactive SWBF, at the position sampled by the
+    ///      parent's hash and the guesser's receiver data.
+    #[error("Proof-of-work field must reveal the sampled leaf of the inactive SWBF")]
+    GuesserSwbfiReveal,
 }
 
 impl From<RemovalRecordListUnpackError> for BlockValidationError {

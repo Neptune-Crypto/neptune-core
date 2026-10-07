@@ -333,39 +333,31 @@ wired: building the claim in the composer and the tip check on the host.
 
 ### e'_2) Guesser proves knowledge of the archival mutator set
 
-The guesser reveals the hash of one chunk of the inactive SWBF with its
-authentication path to the SWBFI MMR root, at the index
-`f(prev_block_hash)`, unknowable before the previous block lands.
+Implemented 2026-10-07, `validity/swbfi_reveal.rs` with accessors on the PoW
+field, same epoch flag. The guesser reveals a leaf of the **first** Merkle
+tree, the tallest, of the inactive SWBF after the parent, the state a guesser
+holds before any proposal arrives, so a proposal needs no processing to be
+guessed on; with its authentication path, at index
+`w mod 2^height`, `w` the first word of
+`hash_pair(parent_hash, hash(guesser_receiver_data))`. The tree is not the
+guesser's to pick: a guesser could otherwise hold a small tree only. The
+two-parameter sample keeps the composer from bundling the reveal with the
+proposal, since the guesser is unknown then, and grinding the receiver data
+toward a held subtree gains nothing because the siblings change with every
+block. An empty inactive SWBF needs no reveal.
 
-The reveal lives in the free words of the PoW field, keeping the 10-permutation
-guessing loop. Light nodes verify it on the host machine in `solo_validate`. One
-chunk hash against the SWBFI peaks along the path. `PredecessorIsValid` repeats
-it for the predecessor in recursion at a few hundred hash rows.
-
-Picking the index using  `f(prev_block_hash, guesser_receiver_data)` can be made
-safe too: grinding the receiver data toward a held subtree gains nothing, since
-the siblings change with every block and only the whole tree keeps them current.
-However, the guesser may not be allowed to pick which *Merkle tree* they reveal
-from. That could be defined to either always be the largest, or the first
-(largest) one touched by this block. The two-parameter form also keeps the
-composer from bundling the reveal with the proposal, since the guesser is
-unknown then: every guesser holds the archival set or fetches from someone who
-does.
-
-What it guarantees is that the archival mutator set is readily available
-on the network, not that each guesser holds it, in the one-parameter model every
-guesser reveals the same chunk per block, so one can fetch it from an archival
-node. A competitor who can slow that response slows the guesser down, which is
-the incentive for serious miners to keep their own.
-
-Space: since hardfork beta, validation checks nothing in the PoW field
-but the threshold, the version word and the six lustration words, and the
-efficient guessing loop varies only the nine words after the lustration
-status, the nonce. So all of `path_b` and all of `path_a` but seven words
-are free: 56 whole digests, room for the chunk hash and a path of 55 digests.
-Should the largest tree ever outgrow that, the guesser reveals the last
-50-something leafs along the authentication path, along with the first elements
-sibling.
+Layout: the field's encoding lays `path_b` out before `path_a` (the codec
+derive reverses the fields), so the path is one stretch of memory, `path_b`
+then `path_a` up to its 26th digest, which holds the leaf: 54 levels at most,
+clear of the version word and the lustration words, so validation of those
+and the guessing loop are untouched. `PredecessorIsValid` walks it with
+`merkle_step_mem` straight out of the header in memory; node indices are u32
+there, so the walk splits after 31 levels, the rest of the sample's bits
+shifted down. A tree taller than 54 levels is rejected; that is 2^54 chunks.
+Host side, `guesser_reveal_is_valid(header, swbfi)` is the same check as an MMR
+membership proof against the first peak, for the tip. Not yet wired: the
+mining loop filling the reveal before guessing (the nonce loop itself is
+unchanged) and the RPC puzzle endpoints handing it to external guessers.
 
 ### e'') Composer reveals knowledge of the archival mutator set
 

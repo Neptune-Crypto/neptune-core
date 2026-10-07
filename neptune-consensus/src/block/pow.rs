@@ -398,6 +398,51 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         self.path_a[MERKLE_TREE_HEIGHT - 3] = Digest([prev_e0, prev_e1, prev_e2, prev_e3, value]);
     }
 
+    /// The tallest Merkle tree of the inactive SWBF a reveal fits.
+    pub const SWBFI_REVEAL_MAX_HEIGHT: usize = MERKLE_TREE_HEIGHT + Self::REVEAL_LEAF_INDEX;
+
+    /// The digest of path a that holds a revealed leaf. The encoding lays
+    /// path b out before path a, so the authentication path runs from the
+    /// start of path b into path a up to this digest, 55 digests in one
+    /// stretch of memory, ahead of the version word.
+    const REVEAL_LEAF_INDEX: usize = MERKLE_TREE_HEIGHT - 4;
+
+    /// Reveal this leaf of the inactive SWBF's first Merkle tree with its
+    /// authentication path.
+    ///
+    /// # Panics
+    ///
+    /// If the path is longer than [`Self::SWBFI_REVEAL_MAX_HEIGHT`].
+    pub fn set_swbfi_reveal(&mut self, leaf: Digest, path: &[Digest]) {
+        assert!(path.len() <= Self::SWBFI_REVEAL_MAX_HEIGHT);
+        self.path_a[Self::REVEAL_LEAF_INDEX] = leaf;
+        let slots = self
+            .path_b
+            .iter_mut()
+            .chain(&mut self.path_a[..Self::REVEAL_LEAF_INDEX]);
+        for (slot, sibling) in slots.zip(path) {
+            *slot = *sibling;
+        }
+    }
+
+    /// The revealed leaf of the inactive SWBF's first Merkle tree and its
+    /// authentication path, for a tree of this height.
+    ///
+    /// # Panics
+    ///
+    /// If the height exceeds [`Self::SWBFI_REVEAL_MAX_HEIGHT`].
+    pub fn swbfi_reveal(&self, height: usize) -> (Digest, Vec<Digest>) {
+        assert!(height <= Self::SWBFI_REVEAL_MAX_HEIGHT);
+        let path = self
+            .path_b
+            .iter()
+            .chain(&self.path_a[..Self::REVEAL_LEAF_INDEX])
+            .take(height)
+            .copied()
+            .collect();
+        (self.path_a[Self::REVEAL_LEAF_INDEX], path)
+    }
+
     pub fn guess(
         mast_auth_paths: &PowMastPaths,
         nonce: Digest,
@@ -657,6 +702,30 @@ pub(crate) mod tests {
         );
         assert!(guesser.guess(rng.random()).is_none());
         assert!(guesser.guess_many(&roots).is_none());
+    }
+
+    #[test]
+    fn swbfi_reveal_follows_the_nonce_in_the_encoding_as_path_then_leaf() {
+        let mut rng = StdRng::seed_from_u64(0);
+        let leaf: Digest = rng.random();
+        let path = (0..Pow::<POW_MEMORY_TREE_HEIGHT>::SWBFI_REVEAL_MAX_HEIGHT)
+            .map(|_| rng.random())
+            .collect_vec();
+        let mut pow = Pow::<POW_MEMORY_TREE_HEIGHT>::default();
+        pow.set_version_in_pow(bfe!(7));
+        pow.set_swbfi_reveal(leaf, &path);
+
+        let words = path
+            .iter()
+            .chain([&leaf])
+            .flat_map(|digest| digest.values())
+            .collect_vec();
+        assert_eq!(words, pow.encode()[Digest::LEN..Digest::LEN + words.len()]);
+        assert_eq!(
+            (leaf, path),
+            pow.swbfi_reveal(Pow::<POW_MEMORY_TREE_HEIGHT>::SWBFI_REVEAL_MAX_HEIGHT)
+        );
+        assert_eq!(bfe!(7), pow.version_in_pow());
     }
 
     #[test]

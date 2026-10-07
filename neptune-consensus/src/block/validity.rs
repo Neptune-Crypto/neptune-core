@@ -39,6 +39,7 @@ pub mod predecessor_is_valid;
 mod removal_record_pointers;
 mod removal_records_are_unique;
 pub mod swbf_update;
+pub mod swbfi_reveal;
 mod verified_lustration_amount;
 
 /// The validity of a block, in the principal case, decomposes into these subclaims.

@@ -65,6 +65,7 @@ use super::swbf_update::OUTPUT_MUTATOR_SET_HASH;
 use super::swbf_update::OUTPUT_NUM_PEAKS;
 use super::swbf_update::OUTPUT_PADDED_ROWS;
 use super::swbf_update::OUTPUT_PEAKS;
+use super::swbfi_reveal::GuesserSwbfiReveal;
 use super::verified_lustration_amount::VerifiedLustrationAmount;
 use crate::block::block_appendix::BlockAppendix;
 use crate::block::block_appendix::MAX_NUM_CLAIMS;
@@ -462,6 +463,7 @@ impl TritonProgram for PredecessorIsValid {
         let mutator_set_hash = library.import(Box::new(MutatorSetHash));
         let mutator_set_update = library.import(Box::new(MutatorSetUpdateFromStateHash));
         let removal_index_commitment = library.import(Box::new(RemovalIndexCommitment));
+        let guesser_swbfi_reveal = library.import(Box::new(GuesserSwbfiReveal));
         let bag_peaks = library.import(Box::new(BagPeaksFromList));
         // What the claim to know the mutator set in the previous block's
         // appendix must bind: the previous block's parent, its AOCL and its
@@ -1948,14 +1950,22 @@ impl TritonProgram for PredecessorIsValid {
             call {bag_peaks}
         );
 
-        // 1.a) The claim to know the mutator set after the previous block's
-        // parent.
+        // 2.v, 1.a) The guesser's reveal in the proof-of-work field and the
+        // claim to know the mutator set, both about the mutator set after the
+        // previous block's parent.
         let swbfi_reveals_required_prev =
             "predecessor_is_valid_swbfi_reveals_required_prev".to_string();
         let swbfi_reveals_required_prev_code = triton_asm!(
             // BEFORE: _ *w [prev_block_hash] *prev_claim_output
             // AFTER:  _ *w [prev_block_hash] *prev_claim_output
             {swbfi_reveals_required_prev}:
+                dup 6 {&prev_block_header}
+                dup 7 {&prev_block_mutator_set} {&field!(MutatorSetAccumulator::swbf_inactive)}
+                // _ *w [prev_block_hash] *prev_claim_output *header *swbfi
+
+                call {guesser_swbfi_reveal}
+                // _ *w [prev_block_hash] *prev_claim_output
+
                 dup 6 {&prev_block_header} {&field!(BlockHeader::prev_block_digest)} {&read_digest}
                 push {sample_claim_input_alloc.write_address()} write_mem {Digest::LEN} pop 1
                 dup 6 {&prev_block_mutator_set} {&field!(MutatorSetAccumulator::aocl)} {&bag_mmr}
@@ -2637,6 +2647,7 @@ mod tests {
     use super::super::swbf_update::chunk_witness::ChunkWitness;
     use super::super::swbf_update::leaf::CorrectSwbfUpdateWitness;
     use super::super::swbf_update::ClaimOutput;
+    use super::super::swbfi_reveal::guesser_reveal_is_valid;
     use super::*;
     use crate::block::block_kernel::BlockKernel;
     use crate::block::mutator_set_update::MutatorSetUpdate;
@@ -2932,10 +2943,15 @@ mod tests {
                     output.mutator_set_hash,
                     &witness.prev_block_body.mutator_set_accumulator,
                 );
-                // 1.a) The claim to know the mutator set after the previous
-                // block's parent, where the epoch requires it.
+                // 2.v, 1.a) The guesser's reveal and the claim to know the
+                // mutator set, both about the mutator set after the previous
+                // block's parent, where the epoch requires them.
                 if !prev_epoch.requires_mutator_set_reveals.is_zero() {
                     let mutator_set = &witness.prev_block_transaction_mutator_set;
+                    assert!(guesser_reveal_is_valid(
+                        &witness.prev_block_header,
+                        &mutator_set.swbf_inactive
+                    ));
                     let sample_claim = KnowsMutatorSet::claim(
                         witness.prev_block_header.prev_block_digest,
                         mutator_set,
@@ -5771,6 +5787,7 @@ ones):
 
             use super::*;
             use crate::block::validity::knows_mutator_set::tests::ArchivalSwbfi;
+            use crate::block::validity::swbfi_reveal::guesser_leaf_index;
 
             fn epochs_requiring_reveals() -> EpochTable {
                 EpochTable::new(&[Epoch {
@@ -5792,6 +5809,27 @@ ones):
                     aocl: MmrAccumulator::new_from_leafs(aocl_leafs),
                     swbf_inactive: swbfi.accumulator(),
                     ..Default::default()
+                }
+            }
+
+            /// The leaf this header's guesser must reveal and its path.
+            fn reveal(header: &BlockHeader, swbfi: &ArchivalSwbfi) -> (u64, Digest, Vec<Digest>) {
+                let (index, _) = guesser_leaf_index(
+                    header.prev_block_digest,
+                    &header.guesser_receiver_data,
+                    swbfi.num_leafs(),
+                )
+                .unwrap();
+                (index, Tip5::hash(swbfi.chunk(index)), swbfi.path(index))
+            }
+
+            fn revealing(
+                swbfi: &ArchivalSwbfi,
+            ) -> impl FnOnce(&BlockBody, BlockHeader) -> BlockHeader + '_ {
+                move |_, mut header| {
+                    let (_, leaf, path) = reveal(&header, swbfi);
+                    header.pow.set_swbfi_reveal(leaf, &path);
+                    header
                 }
             }
 
@@ -5864,13 +5902,13 @@ ones):
             }
 
             #[test]
-            fn prev_block_with_mutator_set_claim_is_accepted() {
+            fn prev_block_revealing_its_swbfi_is_accepted() {
                 let mut rng = StdRng::seed_from_u64(1);
                 let epochs = epochs_requiring_reveals();
                 for num_leafs in [1, 2, 3, 35, 64] {
                     let swbfi = ArchivalSwbfi::random(&mut rng, num_leafs);
                     let (prev_block, next_body, next_header) =
-                        prev_block_with_swbfi(&swbfi, &epochs, |_, header| header, sample_claim);
+                        prev_block_with_swbfi(&swbfi, &epochs, revealing(&swbfi), sample_claim);
                     let parent_mutator_set = parent_mutator_set(prev_block.header());
                     assert_eq!(
                         swbfi.accumulator().peaks(),
@@ -5891,12 +5929,69 @@ ones):
             }
 
             #[test]
+            fn empty_swbfi_needs_no_guesser_reveal() {
+                let mut rng = StdRng::seed_from_u64(2);
+                let epochs = epochs_requiring_reveals();
+                let swbfi = ArchivalSwbfi::random(&mut rng, 0);
+                let (prev_block, next_body, next_header) =
+                    prev_block_with_swbfi(&swbfi, &epochs, |_, header| header, sample_claim);
+                assert_accepts_with_epochs(
+                    &skipping(),
+                    &prev_block,
+                    &next_body,
+                    &next_header,
+                    &epochs,
+                );
+            }
+
+            #[test]
+            fn prev_block_without_guesser_reveal_fails() {
+                let mut rng = StdRng::seed_from_u64(3);
+                let epochs = epochs_requiring_reveals();
+                let swbfi = ArchivalSwbfi::random(&mut rng, 35);
+                let (prev_block, next_body, next_header) =
+                    prev_block_with_swbfi(&swbfi, &epochs, |_, header| header, sample_claim);
+                assert_rejects_with_epochs(
+                    &skipping(),
+                    &prev_block,
+                    &next_body,
+                    &next_header,
+                    &epochs,
+                    BlockValidationRule::GuesserSwbfiReveal.error_id(),
+                );
+            }
+
+            #[test]
+            fn guesser_reveal_of_another_leaf_fails() {
+                let mut rng = StdRng::seed_from_u64(4);
+                let epochs = epochs_requiring_reveals();
+                let swbfi = ArchivalSwbfi::random(&mut rng, 35);
+                let revealing_neighbour = |_: &BlockBody, mut header: BlockHeader| {
+                    let (index, _, _) = reveal(&header, &swbfi);
+                    let neighbour = index ^ 1;
+                    let leaf = Tip5::hash(swbfi.chunk(neighbour));
+                    header.pow.set_swbfi_reveal(leaf, &swbfi.path(neighbour));
+                    header
+                };
+                let (prev_block, next_body, next_header) =
+                    prev_block_with_swbfi(&swbfi, &epochs, revealing_neighbour, sample_claim);
+                assert_rejects_with_epochs(
+                    &skipping(),
+                    &prev_block,
+                    &next_body,
+                    &next_header,
+                    &epochs,
+                    BlockValidationRule::GuesserSwbfiReveal.error_id(),
+                );
+            }
+
+            #[test]
             fn prev_block_without_sample_claim_fails() {
                 let mut rng = StdRng::seed_from_u64(5);
                 let epochs = epochs_requiring_reveals();
                 let swbfi = ArchivalSwbfi::random(&mut rng, 35);
                 let (prev_block, next_body, next_header) =
-                    prev_block_with_swbfi(&swbfi, &epochs, |_, header| header, |_, _| vec![]);
+                    prev_block_with_swbfi(&swbfi, &epochs, revealing(&swbfi), |_, _| vec![]);
                 assert_rejects_with_epochs(
                     &skipping(),
                     &prev_block,
@@ -5948,7 +6043,7 @@ ones):
                     )]
                 };
                 let (prev_block, next_body, next_header) =
-                    prev_block_with_swbfi(&swbfi, &epochs, |_, header| header, other_parent);
+                    prev_block_with_swbfi(&swbfi, &epochs, revealing(&swbfi), other_parent);
                 assert_rejects_with_epochs(
                     &skipping(),
                     &prev_block,
@@ -5959,7 +6054,7 @@ ones):
                 );
                 for other_claim in [other_aocl, other_swbfi, own_state] {
                     let (prev_block, next_body, next_header) =
-                        prev_block_with_swbfi(&swbfi, &epochs, |_, header| header, other_claim);
+                        prev_block_with_swbfi(&swbfi, &epochs, revealing(&swbfi), other_claim);
                     assert_rejects_with_epochs(
                         &skipping(),
                         &prev_block,
@@ -5972,7 +6067,7 @@ ones):
             }
 
             #[test]
-            fn epoch_without_reveals_requires_no_claim() {
+            fn epoch_without_reveals_requires_none() {
                 let mut rng = StdRng::seed_from_u64(7);
                 let swbfi = ArchivalSwbfi::random(&mut rng, 35);
                 let (prev_block, next_body, next_header) =
@@ -5990,7 +6085,7 @@ ones):
                     &next_body,
                     &next_header,
                     &epochs_requiring_reveals(),
-                    BlockValidationRule::AppendixMissingClaim.error_id(),
+                    BlockValidationRule::GuesserSwbfiReveal.error_id(),
                 );
             }
         }
