@@ -862,29 +862,34 @@ several blocks. A leaf index is assigned by the AOCL and is unique, and it is
 also the last ingredient of the order UTXO's absolute index set, which is how
 the book recognizes the block that spends it.
 
-**The composer's query is a scan.** It asks for the largest `X` among the
-orders for this block's subsidy, and that subsidy is an argument rather than a
-property of the book, since `epoch` is the proposer's choice and orders naming
-the next generation stand in the same book. An ordering by `X` alone therefore
-answers a question nobody asks: the first order under it may be for a subsidy
-other than the composer's. Answering from the front of a queue means one queue
-per subsidy, maintained on every insert, every retirement and every rollback,
-and `for_subsidy` (§4.10) does the filter and the ranking in one pass instead.
-It is a few thousand comparisons once per coinbase transaction the plugin
-builds. When that measurably notices, bucket by subsidy and keep a queue on `X`
-within each bucket.
+**The plugin's query is a scan.** To build a block's coinbase transaction, the
+plugin asks for the largest `X` among the orders for that block's subsidy. The
+subsidy is an argument rather than a property of the book, since `epoch` is the
+proposer's choice and orders naming the next generation stand in the same book.
+An ordering by `X` alone therefore answers a question nobody asks: the first
+order under it may be for a subsidy other than the block's. Answering from the
+front of a queue means one queue per subsidy, maintained on every insert, every
+retirement and every rollback, and `for_subsidy` (§4.10) does the filter and the
+ranking in one pass instead. It is a few thousand comparisons once per coinbase
+transaction the plugin builds. When that measurably notices, bucket by subsidy
+and keep a queue on `X` within each bucket.
 
-**Verify on insert, not on query.** An announcement is a hint (§4.3, §7.3), so
-admitting one to the index means rebuilding the lock script from it, computing
-the order UTXO's addition record, and finding that record among the outputs of
-the announcement's own block (§4.10). Done once
-when the announcement is first seen, a row in the index is a verified order, and
-the plugin building a coinbase transaction can take the best row without
-checking it again.
+**Check on insert, not on query.** Anyone can publish an announcement in the
+format of a SOFuN order, and nothing in the announcement proves that a UTXO with
+the announced terms exists. The announcement is material to rebuild an order
+from: the plugin rebuilds the lock script, computes the order UTXO's addition
+record, and looks for that record among the outputs of the announcement's own
+block (§4.10). If the record is not there, there is no order, and a transaction
+that fills it is invalid. The plugin does this once, when it first sees the
+announcement, and admits the announcement to the index if and only if the
+record is there. So every row in the index is an order that exists, and the
+plugin building a coinbase transaction can take the best row without checking
+it again.
 
-**Verification runs outside the node.** Verifying an announcement is work an
-attacker chooses: an announcement is a permissionless write, and checking one
-means building a Triton program of `K` addition records and hashing it. The
+**Rebuilding orders runs outside the node.** An announcement is a
+permissionless write, so an attacker chooses how many the plugin has to check,
+and checking one means building a Triton program of `K` addition records,
+hashing it, and looking for one addition record among a block's outputs. The
 plugin is a process of its own, so that work never sits inside the write that
 sets the node's tip, and its cost falls on the plugin alone.
 
@@ -904,11 +909,12 @@ blocks it missed. So a dropped notification never becomes a dropped block,
 which matters because a book that missed the block spending an order would go
 on listing it.
 
-The book therefore trails the node's tip by however long fetching and
-verification take. An order confirmed in block *h* cannot be filled before
-block *h+1* in any case, so a driver that keeps up with block time costs a
-composer nothing, and one that falls behind costs it orders it would otherwise
-have filled, never a wrong fill.
+The book lags the node's tip: a block enters the book only after the driver has
+fetched it and checked its announcements. The plugin builds the fill for block
+*h+1* only after the driver has applied block *h*, so the book it consults holds
+every order block *h* announces and none that block spends. The lag therefore
+delays the fill and never makes it wrong. The node waits up to a second for the
+fill, and composes again if the fill comes later (§4.9).
 
 **On a reorg, roll back to the shared block.** The book only has to notice that
 a reorganization happened, which it does because the new block's parent is not
@@ -1016,6 +1022,23 @@ plugin builds a new one for every tip it is notified of.
 block with its own coinbase transaction. The block subsidy is worth more than
 any order, and no part of this may sit on the critical path in a way that can
 block it.
+
+**The node waits up to a second for a fill.** When the node starts composing
+and the transaction it holds does not fit the block, it unsets the transaction
+and waits up to one second for the plugin to set another. If a transaction that
+fits arrives after the second, the node drops the composition it began without
+one, which cancels its proof jobs, and composes again with the fill. If the node
+holds no transaction when it starts composing, it does not wait, but a fill that
+arrives during the composition still restarts it. The wait is needed because
+the plugin hears of a new tip only after the node has set it, and builds the
+fill only after fetching the block and applying it to the book. A node that
+read its transaction the moment it started composing would always find the fill
+for the previous tip, which no longer fits, and no fill would reach a block.
+The second is the one place a fill sits on the critical path, and it is bounded:
+a plugin that has exited costs one wait, after which its transaction is unset,
+and a node that has never been sent a coinbase transaction never waits. A
+restart discards the work of the composition it drops, and happens only for a
+transaction that fits.
 
 **Before the fork.** `ConsensusRuleSet::allows_coinbase_inputs` decides whether
 the node accepts the transaction. It holds on RegTest, where blocks carry mock
@@ -1608,7 +1631,7 @@ randomness per order.
 - [x] Order-announcement / lock-script consistency check (§7.3) as a library
       function: `StandingSwapOrder::order_utxo`, whose addition record an
       accepter or a validator compares with the UTXO being spent
-- [x] Order index: insert-time verification, and the composer's query by
+- [x] Order index: insert-time verification, and the plugin's query by
       subsidy answered by a scan (§4.8)
 - [x] The book takes `BlockUpdate` and performs no chain lookups; a row holds a
       `StandingSwapOrder` rather than repeating its fields (§4.10)
