@@ -917,3 +917,15 @@ no earlier than it. Upgrading such a program stacks the old one for as long
 as old nodes require it, at the cost of its own proof only. A tip's header
 cannot be bound by any claim, since proofs precede guessing, so header rules
 are checked for the parent, as the guesser's reveal is.
+
+Parameters do not. The epoch table exists so that a fork need not rewrite
+the program and so that networks can differ, not so that a block can change
+parameters: the host requires the claim's table to equal its own
+(`PredecessorIsValid::claim_in`), and a parameter change is a hard fork.
+Accepting a tighter table from a claim was considered and rejected: the
+program keeps every started epoch of the parent's table in the child's, so
+a single block could lock in an epoch of its own, starting at its own height
+and shaped to what that block satisfies, and each recovery by a later epoch
+spends a slot of the table. A soft fork of parameters would need a majority
+signal counted over a window inside the recursion, which the claim does not
+carry.
