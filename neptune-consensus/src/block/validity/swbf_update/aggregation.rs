@@ -17,6 +17,8 @@
 use std::sync::OnceLock;
 
 use get_size2::GetSize;
+use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use neptune_mutator_set::removal_record::RemovalRecord;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::data_type::Literal;
@@ -39,6 +41,8 @@ use super::leaf::CorrectSwbfUpdate;
 use super::leaf::CorrectSwbfUpdateWitness;
 use super::removal_index_commitment::DigestPeaks;
 use super::removal_index_commitment::IndexSetDigests;
+use super::removal_index_commitment::RemovalIndexCommitment;
+use super::swbfi_peaks_after_removals::SwbfiPeaksAfterRemovals;
 use super::ClaimOutput;
 use super::INPUT_FIRST_LEAF_INDEX;
 use super::INPUT_LEN;
@@ -197,6 +201,35 @@ impl SwbfUpdateAggregation {
     /// waits for the next level, and so on until one node remains. The prover
     /// is called for every leaf and every aggregation. A single leaf is
     /// returned as is, though a block's root must be an aggregation.
+    /// The root claim a block with these packed inputs on this mutator set
+    /// carries, attesting this many padded rows, for networks that mock
+    /// proofs: no leaf is proven, the output is computed.
+    pub fn root_claim_without_proofs(
+        inputs: &[RemovalRecord],
+        mutator_set: &MutatorSetAccumulator,
+        padded_rows: u64,
+    ) -> Claim {
+        let after_removals = SwbfiPeaksAfterRemovals::apply_removals(inputs, mutator_set);
+        let output = ClaimOutput {
+            padded_rows: bfe!(padded_rows),
+            count: inputs.len(),
+            mutator_set_hash: after_removals.hash(),
+            last_leaf_index: bfe!(CorrectSwbfUpdate::FIRST_LEAF_INDEX + 1),
+            peaks: RemovalIndexCommitment::peaks(inputs),
+        };
+        Claim::new(Self::new().hash())
+            .with_input(CorrectSwbfUpdate::claim_input(
+                mutator_set,
+                bfe!(CorrectSwbfUpdate::FIRST_LEAF_INDEX),
+            ))
+            .with_output(output.encode())
+            .about_version(
+                ConsensusRuleSet::HardforkDelta
+                    .triton_proof_version()
+                    .version(),
+            )
+    }
+
     pub fn tree<P>(&self, leaves: &[CorrectSwbfUpdateWitness], prove: P) -> (Claim, Proof)
     where
         P: Fn(&Claim, Program, NonDeterminism) -> Proof,
