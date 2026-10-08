@@ -921,7 +921,10 @@ are checked for the parent, as the guesser's reveal is.
 Parameters do not. The epoch table exists so that a fork need not rewrite
 the program and so that networks can differ, not so that a block can change
 parameters: the host requires the claim's table to equal its own
-(`PredecessorIsValid::claim_in`), and a parameter change is a hard fork.
+(`PredecessorIsValid::claim_in`), and a parameter change is a hard fork that
+may only append an epoch starting after its release: the claims already in
+the chain carry the old table and must stay prefixes of the new one, or the
+recursion no longer verifies from it.
 Accepting a tighter table from a claim was considered and rejected: the
 program keeps every started epoch of the parent's table in the child's, so
 a single block could lock in an epoch of its own, starting at its own height
