@@ -120,7 +120,9 @@ impl EpochTable {
             lustration_counter_initial: initial_counter,
             resets_lustration_status: bfe!(u64::from(epoch_resets_lustration)),
             min_swbf_padded_rows: bfe!(min_swbf_padded_rows),
-            requires_mutator_set_reveals: bfe!(1),
+            // Mock-proof blocks come from fixtures without a mutator set to
+            // reveal.
+            requires_mutator_set_reveals: bfe!(u64::from(!network.use_mock_proof())),
         }])
     }
 
@@ -270,7 +272,10 @@ mod tests {
                 ConsensusRuleSet::infer_from(network, before).requires_predecessor_claim()
             );
             let epoch = table.in_force_at(height);
-            assert_eq!(bfe!(1), epoch.requires_mutator_set_reveals);
+            assert_eq!(
+                network.use_mock_proof(),
+                epoch.requires_mutator_set_reveals.is_zero()
+            );
             assert_eq!(
                 network.use_mock_proof(),
                 epoch.min_swbf_padded_rows.is_zero()

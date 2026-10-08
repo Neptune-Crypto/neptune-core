@@ -116,6 +116,7 @@ impl BlockProofWitness {
             let required = BlockAppendix::consensus_claims(
                 block_primitive_witness.body(),
                 block_height,
+                predecessor.hash(),
                 &mutator_set,
                 &ConsensusParameters::for_network(network),
             );

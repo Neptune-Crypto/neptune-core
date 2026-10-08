@@ -65,6 +65,7 @@ use validity::predecessor_is_valid::PredecessorIsValid;
 use validity::swbf_update::removal_index_commitment::RemovalIndexCommitment;
 use validity::swbf_update::swbfi_peaks_after_removals::SwbfiPeaksAfterRemovals;
 use validity::swbf_update::ClaimOutput;
+use validity::swbfi_reveal::guesser_reveal_is_valid;
 
 use super::transaction::transaction_kernel::TransactionKernelProxy;
 use super::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -703,6 +704,7 @@ impl Block {
         let required_claims = BlockAppendix::consensus_claims(
             self.body(),
             new_height,
+            previous_block.hash(),
             &parent_mutator_set,
             parameters,
         );
@@ -755,6 +757,11 @@ impl Block {
                 .expect("the SWBF update claim comes last");
             let epoch = parameters.epochs.in_force_at(new_height);
             self.validate_swbf_update_claim(swbf_claim, hash_after_removals, &epoch)?;
+
+            // 2.v)
+            if !epoch.requires_mutator_set_reveals.is_zero() {
+                self.validate_guesser_reveal(&parent_mutator_set.swbf_inactive)?;
+            }
         }
 
         let first_lustration_block = ConsensusRuleSet::first_lustration_block(network);
@@ -1049,6 +1056,19 @@ impl Block {
             return Err(BlockValidationError::MutatorSetUpdateIntegrity);
         }
         Ok(())
+    }
+
+    /// 2.v) The proof-of-work field reveals the sampled leaf of the inactive
+    /// SWBF after the parent.
+    fn validate_guesser_reveal(
+        &self,
+        parent_swbfi: &MmrAccumulator,
+    ) -> Result<(), BlockValidationError> {
+        if guesser_reveal_is_valid(self.header(), parent_swbfi) {
+            Ok(())
+        } else {
+            Err(BlockValidationError::GuesserSwbfiReveal)
+        }
     }
 
     /// The appendix holds the required claims, by program, version and
@@ -1697,7 +1717,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::block::pow::Pow;
     use crate::block::test_helpers::invalid_empty_block;
+    use crate::block::validity::knows_mutator_set::KnowsMutatorSet;
     use crate::block::validity::swbf_update::aggregation::SwbfUpdateAggregation;
+    use crate::block::validity::swbfi_reveal::tests::revealing_header_and_swbfi;
     use crate::consensus_rule_set::TX_BACKDATING_LIMIT;
     use crate::proof_abstractions::test_runtime::shared_tokio_runtime;
     use crate::transaction::announcement::Announcement;
@@ -1814,6 +1836,66 @@ pub(crate) mod tests {
         assert_eq!(Ok(()), block1.validate_appendix(&required));
     }
 
+    /// The composer's claim to know the mutator set after the parent is
+    /// required where the epoch requires reveals, which the mock-proof
+    /// networks' does not.
+    #[test]
+    fn mutator_set_claim_is_required_where_reveals_are() {
+        let required_claims = |network: Network| {
+            let genesis = Block::genesis(network);
+            let block1 = invalid_empty_block(&genesis, network);
+            let height = block1.header().height;
+            let mutator_set = genesis.mutator_set_accumulator_after().unwrap();
+            let sample_claim = KnowsMutatorSet::claim(
+                genesis.hash(),
+                &mutator_set,
+                ConsensusRuleSet::infer_from(network, height),
+            );
+            let required = BlockAppendix::consensus_claims(
+                block1.body(),
+                height,
+                genesis.hash(),
+                &mutator_set,
+                &ConsensusParameters::for_network(network),
+            );
+            (required, sample_claim)
+        };
+
+        let (required, sample_claim) = required_claims(Network::Testnet(42));
+        assert!(required.contains(&sample_claim));
+        assert_eq!(4, required.len());
+
+        let (required, sample_claim) = required_claims(Network::RegTest);
+        assert!(!required.contains(&sample_claim));
+        assert_eq!(3, required.len());
+    }
+
+    /// 2.v) The guesser's reveal of the inactive SWBF after the parent, at
+    /// the sampled leaf; vacuous for an empty one.
+    #[test]
+    fn guesser_reveal_is_checked() {
+        let mut rng = StdRng::seed_from_u64(0);
+        let height = 3;
+        let (header, swbfi) = revealing_header_and_swbfi(&mut rng, height, 11);
+        let network = Network::Main;
+        let mut block = invalid_empty_block(&Block::genesis(network), network);
+        block.kernel_mut().header = header;
+        assert_eq!(Ok(()), block.validate_guesser_reveal(&swbfi));
+
+        let (_, path) = header.pow.swbfi_reveal(height as usize);
+        let mut pow = header.pow;
+        pow.set_swbfi_reveal(rng.random(), &path);
+        block.set_header_pow(pow);
+        assert_eq!(
+            Err(BlockValidationError::GuesserSwbfiReveal),
+            block.validate_guesser_reveal(&swbfi)
+        );
+        assert_eq!(
+            Ok(()),
+            block.validate_guesser_reveal(&MmrAccumulator::init(vec![], 0))
+        );
+    }
+
     /// The SWBF root claim about the block's transaction on the mutator set
     /// after its parent: on the floor, covering the inputs, committing to
     /// them, ending where the removals leave the set.
@@ -1831,8 +1913,13 @@ pub(crate) mod tests {
         let inputs = &block1.body().transaction_kernel.inputs;
         let hash_after_removals = SwbfiPeaksAfterRemovals::try_apply_removals(inputs, &mutator_set)
             .map(|after_removals| after_removals.hash());
-        let required =
-            BlockAppendix::consensus_claims(block1.body(), height, &mutator_set, &parameters);
+        let required = BlockAppendix::consensus_claims(
+            block1.body(),
+            height,
+            genesis.hash(),
+            &mutator_set,
+            &parameters,
+        );
         let shape = required.last().unwrap();
         let check =
             |block: &Block| block.validate_swbf_update_claim(shape, hash_after_removals, &epoch);
