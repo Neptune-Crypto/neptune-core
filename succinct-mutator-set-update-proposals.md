@@ -1,8 +1,50 @@
 # Succinct validation: the mutator-set update cost
 
-Discussion notes, 2026-09-21. Branch `thv/succinctness`.
+Discussion notes begun 2026-09-21 on branch `thv/succinctness`, kept current
+on `thv/swbfi-tree`. The options a) through i) below are the ones weighed;
+the sections after them record what was built from d) with e1), e'_1) and
+e'_2), with measurements.
 
-## Where we stand
+## Where we stand (2026-10-08)
+
+Built in `neptune-consensus`, gated by the epoch table, not activated.
+
+- **d)** `CorrectSwbfUpdate` leaf, `SwbfUpdateAggregation`, trees of any
+  height; `PredecessorIsValid` takes an aggregation as the root. Leaf: 50.7k
+  processor rows per input at fixture density, 40.8k with empty chunks, RAM
+  45.8k; about 41 inputs per 2^21 proof.
+- **Work floor** `min_swbf_padded_rows`: leaves idle to a height,
+  aggregations sum the heights verification binds, claims carry leaf
+  positions.
+- **e1)** in the program: 3.1k rows per input without chunk data, 11.4k
+  with. Transactions keep their chunk dictionaries so nodes without an
+  archival mutator set can check them for double spends; the data is
+  stripped when a kernel enters a block.
+- **e'_1)** `KnowsMutatorSet`: a claim that the composer holds two chunks
+  and one AOCL leaf sampled by the parent's hash. **e'_2)** the guesser
+  reveals a leaf of the inactive SWBF's first tree in the PoW field. Both
+  about the mutator set after the parent; checked by the program for the
+  parent. The reveal shows hash and path are obtainable; the claim shows
+  possession of the samples.
+- **Epoch table**: per-network parameters, matched exactly; a change is an
+  appending hard fork. New rules soft-fork as extension claims (last
+  section).
+
+Composer time per block at 15 s per 2^21 proof; a proof verification is
+about 2^19 rows:
+
+| Proof | Height | Time |
+|---|---|---|
+| Four leaves at the floor | 2^21 each | 60 s |
+| Three aggregations | 2^20 each | 22 s |
+| `PredecessorIsValid`, small block | 2^20 | 8 s |
+| `KnowsMutatorSet` | small | 1 s |
+| Block program, four claims | 2^21 | 15 s |
+
+Sequential about 105 s; with the leaves in parallel and the predecessor
+and mutator set claims alongside the tree, about 45 s. Block time 588 s.
+
+## Starting point (2026-09-21)
 
 `PredecessorIsValid` enforces rule 2.e in the previous block: it unpacks the
 transaction's chunks, verifies them against the inactive SWBF (SWBFI) with
@@ -98,9 +140,9 @@ capacity instead, and the proofs run in parallel.
 | d) Aggregation tree in the appendix | 250k / 105k | 8 per leaf | block size | ~125 leaves + ~124 aggregations, by the composer | soft |
 | e1) Drop chunk data in block entirely | 250k / 105k | 8 | 8 alone; block size with c or d | as c or d | hard, rules only, blocks shrink |
 | e2) Keep chunk data in block, don't validate | 250k / 105k | 8 | 8 | as e1 | hard, rules only, no benefit over e1 |
-| e'_1) Composer proves knowledge of the archival mutator set, or of historical blocks | not yet assessed | | | | |
-| e'_2) Guesser reveals one sampled chunk hash with its path | +a few hundred hash rows per block | unchanged | unchanged | none | hard, header rules |
-| e'') Composer reveals knowledge of the archival mutator set | not yet assessed | | | | |
+| e'_1) Composer proves knowledge of the mutator set after the parent: two chunks, one AOCL leaf | one small claim per block, built; a claim search and two bags of peaks in `PredecessorIsValid` | unchanged | unchanged | one | hard, appendix rule; epoch-gated |
+| e'_2) Guesser reveals a leaf of the inactive SWBF's first tree with its path | one path walk per block in `PredecessorIsValid`, built | unchanged | unchanged | none | hard, header rules; epoch-gated |
+| e'') Composer reveals the samples outright | not assessed; e'_1) as built makes it moot | | | | |
 | f) Merkle-tree chunks in the SWBF | 21k tallest table (u32) per input, measured | ~100 | 100 alone; block size with d | ~10 leaves + ~9 aggregations with d, plus the window slide in `PredecessorIsValid` | hard, mutator set redesign |
 | g) Micro-optimisations | 420k / 146k | 5 | 5 | not reachable | none |
 | h) Increase block size | 510k / 146k | 4 | more than now | not reachable | hard, rules only |
@@ -558,6 +600,9 @@ so that can follow as a second step.
 
 ## Ranking
 
+Made 2026-09-21; d) with e1) was built, with e'_1) and e'_2) added for the
+archival data once blocks stop carrying it. See "Where we stand".
+
 1. d) with e1): reaches the target with the existing transaction programs;
    soft fork for the claim, rules-only hard fork for the chunk data.
 2. i): the redesign to plan instead of f), and arguably the long-term
@@ -572,10 +617,10 @@ so that can follow as a second step.
    program. Ranked below d).
 6. b), e2), g), h): do not change the conclusion.
 
-## Proposed next step
+## The build of d) with e1)
 
-The leaf program `T` exists as `CorrectSwbfUpdate`, built from
-`SwbfiPeaksAfterRemovals`, the part of the snippet that holds 2.a, 2.b/2.d
+In the order it happened. The leaf program `T` exists as
+`CorrectSwbfUpdate`, built from `SwbfiPeaksAfterRemovals`, the part of the snippet that holds 2.a, 2.b/2.d
 and the SWBFI half of 2.e, with the claim's public input in place of the
 witness pointers. Measured on the arbitrary fixture (ignored test
 `profile_leaf`), with the unpacker still in:
@@ -892,12 +937,7 @@ and 87.9k; a block of the maximum size, a million words, 641k processor
 and 1,008k RAM rows, so 2^20. The verification of the previous block's
 proof comes on top of each. Under e1 a 1000-input block costs
 `PredecessorIsValid` about 3M rows, a 2^22 proof, next to 32 leaf proofs
-of 2^21.
-
-Next: the host side of e1, which is where the 11.4k drops to 3.1k; the
-assessment of e'_1 and e'_2, the composer or guesser holding the archival
-mutator set; and the f prototype, a chunk hash over a Merkle tree, for the
-leaf numbers it gives.
+of 2^21. What is left is listed under "Where we stand".
 
 ### Soft forks of new claims
 
