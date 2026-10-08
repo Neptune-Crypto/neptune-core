@@ -56,6 +56,16 @@ pub const BLOCK_HEIGHT_HARDFORK_DELTA_MAIN_NET: BlockHeight =
 pub const BLOCK_HEIGHT_HARDFORK_DELTA_TESTNET: BlockHeight =
     BlockHeight::new(BFieldElement::new(5_400));
 
+/// Height of the first block that uses the hard-fork epsilon ruleset, on main
+/// net.
+pub const BLOCK_HEIGHT_HARDFORK_EPSILON_MAIN_NET: BlockHeight =
+    BlockHeight::new(BFieldElement::new(65_000u64));
+
+/// Height of the first block that uses the hard-fork epsilon ruleset, on
+/// testnet-0.
+pub const BLOCK_HEIGHT_HARDFORK_EPSILON_TESTNET: BlockHeight =
+    BlockHeight::new(BFieldElement::new(6_260u64));
+
 /// Transactions that are more than three days older than the block are
 /// disallowed. Only enforced from hardfork gamma and onwards.
 pub const TX_BACKDATING_LIMIT: Timestamp = Timestamp::days(3);
@@ -104,6 +114,14 @@ pub enum ConsensusRuleSet {
     /// Also bumps the Triton VM version.
     #[default]
     HardforkDelta,
+
+    /// Succinct block validation.
+    ///
+    /// A block carries the `PredecessorIsValid` claim, proof pair about its
+    /// parent; the SWBF update claim, and a claim proving knowledge of the
+    /// mutator set. And the guesser reveal an SWBF leaf. Also strips chunk data
+    /// from the transaction kernel.
+    HardforkEpsilon,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
@@ -156,8 +174,10 @@ impl ConsensusRuleSet {
                     ConsensusRuleSet::HardforkBeta
                 } else if block_height < BLOCK_HEIGHT_HARDFORK_DELTA_MAIN_NET {
                     ConsensusRuleSet::HardforkGamma
-                } else {
+                } else if block_height < BLOCK_HEIGHT_HARDFORK_EPSILON_MAIN_NET {
                     ConsensusRuleSet::HardforkDelta
+                } else {
+                    ConsensusRuleSet::HardforkEpsilon
                 }
             }
             Network::Testnet(0) => {
@@ -171,11 +191,36 @@ impl ConsensusRuleSet {
                     ConsensusRuleSet::HardforkBeta
                 } else if block_height < BLOCK_HEIGHT_HARDFORK_DELTA_TESTNET {
                     ConsensusRuleSet::HardforkGamma
-                } else {
+                } else if block_height < BLOCK_HEIGHT_HARDFORK_EPSILON_TESTNET {
                     ConsensusRuleSet::HardforkDelta
+                } else {
+                    ConsensusRuleSet::HardforkEpsilon
                 }
             }
-            _ => ConsensusRuleSet::HardforkDelta,
+            _ => ConsensusRuleSet::HardforkEpsilon,
+        }
+    }
+
+    /// The first block that must carry the succinctness claims
+    pub fn hardfork_epsilon_activation_block_height(network: Network) -> BlockHeight {
+        match network {
+            Network::Main => BLOCK_HEIGHT_HARDFORK_EPSILON_MAIN_NET,
+            Network::Testnet(0) => BLOCK_HEIGHT_HARDFORK_EPSILON_TESTNET,
+            _ => BlockHeight::genesis().next(),
+        }
+    }
+
+    /// Whether a block must carry the `PredecessorIsValid` claim about its
+    /// parent, and the claims and reveal that come with it.
+    pub fn requires_predecessor_claim(&self) -> bool {
+        match self {
+            ConsensusRuleSet::Reboot
+            | ConsensusRuleSet::HardforkAlpha
+            | ConsensusRuleSet::TvmProofVersion1
+            | ConsensusRuleSet::HardforkBeta
+            | ConsensusRuleSet::HardforkGamma
+            | ConsensusRuleSet::HardforkDelta => false,
+            ConsensusRuleSet::HardforkEpsilon => true,
         }
     }
 
@@ -187,6 +232,7 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::HardforkBeta => false,
             ConsensusRuleSet::HardforkGamma => false,
             ConsensusRuleSet::HardforkDelta => false,
+            ConsensusRuleSet::HardforkEpsilon => false,
         }
     }
 
@@ -200,6 +246,7 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::HardforkBeta => false,
             ConsensusRuleSet::HardforkGamma => false,
             ConsensusRuleSet::HardforkDelta => false,
+            ConsensusRuleSet::HardforkEpsilon => false,
         }
     }
 
@@ -211,6 +258,7 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::HardforkBeta => true,
             ConsensusRuleSet::HardforkGamma => true,
             ConsensusRuleSet::HardforkDelta => true,
+            ConsensusRuleSet::HardforkEpsilon => true,
         }
     }
 
@@ -222,6 +270,7 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::HardforkBeta => true,
             ConsensusRuleSet::HardforkGamma => true,
             ConsensusRuleSet::HardforkDelta => true,
+            ConsensusRuleSet::HardforkEpsilon => true,
         }
     }
 
@@ -231,9 +280,9 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::HardforkAlpha
             | ConsensusRuleSet::TvmProofVersion1
             | ConsensusRuleSet::HardforkBeta => None,
-            ConsensusRuleSet::HardforkGamma | ConsensusRuleSet::HardforkDelta => {
-                Some(TX_BACKDATING_LIMIT)
-            }
+            ConsensusRuleSet::HardforkGamma
+            | ConsensusRuleSet::HardforkDelta
+            | ConsensusRuleSet::HardforkEpsilon => Some(TX_BACKDATING_LIMIT),
         }
     }
 
@@ -254,7 +303,7 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::TvmProofVersion1 => false,
             ConsensusRuleSet::HardforkBeta => false,
             ConsensusRuleSet::HardforkGamma => false,
-            ConsensusRuleSet::HardforkDelta => true,
+            ConsensusRuleSet::HardforkDelta | ConsensusRuleSet::HardforkEpsilon => true,
         }
     }
 
@@ -276,7 +325,7 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::TvmProofVersion1
             | ConsensusRuleSet::HardforkBeta
             | ConsensusRuleSet::HardforkGamma => false,
-            ConsensusRuleSet::HardforkDelta => true,
+            ConsensusRuleSet::HardforkDelta | ConsensusRuleSet::HardforkEpsilon => true,
         }
     }
 
@@ -298,7 +347,7 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::TvmProofVersion1 => unreachable!("Lustration not active"),
             ConsensusRuleSet::HardforkBeta => false,
             ConsensusRuleSet::HardforkGamma => true,
-            ConsensusRuleSet::HardforkDelta => true,
+            ConsensusRuleSet::HardforkDelta | ConsensusRuleSet::HardforkEpsilon => true,
         }
     }
 
@@ -319,7 +368,7 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::TvmProofVersion1 => false,
             ConsensusRuleSet::HardforkBeta => false,
             ConsensusRuleSet::HardforkGamma => false,
-            ConsensusRuleSet::HardforkDelta => true,
+            ConsensusRuleSet::HardforkDelta | ConsensusRuleSet::HardforkEpsilon => true,
         }
     }
 
@@ -331,7 +380,9 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::TvmProofVersion1 => TritonProofVersion::V1,
             ConsensusRuleSet::HardforkBeta => TritonProofVersion::V1,
             ConsensusRuleSet::HardforkGamma => TritonProofVersion::V5,
-            ConsensusRuleSet::HardforkDelta => TritonProofVersion::V8,
+            ConsensusRuleSet::HardforkDelta | ConsensusRuleSet::HardforkEpsilon => {
+                TritonProofVersion::V8
+            }
         }
     }
 
@@ -343,7 +394,8 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::TvmProofVersion1
             | ConsensusRuleSet::HardforkBeta
             | ConsensusRuleSet::HardforkGamma
-            | ConsensusRuleSet::HardforkDelta => {
+            | ConsensusRuleSet::HardforkDelta
+            | ConsensusRuleSet::HardforkEpsilon => {
                 // This size is 8MB which should keep it feasible to run archival nodes for
                 // many years without requiring excessive disk space.
                 1_000_000
@@ -375,7 +427,8 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::TvmProofVersion1
             | ConsensusRuleSet::HardforkBeta
             | ConsensusRuleSet::HardforkGamma
-            | ConsensusRuleSet::HardforkDelta => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
+            | ConsensusRuleSet::HardforkDelta
+            | ConsensusRuleSet::HardforkEpsilon => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
         }
     }
     pub fn max_num_outputs(&self) -> usize {
@@ -385,7 +438,8 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::TvmProofVersion1
             | ConsensusRuleSet::HardforkBeta
             | ConsensusRuleSet::HardforkGamma
-            | ConsensusRuleSet::HardforkDelta => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
+            | ConsensusRuleSet::HardforkDelta
+            | ConsensusRuleSet::HardforkEpsilon => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
         }
     }
     pub fn max_num_announcements(&self) -> usize {
@@ -395,7 +449,8 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::TvmProofVersion1
             | ConsensusRuleSet::HardforkBeta
             | ConsensusRuleSet::HardforkGamma
-            | ConsensusRuleSet::HardforkDelta => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
+            | ConsensusRuleSet::HardforkDelta
+            | ConsensusRuleSet::HardforkEpsilon => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
         }
     }
 
@@ -424,47 +479,53 @@ impl ConsensusRuleSet {
         block_height: BlockHeight,
         last_aocl_leaf_index: u64,
     ) -> Option<LustrationRule> {
-        let premine = PREMINE_MAX_SIZE;
-        let claims_pool = INITIAL_BLOCK_SUBSIDY
-            .scalar_mul(u32::try_from(NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT).unwrap());
+        let initial_counter = Self::lustration_counter_initial(network, block_height)?;
+        let rule = if Self::resets_lustration_status(network, block_height) {
+            LustrationRule::Initial(LustrationStatus {
+                counter: initial_counter,
+                max_lustrating_aocl_leaf_index: last_aocl_leaf_index,
+            })
+        } else {
+            LustrationRule::Updated { initial_counter }
+        };
+        Some(rule)
+    }
 
+    /// Whether a block at this height resets the lustration status: the
+    /// first block of hard fork beta and of hard fork gamma.
+    pub(crate) fn resets_lustration_status(network: Network, block_height: BlockHeight) -> bool {
+        block_height == Self::first_lustration_block(network)
+            || block_height == Self::hardfork_gamma_activation_block_height(network)
+    }
+
+    /// The value the lustration counter started from at the last reset by
+    /// this height: the premine, the claims pool and the subsidy mined by
+    /// the reset. None before lustration began.
+    pub(crate) fn lustration_counter_initial(
+        network: Network,
+        block_height: BlockHeight,
+    ) -> Option<NativeCurrencyAmount> {
         let first_hf_beta_block = Self::first_lustration_block(network);
         let first_hf_gamma_block = Self::hardfork_gamma_activation_block_height(network);
-
         assert!(
             first_hf_beta_block.get_generation().is_zero()
                 && first_hf_gamma_block.get_generation().is_zero(),
             "This calculation assumes all transparency gateways start at generation zero."
         );
-
-        let mined_at_hf_beta_activation =
-            INITIAL_BLOCK_SUBSIDY.scalar_mul(u32::try_from(first_hf_beta_block.value()).unwrap());
-        let mined_at_hf_gamma_activation =
-            INITIAL_BLOCK_SUBSIDY.scalar_mul(u32::try_from(first_hf_gamma_block.value()).unwrap());
-        let initial_counter_beta = premine + claims_pool + mined_at_hf_beta_activation;
-        let initial_counter_gamma = premine + claims_pool + mined_at_hf_gamma_activation;
-
-        if block_height < first_hf_beta_block {
-            None
-        } else if block_height == first_hf_beta_block {
-            Some(LustrationRule::Initial(LustrationStatus {
-                counter: initial_counter_beta,
-                max_lustrating_aocl_leaf_index: last_aocl_leaf_index,
-            }))
+        let reset = if block_height < first_hf_beta_block {
+            return None;
         } else if block_height < first_hf_gamma_block {
-            Some(LustrationRule::Updated {
-                initial_counter: initial_counter_beta,
-            })
-        } else if block_height == first_hf_gamma_block {
-            Some(LustrationRule::Initial(LustrationStatus {
-                counter: initial_counter_gamma,
-                max_lustrating_aocl_leaf_index: last_aocl_leaf_index,
-            }))
+            first_hf_beta_block
         } else {
-            Some(LustrationRule::Updated {
-                initial_counter: initial_counter_gamma,
-            })
-        }
+            first_hf_gamma_block
+        };
+
+        let premine = PREMINE_MAX_SIZE;
+        let claims_pool = INITIAL_BLOCK_SUBSIDY
+            .scalar_mul(u32::try_from(NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT).unwrap());
+        let mined_by_reset =
+            INITIAL_BLOCK_SUBSIDY.scalar_mul(u32::try_from(reset.value()).unwrap());
+        Some(premine + claims_pool + mined_by_reset)
     }
 
     fn hardfork_gamma_activation_block_height(network: Network) -> BlockHeight {
@@ -545,6 +606,31 @@ pub(crate) mod tests {
     fn future_and_past_memory_hardness() {
         assert!(ConsensusRuleSet::infer_from(Network::Main, 1_000u64.into()).memory_hard_pow());
         assert!(!ConsensusRuleSet::infer_from(Network::Main, 100_000u64.into()).memory_hard_pow());
+    }
+
+    /// The predecessor claim is required from the epsilon heights on, and
+    /// from height 1 on the networks that are always on epsilon.
+    #[test]
+    fn hardfork_epsilon_activates_the_predecessor_claim() {
+        let requires = |network, height: u64| {
+            ConsensusRuleSet::infer_from(network, height.into()).requires_predecessor_claim()
+        };
+        assert!(!requires(Network::Main, 64_999));
+        assert!(requires(Network::Main, 65_000));
+        assert!(!requires(Network::Testnet(0), 6_259));
+        assert!(requires(Network::Testnet(0), 6_260));
+        for network in [Network::Testnet(1), Network::TestnetMock, Network::RegTest] {
+            assert!(requires(network, 1));
+            assert_eq!(
+                BlockHeight::from(1u64),
+                ConsensusRuleSet::hardfork_epsilon_activation_block_height(network)
+            );
+        }
+        for network in [Network::Main, Network::Testnet(0)] {
+            let activation = ConsensusRuleSet::hardfork_epsilon_activation_block_height(network);
+            assert!(requires(network, activation.value()));
+            assert!(!requires(network, activation.value() - 1));
+        }
     }
 
     #[test]
@@ -700,12 +786,8 @@ pub(crate) mod tests {
                     .await
             );
 
-            let consensus_rule_set = ConsensusRuleSet::HardforkDelta;
-            assert_eq!(
-                consensus_rule_set,
-                ConsensusRuleSet::infer_from(network, valid_successor.header().height)
-            );
-
+            let consensus_rule_set =
+                ConsensusRuleSet::infer_from(network, valid_successor.header().height);
             valid_successor.satisfy_pow(invalid_block.header().difficulty, consensus_rule_set);
             assert!(
                 valid_successor
