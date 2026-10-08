@@ -59,6 +59,8 @@ use tracing::warn;
 use validity::block_primitive_witness::BlockPrimitiveWitness;
 use validity::block_program::BlockProgram;
 use validity::block_proof_witness::BlockProofWitness;
+use validity::epoch_table::EpochTable;
+use validity::predecessor_is_valid::PredecessorIsValid;
 
 use super::transaction::transaction_kernel::TransactionKernelProxy;
 use super::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -471,6 +473,23 @@ impl Block {
             .unwrap_or_else(NativeCurrencyAmount::zero)
     }
 
+    /// The hash of the network's genesis block, computed once.
+    pub fn genesis_digest(network: Network) -> Digest {
+        static DIGESTS: OnceLock<std::sync::Mutex<Vec<(Network, Digest)>>> = OnceLock::new();
+        let digests = DIGESTS.get_or_init(Default::default);
+        let known = digests
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(known, _)| *known == network)
+            .map(|(_, digest)| *digest);
+        known.unwrap_or_else(|| {
+            let digest = Self::genesis(network).hash();
+            digests.lock().unwrap().push((network, digest));
+            digest
+        })
+    }
+
     pub fn genesis(network: Network) -> Self {
         let premine_distribution = Self::premine_distribution();
         let total_premine_amount = premine_distribution
@@ -580,6 +599,25 @@ impl Block {
         now: Timestamp,
         network: Network,
     ) -> Result<(), BlockValidationError> {
+        self.validate_except_proof_under(
+            previous_block,
+            now,
+            network,
+            &EpochTable::for_network(network),
+            &PredecessorIsValid::new(),
+        )
+    }
+
+    /// As [`Self::validate_except_proof`], requiring this predecessor
+    /// program's claim under this epoch table rather than the network's.
+    pub(crate) fn validate_except_proof_under(
+        &self,
+        previous_block: &Block,
+        now: Timestamp,
+        network: Network,
+        epochs: &EpochTable,
+        predecessor_program: &PredecessorIsValid,
+    ) -> Result<(), BlockValidationError> {
         // Note that there is a correspondence between the logic here and the
         // error types in `BlockValidationError`.
 
@@ -649,7 +687,7 @@ impl Block {
         self.solo_validate_without_proof(now, network)?;
 
         // 1.a) 1.b)
-        self.validate_appendix(network)?;
+        self.validate_appendix_under(network, epochs, predecessor_program)?;
 
         // 2.a)
         let inputs = RemovalRecordList::try_unpack(
@@ -948,11 +986,41 @@ impl Block {
 
     /// The appendix holds the claims the rules require, and not too many.
     fn validate_appendix(&self, network: Network) -> Result<(), BlockValidationError> {
+        self.validate_appendix_under(
+            network,
+            &EpochTable::for_network(network),
+            &PredecessorIsValid::new(),
+        )
+    }
+
+    fn validate_appendix_under(
+        &self,
+        network: Network,
+        epochs: &EpochTable,
+        predecessor_program: &PredecessorIsValid,
+    ) -> Result<(), BlockValidationError> {
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, self.header().height);
 
         // 1.a)
         for required_claim in BlockAppendix::consensus_claims(self.body(), consensus_rule_set) {
             if !self.appendix().contains(&required_claim) {
+                return Err(BlockValidationError::AppendixMissingClaim);
+            }
+        }
+
+        // The claim about the parent, under the network's epoch table; its
+        // output is whatever the proof proved. Only the input and program hash
+        // are bound.
+        if consensus_rule_set.requires_predecessor_claim() {
+            let found = predecessor_program.claim_in(
+                self.appendix(),
+                self.body().mast_hash(),
+                self.header().height,
+                Self::genesis_digest(network),
+                epochs,
+                consensus_rule_set,
+            );
+            if found.is_none() {
                 return Err(BlockValidationError::AppendixMissingClaim);
             }
         }
@@ -1595,6 +1663,28 @@ pub(crate) mod tests {
     use crate::type_scripts::native_currency::NativeCurrency;
     use crate::type_scripts::TypeScript;
 
+    impl Block {
+        /// Every rule of [`Block::validate`] except the block's proof, for
+        /// tests on blocks without valid proofs, requiring this predecessor
+        /// program's claim under this epoch table.
+        pub(crate) fn validate_without_proof_under(
+            &self,
+            previous_block: &Block,
+            now: Timestamp,
+            network: Network,
+            epochs: &EpochTable,
+            predecessor_program: &PredecessorIsValid,
+        ) -> Result<(), BlockValidationError> {
+            self.validate_except_proof_under(
+                previous_block,
+                now,
+                network,
+                epochs,
+                predecessor_program,
+            )
+        }
+    }
+
     #[test]
     fn all_genesis_blocks_have_unique_sender_randomnesses() {
         assert!(
@@ -1642,6 +1732,39 @@ pub(crate) mod tests {
             block1.solo_validate(now, network).await,
             "a well-formed block must be rejected by its proof, not before"
         );
+    }
+
+    #[test]
+    fn appendix_needs_the_predecessor_claim_under_epsilon() {
+        let network = Network::Testnet(42);
+        let genesis = Block::genesis(network);
+        let mut block1 = invalid_empty_block(&genesis, network);
+        let rule_set = ConsensusRuleSet::infer_from(network, block1.header().height);
+        assert!(rule_set.requires_predecessor_claim());
+        let transaction_claims = BlockAppendix::consensus_claims(block1.body(), rule_set);
+        let predecessor_claim =
+            PredecessorIsValid::claim_about(&genesis, block1.body().mast_hash(), network);
+
+        block1.set_appendix(BlockAppendix::new(transaction_claims.clone()));
+        assert_eq!(
+            Err(BlockValidationError::AppendixMissingClaim),
+            block1.validate_appendix(network)
+        );
+        let claims = [transaction_claims, vec![predecessor_claim]].concat();
+        block1.set_appendix(BlockAppendix::new(claims));
+        assert_eq!(Ok(()), block1.validate_appendix(network));
+
+        // Main net is on delta at height 1: the transaction claim suffices.
+        let network = Network::Main;
+        let genesis = Block::genesis(network);
+        let mut block1 = invalid_empty_block(&genesis, network);
+        let rule_set = ConsensusRuleSet::infer_from(network, block1.header().height);
+        assert!(!rule_set.requires_predecessor_claim());
+        block1.set_appendix(BlockAppendix::new(BlockAppendix::consensus_claims(
+            block1.body(),
+            rule_set,
+        )));
+        assert_eq!(Ok(()), block1.validate_appendix(network));
     }
 
     #[apply(shared_tokio_runtime)]
@@ -1933,16 +2056,30 @@ pub(crate) mod tests {
             let consensus_rule_set = ConsensusRuleSet::infer_from(network, block.header().height);
 
             // Give the block the appendix its body calls for, so that validation
-            // gets past 1.a and reaches the proof itself, then hand it a proof that
-            // attests to nothing.
-            let appendix = BlockAppendix::new(BlockAppendix::consensus_claims(
-                block.body(),
-                consensus_rule_set,
-            ));
+            // gets past 1.a and reaches the proof itself, then hand it a bad
+            // proof.
+            let mut claims = BlockAppendix::consensus_claims(block.body(), consensus_rule_set);
+            if consensus_rule_set.requires_predecessor_claim() {
+                // The claim's output is the proof's business; the appendix
+                // needs its shape.
+                let program = PredecessorIsValid::new();
+                let input = PredecessorIsValid::claim_input(
+                    block.body().mast_hash(),
+                    block.header().height,
+                    Block::genesis_digest(network),
+                    &EpochTable::for_network(network),
+                );
+                let version = consensus_rule_set.triton_proof_version().version();
+                claims.push(
+                    Claim::new(program.hash())
+                        .with_input(input)
+                        .about_version(version),
+                );
+            }
             let block = Block::new(
                 *block.header(),
                 block.body().to_owned(),
-                appendix,
+                BlockAppendix::new(claims),
                 BlockProof::SingleProof(NeptuneProof::invalid()),
             );
 

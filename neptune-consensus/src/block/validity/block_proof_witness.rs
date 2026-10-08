@@ -17,6 +17,7 @@ use tasm_lib::verifier::stark_verify::StarkVerify;
 
 use super::block_primitive_witness::BlockPrimitiveWitness;
 use super::block_program::BlockProgram;
+use super::predecessor_is_valid::PredecessorIsValid;
 use crate::block::block_body::BlockBody;
 use crate::block::block_body::BlockBodyField;
 use crate::block::BlockAppendix;
@@ -92,7 +93,7 @@ impl BlockProofWitness {
         };
 
         // Add more claim/proof pairs here, when softforking.
-        let witness =
+        let mut witness =
             Self::new(block_primitive_witness.body().clone()).with_claim(tx_claim, tx_proof);
 
         assert_eq!(
@@ -100,6 +101,18 @@ impl BlockProofWitness {
             witness.claims,
             "appendix witness must attest to expected claims",
         );
+
+        // The predecessor claim, with a mock proof where the network mocks
+        // proofs. Proving it is the composer's, not yet written.
+        let network = block_primitive_witness.network;
+        if consensus_rule_set.requires_predecessor_claim() && network.use_mock_proof() {
+            let claim = PredecessorIsValid::claim_about(
+                &block_primitive_witness.predecessor_block,
+                block_primitive_witness.body().mast_hash(),
+                network,
+            );
+            witness = witness.with_claim(claim, Proof::valid_mock());
+        }
 
         witness
     }

@@ -754,8 +754,8 @@ pub(crate) mod tests {
     #[traced_test]
     #[test]
     fn allow_non_zero_version() {
-        // Start well into hardfork delta
-        let init_block_heigth = BlockHeight::from(110_000u64);
+        // Start well into hardfork delta, before epsilon
+        let init_block_heigth = BlockHeight::from(60_000u64);
         let network = Network::Main;
         let bpw = BlockPrimitiveWitness::deterministic_with_block_height_and_difficulty(
             init_block_heigth,
