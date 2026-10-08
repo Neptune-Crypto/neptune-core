@@ -64,9 +64,10 @@ pub struct EpochTable([Epoch; NUM_EPOCHS]);
 impl EpochTable {
     /// # Panics
     ///
-    /// If there are more epochs than fit, if they are not in order of height,
-    /// or if one starts at genesis.
+    /// If there is no epoch or more than fit, if they are not in order of
+    /// height, or if one starts at genesis.
     pub fn new(epochs: &[Epoch]) -> Self {
+        assert!(!epochs.is_empty(), "the program's gate is the first epoch");
         assert!(epochs.len() <= NUM_EPOCHS, "too many epochs");
         assert!(
             epochs.iter().all(|epoch| !epoch.height.is_zero()),
@@ -178,6 +179,12 @@ mod tests {
 
         assert!(table.is_prefix_of_up_to(&with_junk, 1_000.into()));
         assert!(!with_junk.is_prefix_of_up_to(&table, 1_000.into()));
+    }
+
+    #[test]
+    #[should_panic(expected = "the program's gate is the first epoch")]
+    fn table_must_hold_an_epoch() {
+        EpochTable::new(&[]);
     }
 
     #[test]

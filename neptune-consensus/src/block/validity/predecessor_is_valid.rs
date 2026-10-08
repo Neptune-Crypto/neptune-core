@@ -2868,8 +2868,9 @@ mod tests {
                             && claim.input.len() == Self::input_len()
                             && claim.input.starts_with(&expected_input_start)
                             && EpochTable::decode(&claim.input[expected_input_start.len()..])
-                                .unwrap()
-                                .is_prefix_of_up_to(&epochs, prev_block_height)
+                                .is_ok_and(|table| {
+                                    table.is_prefix_of_up_to(&epochs, prev_block_height)
+                                })
                     })
                     .expect("previous block must carry this claim about itself");
 
