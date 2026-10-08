@@ -327,30 +327,6 @@ impl PredecessorIsValid {
         }
     }
 
-    /// This program's claim in the appendix about the block with this body
-    /// hash and height under these epochs, if any. A node requires one of a
-    /// tip, with the table it knows.
-    pub fn claim_in(
-        &self,
-        appendix: &BlockAppendix,
-        body_mast_hash: Digest,
-        height: BlockHeight,
-        genesis_digest: Digest,
-        epochs: &EpochTable,
-        consensus_rule_set: ConsensusRuleSet,
-    ) -> Option<Claim> {
-        let input = Self::claim_input(body_mast_hash, height, genesis_digest, epochs);
-        let version = consensus_rule_set.triton_proof_version().version();
-        appendix
-            .iter()
-            .find(|claim| {
-                claim.program_digest == self.hash()
-                    && claim.version == version
-                    && claim.input == input
-            })
-            .cloned()
-    }
-
     /// The claim's input: the block's body hash and height, the network's
     /// genesis block hash, and the epoch table.
     pub(crate) fn claim_input(
@@ -2778,6 +2754,7 @@ mod tests {
     use crate::block::validity::block_proof_witness::BlockProofWitness;
     use crate::block::BlockProof;
     use crate::block::BlockValidationError;
+    use crate::block::ConsensusParameters;
     use crate::consensus_rule_set::LustrationRule;
     use crate::proof_abstractions::tasm::builtins as tasm;
     use crate::proof_abstractions::tasm::builtins::verify_stark;
@@ -3879,12 +3856,14 @@ mod tests {
             let predecessor =
                 predecessor_of(prev_block).expect("test case must be built on a block");
             prev_block
-                .validate_without_proof_under(
+                .validate_without_proof_with(
                     &predecessor,
                     prev_block.header().timestamp,
-                    Network::Main,
-                    epochs,
-                    program,
+                    &ConsensusParameters {
+                        network: Network::Main,
+                        epochs: *epochs,
+                        predecessor_program: *program,
+                    },
                 )
                 .expect("host must accept a previous block the program accepts");
         }
@@ -4099,46 +4078,6 @@ mod tests {
             );
             let input = witness.standard_input();
             assert!(extension.run_tasm(&input, witness.nondeterminism()).is_ok());
-        }
-
-        /// The host finds a block's claim with its own table and not with
-        /// another, however slight the difference.
-        #[test]
-        fn claim_is_found_under_the_nodes_table_only() {
-            let prev_prev_block = random_unproven_block(0);
-            let (body, header) = next_body_and_header(&prev_prev_block, 0);
-            let base = epochs();
-            let other = EpochTable::new(&[Epoch {
-                min_swbf_padded_rows: activation_epoch().min_swbf_padded_rows + bfe!(1),
-                ..activation_epoch()
-            }]);
-            let program = skipping();
-            let rule_set = ConsensusRuleSet::HardforkDelta;
-            let genesis = fixture_genesis().hash();
-            for table in [&base, &other] {
-                let claim =
-                    own_claim_with_epochs(&program, &prev_prev_block, &body, &header, table);
-                let block = unproven_block(header, body.clone(), vec![claim.clone()]);
-                let (body_mast_hash, height) = (body.mast_hash(), header.height);
-                let appendix = block.appendix();
-                assert_eq!(
-                    Some(claim),
-                    program.claim_in(appendix, body_mast_hash, height, genesis, table, rule_set)
-                );
-                let under_base =
-                    program.claim_in(appendix, body_mast_hash, height, genesis, &base, rule_set);
-                assert_eq!(std::ptr::eq(table, &base), under_base.is_some());
-                assert!(program
-                    .claim_in(
-                        appendix,
-                        body_mast_hash,
-                        height.next(),
-                        genesis,
-                        table,
-                        rule_set
-                    )
-                    .is_none());
-            }
         }
 
         #[test]

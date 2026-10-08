@@ -59,8 +59,12 @@ use tracing::warn;
 use validity::block_primitive_witness::BlockPrimitiveWitness;
 use validity::block_program::BlockProgram;
 use validity::block_proof_witness::BlockProofWitness;
+use validity::epoch_table::Epoch;
 use validity::epoch_table::EpochTable;
 use validity::predecessor_is_valid::PredecessorIsValid;
+use validity::swbf_update::removal_index_commitment::RemovalIndexCommitment;
+use validity::swbf_update::swbfi_peaks_after_removals::SwbfiPeaksAfterRemovals;
+use validity::swbf_update::ClaimOutput;
 
 use super::transaction::transaction_kernel::TransactionKernelProxy;
 use super::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -179,6 +183,26 @@ impl BlockProof {
 //
 // A unit test-suite exists in module tests::digest_encapsulation.
 #[readonly::make]
+/// What the rules take beyond a block: the network, its epoch table, and
+/// the predecessor program whose claim they require. Tests substitute the
+/// last two.
+#[derive(Debug, Clone, Copy)]
+pub struct ConsensusParameters {
+    pub network: Network,
+    pub epochs: EpochTable,
+    pub predecessor_program: PredecessorIsValid,
+}
+
+impl ConsensusParameters {
+    pub fn for_network(network: Network) -> Self {
+        Self {
+            network,
+            epochs: EpochTable::for_network(network),
+            predecessor_program: PredecessorIsValid::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, BFieldCodec, GetSize)]
 pub struct Block {
     /// Everything but the proof
@@ -591,25 +615,21 @@ impl Block {
         now: Timestamp,
         network: Network,
     ) -> Result<(), BlockValidationError> {
-        self.validate_except_proof_under(
+        self.validate_except_proof_with(
             previous_block,
             now,
-            network,
-            &EpochTable::for_network(network),
-            &PredecessorIsValid::new(),
+            &ConsensusParameters::for_network(network),
         )
     }
 
-    /// As [`Self::validate_except_proof`], requiring this predecessor
-    /// program's claim under this epoch table rather than the network's.
-    pub(crate) fn validate_except_proof_under(
+    /// As [`Self::validate_except_proof`], under these parameters.
+    pub(crate) fn validate_except_proof_with(
         &self,
         previous_block: &Block,
         now: Timestamp,
-        network: Network,
-        epochs: &EpochTable,
-        predecessor_program: &PredecessorIsValid,
+        parameters: &ConsensusParameters,
     ) -> Result<(), BlockValidationError> {
+        let network = parameters.network;
         // Note that there is a correspondence between the logic here and the
         // error types in `BlockValidationError`.
 
@@ -679,7 +699,14 @@ impl Block {
         self.solo_validate_without_proof(now, network)?;
 
         // 1.a) 1.b)
-        self.validate_appendix_under(network, epochs, predecessor_program)?;
+        let parent_mutator_set = previous_block.mutator_set_accumulator_after()?;
+        let required_claims = BlockAppendix::consensus_claims(
+            self.body(),
+            new_height,
+            &parent_mutator_set,
+            parameters,
+        );
+        self.validate_appendix(&required_claims)?;
 
         // 2.a)
         let inputs = RemovalRecordList::try_unpack(
@@ -705,6 +732,11 @@ impl Block {
             inputs.clone(),
             self.body().transaction_kernel.outputs.clone(),
         );
+        let hash_after_removals = SwbfiPeaksAfterRemovals::try_apply_removals(
+            &self.body().transaction_kernel.inputs,
+            &msa_before,
+        )
+        .map(|after_removals| after_removals.hash());
         let mut msa = msa_before;
         let ms_update_result = mutator_set_update.apply_to_accumulator(&mut msa);
 
@@ -716,6 +748,13 @@ impl Block {
         // 2.e)
         if msa.hash() != self.body().mutator_set_accumulator.hash() {
             return Err(BlockValidationError::MutatorSetUpdateIntegrity);
+        }
+        if consensus_rule_set.requires_predecessor_claim() {
+            let swbf_claim = required_claims
+                .last()
+                .expect("the SWBF update claim comes last");
+            let epoch = parameters.epochs.in_force_at(new_height);
+            self.validate_swbf_update_claim(swbf_claim, hash_after_removals, &epoch)?;
         }
 
         let first_lustration_block = ConsensusRuleSet::first_lustration_block(network);
@@ -972,49 +1011,55 @@ impl Block {
     /// Validate the proof of a block, an that the proof relates to the expected
     /// appendices.
     pub async fn validate_block_proof(&self, network: Network) -> Result<(), BlockValidationError> {
-        self.validate_appendix(network)?;
+        let parameters = ConsensusParameters::for_network(network);
+        let required_claims = BlockAppendix::consensus_claims_without_parent(
+            self.body(),
+            self.header().height,
+            &parameters,
+        );
+        self.validate_appendix(&required_claims)?;
         self.validate_proof(network).await
     }
 
-    /// The appendix holds the claims the rules require, and not too many.
-    fn validate_appendix(&self, network: Network) -> Result<(), BlockValidationError> {
-        self.validate_appendix_under(
-            network,
-            &EpochTable::for_network(network),
-            &PredecessorIsValid::new(),
-        )
+    /// The aggregated SWBF update claim about the block's transaction on the
+    /// mutator set after its parent, as the program checks it for a parent:
+    /// present, with leaf proofs reaching the epoch's floor, covering every
+    /// input, committing to the inputs' index sets, and ending on the mutator
+    /// set the removals leave.
+    fn validate_swbf_update_claim(
+        &self,
+        shape: &Claim,
+        hash_after_removals: Option<Digest>,
+        epoch: &Epoch,
+    ) -> Result<(), BlockValidationError> {
+        let claim = self
+            .appendix()
+            .find(shape)
+            .ok_or(BlockValidationError::AppendixMissingClaim)?;
+        let output = ClaimOutput::try_parse(&claim.output)
+            .ok_or(BlockValidationError::MutatorSetUpdateIntegrity)?;
+        if output.padded_rows.value() < epoch.min_swbf_padded_rows.value() {
+            return Err(BlockValidationError::SwbfUpdateBelowWorkFloor);
+        }
+        let inputs = &self.body().transaction_kernel.inputs;
+        if output.count != inputs.len() || output.peaks != RemovalIndexCommitment::peaks(inputs) {
+            return Err(BlockValidationError::RemovalIndexCommitmentMismatch);
+        }
+        if Some(output.mutator_set_hash) != hash_after_removals {
+            return Err(BlockValidationError::MutatorSetUpdateIntegrity);
+        }
+        Ok(())
     }
 
-    fn validate_appendix_under(
-        &self,
-        network: Network,
-        epochs: &EpochTable,
-        predecessor_program: &PredecessorIsValid,
-    ) -> Result<(), BlockValidationError> {
-        let consensus_rule_set = ConsensusRuleSet::infer_from(network, self.header().height);
-
+    /// The appendix holds the required claims, by program, version and
+    /// input, and not too many.
+    fn validate_appendix(&self, required_claims: &[Claim]) -> Result<(), BlockValidationError> {
         // 1.a)
-        for required_claim in BlockAppendix::consensus_claims(self.body(), consensus_rule_set) {
-            if !self.appendix().contains(&required_claim) {
-                return Err(BlockValidationError::AppendixMissingClaim);
-            }
-        }
-
-        // The claim about the parent, under the network's epoch table; its
-        // output is whatever the proof proved. Only the input and program hash
-        // are bound.
-        if consensus_rule_set.requires_predecessor_claim() {
-            let found = predecessor_program.claim_in(
-                self.appendix(),
-                self.body().mast_hash(),
-                self.header().height,
-                Self::genesis_digest(network),
-                epochs,
-                consensus_rule_set,
-            );
-            if found.is_none() {
-                return Err(BlockValidationError::AppendixMissingClaim);
-            }
+        if !required_claims
+            .iter()
+            .all(|claim| self.appendix().find(claim).is_some())
+        {
+            return Err(BlockValidationError::AppendixMissingClaim);
         }
 
         // 1.b)
@@ -1652,6 +1697,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::block::pow::Pow;
     use crate::block::test_helpers::invalid_empty_block;
+    use crate::block::validity::swbf_update::aggregation::SwbfUpdateAggregation;
     use crate::consensus_rule_set::TX_BACKDATING_LIMIT;
     use crate::proof_abstractions::test_runtime::shared_tokio_runtime;
     use crate::transaction::announcement::Announcement;
@@ -1664,23 +1710,14 @@ pub(crate) mod tests {
 
     impl Block {
         /// Every rule of [`Block::validate`] except the block's proof, for
-        /// tests on blocks without valid proofs, requiring this predecessor
-        /// program's claim under this epoch table.
-        pub(crate) fn validate_without_proof_under(
+        /// tests on blocks without valid proofs, under these parameters.
+        pub(crate) fn validate_without_proof_with(
             &self,
             previous_block: &Block,
             now: Timestamp,
-            network: Network,
-            epochs: &EpochTable,
-            predecessor_program: &PredecessorIsValid,
+            parameters: &ConsensusParameters,
         ) -> Result<(), BlockValidationError> {
-            self.validate_except_proof_under(
-                previous_block,
-                now,
-                network,
-                epochs,
-                predecessor_program,
-            )
+            self.validate_except_proof_with(previous_block, now, parameters)
         }
     }
 
@@ -1738,32 +1775,119 @@ pub(crate) mod tests {
         let network = Network::Testnet(42);
         let genesis = Block::genesis(network);
         let mut block1 = invalid_empty_block(&genesis, network);
-        let rule_set = ConsensusRuleSet::infer_from(network, block1.header().height);
-        assert!(rule_set.requires_predecessor_claim());
-        let transaction_claims = BlockAppendix::consensus_claims(block1.body(), rule_set);
+        let height = block1.header().height;
+        assert!(ConsensusRuleSet::infer_from(network, height).requires_predecessor_claim());
+        let parameters = ConsensusParameters::for_network(network);
+        let required =
+            BlockAppendix::consensus_claims_without_parent(block1.body(), height, &parameters);
+        let [transaction_claim, predecessor_shape] = required.as_slice() else {
+            panic!("the transaction claim and the predecessor claim are required");
+        };
         let predecessor_claim =
             PredecessorIsValid::claim_about(&genesis, block1.body().mast_hash(), network);
+        assert_eq!(
+            predecessor_shape.program_digest,
+            predecessor_claim.program_digest
+        );
+        assert_eq!(predecessor_shape.input, predecessor_claim.input);
 
-        block1.set_appendix(BlockAppendix::new(transaction_claims.clone()));
+        block1.set_appendix(BlockAppendix::new(vec![transaction_claim.clone()]));
         assert_eq!(
             Err(BlockValidationError::AppendixMissingClaim),
-            block1.validate_appendix(network)
+            block1.validate_appendix(&required)
         );
-        let claims = [transaction_claims, vec![predecessor_claim]].concat();
+        let claims = vec![transaction_claim.clone(), predecessor_claim];
         block1.set_appendix(BlockAppendix::new(claims));
-        assert_eq!(Ok(()), block1.validate_appendix(network));
+        assert_eq!(Ok(()), block1.validate_appendix(&required));
 
         // Main net is on delta at height 1: the transaction claim suffices.
         let network = Network::Main;
         let genesis = Block::genesis(network);
         let mut block1 = invalid_empty_block(&genesis, network);
-        let rule_set = ConsensusRuleSet::infer_from(network, block1.header().height);
-        assert!(!rule_set.requires_predecessor_claim());
-        block1.set_appendix(BlockAppendix::new(BlockAppendix::consensus_claims(
-            block1.body(),
-            rule_set,
-        )));
-        assert_eq!(Ok(()), block1.validate_appendix(network));
+        let height = block1.header().height;
+        assert!(!ConsensusRuleSet::infer_from(network, height).requires_predecessor_claim());
+        let parameters = ConsensusParameters::for_network(network);
+        let required =
+            BlockAppendix::consensus_claims_without_parent(block1.body(), height, &parameters);
+        assert_eq!(1, required.len());
+        block1.set_appendix(BlockAppendix::new(required.clone()));
+        assert_eq!(Ok(()), block1.validate_appendix(&required));
+    }
+
+    /// The SWBF root claim about the block's transaction on the mutator set
+    /// after its parent: on the floor, covering the inputs, committing to
+    /// them, ending where the removals leave the set.
+    #[test]
+    fn swbf_root_claim_is_checked_under_epsilon() {
+        let network = Network::Testnet(42);
+        let genesis = Block::genesis(network);
+        let block1 = invalid_empty_block(&genesis, network);
+        let height = block1.header().height;
+        let parameters = ConsensusParameters::for_network(network);
+        let epoch = parameters.epochs.in_force_at(height);
+        let floor = epoch.min_swbf_padded_rows.value();
+        assert!(floor > 0);
+        let mutator_set = genesis.mutator_set_accumulator_after().unwrap();
+        let inputs = &block1.body().transaction_kernel.inputs;
+        let hash_after_removals = SwbfiPeaksAfterRemovals::try_apply_removals(inputs, &mutator_set)
+            .map(|after_removals| after_removals.hash());
+        let required =
+            BlockAppendix::consensus_claims(block1.body(), height, &mutator_set, &parameters);
+        let shape = required.last().unwrap();
+        let check =
+            |block: &Block| block.validate_swbf_update_claim(shape, hash_after_removals, &epoch);
+        let with_claim = |claim: Claim| {
+            let mut block = block1.clone();
+            block.set_appendix(BlockAppendix::new(vec![claim]));
+            block
+        };
+        let root_claim = |mutator_set: &MutatorSetAccumulator, padded_rows| {
+            SwbfUpdateAggregation::root_claim_without_proofs(inputs, mutator_set, padded_rows)
+        };
+        let with_output = |output: &ClaimOutput| {
+            let mut claim = root_claim(&mutator_set, floor);
+            claim.output = output.encode();
+            claim
+        };
+        let good = ClaimOutput::try_parse(&root_claim(&mutator_set, floor).output).unwrap();
+
+        assert_eq!(
+            Err(BlockValidationError::AppendixMissingClaim),
+            check(&block1)
+        );
+        assert_eq!(Ok(()), check(&with_claim(root_claim(&mutator_set, floor))));
+        assert_eq!(
+            Err(BlockValidationError::SwbfUpdateBelowWorkFloor),
+            check(&with_claim(root_claim(&mutator_set, floor - 1)))
+        );
+        let mut other_set = mutator_set.clone();
+        other_set.aocl.append(Digest::default());
+        assert_eq!(
+            Err(BlockValidationError::AppendixMissingClaim),
+            check(&with_claim(root_claim(&other_set, floor)))
+        );
+        let more_inputs = ClaimOutput {
+            count: good.count + 1,
+            ..good.clone()
+        };
+        assert_eq!(
+            Err(BlockValidationError::RemovalIndexCommitmentMismatch),
+            check(&with_claim(with_output(&more_inputs)))
+        );
+        let other_end = ClaimOutput {
+            mutator_set_hash: Digest::default(),
+            ..good.clone()
+        };
+        assert_eq!(
+            Err(BlockValidationError::MutatorSetUpdateIntegrity),
+            check(&with_claim(with_output(&other_end)))
+        );
+        let mut truncated = root_claim(&mutator_set, floor);
+        truncated.output.pop();
+        assert_eq!(
+            Err(BlockValidationError::MutatorSetUpdateIntegrity),
+            check(&with_claim(truncated))
+        );
     }
 
     #[apply(shared_tokio_runtime)]
@@ -2052,29 +2176,15 @@ pub(crate) mod tests {
         ) {
             let (block, now) = block_rejected_only_by_its_proof(arbitrary_block);
             let network = Network::Main;
-            let consensus_rule_set = ConsensusRuleSet::infer_from(network, block.header().height);
 
             // Give the block the appendix its body calls for, so that validation
             // gets past 1.a and reaches the proof itself, then hand it a bad
             // proof.
-            let mut claims = BlockAppendix::consensus_claims(block.body(), consensus_rule_set);
-            if consensus_rule_set.requires_predecessor_claim() {
-                // The claim's output is the proof's business; the appendix
-                // needs its shape.
-                let program = PredecessorIsValid::new();
-                let input = PredecessorIsValid::claim_input(
-                    block.body().mast_hash(),
-                    block.header().height,
-                    Block::genesis_digest(network),
-                    &EpochTable::for_network(network),
-                );
-                let version = consensus_rule_set.triton_proof_version().version();
-                claims.push(
-                    Claim::new(program.hash())
-                        .with_input(input)
-                        .about_version(version),
-                );
-            }
+            let claims = BlockAppendix::consensus_claims_without_parent(
+                block.body(),
+                block.header().height,
+                &ConsensusParameters::for_network(network),
+            );
             let block = Block::new(
                 *block.header(),
                 block.body().to_owned(),

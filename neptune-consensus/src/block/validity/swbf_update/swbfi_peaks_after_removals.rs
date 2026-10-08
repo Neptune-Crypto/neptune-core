@@ -44,7 +44,7 @@ use crate::consensus_rule_set::ConsensusRuleSet;
 ///
 /// The lists are the witness's, as [`WitnessLists`] reads them.
 #[derive(Debug, Copy, Clone)]
-pub(in crate::block::validity) struct SwbfiPeaksAfterRemovals;
+pub(in crate::block) struct SwbfiPeaksAfterRemovals;
 
 impl BasicSnippet for SwbfiPeaksAfterRemovals {
     fn parameters(&self) -> Vec<(DataType, String)> {
@@ -284,7 +284,7 @@ impl SwbfiPeaksAfterRemovals {
 
     /// The mutator set with the packed inputs removed, if they unpack and
     /// can be removed from it.
-    pub(in crate::block::validity) fn try_apply_removals(
+    pub(in crate::block) fn try_apply_removals(
         inputs: &[RemovalRecord],
         mutator_set: &MutatorSetAccumulator,
     ) -> Option<MutatorSetAccumulator> {

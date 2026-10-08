@@ -309,7 +309,7 @@ async fn lustration_counter_errors() {
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, block.header().height);
         assert!(consensus_rule_set.requires_lustration_status_in_block_header());
 
-        let appendix = BlockAppendix::consensus_claims(block.body(), consensus_rule_set);
+        let appendix = BlockAppendix::mock_consensus_claims(block.body(), parent, network);
         block.set_appendix(BlockAppendix::new(appendix));
         block.set_proof(BlockProof::SingleProof(NeptuneProof::valid_mock()));
         block.set_lustration_status(parent.header().pow.lustration_status().unwrap());

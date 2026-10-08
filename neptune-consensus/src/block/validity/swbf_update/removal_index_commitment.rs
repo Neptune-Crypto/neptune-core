@@ -30,11 +30,11 @@ use crate::block::validity::removal_record_pointers::RemovalRecordPointers;
 /// AFTER:  _ *peaks
 /// ```
 #[derive(Debug, Copy, Clone)]
-pub(in crate::block::validity) struct RemovalIndexCommitment;
+pub(in crate::block) struct RemovalIndexCommitment;
 
 impl RemovalIndexCommitment {
     /// The peaks of the MMR over these inputs' index sets.
-    pub(in crate::block::validity) fn peaks(inputs: &[RemovalRecord]) -> Vec<Digest> {
+    pub(in crate::block) fn peaks(inputs: &[RemovalRecord]) -> Vec<Digest> {
         DigestPeaks::peaks(&IndexSetDigests::digests(inputs))
     }
 }

@@ -342,9 +342,10 @@ async fn block_with_mutator_set_update_integrity_error_fails_2e(
         .modify(b_new.kernel.body.transaction_kernel.clone());
     b_new.kernel_mut().body.transaction_kernel = new_kernel;
     let consensus_rule_set = ConsensusRuleSet::infer_from(network, b_new.header().height);
-    b_new.set_appendix(BlockAppendix::new(BlockAppendix::consensus_claims(
+    b_new.set_appendix(BlockAppendix::new(BlockAppendix::mock_consensus_claims(
         b_new.body(),
-        consensus_rule_set,
+        &b_prev,
+        network,
     )));
 
     cache_true_claims([BlockProgram::claim(
@@ -408,9 +409,10 @@ async fn block_with_transaction_timestamp_too_large_fails_2f(
     tx_kernel_ts.timestamp = Timestamp(bfe![ts_kernel]);
     b_new.kernel_mut().body.transaction_kernel = tx_kernel_ts.into_kernel();
     let consensus_rule_set = ConsensusRuleSet::infer_from(network, b_new.header().height);
-    b_new.set_appendix(BlockAppendix::new(BlockAppendix::consensus_claims(
+    b_new.set_appendix(BlockAppendix::new(BlockAppendix::mock_consensus_claims(
         b_new.body(),
-        consensus_rule_set,
+        &b_prev,
+        network,
     )));
     cache_true_claims([BlockProgram::claim(
         b_new.body(),
@@ -441,9 +443,10 @@ async fn block_with_transaction_timestamp_too_small_fails_2f(
         TransactionKernelProxy::from(b_new.kernel.body.transaction_kernel.clone());
     tx_kernel_ts.timestamp = b_new.header().timestamp - TX_BACKDATING_LIMIT - Timestamp::minutes(1);
     b_new.kernel_mut().body.transaction_kernel = tx_kernel_ts.into_kernel();
-    b_new.set_appendix(BlockAppendix::new(BlockAppendix::consensus_claims(
+    b_new.set_appendix(BlockAppendix::new(BlockAppendix::mock_consensus_claims(
         b_new.body(),
-        consensus_rule_set,
+        &b_prev,
+        network,
     )));
     cache_true_claims([BlockProgram::claim(
         b_new.body(),
@@ -474,9 +477,10 @@ async fn block_with_coinbase_too_big_fails_2g(
     tx_kernel_big_coinbase.coinbase = Some(too_big_coinbase);
     b_new.kernel_mut().body.transaction_kernel = tx_kernel_big_coinbase.into_kernel();
     let consensus_rule_set = ConsensusRuleSet::infer_from(network, b_new.header().height);
-    b_new.set_appendix(BlockAppendix::new(BlockAppendix::consensus_claims(
+    b_new.set_appendix(BlockAppendix::new(BlockAppendix::mock_consensus_claims(
         b_new.body(),
-        consensus_rule_set,
+        &b_prev,
+        network,
     )));
     cache_true_claims([BlockProgram::claim(
         b_new.body(),
@@ -506,9 +510,10 @@ async fn block_with_negative_coinbase_fails_2h(
 
     b_new.kernel_mut().body.transaction_kernel = tx_kernel_neg_coinbase.into_kernel();
     let consensus_rule_set = ConsensusRuleSet::infer_from(network, b_new.header().height);
-    b_new.set_appendix(BlockAppendix::new(BlockAppendix::consensus_claims(
+    b_new.set_appendix(BlockAppendix::new(BlockAppendix::mock_consensus_claims(
         b_new.body(),
-        consensus_rule_set,
+        &b_prev,
+        network,
     )));
     cache_true_claims([BlockProgram::claim(
         b_new.body(),
@@ -537,9 +542,10 @@ async fn block_with_negative_fee_fails_2i(
     tx_kernel_fee_neg.fee = -NativeCurrencyAmount::one_nau();
     b_new.kernel_mut().body.transaction_kernel = tx_kernel_fee_neg.into_kernel();
     let consensus_rule_set = ConsensusRuleSet::infer_from(network, b_new.header().height);
-    b_new.set_appendix(BlockAppendix::new(BlockAppendix::consensus_claims(
+    b_new.set_appendix(BlockAppendix::new(BlockAppendix::mock_consensus_claims(
         b_new.body(),
-        consensus_rule_set,
+        &b_prev,
+        network,
     )));
     cache_true_claims([BlockProgram::claim(
         b_new.body(),
@@ -602,9 +608,10 @@ async fn bad_lustration_status_encoding_fails_parent_2n(
     b_new.fix_mutator_set_fields(&b_prev);
     b_new.set_lustration_status(LustrationStatus::default());
     let consensus_rule_set = ConsensusRuleSet::infer_from(network, b_new.header().height);
-    b_new.set_appendix(BlockAppendix::new(BlockAppendix::consensus_claims(
+    b_new.set_appendix(BlockAppendix::new(BlockAppendix::mock_consensus_claims(
         b_new.body(),
-        consensus_rule_set,
+        &b_prev,
+        network,
     )));
 
     cache_true_claims([BlockProgram::claim(
@@ -965,9 +972,10 @@ async fn block_spending_lustration_bound_inputs(
     // The block proof is defined to be true rather than produced, so that
     // these tests need no proving.
     let consensus_rule_set = ConsensusRuleSet::infer_from(network, block.header().height);
-    block.set_appendix(BlockAppendix::new(BlockAppendix::consensus_claims(
+    block.set_appendix(BlockAppendix::new(BlockAppendix::mock_consensus_claims(
         block.body(),
-        consensus_rule_set,
+        &parent,
+        network,
     )));
     block.set_proof(BlockProof::SingleProof(NeptuneProof::invalid()));
     block.satisfy_pow(parent.header().difficulty, consensus_rule_set);

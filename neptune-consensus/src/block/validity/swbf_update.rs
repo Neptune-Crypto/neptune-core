@@ -38,13 +38,13 @@ mod insert_into_window;
 pub mod leaf;
 mod mutate_swbfi_peaks;
 mod mutator_set_hash_after_removals;
-pub(super) mod removal_index_commitment;
+pub(in crate::block) mod removal_index_commitment;
 mod removal_records_are_unspent;
 // Kept for the benchmark in `update_tree_leaf`; no program uses it.
 #[cfg(test)]
 mod roots_from_authentication_struct;
 mod sorted_window_indices;
-pub(super) mod swbfi_peaks_after_removals;
+pub(in crate::block) mod swbfi_peaks_after_removals;
 mod update_tree_leaf;
 pub(super) mod window_after_removals;
 mod witness_lists;
@@ -69,24 +69,24 @@ pub(super) const OUTPUT_PEAKS: usize = OUTPUT_NUM_PEAKS + 1;
 /// An SWBF update claim's output taken apart; the same for a leaf and an
 /// aggregation. See [`leaf::CorrectSwbfUpdate`] for the input.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct ClaimOutput {
+pub(in crate::block) struct ClaimOutput {
     /// The padded heights of the leaf proofs beneath the claim, summed. A
     /// leaf cannot attest its own proof's height and writes zero; see
     /// [`leaf::CorrectSwbfUpdate::ATTESTED_PADDED_ROWS`].
-    pub(super) padded_rows: BFieldElement,
+    pub(in crate::block) padded_rows: BFieldElement,
 
     /// The number of inputs removed, which the peaks below commit to.
-    pub(super) count: usize,
+    pub(in crate::block) count: usize,
 
     /// The hash of the mutator set after the removals.
-    pub(super) mutator_set_hash: Digest,
+    pub(in crate::block) mutator_set_hash: Digest,
 
     /// The index of the last leaf beneath the claim: a leaf's own, an
     /// aggregation's right child's.
-    pub(super) last_leaf_index: BFieldElement,
+    pub(in crate::block) last_leaf_index: BFieldElement,
 
     /// The peaks of the MMR over the inputs' index sets.
-    pub(super) peaks: Vec<Digest>,
+    pub(in crate::block) peaks: Vec<Digest>,
 }
 
 impl ClaimOutput {
@@ -95,9 +95,16 @@ impl ClaimOutput {
     /// - If the output's length does not fit its number of peaks.
     /// - If output does not match the output format of the SWBF update tree
     pub(super) fn parse(output: &[BFieldElement]) -> Self {
-        let num_peaks = output[OUTPUT_NUM_PEAKS].value() as usize;
-        assert_eq!(OUTPUT_PEAKS + Digest::LEN * num_peaks, output.len());
-        Self {
+        Self::try_parse(output).expect("output must have the SWBF update claim's layout")
+    }
+
+    /// The output taken apart, if it has the layout.
+    pub(in crate::block) fn try_parse(output: &[BFieldElement]) -> Option<Self> {
+        let num_peaks = usize::try_from(output.get(OUTPUT_NUM_PEAKS)?.value()).ok()?;
+        if OUTPUT_PEAKS + Digest::LEN * num_peaks != output.len() {
+            return None;
+        }
+        Some(Self {
             padded_rows: output[OUTPUT_PADDED_ROWS],
             count: output[OUTPUT_COUNT].value() as usize,
             mutator_set_hash: Digest::new(
@@ -110,10 +117,10 @@ impl ClaimOutput {
                 .chunks(Digest::LEN)
                 .map(|words| Digest::new(words.try_into().unwrap()))
                 .collect(),
-        }
+        })
     }
 
-    pub(super) fn encode(&self) -> Vec<BFieldElement> {
+    pub(in crate::block) fn encode(&self) -> Vec<BFieldElement> {
         [
             // Measure of proof complexity in leaf-proofs below this node. 0 if
             // the program is the leaf program, the sum of the leaf program's
