@@ -1258,30 +1258,13 @@ its parameters, such as the `V1Swap` pair, takes both amounts as arguments, and
 refuses only a negative offer.
 
 The configuration chooses the parameter type, and each order carries its own
-value of it — two SOFuN orders in one book have different `d_zero`. Keying the
-book on the configuration rather than on the parameter type also means a query
-that only makes sense for one configuration is written against that
-configuration by name, as `for_subsidy` is. No method of the generic book reads
-`params`.
-
-**Rejected: erasing the schema behind `Box<dyn Order>`.** A trait with `id`,
-`offered`, `demanded` and `opened_in` as `&self` methods is object safe, so a
-book of trait objects compiles. It solves a variation that cannot occur: a book
-replicates one pair, `pair_id` fixes that pair's schema, and every order in it
-was therefore decoded the same way. It also costs twice. The composer reads this
-structure on every coinbase transaction it builds and wants a contiguous run ordered by offered
-amount, not a vector of pointers into separate allocations. And a SOFuN consumer
-holding `&dyn Order` cannot reach `d_zero`, so it either downcasts through `Any`,
-turning a compile-time fact into a runtime failure, or the trait grows a release
-date and the general primitive acquires the time lock §1.5 keeps out of it.
-
-If one process ever serves many pairs, the erasure belongs a level up: a map from
-pair to book, with the *book* behind the trait object. That is one indirection
-per pair rather than per order, and the erased interface is then the query
-surface, which really is uniform across pairs. Inside each book everything stays
-concrete. The one place a trait object fits well is the driver, where choosing a
-decoder from `pair_id` is dispatch over an open set with a uniform operation, and
-the type parameter reappears on the far side once the schema is known.
+value of it — two SOFuN orders in one book have different `d_zero`. A book holds
+the orders of one pair, and `pair_id` fixes that pair's schema, so every order
+in a book has the same type, and the book is generic over its configuration
+rather than holding trait objects. Keying the book on the configuration rather
+than on the parameter type also means a query that only makes sense for one
+configuration is written against that configuration by name, as `for_subsidy`
+is. No method of the generic book reads `params`.
 
 **The query is a filter and then a maximum, in that order, and it belongs to
 SOFuN.** A composer fills only orders for their own block's subsidy (§4.7), so
@@ -1309,7 +1292,8 @@ one block only on a single branch. The book holds one branch at a time, so
 rollback and pruning can compare rows by height alone — and they must, since
 hashes are unordered. A row nonetheless records the confirming block's hash as
 well, so that the block can be named unambiguously by a consumer that does not
-share the book's view of which branch is current. What a height cannot do is notice that the book has left its
+share the book's view of which branch is current. What a height cannot do is
+notice that the book has left its
 branch. A driver that sees a reorganization but skips `roll_back_to` would
 otherwise hand the book blocks at heights it has already passed, and a book
 tracking only its height would either drop them as replays or stack the new
@@ -1371,30 +1355,41 @@ impl<C: Swappable> OrderBook<C> {
 }
 ```
 
-**What is reversible, and what is not.** The process boundary is the cheapest
-thing here: discovery, validation, `apply` and `roll_back_to` are the same logic
-whichever process runs the driver, and only the channel that brings the blocks
-differs. What is permanent is the wire format of §4.3 — the flag value,
-how `pair_id` is derived, the 28 elements and their two readings, the reverse
-field order, and `padding` being zero. Once orders exist on mainnet
-under generic version 1 or SOFuN version 0, those cannot be changed without a
-new version that fillers must adopt. Scrutiny belongs there rather than on which process runs the book.
+**What can be changed later, and what cannot.** Moving the driver to another
+process changes only the channel that delivers blocks. Discovery, validation,
+`apply` and `roll_back_to` run the same code in either process, so revising that
+choice costs a refactor and nothing else. The wire format of §4.3 is different.
+It consists of the flag value, the derivation of `pair_id`, the 28 elements with
+their generic and SOFuN readings, the reverse field order, and the rule that
+`padding` is zero. An order announced on mainnet stays encoded in that format
+until its UTXO is spent, and nothing forces that spend. Changing any item on the
+list therefore requires a new version (generic version 2 or SOFuN version 1),
+and every filler must then read the old version as well as the new one for as
+long as an order under the old one remains unspent. Review effort belongs on the
+wire format, not on the choice of process.
 
-**One rule keeps the rest reversible: dependency direction.** The
+**Dependency direction keeps the choice of process revisable.** The
 `neptune-defi` library depends on `neptune-consensus`, `neptune-mutator-set`,
 `neptune-primitives`, `neptune-wallet`, `neptune-rpc-api` and
-`neptune-rpc-client`, and on no part of the node, so any process can link it
-unchanged; only its tests start a node, to fill an order end to end. The node
-never depends on `neptune-defi`, which in particular means block processing
-cannot call into the book. `apply` and `roll_back_to` take data, not a `Block`
-and not a handle to node state, so the book never learns which process feeds
-it.
+`neptune-rpc-client`, and on no part of the node. Any process can therefore link
+it unchanged. Only its tests start a node, to fill an order end to end, and tests
+are not linked into anything. In the other direction, the node does not depend
+on `neptune-defi`, so block processing cannot call into the book. Finally,
+`apply` and `roll_back_to` take data, not a `Block` and not a handle to node
+state, so the book cannot tell which process feeds it. If any of these three
+facts failed, moving the driver to another process would require changing the
+book as well.
 
-**Build nothing for mempool yet.** Going from "an order is in the book" to "an
-order has a state" is a mechanical change when the time comes, and a
-single-variant status today is the dead weight this section exists to avoid. The
-same goes for the query surface: return orders and let a market maker or a
-wallet decide what to do with them, rather than offering to act on their behalf.
+**The book holds confirmed orders only.** An order enters the book when the
+block carrying its announcement is applied, and leaves when a block spends its
+UTXO. A mempool transaction that creates or spends an order does not change the
+book. Tracking such transactions would give every entry a status, such as
+confirmed, pending creation or pending spend. Today that status would have
+exactly one value, so the book stores none. Adding it later is a mechanical
+change, since every existing entry becomes a confirmed one. The query surface is
+minimal for the same reason. The book returns orders and does not act on them;
+whether to fill, quote or display an order is decided by the caller, be it a
+market maker or a wallet.
 
 
 ## 5. One consensus change
@@ -1494,7 +1489,7 @@ two orders offering the same amount in one generation demand the same `Y`, and
 one wallet's orders may share a reward address. The seed is the only thing left
 keeping two of a proposer's own orders apart.
 
-Mitigation: every order must use a fresh seed, hence fresh
+Mitigation: *every order must use a fresh seed*, hence fresh
 `sender_randomness*` (§4.3), which makes the commitments distinct for *every*
 `k`. This is a hard wallet requirement, not a
 convention. Cross-proposer collisions are not a concern — distinct proposers
