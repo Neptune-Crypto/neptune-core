@@ -1,5 +1,4 @@
-//! Test-support constructors for blocks with invalid proofs, and validation
-//! that leaves the proof out.
+//! Test-support constructors for blocks with invalid proofs.
 
 use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -19,7 +18,6 @@ use crate::block::block_appendix::BlockAppendix;
 use crate::block::block_body::BlockBody;
 use crate::block::block_header::BlockHeader;
 use crate::block::block_transaction::BlockTransaction;
-use crate::block::block_validation_error::BlockValidationError;
 use crate::block::guesser_receiver_data::GuesserReceiverData;
 use crate::block::mutator_set_update::MutatorSetUpdate;
 use crate::block::pow::Pow;
@@ -236,17 +234,4 @@ pub fn invalid_empty_block_with_announcements(
     let timestamp = predecessor.header().timestamp + Timestamp::hours(1);
     let tx = BlockTransaction::upgrade(tx);
     Block::block_template_invalid_proof(predecessor, tx, timestamp, None, network)
-}
-
-impl Block {
-    /// Every rule of [`Block::validate`] except the block's proof, for tests
-    /// on blocks without valid proofs.
-    pub fn validate_without_proof(
-        &self,
-        previous_block: &Block,
-        now: Timestamp,
-        network: Network,
-    ) -> Result<(), BlockValidationError> {
-        self.validate_except_proof(previous_block, now, network)
-    }
 }

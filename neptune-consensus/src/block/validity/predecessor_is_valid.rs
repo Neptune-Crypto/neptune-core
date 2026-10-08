@@ -6,6 +6,7 @@ use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::difficulty_control::Difficulty;
 use neptune_primitives::difficulty_control::ProofOfWork;
 use neptune_primitives::mast_hash::MastHash;
+use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 use num_bigint::BigUint;
 use serde::Deserialize;
@@ -352,7 +353,7 @@ impl PredecessorIsValid {
 
     /// The claim's input: the block's body hash and height, the network's
     /// genesis block hash, and the epoch table.
-    fn claim_input(
+    pub(crate) fn claim_input(
         body_mast_hash: Digest,
         height: BlockHeight,
         genesis_digest: Digest,
@@ -411,10 +412,43 @@ impl PredecessorIsValid {
         epochs: &EpochTable,
         consensus_rule_set: ConsensusRuleSet,
     ) -> Claim {
+        self.claim_at(
+            next_block_body_mh,
+            next_header.height,
+            prev_block,
+            genesis_digest,
+            epochs,
+            consensus_rule_set,
+        )
+    }
+
+    /// The claim a block on this parent with this body carries, under the
+    /// network's genesis block, table and rule set at the block's height.
+    pub fn claim_about(prev_block: &Block, next_block_body_mh: Digest, network: Network) -> Claim {
+        let height = prev_block.header().height.next();
+        Self::new().claim_at(
+            next_block_body_mh,
+            height,
+            prev_block,
+            Block::genesis_digest(network),
+            &EpochTable::for_network(network),
+            ConsensusRuleSet::infer_from(network, height),
+        )
+    }
+
+    fn claim_at(
+        &self,
+        next_block_body_mh: Digest,
+        next_block_height: BlockHeight,
+        prev_block: &Block,
+        genesis_digest: Digest,
+        epochs: &EpochTable,
+        consensus_rule_set: ConsensusRuleSet,
+    ) -> Claim {
         let prev_block_header = prev_block.header();
         let input = Self::claim_input(
             next_block_body_mh,
-            next_header.height,
+            next_block_height,
             genesis_digest,
             epochs,
         );
@@ -432,7 +466,7 @@ impl PredecessorIsValid {
             .map(|mutator_set| mutator_set.hash())
             .unwrap_or_default();
         let output = [
-            next_header.prev_block_digest.values().to_vec(),
+            prev_block.hash().values().to_vec(),
             prev_lustration_status,
             vec![prev_block_header.timestamp.0],
             prev_block_header.cumulative_proof_of_work.encode(),
@@ -3845,7 +3879,13 @@ mod tests {
             let predecessor =
                 predecessor_of(prev_block).expect("test case must be built on a block");
             prev_block
-                .validate_without_proof(&predecessor, prev_block.header().timestamp, Network::Main)
+                .validate_without_proof_under(
+                    &predecessor,
+                    prev_block.header().timestamp,
+                    Network::Main,
+                    epochs,
+                    program,
+                )
                 .expect("host must accept a previous block the program accepts");
         }
     }
