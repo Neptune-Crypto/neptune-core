@@ -29,6 +29,9 @@ Built in `neptune-consensus`, gated by the epoch table, not activated.
 - **Epoch table**: per-network parameters, matched exactly; a change is an
   appending hard fork. New rules soft-fork as extension claims (last
   section).
+- **Genesis**: the claim input names the network's genesis block. A parent
+  at height zero passes by that hash alone, no proof or other rule, so a
+  network can activate at height 1.
 
 Composer time per block at 15 s per 2^21 proof; a proof verification is
 about 2^19 rows:

@@ -377,6 +377,7 @@ mod tests {
         let input = [
             body.mast_hash().reversed().values().to_vec(),
             vec![bfe!(height)],
+            Digest::default().reversed().values().to_vec(),
             epochs.encode(),
         ]
         .concat();

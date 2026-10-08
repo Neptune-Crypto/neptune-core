@@ -334,15 +334,11 @@ impl PredecessorIsValid {
         appendix: &BlockAppendix,
         body_mast_hash: Digest,
         height: BlockHeight,
+        genesis_digest: Digest,
         epochs: &EpochTable,
         consensus_rule_set: ConsensusRuleSet,
     ) -> Option<Claim> {
-        let input = [
-            body_mast_hash.reversed().values().to_vec(),
-            vec![height.into()],
-            epochs.encode(),
-        ]
-        .concat();
+        let input = Self::claim_input(body_mast_hash, height, genesis_digest, epochs);
         let version = consensus_rule_set.triton_proof_version().version();
         appendix
             .iter()
@@ -352,6 +348,23 @@ impl PredecessorIsValid {
                     && claim.input == input
             })
             .cloned()
+    }
+
+    /// The claim's input: the block's body hash and height, the network's
+    /// genesis block hash, and the epoch table.
+    fn claim_input(
+        body_mast_hash: Digest,
+        height: BlockHeight,
+        genesis_digest: Digest,
+        epochs: &EpochTable,
+    ) -> Vec<BFieldElement> {
+        [
+            body_mast_hash.reversed().values().to_vec(),
+            vec![height.into()],
+            genesis_digest.reversed().values().to_vec(),
+            epochs.encode(),
+        ]
+        .concat()
     }
 
     /// Where in the claim's output the previous block's timestamp is.
@@ -383,8 +396,9 @@ impl PredecessorIsValid {
     fn input_len() -> usize {
         // - Next block body MAST hash (5 words)
         // - Next block height (1)
+        // - genesis block hash (5)
         // - epoch table
-        Digest::LEN + 1 + EpochTable::static_length().unwrap()
+        2 * Digest::LEN + 1 + EpochTable::static_length().unwrap()
     }
 
     /// The claim for this program execution.
@@ -393,16 +407,17 @@ impl PredecessorIsValid {
         next_block_body_mh: Digest,
         next_header: &BlockHeader,
         prev_block: &Block,
+        genesis_digest: Digest,
         epochs: &EpochTable,
         consensus_rule_set: ConsensusRuleSet,
     ) -> Claim {
         let prev_block_header = prev_block.header();
-        let input = [
-            next_block_body_mh.reversed().values().to_vec(),
-            vec![next_header.height.into()],
-            epochs.encode(),
-        ]
-        .concat();
+        let input = Self::claim_input(
+            next_block_body_mh,
+            next_header.height,
+            genesis_digest,
+            epochs,
+        );
 
         let prev_lustration_status = prev_block_header
             .pow
@@ -448,6 +463,8 @@ impl TritonProgram for PredecessorIsValid {
         let own_program_digest = library.import(Box::new(OwnProgramDigest));
 
         let own_program_digest_alloc = library.kmalloc(Digest::LEN as u32);
+        // The genesis block hash the claim names.
+        let genesis_alloc = library.kmalloc(Digest::LEN as u32);
 
         let prev_block_body_mh_alloc = library.kmalloc(Digest::LEN as u32);
         let prev_block_txk_mh_alloc = library.kmalloc(Digest::LEN as u32);
@@ -747,6 +764,8 @@ impl TritonProgram for PredecessorIsValid {
         // STDIN:  next_block_height
         let rule_0a = triton_asm!(
             read_io 1
+            read_io {Digest::LEN}
+            push {genesis_alloc.write_address()} write_mem {Digest::LEN} pop 1
             // _ *w [prev_block_hash] next_block_height
 
             dup 6 {&read_prev_block_height}
@@ -1003,14 +1022,16 @@ impl TritonProgram for PredecessorIsValid {
                 push {expected_prev_height_alloc.read_address()} read_mem 1 pop 1
                 eq
                 // _ *input body_mh_matches height_matches
-
-                dup 2 addi {Digest::LEN + 2}
+                dup 2 addi {2 * Digest::LEN + 1} read_mem {Digest::LEN} pop 1
+                swap 4 swap 1 swap 3 swap 1
+                push {genesis_alloc.read_address()} read_mem {Digest::LEN} pop 1
+                {&digests_are_equal}
+                // _ *input body_mh_matches height_matches genesis_matches
+                dup 3 addi {2 * Digest::LEN + 2}
                 call {epoch_tables_agree}
-                // _ *input body_mh_matches height_matches tables_agree
-
-                mul mul
+                // _ *input body_mh_matches height_matches genesis_matches tables_agree
+                mul mul mul
                 // _ *input input_matches
-
                 return
         );
 
@@ -2425,6 +2446,22 @@ impl TritonProgram for PredecessorIsValid {
 
         let (rule_1c_prev, rule_1c_prev_code) = subroutine("rule_1c_prev", rule_1c_prev);
         let (rule_1d_prev, rule_1d_prev_code) = subroutine("rule_1d_prev", rule_1d_prev);
+
+        // 1.g) A parent at height zero is the genesis block the claim names;
+        // no other rule applies to it.
+        // BEFORE: _ *w [prev_block_hash] prev_block_is_genesis
+        // AFTER:  _ *w [prev_block_hash] prev_block_is_genesis
+        let rule_1g_prev = triton_asm!(
+            dup 5 dup 5 dup 5 dup 5 dup 5
+            push {genesis_alloc.read_address()} read_mem {Digest::LEN} pop 1
+            assert_vector error_id {BlockValidationRule::GenesisHash.error_id()}
+            pop {Digest::LEN}
+        );
+        let (rule_1g_prev, rule_1g_prev_code) = subroutine("rule_1g_prev", rule_1g_prev);
+
+        // BEFORE: _ *w [prev_block_hash]
+        // AFTER:  _ *w [prev_block_hash] prev_block_is_genesis
+        let prev_block_is_genesis = triton_asm!(dup 5 {&read_prev_block_height} push 0 eq);
         let (verify_prev_block_proof, verify_prev_block_proof_code) =
             if self.verifies_prev_block_proof {
                 (
@@ -2488,36 +2525,12 @@ impl TritonProgram for PredecessorIsValid {
         let (rule_2m_prev, rule_2m_prev_code) = subroutine("rule_2m_prev", rule_2m_prev);
         let (write_output, write_output_code) = subroutine("write_output", write_output);
 
-        let code = triton_asm!(
-            call {own_program_digest}
-            push {own_program_digest_alloc.write_address()} write_mem {Digest::LEN} pop 1
-            // _
-
-            read_io {Digest::LEN}
-            // _ [next_block_body_mh]
-
-            push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
-            hint witness = stack[0]
-            // _ [next_block_body_mh] *w
-
-            dup 0 call {audit_witness} pop 1
-            call {authenticate_next_block_mmr_accumulator}
-            call {hash_prev_block_body}
-            // _ [next_block_body_mh] *w
-
-            /* Construct previous block hash from non-deterministic memory,
-            reconstructing the MAST hash construction. Along with its proof
-            verification, this established that the ND memory for the previous
-            block is authentic. */
-            call {prev_block_hash}
-            // _ [next_block_body_mh] *w [prev_block_hash]
-
-            call {rule_0a}
-            // _ [next_block_body_mh] *w [prev_block_hash]
-
-            call {rule_0c}
-            // _ [next_block_body_mh] *w [prev_block_hash]
-
+        // The rules of a parent that was mined, which a genesis parent is not.
+        // BEFORE: _ [next_block_body_mh] *w [prev_block_hash]
+        // AFTER:  _ [next_block_body_mh] *w [prev_block_hash]
+        let (rules_for_mined_parent, rules_for_mined_parent_code) = subroutine(
+            "rules_for_mined_parent",
+            triton_asm!(
             call {rule_1f_prev}
             // _ [next_block_body_mh] *w [prev_block_hash]
 
@@ -2549,13 +2562,53 @@ impl TritonProgram for PredecessorIsValid {
             call {rule_2c_prev}
             // _ [next_block_body_mh] *w [prev_block_hash]
 
-            call {mutator_set_after_prev_block}
             // _ [next_block_body_mh] *w [prev_block_hash]
 
 
             call {prev_block_announcement_rules}
             // _ [next_block_body_mh] *w [prev_block_hash]
 
+
+            ),
+        );
+
+        let code = triton_asm!(
+            call {own_program_digest}
+            push {own_program_digest_alloc.write_address()} write_mem {Digest::LEN} pop 1
+            // _
+
+            read_io {Digest::LEN}
+            // _ [next_block_body_mh]
+
+            push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
+            hint witness = stack[0]
+            // _ [next_block_body_mh] *w
+
+            dup 0 call {audit_witness} pop 1
+            call {authenticate_next_block_mmr_accumulator}
+            call {hash_prev_block_body}
+            // _ [next_block_body_mh] *w
+
+            /* Construct previous block hash from non-deterministic memory,
+            reconstructing the MAST hash construction. Along with its proof
+            verification, this established that the ND memory for the previous
+            block is authentic. */
+            call {prev_block_hash}
+            // _ [next_block_body_mh] *w [prev_block_hash]
+
+            call {rule_0a}
+            // _ [next_block_body_mh] *w [prev_block_hash]
+
+            call {rule_0c}
+            // _ [next_block_body_mh] *w [prev_block_hash]
+
+            {&prev_block_is_genesis}
+            dup 0 skiz call {rule_1g_prev}
+            push 0 eq skiz call {rules_for_mined_parent}
+            // _ [next_block_body_mh] *w [prev_block_hash]
+
+            call {mutator_set_after_prev_block}
+            // _ [next_block_body_mh] *w [prev_block_hash]
 
             dup 5 call {rule_2m_prev} pop 1
             // _ [next_block_body_mh] *w [prev_block_hash]
@@ -2595,6 +2648,8 @@ impl TritonProgram for PredecessorIsValid {
             {&prev_block_pow_code}
             {&rule_1b_prev_code}
             {&verify_prev_block_proof_code}
+            {&rule_1g_prev_code}
+            {&rules_for_mined_parent_code}
             {&rule_1a_txproof_prev_code}
             {&rule_2g_prev_code}
             {&rule_2h_prev_code}
@@ -2744,6 +2799,7 @@ mod tests {
 
             // 0.a)
             let next_block_height: BlockHeight = tasm::tasmlib_io_read_stdin___bfe().into();
+            let genesis_digest = tasm::tasmlib_io_read_stdin___digest();
             assert_eq!(witness.prev_block_header.height.next(), next_block_height);
             assert_eq!(
                 witness.next_block_mmr_accumulator.num_leafs(),
@@ -2758,81 +2814,87 @@ mod tests {
                 witness.next_block_mmr_accumulator.peaks()
             );
 
-            // 1.f)
-            assert_eq!(
-                witness.prev_block_header.version,
-                witness.prev_block_header.pow.version_in_pow()
-            );
-
-            let difficulty = witness.prev_block_header.difficulty;
-            assert!(difficulty >= Difficulty::MINIMUM);
-            assert!(prev_block_hash <= difficulty.target());
-
-            // 1.b)
-            assert!(witness.prev_block_appendix.len() <= MAX_NUM_CLAIMS);
-
-            if self.verifies_prev_block_proof {
-                // 1.c)
-                let BlockProof::SingleProof(prev_block_proof) =
-                    *BlockProof::decode(&witness.prev_block_proof).unwrap()
-                else {
-                    panic!("previous block must carry a single proof");
-                };
-
-                // 1.d)
-                let prev_block_claim = Claim::new(BlockProgram.hash())
-                    .with_input(prev_block_body_mh.reversed().values().to_vec())
-                    .with_output(witness.prev_block_appendix.claims_as_output())
-                    .about_version(
-                        ConsensusRuleSet::HardforkDelta
-                            .triton_proof_version()
-                            .version(),
-                    );
-                verify_stark(Stark::default(), &prev_block_claim, &prev_block_proof);
-            }
-
-            // 1.a) The transaction claim; this program's own claim is found
-            // under the header rules.
-            let transaction_claim =
-                single_proof_claim(prev_block_txk_mh, ConsensusRuleSet::HardforkDelta);
-            assert!(witness.prev_block_appendix.contains(&transaction_claim));
-
             let prev_transaction_kernel = &witness.prev_block_body.transaction_kernel;
+            if witness.prev_block_header.height.is_genesis() {
+                // 1.g) The parent at height zero is the named genesis block;
+                // no other rule applies to it.
+                assert_eq!(genesis_digest, prev_block_hash);
+            } else {
+                // 1.f)
+                assert_eq!(
+                    witness.prev_block_header.version,
+                    witness.prev_block_header.pow.version_in_pow()
+                );
 
-            // 2.g)
-            if let Some(coinbase) = prev_transaction_kernel.coinbase {
-                assert!(coinbase <= Block::block_subsidy(witness.prev_block_header.height));
+                let difficulty = witness.prev_block_header.difficulty;
+                assert!(difficulty >= Difficulty::MINIMUM);
+                assert!(prev_block_hash <= difficulty.target());
+
+                // 1.b)
+                assert!(witness.prev_block_appendix.len() <= MAX_NUM_CLAIMS);
+
+                if self.verifies_prev_block_proof {
+                    // 1.c)
+                    let BlockProof::SingleProof(prev_block_proof) =
+                        *BlockProof::decode(&witness.prev_block_proof).unwrap()
+                    else {
+                        panic!("previous block must carry a single proof");
+                    };
+
+                    // 1.d)
+                    let prev_block_claim = Claim::new(BlockProgram.hash())
+                        .with_input(prev_block_body_mh.reversed().values().to_vec())
+                        .with_output(witness.prev_block_appendix.claims_as_output())
+                        .about_version(
+                            ConsensusRuleSet::HardforkDelta
+                                .triton_proof_version()
+                                .version(),
+                        );
+                    verify_stark(Stark::default(), &prev_block_claim, &prev_block_proof);
+                }
+
+                // 1.a) The transaction claim; this program's own claim is found
+                // under the header rules.
+                let transaction_claim =
+                    single_proof_claim(prev_block_txk_mh, ConsensusRuleSet::HardforkDelta);
+                assert!(witness.prev_block_appendix.contains(&transaction_claim));
+
+                // 2.g)
+                if let Some(coinbase) = prev_transaction_kernel.coinbase {
+                    assert!(coinbase <= Block::block_subsidy(witness.prev_block_header.height));
+                }
+
+                // 2.h)
+                if let Some(coinbase) = prev_transaction_kernel.coinbase {
+                    assert!(!coinbase.is_negative());
+                }
+
+                // 2.i)
+                assert!(!prev_transaction_kernel.fee.is_negative());
+
+                // 2.c) The divined positions must be a permutation of the inputs,
+                // along which the index sets are strictly increasing.
+                let num_inputs = prev_transaction_kernel.inputs.len();
+                let mut taken = vec![false; num_inputs];
+                let mut previous_index_set: Option<Vec<u128>> = None;
+                for _ in 0..num_inputs {
+                    let position = usize::try_from(tasm::tasmlib_io_read_secin___bfe().value())
+                        .expect("position must fit");
+                    assert!(position < num_inputs);
+                    assert!(!taken[position]);
+                    taken[position] = true;
+                    let index_set = prev_transaction_kernel.inputs[position]
+                        .absolute_indices
+                        .to_vec();
+                    assert!(previous_index_set.is_none_or(|previous| previous < index_set));
+                    previous_index_set = Some(index_set);
+                }
+
+                // 2.u)
+                assert!(
+                    !prev_transaction_kernel.retires_before(witness.prev_block_header.timestamp)
+                );
             }
-
-            // 2.h)
-            if let Some(coinbase) = prev_transaction_kernel.coinbase {
-                assert!(!coinbase.is_negative());
-            }
-
-            // 2.i)
-            assert!(!prev_transaction_kernel.fee.is_negative());
-
-            // 2.c) The divined positions must be a permutation of the inputs,
-            // along which the index sets are strictly increasing.
-            let num_inputs = prev_transaction_kernel.inputs.len();
-            let mut taken = vec![false; num_inputs];
-            let mut previous_index_set: Option<Vec<u128>> = None;
-            for _ in 0..num_inputs {
-                let position = usize::try_from(tasm::tasmlib_io_read_secin___bfe().value())
-                    .expect("position must fit");
-                assert!(position < num_inputs);
-                assert!(!taken[position]);
-                taken[position] = true;
-                let index_set = prev_transaction_kernel.inputs[position]
-                    .absolute_indices
-                    .to_vec();
-                assert!(previous_index_set.is_none_or(|previous| previous < index_set));
-                previous_index_set = Some(index_set);
-            }
-
-            // 2.u)
-            assert!(!prev_transaction_kernel.retires_before(witness.prev_block_header.timestamp));
-
             // 2.m)
             let prev_lustration_status = witness
                 .prev_block_header
@@ -2857,6 +2919,7 @@ mod tests {
                 let expected_input_start = [
                     prev_block_body_mh.reversed().values().to_vec(),
                     vec![prev_block_height.into()],
+                    genesis_digest.reversed().values().to_vec(),
                 ]
                 .concat();
                 let parent_claim = witness
@@ -3667,9 +3730,15 @@ mod tests {
             next_body.mast_hash(),
             next_header,
             prev_block,
+            fixture_genesis().hash(),
             epochs,
             ConsensusRuleSet::HardforkDelta,
         )
+    }
+
+    /// The genesis block the fixture chains name.
+    fn fixture_genesis() -> Block {
+        Block::genesis(Network::Main)
     }
 
     /// A claim that a trivial program halts, with its proof: filler for an
@@ -4005,6 +4074,7 @@ mod tests {
             }]);
             let program = skipping();
             let rule_set = ConsensusRuleSet::HardforkDelta;
+            let genesis = fixture_genesis().hash();
             for table in [&base, &other] {
                 let claim =
                     own_claim_with_epochs(&program, &prev_prev_block, &body, &header, table);
@@ -4013,13 +4083,20 @@ mod tests {
                 let appendix = block.appendix();
                 assert_eq!(
                     Some(claim),
-                    program.claim_in(appendix, body_mast_hash, height, table, rule_set)
+                    program.claim_in(appendix, body_mast_hash, height, genesis, table, rule_set)
                 );
                 let under_base =
-                    program.claim_in(appendix, body_mast_hash, height, &base, rule_set);
+                    program.claim_in(appendix, body_mast_hash, height, genesis, &base, rule_set);
                 assert_eq!(std::ptr::eq(table, &base), under_base.is_some());
                 assert!(program
-                    .claim_in(appendix, body_mast_hash, height.next(), table, rule_set)
+                    .claim_in(
+                        appendix,
+                        body_mast_hash,
+                        height.next(),
+                        genesis,
+                        table,
+                        rule_set
+                    )
                     .is_none());
             }
         }
@@ -5414,6 +5491,37 @@ ones):
                 &next_header,
                 BlockValidationRule::ProofQuality.error_id(),
             );
+        }
+
+        /// A genesis parent, unmined and without claims or proof, passes
+        /// no rule but the named hash.
+        #[test]
+        fn genesis_parent_passes_by_the_named_hash_alone() {
+            let kernel = TransactionKernelModifier::default()
+                .inputs(vec![])
+                .outputs(vec![])
+                .modify(transaction_kernel_and_proof().0.clone());
+            let next = |genesis: &Block| {
+                let mutator_set = &genesis.body().mutator_set_accumulator;
+                next_body_and_header_with_transaction(genesis, 0, &kernel, mutator_set)
+            };
+            let genesis = fixture_genesis();
+            let (next_body, next_header) = next(&genesis);
+            for program in [PredecessorIsValid::new(), skipping()] {
+                assert_accepts(&program, &genesis, &next_body, &next_header);
+            }
+
+            let other_genesis = Block::genesis(Network::TestnetMock);
+            let (next_body, next_header) = next(&other_genesis);
+            for program in [PredecessorIsValid::new(), skipping()] {
+                assert_rejects(
+                    &program,
+                    &other_genesis,
+                    &next_body,
+                    &next_header,
+                    BlockValidationRule::GenesisHash.error_id(),
+                );
+            }
         }
 
         #[test]
