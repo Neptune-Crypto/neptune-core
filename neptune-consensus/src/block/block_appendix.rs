@@ -8,6 +8,7 @@ use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::mast_hash::MastHash;
 use neptune_primitives::network::Network;
+use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
@@ -17,6 +18,7 @@ use tasm_lib::twenty_first::bfe;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 
 use super::block_body::BlockBody;
+use crate::block::validity::knows_mutator_set::KnowsMutatorSet;
 use crate::block::validity::predecessor_is_valid::PredecessorIsValid;
 use crate::block::validity::swbf_update::aggregation::SwbfUpdateAggregation;
 use crate::block::validity::swbf_update::leaf::CorrectSwbfUpdate;
@@ -91,18 +93,28 @@ impl BlockAppendix {
     }
 
     /// Every claim a block's appendix must hold, by program, version and
-    /// input, given the mutator set after its parent: those above, and from
-    /// hard fork epsilon on the SWBF update claim about the transaction on
-    /// that mutator set.
+    /// input, given its parent's hash and the mutator set after it: those
+    /// above, and from hard fork epsilon on the composer's claim to know
+    /// that mutator set, where the epoch requires reveals, and the SWBF
+    /// update claim about the transaction on it.
     pub fn consensus_claims(
         block_body: &BlockBody,
         height: BlockHeight,
+        parent_digest: Digest,
         parent_mutator_set: &MutatorSetAccumulator,
         parameters: &ConsensusParameters,
     ) -> Vec<Claim> {
         let consensus_rule_set = ConsensusRuleSet::infer_from(parameters.network, height);
         let mut claims = Self::consensus_claims_without_parent(block_body, height, parameters);
         if consensus_rule_set.requires_predecessor_claim() {
+            let epoch = parameters.epochs.in_force_at(height);
+            if !epoch.requires_mutator_set_reveals.is_zero() {
+                claims.push(KnowsMutatorSet::claim(
+                    parent_digest,
+                    parent_mutator_set,
+                    consensus_rule_set,
+                ));
+            }
             let input = CorrectSwbfUpdate::claim_input(
                 parent_mutator_set,
                 bfe!(CorrectSwbfUpdate::FIRST_LEAF_INDEX),

@@ -174,7 +174,7 @@ impl BasicSnippet for GuesserSwbfiReveal {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-pub(super) mod tests {
+pub(in crate::block) mod tests {
     use std::collections::HashMap;
 
     use rand::rngs::StdRng;
@@ -194,7 +194,7 @@ pub(super) mod tests {
     /// A random header revealing a random leaf, in a first Merkle tree of
     /// this height made up around the leaf's path, and the inactive SWBF
     /// whose first peak it is, with this many leafs.
-    pub(in crate::block::validity) fn revealing_header_and_swbfi(
+    pub(in crate::block) fn revealing_header_and_swbfi(
         rng: &mut StdRng,
         height: u32,
         leaf_count: u64,
