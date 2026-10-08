@@ -398,7 +398,9 @@ clear of the version word and the lustration words, so validation of those
 and the guessing loop are untouched. `PredecessorIsValid` walks it with
 `merkle_step_mem` straight out of the header in memory; node indices are u32
 there, so the walk splits after 31 levels, the rest of the sample's bits
-shifted down. A tree taller than 54 levels is rejected; that is 2^54 chunks.
+shifted down. A tree taller than 54 levels, that is more than 2^54 chunks, is
+revealed from the node 54 levels below the root on the sampled leaf's path,
+at the sample's bits above the levels left out.
 Host side, `guesser_reveal_is_valid(header, swbfi)` is the same check as an MMR
 membership proof against the first peak, for the tip. Not yet wired: the
 mining loop filling the reveal before guessing (the nonce loop itself is

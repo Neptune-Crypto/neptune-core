@@ -5968,7 +5968,7 @@ ones):
 
             use super::*;
             use crate::block::validity::knows_mutator_set::tests::ArchivalSwbfi;
-            use crate::block::validity::swbfi_reveal::guesser_leaf_index;
+            use crate::block::validity::swbfi_reveal::guesser_node_index;
 
             fn epochs_requiring_mutator_set_reveals() -> EpochTable {
                 EpochTable::new(&[Epoch {
@@ -5995,7 +5995,7 @@ ones):
 
             /// The leaf this header's guesser must reveal and its path.
             fn reveal(header: &BlockHeader, swbfi: &ArchivalSwbfi) -> (u64, Digest, Vec<Digest>) {
-                let (index, _) = guesser_leaf_index(
+                let (index, _) = guesser_node_index(
                     header.prev_block_digest,
                     &header.guesser_receiver_data,
                     swbfi.num_leafs(),
