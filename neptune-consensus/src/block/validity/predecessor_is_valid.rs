@@ -2,6 +2,7 @@ use std::sync::OnceLock;
 
 use get_size2::GetSize;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::difficulty_control::Difficulty;
 use neptune_primitives::difficulty_control::ProofOfWork;
 use neptune_primitives::mast_hash::MastHash;
@@ -323,6 +324,34 @@ impl PredecessorIsValid {
         Self {
             verifies_prev_block_proof: true,
         }
+    }
+
+    /// This program's claim in the appendix about the block with this body
+    /// hash and height under these epochs, if any. A node requires one of a
+    /// tip, with the table it knows.
+    pub fn claim_in(
+        &self,
+        appendix: &BlockAppendix,
+        body_mast_hash: Digest,
+        height: BlockHeight,
+        epochs: &EpochTable,
+        consensus_rule_set: ConsensusRuleSet,
+    ) -> Option<Claim> {
+        let input = [
+            body_mast_hash.reversed().values().to_vec(),
+            vec![height.into()],
+            epochs.encode(),
+        ]
+        .concat();
+        let version = consensus_rule_set.triton_proof_version().version();
+        appendix
+            .iter()
+            .find(|claim| {
+                claim.program_digest == self.hash()
+                    && claim.version == version
+                    && claim.input == input
+            })
+            .cloned()
     }
 
     /// Where in the claim's output the previous block's timestamp is.
@@ -3960,6 +3989,38 @@ mod tests {
             );
             let input = witness.standard_input();
             assert!(extension.run_tasm(&input, witness.nondeterminism()).is_ok());
+        }
+
+        /// The host finds a block's claim with its own table and not with
+        /// another, however slight the difference.
+        #[test]
+        fn claim_is_found_under_the_nodes_table_only() {
+            let prev_prev_block = random_unproven_block(0);
+            let (body, header) = next_body_and_header(&prev_prev_block, 0);
+            let base = epochs();
+            let other = EpochTable::new(&[Epoch {
+                min_swbf_padded_rows: activation_epoch().min_swbf_padded_rows + bfe!(1),
+                ..activation_epoch()
+            }]);
+            let program = skipping();
+            let rule_set = ConsensusRuleSet::HardforkDelta;
+            for table in [&base, &other] {
+                let claim =
+                    own_claim_with_epochs(&program, &prev_prev_block, &body, &header, table);
+                let block = unproven_block(header, body.clone(), vec![claim.clone()]);
+                let (body_mast_hash, height) = (body.mast_hash(), header.height);
+                let appendix = block.appendix();
+                assert_eq!(
+                    Some(claim),
+                    program.claim_in(appendix, body_mast_hash, height, table, rule_set)
+                );
+                let under_base =
+                    program.claim_in(appendix, body_mast_hash, height, &base, rule_set);
+                assert_eq!(std::ptr::eq(table, &base), under_base.is_some());
+                assert!(program
+                    .claim_in(appendix, body_mast_hash, height.next(), table, rule_set)
+                    .is_none());
+            }
         }
 
         #[test]
