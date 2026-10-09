@@ -32,22 +32,17 @@ use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::proof_abstractions::SecretWitness;
 
-/// The hash of the parent's hash paired with a salt, whose words sample
-/// leafs of the mutator set.
-pub(super) fn sample_digest(prev_block_digest: Digest, salt: Digest) -> Digest {
-    Tip5::hash_pair(prev_block_digest, salt)
-}
-
-/// The leafs of the mutator set whose contents the composer must know: two
-/// of an inactive SWBF with this many leafs and one of an AOCL with this
-/// many, each none when the MMR has none.
+/// The leafs of the mutator set whose contents the composer must know.
+///
+/// Two from the inactive SWBF, and one from the AOCL. None if the respective
+/// MMRs are empty.
 pub fn sampled_leafs(
     prev_block_digest: Digest,
     swbfi_leaf_count: u64,
     aocl_leaf_count: u64,
 ) -> (Option<[u64; 2]>, Option<u64>) {
     let [chunk_a, chunk_b, aocl_leaf, _, _] =
-        sample_digest(prev_block_digest, Digest::default()).values();
+        Tip5::hash_pair(prev_block_digest, Digest::default()).values();
     let chunks = (swbfi_leaf_count != 0)
         .then(|| [chunk_a, chunk_b].map(|word| word.value() % swbfi_leaf_count));
     let aocl_leaf = (aocl_leaf_count != 0).then(|| aocl_leaf.value() % aocl_leaf_count);

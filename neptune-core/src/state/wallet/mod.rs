@@ -1020,6 +1020,7 @@ mod tests {
             block_2_b.clone(),
             merged_tx,
             timestamp,
+            None,
             TritonVmJobQueue::get_instance(),
             TritonVmProofJobOptions::default_with_network(network),
         )
@@ -1186,6 +1187,7 @@ mod tests {
             genesis_block.clone(),
             tx_for_block,
             in_seven_months,
+            None,
             TritonVmJobQueue::get_instance(),
             TritonVmProofJobOptions::default_with_network(network),
         )

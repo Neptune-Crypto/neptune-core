@@ -6014,6 +6014,7 @@ mod tests {
             genesis_block.clone(),
             block_transaction,
             in_seven_months,
+            None,
             TritonVmJobQueue::get_instance(),
             TritonVmProofJobOptions::default_with_network(network),
         )
@@ -6255,6 +6256,7 @@ mod tests {
             block_1.clone(),
             block_transaction2,
             in_eight_months,
+            None,
             TritonVmJobQueue::get_instance(),
             TritonVmProofJobOptions::default_with_network(network),
         )
@@ -7352,6 +7354,7 @@ mod tests {
                     genesis_block,
                     block_1_tx,
                     seven_months_post_launch,
+                    None,
                     TritonVmJobQueue::get_instance(),
                     TritonVmProofJobOptions::default_with_network(network),
                 )

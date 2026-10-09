@@ -20,7 +20,6 @@ use crate::block::block_header::BlockHeader;
 use crate::block::block_header::BlockPow;
 use crate::block::block_validation_error::BlockValidationRule;
 use crate::block::guesser_receiver_data::GuesserReceiverData;
-use crate::block::validity::knows_mutator_set::sample_digest;
 
 /// The node of the inactive SWBF's first Merkle tree the guesser must
 /// reveal, with the levels from it to the root, for an inactive SWBF with
@@ -34,7 +33,7 @@ pub fn guesser_node_index(
 ) -> Option<(u64, u32)> {
     let height = leaf_count.checked_ilog2()?;
     let levels = height.min(BlockPow::SWBFI_REVEAL_MAX_HEIGHT as u32);
-    let sample = sample_digest(prev_block_digest, Tip5::hash(receiver_data)).values()[0];
+    let sample = Tip5::hash_pair(prev_block_digest, Tip5::hash(receiver_data)).values()[0];
     let index = (sample.value() >> (height - levels)) & ((1 << levels) - 1);
     Some((index, levels))
 }

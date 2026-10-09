@@ -187,6 +187,7 @@ async fn block_with_n_outputs(
         current_tip,
         block_tx,
         timestamp,
+        None,
         vm_job_queue(),
         TritonVmProofJobOptions::default(),
     )

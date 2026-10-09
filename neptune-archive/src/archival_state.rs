@@ -2545,6 +2545,86 @@ impl ArchivalState {
         // Populate true claims cache
         cache_true_claims(historical_block_claims).await;
     }
+
+    fn assert_synced_to(&self, block_digest: Digest) {
+        assert_eq!(
+            block_digest,
+            self.archival_mutator_set.get_sync_label(),
+            "archival mutator set must be synced to the block"
+        );
+    }
+
+    /// The composer's witness to knowing the archival mutator set.
+    ///
+    /// The mutator set must be sync to the expected block.
+    ///
+    /// # Panics
+    /// - If the mutator set is synced to another block than the one called
+    ///   for.
+    pub async fn knows_mutator_set_witness(
+        &self,
+        prev_block_digest: Digest,
+    ) -> KnowsMutatorSetWitness {
+        self.assert_synced_to(prev_block_digest);
+        let ams = self.archival_mutator_set.ams();
+        let msa = ams.accumulator().await;
+        let (chunk_indices, aocl_index) = sampled_leafs(
+            prev_block_digest,
+            msa.swbf_inactive.num_leafs(),
+            msa.aocl.num_leafs(),
+        );
+        let mut chunks = [Chunk::empty_chunk(), Chunk::empty_chunk()];
+        let mut chunk_paths = [vec![], vec![]];
+        for (slot, index) in chunk_indices.into_iter().flatten().enumerate() {
+            let (path, chunk) = ams
+                .get_chunk_and_auth_path(index)
+                .await
+                .expect("sampled chunk must be in the SWBF");
+            chunks[slot] = chunk;
+            chunk_paths[slot] = path.authentication_path;
+        }
+        let (aocl_leaf, aocl_path) = match aocl_index {
+            Some(index) => (
+                ams.aocl.get_leaf_async(index).await,
+                ams.aocl
+                    .prove_membership_async(index)
+                    .await
+                    .authentication_path,
+            ),
+            None => (Digest::default(), vec![]),
+        };
+        KnowsMutatorSetWitness::new(
+            prev_block_digest,
+            &msa,
+            chunks,
+            chunk_paths,
+            aocl_leaf,
+            aocl_path,
+        )
+    }
+
+    /// The guesser's reveal of the inactive SWBF that the archival mutator set
+    /// holds.
+    ///
+    /// For a block on the block with this hash, which that mutator
+    /// set must be synced to: the sampled node of the first Merkle tree
+    /// and its authentication path. None for an empty SWBF.
+    pub async fn guesser_swbfi_reveal(
+        &self,
+        prev_block_digest: Digest,
+        receiver_data: &GuesserReceiverData,
+    ) -> Option<(Digest, Vec<Digest>)> {
+        self.assert_synced_to(prev_block_digest);
+        let swbfi = &self.archival_mutator_set.ams().swbf_inactive;
+        let leaf_count = swbfi.num_leafs().await;
+        let (index, levels) = guesser_node_index(prev_block_digest, receiver_data, leaf_count)?;
+        let levels_up = leaf_count.ilog2() - levels;
+        Some(
+            swbfi
+                .get_ancestor_and_path(index << levels_up, levels_up)
+                .await,
+        )
+    }
 }
 
 /// Test-support consistency checks for [`ArchivalState`].
@@ -2624,82 +2704,6 @@ impl ArchivalState {
     pub async fn assert_consistent(&self, expected_tip: &Block) {
         assert!(self.is_consistent(expected_tip).await);
     }
-
-    fn assert_synced_to(&self, block_digest: Digest) {
-        assert_eq!(
-            block_digest,
-            self.archival_mutator_set.get_sync_label(),
-            "archival mutator set must be synced to the block"
-        );
-    }
-
-    /// The composer's witness to knowing the mutator set the archival
-    /// mutator set holds, for a block on the block with this hash, which
-    /// that mutator set must be synced to.
-    pub async fn knows_mutator_set_witness(
-        &self,
-        prev_block_digest: Digest,
-    ) -> KnowsMutatorSetWitness {
-        self.assert_synced_to(prev_block_digest);
-        let ams = self.archival_mutator_set.ams();
-        let msa = ams.accumulator().await;
-        let (chunk_indices, aocl_index) = sampled_leafs(
-            prev_block_digest,
-            msa.swbf_inactive.num_leafs(),
-            msa.aocl.num_leafs(),
-        );
-        let mut chunks = [Chunk::empty_chunk(), Chunk::empty_chunk()];
-        let mut chunk_paths = [vec![], vec![]];
-        for (slot, index) in chunk_indices.into_iter().flatten().enumerate() {
-            let (path, chunk) = ams
-                .get_chunk_and_auth_path(index)
-                .await
-                .expect("sampled chunk must be in the SWBF");
-            chunks[slot] = chunk;
-            chunk_paths[slot] = path.authentication_path;
-        }
-        let (aocl_leaf, aocl_path) = match aocl_index {
-            Some(index) => (
-                ams.aocl.get_leaf_async(index).await,
-                ams.aocl
-                    .prove_membership_async(index)
-                    .await
-                    .authentication_path,
-            ),
-            None => (Digest::default(), vec![]),
-        };
-        KnowsMutatorSetWitness::new(
-            prev_block_digest,
-            &msa,
-            chunks,
-            chunk_paths,
-            aocl_leaf,
-            aocl_path,
-        )
-    }
-
-    /// The guesser's reveal of the inactive SWBF that the archival mutator set
-    /// holds.
-    ///
-    /// For a block on the block with this hash, which that mutator
-    /// set must be synced to: the sampled node of the first Merkle tree
-    /// and its authentication path. None for an empty SWBF.
-    pub async fn guesser_swbfi_reveal(
-        &self,
-        prev_block_digest: Digest,
-        receiver_data: &GuesserReceiverData,
-    ) -> Option<(Digest, Vec<Digest>)> {
-        self.assert_synced_to(prev_block_digest);
-        let swbfi = &self.archival_mutator_set.ams().swbf_inactive;
-        let leaf_count = swbfi.num_leafs().await;
-        let (index, levels) = guesser_node_index(prev_block_digest, receiver_data, leaf_count)?;
-        let levels_up = leaf_count.ilog2() - levels;
-        Some(
-            swbfi
-                .get_ancestor_and_path(index << levels_up, levels_up)
-                .await,
-        )
-    }
 }
 
 #[cfg(test)]
@@ -2773,30 +2777,45 @@ mod tests {
         ArchivalState::new(data_dir, Block::genesis(network), utxo_index, network).await
     }
 
-    /// The witness from the archival mutator set after genesis is the
-    /// composer's claim for block 1, and the program accepts it.
+    /// The witness for block 1, on the archival state synced to genesis,
+    /// then for block 2, synced to block 1.
     #[apply(shared_tokio_runtime)]
     async fn knows_mutator_set_witness_satisfies_the_program() {
         let network = Network::Main;
-        let archival_state = make_test_archival_state(network, false).await;
+        let mut archival_state = make_test_archival_state(network, false).await;
         let genesis = Block::genesis(network);
-        let ams = archival_state.archival_mutator_set.ams();
-        assert!(ams.swbf_inactive.num_leafs().await > 0);
-
-        let witness = archival_state
-            .knows_mutator_set_witness(genesis.hash())
-            .await;
-        let rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::genesis().next());
-        let expected = KnowsMutatorSet::claim(genesis.hash(), &ams.accumulator().await, rule_set);
-        let claim = witness.claim();
-        assert_eq!(expected.program_digest, claim.program_digest);
-        assert_eq!(expected.input, claim.input);
-        let run = VM::run(
-            witness.program(),
-            witness.standard_input(),
-            witness.nondeterminism(),
+        let block1 = invalid_empty_block(&genesis, network);
+        let block2 = invalid_empty_block(&block1, network);
+        assert!(
+            archival_state
+                .archival_mutator_set
+                .ams()
+                .swbf_inactive
+                .num_leafs()
+                .await
+                > 0
         );
-        assert!(run.is_ok());
+
+        for (parent, child) in [(genesis, &block1), (block1.clone(), &block2)] {
+            let ams = archival_state.archival_mutator_set.ams();
+            let witness = archival_state
+                .knows_mutator_set_witness(parent.hash())
+                .await;
+            let rule_set = ConsensusRuleSet::infer_from(network, child.header().height);
+            let expected =
+                KnowsMutatorSet::claim(parent.hash(), &ams.accumulator().await, rule_set);
+            let claim = witness.claim();
+            assert_eq!(expected.program_digest, claim.program_digest);
+            assert_eq!(expected.input, claim.input);
+            let run = VM::run(
+                witness.program(),
+                witness.standard_input(),
+                witness.nondeterminism(),
+            );
+            assert!(run.is_ok(), "block {}", parent.header().height.next());
+
+            archival_state.set_new_tip(child).await.unwrap();
+        }
     }
 
     /// The reveal from the archival mutator set after genesis passes the
