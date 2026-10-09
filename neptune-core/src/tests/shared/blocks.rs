@@ -82,6 +82,7 @@ pub(crate) async fn next_block(
             address: guesser_address,
             override_rng_seed: Some(deterministic_guesser_rng_seed),
             override_timestamp: Some(new_timestamp),
+            swbfi_reveal: None,
         },
     )
     .await;

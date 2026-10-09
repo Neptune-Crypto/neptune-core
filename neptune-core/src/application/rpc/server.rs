@@ -6444,6 +6444,7 @@ mod tests {
                         target,
                         lustration_status,
                         Some(version),
+                        None,
                     ) {
                         break valid_pow;
                     }

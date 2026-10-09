@@ -2650,10 +2650,13 @@ pub(crate) mod tests {
         let parent_target = genesis.header().difficulty.target();
 
         // Only loop over non-memory hard PoW algorithms since the memory-hard
-        // are too expensive for tests.
+        // are too expensive for tests. The guesser's reveal belongs to the
+        // block's validity, not to the proof of work, so none is set.
         for consensus_rule_set in [
             ConsensusRuleSet::HardforkBeta,
             ConsensusRuleSet::HardforkGamma,
+            ConsensusRuleSet::HardforkDelta,
+            ConsensusRuleSet::HardforkEpsilon,
         ] {
             let mut invalid_block = invalid_empty_block(&genesis, network);
             let mast_auth_paths = invalid_block.pow_mast_paths();
@@ -2667,9 +2670,14 @@ pub(crate) mod tests {
             let version = invalid_block.header().version;
 
             let valid_pow = loop {
-                if let Some(valid_pow) =
-                    Pow::guess(&mast_auth_paths, rng.random(), target, None, Some(version))
-                {
+                if let Some(valid_pow) = Pow::guess(
+                    &mast_auth_paths,
+                    rng.random(),
+                    target,
+                    None,
+                    Some(version),
+                    None,
+                ) {
                     break valid_pow;
                 }
             };

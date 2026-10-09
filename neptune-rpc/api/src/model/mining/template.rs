@@ -102,6 +102,7 @@ impl RpcBlockTemplateMetadata {
                     self.threshold,
                     self.lustration_status,
                     Some(self.version),
+                    None,
                 )
             })
             .find_map(|x| x)

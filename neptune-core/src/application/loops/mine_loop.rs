@@ -262,6 +262,7 @@ fn guess_worker(
         address: guesser_address,
         override_rng_seed: rng_seed,
         override_timestamp: now,
+        swbfi_reveal,
     } = guessing_configuration;
 
     let now = now.unwrap_or(Timestamp::now());
@@ -362,6 +363,7 @@ fn guess_worker(
                         rng,
                         &sender,
                         Some(version),
+                        swbfi_reveal.as_ref(),
                     )
                 },
             )
@@ -431,6 +433,7 @@ fn guess_nonce_iteration(
     rng: &mut rand::rngs::StdRng,
     sender: &oneshot::Sender<NewBlockFound>,
     version: Option<BFieldElement>,
+    swbfi_reveal: Option<&(Digest, Vec<Digest>)>,
 ) -> GuessNonceResult {
     let nonce: Digest = rng.random();
 
@@ -446,6 +449,7 @@ fn guess_nonce_iteration(
         threshold,
         lustration_status,
         version,
+        swbfi_reveal,
     );
 
     match result {
@@ -862,9 +866,25 @@ pub(crate) async fn mine(
                 .await
                 .mining_rewards_address();
 
-            let latest_block_header = global_state_lock
-                .lock(|s| s.chain.tip().header().to_owned())
-                .await;
+            // The reveal comes from the archival state synced to the tip.
+            let (latest_block_header, swbfi_reveal) = {
+                let state = global_state_lock.lock_guard().await;
+                let tip = state.chain.tip();
+                let reveal = if tip.hash() == proposal.header().prev_block_digest
+                    && ConsensusParameters::for_network(network)
+                        .requires_mutator_set_reveals(proposal.header().height)
+                {
+                    state
+                        .chain
+                        .archival_state()
+                        .guesser_swbfi_reveal(tip.hash(), &guesser_address.clone().into())
+                        .await
+                } else {
+                    // Guess is stale, and will be cancelled
+                    None
+                };
+                (tip.header().to_owned(), reveal)
+            };
             let guesser_task = guess_nonce(
                 network,
                 proposal,
@@ -875,6 +895,7 @@ pub(crate) async fn mine(
                     address: guesser_address,
                     override_rng_seed: None,
                     override_timestamp: None,
+                    swbfi_reveal,
                 },
             );
 
@@ -1256,6 +1277,7 @@ pub(crate) mod tests {
                         prng,
                         &worker_task_tx,
                         Some(version),
+                        None,
                     );
                 })
                 .count();
@@ -1774,6 +1796,7 @@ pub(crate) mod tests {
                 address: guesser_address,
                 override_rng_seed: None,
                 override_timestamp: None,
+                swbfi_reveal: None,
             },
             None,
         );
@@ -1853,6 +1876,7 @@ pub(crate) mod tests {
                 address: guesser_key.to_address().into(),
                 override_rng_seed: None,
                 override_timestamp: None,
+                swbfi_reveal: None,
             },
             None,
         );
@@ -2010,6 +2034,7 @@ pub(crate) mod tests {
                     address: guesser_key.to_address().into(),
                     override_rng_seed: None,
                     override_timestamp: None,
+                    swbfi_reveal: None,
                 },
                 Some(target_block_interval),
             );
@@ -2563,6 +2588,7 @@ pub(crate) mod tests {
                     address: guesser_key.to_address().into(),
                     override_rng_seed: None,
                     override_timestamp: Some(block_time),
+                    swbfi_reveal: None,
                 },
                 None,
             );
