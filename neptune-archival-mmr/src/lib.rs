@@ -420,6 +420,32 @@ impl<Storage: StorageVec<Digest>> ArchivalMmr<Storage> {
         MmrMembershipProof::new(authentication_path)
     }
 
+    /// The node this many levels above a leaf, along with its authentication
+    /// path. The leaf and its authentication path if levels_up is zero.
+    ///
+    /// # Panics
+    ///
+    /// If the leaf index is out of bounds, or the levels exceed the height
+    /// of the leaf's tree.
+    pub async fn get_ancestor_and_path(
+        &self,
+        leaf_index: u64,
+        levels_up: u32,
+    ) -> (Digest, Vec<Digest>) {
+        let path = self
+            .prove_membership_async(leaf_index)
+            .await
+            .authentication_path;
+        let node_index = (0..levels_up).fold(
+            shared_advanced::leaf_index_to_node_index(leaf_index),
+            |node_index, _| shared_advanced::parent(node_index),
+        );
+        (
+            self.digests.get(node_index).await,
+            path[levels_up as usize..].to_vec(),
+        )
+    }
+
     /// Returns the right-most leaf of the MMR, the leaf that was added the
     /// latest.
     pub async fn get_latest_leaf(&self) -> Option<Digest> {
@@ -1366,6 +1392,59 @@ pub(crate) mod tests {
         let digests = vec![Digest::default(); 17];
         let ammr = mock::get_ammr_from_digests(digests.clone()).await;
         ammr.get_leaf_async(17).await;
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn internal_path_for_leaf_agrees_with_leaf_membership_proof() {
+        let leaf_hashes: Vec<Digest> = (0..11).map(|_| random()).collect();
+        let archival_mmr = mock::get_ammr_from_digests(leaf_hashes.clone()).await;
+
+        for i in 0..11 {
+            let expected = archival_mmr.prove_membership_async(i).await;
+            let (leaf, leaf_auth_path) = archival_mmr.get_ancestor_and_path(i, 0).await;
+            assert_eq!(expected.authentication_path, leaf_auth_path);
+            assert_eq!(leaf_hashes[i as usize], leaf);
+        }
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn ancestor_and_path_reach_the_peak() {
+        let root_of_path = |index: u64, node: Digest, path: &[Digest]| {
+            path.iter()
+                .enumerate()
+                .fold(node, |node, (level, &sibling)| {
+                    if (index >> level) & 1 == 0 {
+                        Tip5::hash_pair(node, sibling)
+                    } else {
+                        Tip5::hash_pair(sibling, node)
+                    }
+                })
+        };
+        let leaf_hashes: Vec<Digest> = (0..11).map(|_| random()).collect();
+        let archival_mmr = mock::get_ammr_from_digests(leaf_hashes.clone()).await;
+        let first_peak = archival_mmr.peaks().await[0];
+        for (leaf_index, &leaf) in leaf_hashes.iter().enumerate().take(8) {
+            let leaf_index = leaf_index as u64;
+            let full_path = archival_mmr
+                .prove_membership_async(leaf_index)
+                .await
+                .authentication_path;
+            for levels_up in 0..=3u32 {
+                let (node, path) = archival_mmr
+                    .get_ancestor_and_path(leaf_index, levels_up)
+                    .await;
+                let levels_up = levels_up as usize;
+                assert_eq!(
+                    root_of_path(leaf_index, leaf, &full_path[..levels_up]),
+                    node
+                );
+                assert_eq!(full_path[levels_up..], path);
+                assert_eq!(
+                    first_peak,
+                    root_of_path(leaf_index >> levels_up, node, &path)
+                );
+            }
+        }
     }
 
     #[apply(shared_tokio_runtime)]

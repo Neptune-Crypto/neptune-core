@@ -17,7 +17,11 @@ use neptune_consensus::block::block_header::BlockHeader;
 use neptune_consensus::block::block_header::BlockHeaderWithBlockHashWitness;
 use neptune_consensus::block::block_header::HeaderToBlockHashWitness;
 use neptune_consensus::block::block_kernel::BlockKernel;
+use neptune_consensus::block::guesser_receiver_data::GuesserReceiverData;
 use neptune_consensus::block::mutator_set_update::MutatorSetUpdate;
+use neptune_consensus::block::validity::knows_mutator_set::KnowsMutatorSetWitness;
+use neptune_consensus::block::validity::knows_mutator_set::sampled_leafs;
+use neptune_consensus::block::validity::swbfi_reveal::guesser_node_index;
 use neptune_consensus::proof_abstractions::verifier::CHECKPOINT_MAIN;
 use neptune_consensus::proof_abstractions::verifier::CHECKPOINT_TESTNET_0;
 use neptune_consensus::proof_abstractions::verifier::cache_true_claims;
@@ -34,6 +38,7 @@ use neptune_mutator_set::commit;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_mutator_set::removal_record::RemovalRecord;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+use neptune_mutator_set::removal_record::chunk::Chunk;
 use neptune_primitives::block_height::BLOCKS_PER_GENERATION;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
@@ -2437,6 +2442,82 @@ impl ArchivalState {
     pub async fn assert_consistent(&self, expected_tip: &Block) {
         assert!(self.is_consistent(expected_tip).await);
     }
+
+    fn assert_synced_to(&self, block_digest: Digest) {
+        assert_eq!(
+            block_digest,
+            self.archival_mutator_set.get_sync_label(),
+            "archival mutator set must be synced to the block"
+        );
+    }
+
+    /// The composer's witness to knowing the mutator set the archival
+    /// mutator set holds, for a block on the block with this hash, which
+    /// that mutator set must be synced to.
+    pub async fn knows_mutator_set_witness(
+        &self,
+        prev_block_digest: Digest,
+    ) -> KnowsMutatorSetWitness {
+        self.assert_synced_to(prev_block_digest);
+        let ams = self.archival_mutator_set.ams();
+        let msa = ams.accumulator().await;
+        let (chunk_indices, aocl_index) = sampled_leafs(
+            prev_block_digest,
+            msa.swbf_inactive.num_leafs(),
+            msa.aocl.num_leafs(),
+        );
+        let mut chunks = [Chunk::empty_chunk(), Chunk::empty_chunk()];
+        let mut chunk_paths = [vec![], vec![]];
+        for (slot, index) in chunk_indices.into_iter().flatten().enumerate() {
+            let (path, chunk) = ams
+                .get_chunk_and_auth_path(index)
+                .await
+                .expect("sampled chunk must be in the SWBF");
+            chunks[slot] = chunk;
+            chunk_paths[slot] = path.authentication_path;
+        }
+        let (aocl_leaf, aocl_path) = match aocl_index {
+            Some(index) => (
+                ams.aocl.get_leaf_async(index).await,
+                ams.aocl
+                    .prove_membership_async(index)
+                    .await
+                    .authentication_path,
+            ),
+            None => (Digest::default(), vec![]),
+        };
+        KnowsMutatorSetWitness::new(
+            prev_block_digest,
+            &msa,
+            chunks,
+            chunk_paths,
+            aocl_leaf,
+            aocl_path,
+        )
+    }
+
+    /// The guesser's reveal of the inactive SWBF that the archival mutator set
+    /// holds.
+    ///
+    /// For a block on the block with this hash, which that mutator
+    /// set must be synced to: the sampled node of the first Merkle tree
+    /// and its authentication path. None for an empty SWBF.
+    pub async fn guesser_swbfi_reveal(
+        &self,
+        prev_block_digest: Digest,
+        receiver_data: &GuesserReceiverData,
+    ) -> Option<(Digest, Vec<Digest>)> {
+        self.assert_synced_to(prev_block_digest);
+        let swbfi = &self.archival_mutator_set.ams().swbf_inactive;
+        let leaf_count = swbfi.num_leafs().await;
+        let (index, levels) = guesser_node_index(prev_block_digest, receiver_data, leaf_count)?;
+        let levels_up = leaf_count.ilog2() - levels;
+        Some(
+            swbfi
+                .get_ancestor_and_path(index << levels_up, levels_up)
+                .await,
+        )
+    }
 }
 
 #[cfg(test)]
@@ -2451,11 +2532,16 @@ mod tests {
     use anyhow::Result;
     use macro_rules_attr::apply;
     use neptune_consensus::block::Block;
+    use neptune_consensus::block::block_header::BlockHeader;
     use neptune_consensus::block::block_header::BlockHeaderWithBlockHashWitness;
     use neptune_consensus::block::test_helpers::invalid_empty_block;
     use neptune_consensus::block::test_helpers::invalid_empty_block_with_announcements;
     use neptune_consensus::block::test_helpers::invalid_empty_block_with_proof_size;
     use neptune_consensus::block::test_helpers::invalid_empty_blocks;
+    use neptune_consensus::block::validity::knows_mutator_set::KnowsMutatorSet;
+    use neptune_consensus::block::validity::swbfi_reveal::guesser_reveal_is_valid;
+    use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+    use neptune_consensus::proof_abstractions::SecretWitness;
     use neptune_consensus::transaction::announcement::Announcement;
     use neptune_mutator_set::addition_record::AdditionRecord;
     use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -2476,6 +2562,7 @@ mod tests {
     use tasm_lib::prelude::Digest;
     use tasm_lib::prelude::Tip5;
     use tasm_lib::triton_vm::prelude::BFieldElement;
+    use tasm_lib::triton_vm::prelude::VM;
     use tasm_lib::twenty_first::bfe;
     use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
     use tracing_test::traced_test;
@@ -2502,6 +2589,52 @@ mod tests {
     async fn make_test_archival_state(network: Network, utxo_index: bool) -> ArchivalState {
         let data_dir = unit_test_data_directory(network).unwrap();
         ArchivalState::new(data_dir, Block::genesis(network), utxo_index, network).await
+    }
+
+    /// The witness from the archival mutator set after genesis is the
+    /// composer's claim for block 1, and the program accepts it.
+    #[apply(shared_tokio_runtime)]
+    async fn knows_mutator_set_witness_satisfies_the_program() {
+        let network = Network::Main;
+        let archival_state = make_test_archival_state(network, false).await;
+        let genesis = Block::genesis(network);
+        let ams = archival_state.archival_mutator_set.ams();
+        assert!(ams.swbf_inactive.num_leafs().await > 0);
+
+        let witness = archival_state
+            .knows_mutator_set_witness(genesis.hash())
+            .await;
+        let rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::genesis().next());
+        let expected = KnowsMutatorSet::claim(genesis.hash(), &ams.accumulator().await, rule_set);
+        let claim = witness.claim();
+        assert_eq!(expected.program_digest, claim.program_digest);
+        assert_eq!(expected.input, claim.input);
+        let run = VM::run(
+            witness.program(),
+            witness.standard_input(),
+            witness.nondeterminism(),
+        );
+        assert!(run.is_ok());
+    }
+
+    /// The reveal from the archival mutator set after genesis passes the
+    /// rule for a block 1 header.
+    #[apply(shared_tokio_runtime)]
+    async fn guesser_swbfi_reveal_passes_the_rule() {
+        let network = Network::Main;
+        let archival_state = make_test_archival_state(network, false).await;
+        let genesis = Block::genesis(network);
+        let mut header: BlockHeader = rand::rng().random();
+        header.prev_block_digest = genesis.hash();
+
+        let (node, path) = archival_state
+            .guesser_swbfi_reveal(genesis.hash(), &header.guesser_receiver_data)
+            .await
+            .unwrap();
+        header.pow.set_swbfi_reveal(node, &path);
+        let ams = archival_state.archival_mutator_set.ams();
+        let swbfi = ams.swbf_inactive.to_accumulator_async().await;
+        assert!(guesser_reveal_is_valid(&header, &swbfi));
     }
 
     #[traced_test]
