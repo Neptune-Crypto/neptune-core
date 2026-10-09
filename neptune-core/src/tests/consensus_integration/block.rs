@@ -89,7 +89,8 @@ async fn total_block_subsidy_is_128_coins_regardless_of_guesser_fraction() {
             .sum();
         let block_primitive_witness =
             BlockPrimitiveWitness::new(genesis.clone(), coinbase_transaction, network);
-        let block_proof_witness = BlockProofWitness::produce(block_primitive_witness.clone());
+        let block_proof_witness =
+            BlockProofWitness::produce(block_primitive_witness.clone(), vec![]);
         let block1 = Block::new(
             block_primitive_witness.header(now, network.target_block_interval()),
             block_primitive_witness.body().to_owned(),

@@ -441,7 +441,7 @@ pub(crate) mod tests {
                 .to_vec(),
         );
 
-        let block_proof_witness = BlockProofWitness::produce(block_primitive_witness);
+        let block_proof_witness = BlockProofWitness::produce(block_primitive_witness, vec![]);
 
         let block_program_nondeterminism = block_proof_witness.nondeterminism();
         let rust_output = BlockProgram
@@ -497,7 +497,7 @@ pub(crate) mod tests {
         )
         .unwrap();
 
-        let block_proof_witness = BlockProofWitness::produce(block_primitive_witness)
+        let block_proof_witness = BlockProofWitness::produce(block_primitive_witness, vec![])
             .with_claim_test(halt_claim, halt_proof.into());
 
         let block_program_nondeterminism = block_proof_witness.nondeterminism();

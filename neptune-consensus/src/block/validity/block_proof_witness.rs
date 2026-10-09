@@ -20,7 +20,6 @@ use super::block_program::BlockProgram;
 use crate::block::block_body::BlockBody;
 use crate::block::block_body::BlockBodyField;
 use crate::block::BlockAppendix;
-use crate::block::ConsensusParameters;
 use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::transaction::transaction_kernel::TransactionKernelField;
@@ -48,7 +47,7 @@ impl BlockProofWitness {
     }
 
     /// Add a claim to the appendix, along with a proof.
-    pub(crate) fn with_claim(mut self, claim: Claim, proof: Proof) -> Self {
+    fn with_claim(mut self, claim: Claim, proof: Proof) -> Self {
         self.claims.push(claim);
         self.proofs.push(proof);
 
@@ -68,7 +67,13 @@ impl BlockProofWitness {
         BlockAppendix::new(self.claims())
     }
 
-    pub fn produce(block_primitive_witness: BlockPrimitiveWitness) -> BlockProofWitness {
+    /// The witness with the transaction's claim and the claims the composer
+    /// proved. Networks that mock proofs get the claims the rules require
+    /// here, with mock proofs.
+    pub fn produce(
+        block_primitive_witness: BlockPrimitiveWitness,
+        proven: Vec<(Claim, Proof)>,
+    ) -> BlockProofWitness {
         let txk_mast_hash = block_primitive_witness
             .body()
             .transaction_kernel
@@ -95,10 +100,10 @@ impl BlockProofWitness {
         // Add more claim/proof pairs here, when softforking.
         let mut witness =
             Self::new(block_primitive_witness.body().clone()).with_claim(tx_claim, tx_proof);
+        for (claim, proof) in proven {
+            witness = witness.with_claim(claim, proof);
+        }
 
-        // The predecessor claim and the SWBF update claim, with mock proofs
-        // where the network mocks proofs. Elsewhere the composer proves the
-        // SWBF update tree and adds its root; the rest is not yet written.
         let network = block_primitive_witness.network;
         let predecessor = &block_primitive_witness.predecessor_block;
         if consensus_rule_set.requires_predecessor_claim() && network.use_mock_proof() {
@@ -107,24 +112,6 @@ impl BlockProofWitness {
             for claim in claims.into_iter().skip(1) {
                 witness = witness.with_claim(claim, Proof::valid_mock());
             }
-        }
-
-        if !consensus_rule_set.requires_predecessor_claim() || network.use_mock_proof() {
-            let mutator_set = predecessor
-                .mutator_set_accumulator_after()
-                .expect("predecessor must have a fee");
-            let required = BlockAppendix::consensus_claims(
-                block_primitive_witness.body(),
-                block_height,
-                predecessor.hash(),
-                &mutator_set,
-                &ConsensusParameters::for_network(network),
-            );
-            let appendix = witness.appendix();
-            assert!(
-                required.iter().all(|claim| appendix.find(claim).is_some()),
-                "appendix witness must attest to the required claims",
-            );
         }
 
         witness

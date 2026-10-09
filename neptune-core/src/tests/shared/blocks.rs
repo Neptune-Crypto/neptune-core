@@ -171,7 +171,7 @@ pub(crate) async fn fake_valid_block_proposal_from_tx(
     let body = primitive_witness.body().to_owned();
     let header = primitive_witness.header(timestamp, network.target_block_interval());
     let (appendix, proof) = {
-        let block_proof_witness = BlockProofWitness::produce(primitive_witness);
+        let block_proof_witness = BlockProofWitness::produce(primitive_witness, vec![]);
         let appendix = block_proof_witness.appendix();
         let consensus_rules = ConsensusRuleSet::infer_from(network, header.height);
         let claim = BlockProgram::claim(&body, &appendix, consensus_rules);

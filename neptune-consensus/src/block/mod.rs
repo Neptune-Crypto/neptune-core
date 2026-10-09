@@ -65,6 +65,7 @@ use validity::epoch_table::EpochTable;
 use validity::knows_mutator_set::KnowsMutatorSet;
 use validity::knows_mutator_set::KnowsMutatorSetWitness;
 use validity::predecessor_is_valid::PredecessorIsValid;
+use validity::predecessor_is_valid::PredecessorIsValidWitness;
 use validity::swbf_update::aggregation::SwbfUpdateAggregation;
 use validity::swbf_update::leaf::CorrectSwbfUpdateWitness;
 use validity::swbf_update::removal_index_commitment::RemovalIndexCommitment;
@@ -222,6 +223,15 @@ impl ConsensusParameters {
     }
 }
 
+/// The witness data required for claims activated with hard fork epsilon: The
+/// witness data that it knows the mutator set, and the mutator set the
+/// predecessor's transaction was built on.
+#[derive(Debug, Clone)]
+pub struct ComposerWitness {
+    pub knows_mutator_set: KnowsMutatorSetWitness,
+    pub prev_block_transaction_mutator_set: MutatorSetAccumulator,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, BFieldCodec, GetSize)]
 pub struct Block {
     /// Everything but the proof
@@ -270,12 +280,12 @@ impl PartialEq for Block {
 impl Eq for Block {}
 
 impl Block {
-    /// The composer's witness to the mutator set after the predecessor is
-    /// required where the epoch requires reveals and the network proves.
+    /// The composer's witness is required from hard fork epsilon on where
+    /// the network proves.
     pub async fn block_template_from_block_primitive_witness(
         primitive_witness: BlockPrimitiveWitness,
         timestamp: Timestamp,
-        knows_mutator_set: Option<KnowsMutatorSetWitness>,
+        composer_witness: Option<ComposerWitness>,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Block> {
@@ -285,17 +295,17 @@ impl Block {
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, header.height);
         let mut proven = vec![];
         if consensus_rule_set.requires_predecessor_claim() && !network.use_mock_proof() {
+            let composer_witness = composer_witness.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "a block at height {} needs the composer's witness",
+                    header.height
+                )
+            })?;
             let parameters = ConsensusParameters::for_network(network);
             if parameters.requires_mutator_set_reveals(header.height) {
-                let witness = knows_mutator_set.ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "a block at height {} needs the composer's witness to the mutator set",
-                        header.height
-                    )
-                })?;
                 proven.push(
                     Self::prove_knows_mutator_set(
-                        witness,
+                        composer_witness.knows_mutator_set,
                         consensus_rule_set,
                         triton_vm_job_queue.clone(),
                         proof_job_options.clone(),
@@ -303,6 +313,16 @@ impl Block {
                     .await?,
                 );
             }
+            proven.push(
+                Self::prove_predecessor_is_valid(
+                    &primitive_witness.predecessor_block,
+                    &body,
+                    composer_witness.prev_block_transaction_mutator_set,
+                    triton_vm_job_queue.clone(),
+                    proof_job_options.clone(),
+                )
+                .await?,
+            );
             proven.push(
                 Self::prove_swbf_update(
                     &body,
@@ -314,12 +334,24 @@ impl Block {
                 .await?,
             );
         }
+        let parent_digest = primitive_witness.predecessor_block.hash();
+        let parent_mutator_set = primitive_witness
+            .predecessor_block
+            .mutator_set_accumulator_after()?;
         let (appendix, proof) = {
-            let mut block_proof_witness = BlockProofWitness::produce(primitive_witness);
-            for (claim, proof) in proven {
-                block_proof_witness = block_proof_witness.with_claim(claim, proof);
-            }
+            let block_proof_witness = BlockProofWitness::produce(primitive_witness, proven);
             let appendix = block_proof_witness.appendix();
+            let required = BlockAppendix::consensus_claims(
+                &body,
+                header.height,
+                parent_digest,
+                &parent_mutator_set,
+                &ConsensusParameters::for_network(network),
+            );
+            anyhow::ensure!(
+                required.iter().all(|claim| appendix.find(claim).is_some()),
+                "the appendix must hold the claims the rules require"
+            );
             let claim = BlockProgram::claim(&body, &appendix, consensus_rule_set);
 
             let proof = ProofBuilder::new()
@@ -335,6 +367,33 @@ impl Block {
         };
 
         Ok(Block::new(header, body, appendix, proof))
+    }
+
+    /// The claim that the predecessor is valid, with its proof, for a block
+    /// with this body on it. The mutator set is the one the predecessor's
+    /// transaction was built on.
+    async fn prove_predecessor_is_valid(
+        predecessor: &Block,
+        body: &BlockBody,
+        prev_block_transaction_mutator_set: MutatorSetAccumulator,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
+        proof_job_options: TritonVmProofJobOptions,
+    ) -> anyhow::Result<(Claim, Proof)> {
+        let network = proof_job_options.job_settings.network;
+        let program = PredecessorIsValid::new();
+        let claim = PredecessorIsValid::claim_about(predecessor, body.mast_hash(), network);
+        let witness =
+            PredecessorIsValidWitness::new(predecessor, body, prev_block_transaction_mutator_set);
+        info!("Proving that the predecessor is valid");
+        let proof = ProofBuilder::new()
+            .program(program.program())
+            .claim(claim.clone())
+            .nondeterminism(|| witness.nondeterminism(&program, &EpochTable::for_network(network)))
+            .job_queue(triton_vm_job_queue)
+            .proof_job_options(proof_job_options)
+            .build()
+            .await?;
+        Ok((claim, proof))
     }
 
     /// The composer's claim to know the mutator set after the predecessor,
@@ -414,7 +473,7 @@ impl Block {
         predecessor: Block,
         transaction: BlockTransaction,
         block_timestamp: Timestamp,
-        knows_mutator_set: Option<KnowsMutatorSetWitness>,
+        composer_witness: Option<ComposerWitness>,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Block> {
@@ -443,7 +502,7 @@ impl Block {
         Self::block_template_from_block_primitive_witness(
             primitive_witness,
             block_timestamp,
-            knows_mutator_set,
+            composer_witness,
             triton_vm_job_queue,
             proof_job_options,
         )
@@ -453,14 +512,13 @@ impl Block {
     /// Compose a block.
     ///
     /// Create a block with valid block proof, but without proof-of-work. The
-    /// composer's witness to the mutator set after the predecessor is
-    /// required where [`ConsensusParameters::requires_mutator_set_reveals`]
-    /// and the network proves.
+    /// composer's witness is required from hard fork epsilon on where the
+    /// network proves.
     pub async fn compose(
         predecessor: Block,
         transaction: BlockTransaction,
         block_timestamp: Timestamp,
-        knows_mutator_set: Option<KnowsMutatorSetWitness>,
+        composer_witness: Option<ComposerWitness>,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Block> {
@@ -468,7 +526,7 @@ impl Block {
             predecessor,
             transaction,
             block_timestamp,
-            knows_mutator_set,
+            composer_witness,
             triton_vm_job_queue,
             proof_job_options,
         )
