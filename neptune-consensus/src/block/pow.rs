@@ -208,6 +208,7 @@ impl<const MERKLE_TREE_HEIGHT: usize> Guesser<MERKLE_TREE_HEIGHT> {
         target: Digest,
         lustration_status: Option<LustrationStatus>,
         version: Option<BFieldElement>,
+        swbfi_reveal: Option<&(Digest, Vec<Digest>)>,
     ) -> Self {
         let mut pow = Pow {
             nonce,
@@ -222,6 +223,10 @@ impl<const MERKLE_TREE_HEIGHT: usize> Guesser<MERKLE_TREE_HEIGHT> {
 
         if let Some(version) = version {
             pow.set_version_in_pow(version);
+        }
+
+        if let Some((leaf, path)) = swbfi_reveal {
+            pow.set_swbfi_reveal(*leaf, path);
         }
 
         // The encoding ends with the root and fills its rate blocks exactly.
@@ -449,9 +454,17 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         target: Digest,
         lustration_status: Option<LustrationStatus>,
         version: Option<BFieldElement>,
+        swbfi_reveal: Option<&(Digest, Vec<Digest>)>,
     ) -> Option<Self> {
-        Guesser::new(*mast_auth_paths, nonce, target, lustration_status, version)
-            .guess(Digest::default())
+        Guesser::new(
+            *mast_auth_paths,
+            nonce,
+            target,
+            lustration_status,
+            version,
+            swbfi_reveal,
+        )
+        .guess(Digest::default())
     }
 
     pub(super) fn validate(
@@ -677,6 +690,7 @@ pub(crate) mod tests {
             every_hash_meets,
             Some(lustration),
             Some(version),
+            None,
         );
         let roots: [Digest; 10] = rng.random();
         for root in roots {
@@ -700,6 +714,7 @@ pub(crate) mod tests {
             no_hash_meets,
             Some(lustration),
             Some(version),
+            None,
         );
         assert!(guesser.guess(rng.random()).is_none());
         assert!(guesser.guess_many(&roots).is_none());
@@ -846,6 +861,39 @@ pub(crate) mod tests {
         })?;
     }
 
+    #[test]
+    fn guess_carries_the_reveal_next_to_lustration_and_version() {
+        let mut rng = rng();
+        let auth_paths = rng.random::<PowMastPaths>();
+        let leaf: Digest = rng.random();
+        let path = (0..Pow::<29>::SWBFI_REVEAL_MAX_HEIGHT)
+            .map(|_| rng.random())
+            .collect::<Vec<Digest>>();
+        let lustration = LustrationStatus {
+            counter: NativeCurrencyAmount::coins(3),
+            max_lustrating_aocl_leaf_index: 7,
+        };
+        let version = BFieldElement::new(5);
+        let target = Difficulty::from(2u32).target();
+
+        let pow = loop {
+            if let Some(pow) = Pow::<29>::guess(
+                &auth_paths,
+                rng.random(),
+                target,
+                Some(lustration),
+                Some(version),
+                Some(&(leaf, path.clone())),
+            ) {
+                break pow;
+            }
+        };
+
+        assert_eq!((leaf, path.clone()), pow.swbfi_reveal(path.len()));
+        assert_eq!(lustration, pow.lustration_status().unwrap());
+        assert_eq!(version, pow.version_in_pow());
+    }
+
     #[proptest(cases = 20)]
     fn version_encoding_consistency(#[strategy(arb())] version: BFieldElement) {
         let mut pow = Pow::<29>::default();
@@ -873,7 +921,7 @@ pub(crate) mod tests {
         loop {
             let nonce = rng.random();
             if let Some(solution) =
-                Pow::guess(auth_paths, nonce, target, lustration_status, version)
+                Pow::guess(auth_paths, nonce, target, lustration_status, version, None)
             {
                 break solution;
             }

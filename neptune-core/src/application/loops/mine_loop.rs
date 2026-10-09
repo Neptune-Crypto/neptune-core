@@ -265,6 +265,7 @@ fn guess_worker(
         override_timestamp: now,
         override_version,
         guess_rate,
+        swbfi_reveal,
     } = guessing_configuration;
 
     let now = now.unwrap_or(Timestamp::now());
@@ -364,6 +365,7 @@ fn guess_worker(
         threshold,
         lustration_status,
         Some(version),
+        swbfi_reveal.as_ref(),
     );
 
     let num_guesses = AtomicU64::new(0);
@@ -887,9 +889,25 @@ pub(crate) async fn mine(
                 .await
                 .mining_rewards_address();
 
-            let latest_block_header = global_state_lock
-                .lock(|s| s.chain.tip().header().to_owned())
-                .await;
+            // The reveal comes from the archival state synced to the tip.
+            let (latest_block_header, swbfi_reveal) = {
+                let state = global_state_lock.lock_guard().await;
+                let tip = state.chain.tip();
+                let reveal = if tip.hash() == proposal.header().prev_block_digest
+                    && ConsensusParameters::for_network(network)
+                        .requires_mutator_set_reveals(proposal.header().height)
+                {
+                    state
+                        .chain
+                        .archival_state()
+                        .guesser_swbfi_reveal(tip.hash(), &guesser_address.clone().into())
+                        .await
+                } else {
+                    // Guess is stale, and will be cancelled
+                    None
+                };
+                (tip.header().to_owned(), reveal)
+            };
             let guesser_task = guess_nonce(
                 network,
                 proposal,
@@ -902,6 +920,7 @@ pub(crate) async fn mine(
                     override_timestamp: None,
                     override_version: cli_args.guesser_version.map(BFieldElement::new),
                     guess_rate: guess_rate.clone(),
+                    swbfi_reveal,
                 },
             );
 
@@ -1279,6 +1298,7 @@ pub(crate) mod tests {
             threshold,
             lustration_status,
             Some(version),
+            None,
         );
         let num_guesses = AtomicU64::new(0);
         let num_iterations_run =
@@ -1813,6 +1833,7 @@ pub(crate) mod tests {
                 override_timestamp: None,
                 override_version: None,
                 guess_rate: Arc::default(),
+                swbfi_reveal: None,
             },
             None,
         );
@@ -1894,6 +1915,7 @@ pub(crate) mod tests {
                 override_timestamp: None,
                 override_version: None,
                 guess_rate: Arc::default(),
+                swbfi_reveal: None,
             },
             None,
         );
@@ -2053,6 +2075,7 @@ pub(crate) mod tests {
                     override_timestamp: None,
                     override_version: None,
                     guess_rate: Arc::default(),
+                    swbfi_reveal: None,
                 },
                 Some(target_block_interval),
             );
@@ -2608,6 +2631,7 @@ pub(crate) mod tests {
                     override_timestamp: Some(block_time),
                     override_version: None,
                     guess_rate: Arc::default(),
+                    swbfi_reveal: None,
                 },
                 None,
             );
@@ -2678,6 +2702,7 @@ pub(crate) mod tests {
                     override_timestamp: Some(block_time),
                     override_version: Some(BFieldElement::new(7)),
                     guess_rate: Arc::default(),
+                    swbfi_reveal: None,
                 },
                 None,
             );
@@ -2730,6 +2755,7 @@ pub(crate) mod tests {
                     override_timestamp: Some(now),
                     override_version: None,
                     guess_rate: Arc::default(),
+                    swbfi_reveal: None,
                 },
                 None,
             );

@@ -86,6 +86,7 @@ pub(crate) async fn next_block(
             override_timestamp: Some(new_timestamp),
             override_version: None,
             guess_rate: Arc::default(),
+            swbfi_reveal: None,
         },
     )
     .await;

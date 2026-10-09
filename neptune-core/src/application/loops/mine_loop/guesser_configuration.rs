@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use neptune_primitives::timestamp::Timestamp;
 use neptune_wallet::address::ReceivingAddress;
+use tasm_lib::prelude::Digest;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 
 /// Information related to guessing.
@@ -18,4 +19,7 @@ pub(crate) struct GuessingConfiguration {
 
     /// Number of guesses per seconds reported by guesser.
     pub(crate) guess_rate: Arc<AtomicU64>,
+    /// The guesser's reveal of the inactive SWBF after the proposal's parent,
+    /// where required by the consensus rules.
+    pub(crate) swbfi_reveal: Option<(Digest, Vec<Digest>)>,
 }

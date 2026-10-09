@@ -3326,6 +3326,7 @@ pub(crate) mod tests {
                     override_timestamp: None,
                     override_version: None,
                     guess_rate: Arc::default(),
+                    swbfi_reveal: None,
                 },
             )
             .await;
