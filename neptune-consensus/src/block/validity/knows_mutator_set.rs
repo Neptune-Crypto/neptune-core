@@ -54,11 +54,14 @@ pub fn sampled_leafs(
     (chunks, aocl_leaf)
 }
 
+/// Witness data to prove that the composer knows the archival mutator set.
+///
+/// In the general case, this requires the archival mutator set to derived.
 #[derive(Debug, Clone, BFieldCodec, GetSize, PartialEq, Eq, Serialize, Deserialize, TasmObject)]
 pub struct KnowsMutatorSetWitness {
     prev_block_digest: Digest,
-    aocl: MmrAccumulator,
-    swbfi: MmrAccumulator,
+    aocl_accumulator: MmrAccumulator,
+    swbfi_accumulator: MmrAccumulator,
     chunk_a: Chunk,
     chunk_b: Chunk,
     aocl_leaf: Digest,
@@ -81,8 +84,8 @@ impl KnowsMutatorSetWitness {
         let [path_a, path_b] = chunk_paths;
         Self {
             prev_block_digest,
-            aocl: mutator_set.aocl.clone(),
-            swbfi: mutator_set.swbf_inactive.clone(),
+            aocl_accumulator: mutator_set.aocl.clone(),
+            swbfi_accumulator: mutator_set.swbf_inactive.clone(),
             chunk_a,
             chunk_b,
             aocl_leaf,
@@ -92,8 +95,8 @@ impl KnowsMutatorSetWitness {
 
     fn mutator_set(&self) -> MutatorSetAccumulator {
         MutatorSetAccumulator {
-            aocl: self.aocl.clone(),
-            swbf_inactive: self.swbfi.clone(),
+            aocl: self.aocl_accumulator.clone(),
+            swbf_inactive: self.swbfi_accumulator.clone(),
             ..Default::default()
         }
     }
@@ -220,16 +223,16 @@ impl TritonProgram for KnowsMutatorSet {
             dup 0 call {audit_witness} pop 1
             // _ *w
             read_io {Digest::LEN}
-            dup 5 {&field!(KnowsMutatorSetWitness::aocl)}
+            dup 5 {&field!(KnowsMutatorSetWitness::aocl_accumulator)}
             {&mmr_bags_to}
             read_io {Digest::LEN}
-            dup 5 {&field!(KnowsMutatorSetWitness::swbfi)}
+            dup 5 {&field!(KnowsMutatorSetWitness::swbfi_accumulator)}
             {&mmr_bags_to}
             // _ *w
-            dup 0 {&field!(KnowsMutatorSetWitness::swbfi)} {&read_leaf_count}
+            dup 0 {&field!(KnowsMutatorSetWitness::swbfi_accumulator)} {&read_leaf_count}
             add push 0 eq push 0 eq
             skiz call {verify_chunks}
-            dup 0 {&field!(KnowsMutatorSetWitness::aocl)} {&read_leaf_count}
+            dup 0 {&field!(KnowsMutatorSetWitness::aocl_accumulator)} {&read_leaf_count}
             add push 0 eq push 0 eq
             skiz call {verify_aocl_leaf}
             pop 1
@@ -251,7 +254,7 @@ impl TritonProgram for KnowsMutatorSet {
             {verify_chunk}:
                 place 2 call {hash_varlen}
                 // _ *w sample [leaf]
-                dup 6 {&field!(KnowsMutatorSetWitness::swbfi)}
+                dup 6 {&field!(KnowsMutatorSetWitness::swbfi_accumulator)}
                 dup 0 {&field!(MmrAccumulator::peaks)} place 7
                 // _ *w *peaks sample [leaf] *swbfi
                 {&read_leaf_count} pick 7
@@ -262,7 +265,7 @@ impl TritonProgram for KnowsMutatorSet {
             // BEFORE: _ *w
             // AFTER:  _ *w
             {verify_aocl_leaf}:
-                dup 0 {&field!(KnowsMutatorSetWitness::aocl)}
+                dup 0 {&field!(KnowsMutatorSetWitness::aocl_accumulator)}
                 dup 0 {&field!(MmrAccumulator::peaks)}
                 dup 2 {&field!(KnowsMutatorSetWitness::aocl_leaf)} {&read_digest}
                 // _ *w *aocl *peaks [leaf]
@@ -332,18 +335,18 @@ pub(super) mod tests {
             let witness: KnowsMutatorSetWitness =
                 tasm::decode_from_memory(FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS);
             let bagged_aocl_peaks = tasm::tasmlib_io_read_stdin___digest();
-            assert_eq!(bagged_aocl_peaks, witness.aocl.bag_peaks());
+            assert_eq!(bagged_aocl_peaks, witness.aocl_accumulator.bag_peaks());
             let bagged_swbfi_peaks = tasm::tasmlib_io_read_stdin___digest();
-            assert_eq!(bagged_swbfi_peaks, witness.swbfi.bag_peaks());
-            let swbfi_leaf_count = witness.swbfi.num_leafs();
-            let aocl_leaf_count = witness.aocl.num_leafs();
+            assert_eq!(bagged_swbfi_peaks, witness.swbfi_accumulator.bag_peaks());
+            let swbfi_leaf_count = witness.swbfi_accumulator.num_leafs();
+            let aocl_leaf_count = witness.aocl_accumulator.num_leafs();
             let (chunks, aocl_leaf) =
                 sampled_leafs(prev_block_digest, swbfi_leaf_count, aocl_leaf_count);
             if let Some(leaf_indices) = chunks {
                 let leafs = [&witness.chunk_a, &witness.chunk_b].map(Tip5::hash);
                 for (leaf_index, leaf) in leaf_indices.into_iter().zip(leafs) {
                     assert!(tasm::mmr_verify_from_secret_in_leaf_index_on_stack(
-                        &witness.swbfi.peaks(),
+                        &witness.swbfi_accumulator.peaks(),
                         swbfi_leaf_count,
                         leaf_index,
                         leaf,
@@ -352,7 +355,7 @@ pub(super) mod tests {
             }
             if let Some(leaf_index) = aocl_leaf {
                 assert!(tasm::mmr_verify_from_secret_in_leaf_index_on_stack(
-                    &witness.aocl.peaks(),
+                    &witness.aocl_accumulator.peaks(),
                     aocl_leaf_count,
                     leaf_index,
                     witness.aocl_leaf,
