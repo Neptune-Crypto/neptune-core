@@ -163,6 +163,38 @@ impl CorrectSwbfUpdateWitness {
             .collect()
     }
 
+    /// The leaves of a block's tree over these packed inputs on the mutator
+    /// set its transaction is built on, whose proofs' padded heights sum to
+    /// at least this floor: as many leaves of
+    /// [`CorrectSwbfUpdate::LEAF_LOG2_PADDED_HEIGHT`] as the floor needs, at
+    /// least two for the root to be an aggregation, and enough for no leaf
+    /// to hold more than [`CorrectSwbfUpdate::MAX_INPUTS_PER_LEAF`] inputs,
+    /// with the inputs spread evenly.
+    pub fn leaves(
+        inputs: &[RemovalRecord],
+        mutator_set: &MutatorSetAccumulator,
+        min_padded_rows: u64,
+    ) -> Vec<Self> {
+        let num_leaves = Self::num_leaves(inputs.len(), min_padded_rows);
+        let (base, extra) = (inputs.len() / num_leaves, inputs.len() % num_leaves);
+        let sizes = (0..num_leaves)
+            .map(|position| base + usize::from(position < extra))
+            .collect::<Vec<_>>();
+        Self::segments(inputs, mutator_set, &sizes)
+            .into_iter()
+            .map(|leaf| leaf.with_padded_height(CorrectSwbfUpdate::LEAF_LOG2_PADDED_HEIGHT))
+            .collect()
+    }
+
+    fn num_leaves(num_inputs: usize, min_padded_rows: u64) -> usize {
+        let for_floor = min_padded_rows.div_ceil(1 << CorrectSwbfUpdate::LEAF_LOG2_PADDED_HEIGHT);
+        let for_inputs = num_inputs.div_ceil(CorrectSwbfUpdate::MAX_INPUTS_PER_LEAF);
+        usize::try_from(for_floor)
+            .expect("floor fits")
+            .max(for_inputs)
+            .max(2)
+    }
+
     pub fn inputs(&self) -> &[RemovalRecord] {
         &self.inputs
     }
@@ -280,13 +312,11 @@ impl CorrectSwbfUpdateWitness {
     }
 
     /// Set enough idle iterations to increase the proof of this program
-    /// execution to the supplied padded height. A program execution below the
-    /// padded height value idles it up to the required height. A program
-    /// execution that has already met this requirement does nothing.
+    /// execution to the supplied padded height.
     ///
-    /// # Panics
-    ///
-    /// If the leaf's work alone exceeds the height.
+    /// A program execution below the padded height value idles (nops) it up to
+    /// the required height. A program execution that has already met or
+    /// exceeded this requirement is returned without idling.
     pub fn with_padded_height(self, log2_padded_height: u32) -> Self {
         let witness = self.with_idle_iterations(0);
 
@@ -305,11 +335,6 @@ impl CorrectSwbfUpdateWitness {
 
         let target = 1 << log2_padded_height;
         if aet.padded_height() >= target {
-            assert_eq!(
-                target,
-                aet.padded_height(),
-                "leaf exceeds the padded height"
-            );
             return witness;
         }
 
@@ -420,6 +445,17 @@ impl CorrectSwbfUpdate {
     /// The index of a block's first leaf; the others follow in order of
     /// their segments.
     pub const FIRST_LEAF_INDEX: u64 = 1;
+
+    /// The padded height a composer idles each leaf to; see
+    /// [`CorrectSwbfUpdateWitness::leaves`].
+    pub const LEAF_LOG2_PADDED_HEIGHT: u32 = 21;
+
+    /// The most inputs a composer puts in one leaf: a leaf of that many
+    /// stays within [`Self::LEAF_LOG2_PADDED_HEIGHT`] without idling. The
+    /// processor table is the tallest, at 1.89M rows for 36 inputs with
+    /// 410 indices per chunk and an inactive SWBF of 2^27 chunks; 40 inputs
+    /// exceed the height there.
+    pub const MAX_INPUTS_PER_LEAF: usize = 36;
 
     /// The most idle iterations a leaf takes: idling alone then stays under
     /// 2^29 processor rows, the tallest trace the verifier accepts. The
@@ -1514,11 +1550,51 @@ pub(super) mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "exceeds the padded height")]
-    fn leaf_above_the_target_height_cannot_be_lowered() {
+    fn block_leaves_are_counted_by_floor_inputs_and_the_aggregation_root() {
+        let height = CorrectSwbfUpdate::LEAF_LOG2_PADDED_HEIGHT;
+        let per_leaf = CorrectSwbfUpdate::MAX_INPUTS_PER_LEAF;
+        assert_eq!(2, CorrectSwbfUpdateWitness::num_leaves(0, 0));
+        assert_eq!(2, CorrectSwbfUpdateWitness::num_leaves(0, 1 << height));
+        assert_eq!(4, CorrectSwbfUpdateWitness::num_leaves(0, 4 << height));
+        assert_eq!(
+            5,
+            CorrectSwbfUpdateWitness::num_leaves(0, (4 << height) + 1)
+        );
+        assert_eq!(2, CorrectSwbfUpdateWitness::num_leaves(2 * per_leaf, 0));
+        assert_eq!(3, CorrectSwbfUpdateWitness::num_leaves(2 * per_leaf + 1, 0));
+        assert_eq!(
+            4,
+            CorrectSwbfUpdateWitness::num_leaves(3 * per_leaf, 4 << height)
+        );
+    }
+
+    #[test]
+    fn block_leaves_spread_the_inputs_and_idle_to_the_leaf_height() {
+        let all = witness(5, 4);
+        let floor = 3 << CorrectSwbfUpdate::LEAF_LOG2_PADDED_HEIGHT;
+        let leaves =
+            CorrectSwbfUpdateWitness::leaves(&all.packed_inputs(), &all.mutator_set, floor);
+        let sizes = leaves
+            .iter()
+            .map(|leaf| leaf.inputs().len())
+            .collect::<Vec<_>>();
+        assert_eq!(vec![2, 2, 1], sizes);
+        let indices = leaves
+            .iter()
+            .map(|leaf| leaf.leaf_index().value())
+            .collect::<Vec<_>>();
+        assert_eq!(vec![1, 2, 3], indices);
+        assert!(leaves.iter().all(|leaf| leaf.idle_iterations != bfe!(0)));
+        let (_, padded) = processor_rows_and_padded_height(&leaves[2]);
+        assert_eq!(1 << CorrectSwbfUpdate::LEAF_LOG2_PADDED_HEIGHT, padded);
+    }
+
+    #[test]
+    fn leaf_above_the_target_height_is_left_as_it_is() {
         let witness = witness(2, 0);
         let (_, natural) = processor_rows_and_padded_height(&witness);
-        witness.with_padded_height(natural.ilog2() - 1);
+        let unchanged = witness.clone().with_padded_height(natural.ilog2() - 1);
+        assert_eq!(witness, unchanged);
     }
 
     #[test]

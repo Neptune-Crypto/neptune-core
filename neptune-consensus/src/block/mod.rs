@@ -55,6 +55,7 @@ use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
+use tracing::info;
 use tracing::warn;
 use validity::block_primitive_witness::BlockPrimitiveWitness;
 use validity::block_program::BlockProgram;
@@ -62,6 +63,8 @@ use validity::block_proof_witness::BlockProofWitness;
 use validity::epoch_table::Epoch;
 use validity::epoch_table::EpochTable;
 use validity::predecessor_is_valid::PredecessorIsValid;
+use validity::swbf_update::aggregation::SwbfUpdateAggregation;
+use validity::swbf_update::leaf::CorrectSwbfUpdateWitness;
 use validity::swbf_update::removal_index_commitment::RemovalIndexCommitment;
 use validity::swbf_update::swbfi_peaks_after_removals::SwbfiPeaksAfterRemovals;
 use validity::swbf_update::ClaimOutput;
@@ -261,10 +264,27 @@ impl Block {
         let network = proof_job_options.job_settings.network;
         let body = primitive_witness.body().to_owned();
         let header = primitive_witness.header(timestamp, network.target_block_interval());
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, header.height);
+        let swbf_update =
+            if consensus_rule_set.requires_predecessor_claim() && !network.use_mock_proof() {
+                let root = Self::prove_swbf_update(
+                    &body,
+                    &primitive_witness.predecessor_block,
+                    header.height,
+                    triton_vm_job_queue.clone(),
+                    proof_job_options.clone(),
+                )
+                .await?;
+                Some(root)
+            } else {
+                None
+            };
         let (appendix, proof) = {
-            let block_proof_witness = BlockProofWitness::produce(primitive_witness);
+            let mut block_proof_witness = BlockProofWitness::produce(primitive_witness);
+            if let Some((claim, proof)) = swbf_update {
+                block_proof_witness = block_proof_witness.with_claim(claim, proof);
+            }
             let appendix = block_proof_witness.appendix();
-            let consensus_rule_set = ConsensusRuleSet::infer_from(network, header.height);
             let claim = BlockProgram::claim(&body, &appendix, consensus_rule_set);
 
             let proof = ProofBuilder::new()
@@ -280,6 +300,56 @@ impl Block {
         };
 
         Ok(Block::new(header, body, appendix, proof))
+    }
+
+    /// The SWBF update root claim of a block with this body on this
+    /// predecessor, with its proof.
+    ///
+    /// Proof verifies the leaf proofs [`CorrectSwbfUpdateWitness::leaves`], and
+    /// guarantees to meet the required proof complexity.
+    async fn prove_swbf_update(
+        body: &BlockBody,
+        predecessor: &Block,
+        height: BlockHeight,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
+        proof_job_options: TritonVmProofJobOptions,
+    ) -> anyhow::Result<(Claim, Proof)> {
+        let network = proof_job_options.job_settings.network;
+        let floor = EpochTable::for_network(network)
+            .in_force_at(height)
+            .min_swbf_padded_rows
+            .value();
+        let inputs = &body.transaction_kernel.inputs;
+        info!(
+            "Sizing the SWBF update tree for {} inputs at a floor of {floor} padded rows; \
+             one VM trace per leaf",
+            inputs.len()
+        );
+        let start = std::time::Instant::now();
+        let leaves = CorrectSwbfUpdateWitness::leaves(
+            inputs,
+            &predecessor.mutator_set_accumulator_after()?,
+            floor,
+        );
+        info!(
+            "Proving the SWBF update tree: {} leaves and {} aggregations",
+            leaves.len(),
+            leaves.len() - 1
+        );
+        let (claim, proof) = SwbfUpdateAggregation::new()
+            .tree(&leaves, |claim, program, nondeterminism| {
+                let proof = ProofBuilder::new()
+                    .program(program)
+                    .claim(claim)
+                    .nondeterminism(move || nondeterminism)
+                    .job_queue(triton_vm_job_queue.clone())
+                    .proof_job_options(proof_job_options.clone())
+                    .build();
+                async { proof.await.map(tasm_lib::triton_vm::proof::Proof::from) }
+            })
+            .await?;
+        info!("SWBF update tree proven in {:.0?}", start.elapsed());
+        Ok((claim, Proof::from(proof)))
     }
 
     async fn make_block_template_with_valid_proof(

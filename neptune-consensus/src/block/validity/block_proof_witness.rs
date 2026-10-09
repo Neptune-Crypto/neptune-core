@@ -48,7 +48,7 @@ impl BlockProofWitness {
     }
 
     /// Add a claim to the appendix, along with a proof.
-    fn with_claim(mut self, claim: Claim, proof: Proof) -> Self {
+    pub(crate) fn with_claim(mut self, claim: Claim, proof: Proof) -> Self {
         self.claims.push(claim);
         self.proofs.push(proof);
 
@@ -97,8 +97,8 @@ impl BlockProofWitness {
             Self::new(block_primitive_witness.body().clone()).with_claim(tx_claim, tx_proof);
 
         // The predecessor claim and the SWBF update claim, with mock proofs
-        // where the network mocks proofs. Proving them is the composer's,
-        // not yet written.
+        // where the network mocks proofs. Elsewhere the composer proves the
+        // SWBF update tree and adds its root; the rest is not yet written.
         let network = block_primitive_witness.network;
         let predecessor = &block_primitive_witness.predecessor_block;
         if consensus_rule_set.requires_predecessor_claim() && network.use_mock_proof() {

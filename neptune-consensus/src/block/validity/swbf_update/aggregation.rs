@@ -14,6 +14,7 @@
 //! index sets' digests come as witness; the children's peaks are recomputed
 //! from them, and this claim's over all of them.
 
+use std::future::Future;
 use std::sync::OnceLock;
 
 use get_size2::GetSize;
@@ -36,6 +37,7 @@ use tasm_lib::triton_vm::proof_item::ProofItemVariant;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 use tasm_lib::verifier::vm_proof_iter::dequeue_next_as::DequeueNextAs;
 use tasm_lib::verifier::vm_proof_iter::new::New as NewProofIter;
+use tracing::info;
 
 use super::leaf::CorrectSwbfUpdate;
 use super::leaf::CorrectSwbfUpdateWitness;
@@ -194,13 +196,6 @@ impl SwbfUpdateAggregation {
         }
     }
 
-    /// The root claim and proof of a tree over these leaves: the consecutive
-    /// segments of one block's inputs, numbered from the first leaf index,
-    /// each lifted to the padded height it is to have. Adjacent nodes
-    /// aggregate pairwise from the left, a node without a right neighbour
-    /// waits for the next level, and so on until one node remains. The prover
-    /// is called for every leaf and every aggregation. A single leaf is
-    /// returned as is, though a block's root must be an aggregation.
     /// The root claim a block with these packed inputs on this mutator set
     /// carries, attesting this many padded rows, for networks that mock
     /// proofs: no leaf is proven, the output is computed.
@@ -230,9 +225,22 @@ impl SwbfUpdateAggregation {
             )
     }
 
-    pub fn tree<P>(&self, leaves: &[CorrectSwbfUpdateWitness], prove: P) -> (Claim, Proof)
+    /// The root claim and proof of a tree over these leaves: the consecutive
+    /// segments of one block's inputs, numbered from the first leaf index,
+    /// each lifted to the padded height it is to have.
+    ///
+    /// Adjacent nodes aggregate pairwise from the left, a node without a right neighbour
+    /// waits for the next level, and so on until one node remains. The prover
+    /// is called for every leaf and every aggregation, and its first error
+    /// ends the build. A single leaf is returned as is, though a block's root
+    /// must be an aggregation.
+    pub async fn tree<E, Fut>(
+        &self,
+        leaves: &[CorrectSwbfUpdateWitness],
+        prove: impl Fn(Claim, Program, NonDeterminism) -> Fut,
+    ) -> Result<(Claim, Proof), E>
     where
-        P: Fn(&Claim, Program, NonDeterminism) -> Proof,
+        Fut: Future<Output = Result<Proof, E>>,
     {
         struct Node {
             claim: Claim,
@@ -240,20 +248,31 @@ impl SwbfUpdateAggregation {
             index_set_digests: Vec<Digest>,
         }
 
-        let mut level = leaves
-            .iter()
-            .map(|leaf| {
-                let claim = leaf.versioned_claim();
-                let proof = prove(&claim, CorrectSwbfUpdate.program(), leaf.nondeterminism());
-                Node {
-                    claim,
-                    proof,
-                    index_set_digests: IndexSetDigests::digests(leaf.inputs()),
-                }
-            })
-            .collect::<Vec<_>>();
-        assert!(!level.is_empty(), "a tree needs a leaf");
+        assert!(!leaves.is_empty(), "a tree needs a leaf");
+        let mut level = Vec::with_capacity(leaves.len());
+        for (position, leaf) in leaves.iter().enumerate() {
+            info!(
+                "Proving SWBF update leaf {} of {} ({} inputs)",
+                position + 1,
+                leaves.len(),
+                leaf.inputs().len()
+            );
+            let claim = leaf.versioned_claim();
+            let proof = prove(
+                claim.clone(),
+                CorrectSwbfUpdate.program(),
+                leaf.nondeterminism(),
+            )
+            .await?;
+            level.push(Node {
+                claim,
+                proof,
+                index_set_digests: IndexSetDigests::digests(leaf.inputs()),
+            });
+        }
 
+        let num_aggregations = leaves.len() - 1;
+        let mut aggregation = 0;
         while level.len() > 1 {
             let mut next = Vec::with_capacity(level.len().div_ceil(2));
             let mut nodes = level.into_iter();
@@ -271,7 +290,14 @@ impl SwbfUpdateAggregation {
                     index_set_digests.clone(),
                 );
                 let claim = witness.claim_for(self);
-                let proof = prove(&claim, self.program(), witness.nondeterminism_for(self));
+                aggregation += 1;
+                info!("Proving SWBF update aggregation {aggregation} of {num_aggregations}");
+                let proof = prove(
+                    claim.clone(),
+                    self.program(),
+                    witness.nondeterminism_for(self),
+                )
+                .await?;
                 next.push(Node {
                     claim,
                     proof,
@@ -282,7 +308,7 @@ impl SwbfUpdateAggregation {
         }
 
         let root = level.pop().expect("a level has a node");
-        (root.claim, root.proof)
+        Ok((root.claim, root.proof))
     }
 }
 
@@ -627,8 +653,12 @@ impl TritonProgram for SwbfUpdateAggregation {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(in crate::block::validity) mod tests {
+    use std::convert::Infallible;
+
+    use futures::executor::block_on;
     use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use neptune_mutator_set::removal_record::RemovalRecord;
+    use neptune_primitives::network::Network;
     use tasm_lib::triton_vm::proof_item::ProofItem;
     use tasm_lib::triton_vm::proof_stream::ProofStream;
     use tasm_lib::triton_vm::vm::VM;
@@ -637,6 +667,7 @@ pub(in crate::block::validity) mod tests {
     use super::super::leaf::tests::chained_witnesses;
     use super::super::removal_index_commitment::RemovalIndexCommitment;
     use super::*;
+    use crate::block::validity::epoch_table::EpochTable;
     use crate::proof_abstractions::tasm::builtins as tasm;
     use crate::proof_abstractions::tasm::builtins::verify_stark;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
@@ -862,15 +893,15 @@ pub(in crate::block::validity) mod tests {
     }
 
     /// Runs the node in the VM and hands back a placeholder proof.
-    fn run_and_placeholder(
-        claim: &Claim,
+    async fn run_and_placeholder(
+        claim: Claim,
         program: Program,
         nondeterminism: NonDeterminism,
-    ) -> Proof {
+    ) -> Result<Proof, Infallible> {
         let input = PublicInput::new(claim.input.clone());
         let output = VM::run(program, input, nondeterminism).unwrap();
         assert_eq!(claim.output, output);
-        placeholder_proof(CHILD_LOG2_PADDED_HEIGHT)
+        Ok(placeholder_proof(CHILD_LOG2_PADDED_HEIGHT))
     }
 
     #[test]
@@ -878,7 +909,7 @@ pub(in crate::block::validity) mod tests {
         for num_leaves in 1..=6 {
             let sizes = (0..num_leaves).map(|i| i % 3).collect::<Vec<_>>();
             let leaves = chained_witnesses(&sizes, 9);
-            let (root, _) = skipping().tree(&leaves, run_and_placeholder);
+            let (root, _) = block_on(skipping().tree(&leaves, run_and_placeholder)).unwrap();
             let parsed = ClaimOutput::parse(&root.output);
 
             assert_eq!(bfe!(num_leaves as u64), parsed.last_leaf_index);
@@ -898,6 +929,39 @@ pub(in crate::block::validity) mod tests {
                 parsed.mutator_set_hash
             );
         }
+    }
+
+    #[test]
+    fn one_tall_leaf_and_an_empty_leaf_clear_the_floor() {
+        let table = EpochTable::for_network(Network::Main);
+        let floor = table
+            .in_force_at(table.activation_height())
+            .min_swbf_padded_rows
+            .value();
+        let tall_log2 = floor.ilog2();
+        let empty_log2 = 10;
+
+        let leaves = chained_witnesses(&[5, 0], 13);
+        let witness = SwbfUpdateAggregationWitness::new(
+            leaves[0].versioned_claim(),
+            placeholder_proof(tall_log2),
+            leaves[1].versioned_claim(),
+            placeholder_proof(empty_log2),
+            index_set_digests(&leaves),
+        );
+        let parsed = ClaimOutput::parse(&outputs(&witness));
+
+        assert_eq!(
+            bfe!((1u64 << tall_log2) + (1 << empty_log2)),
+            parsed.padded_rows
+        );
+        assert!(parsed.padded_rows.value() >= floor);
+        assert_eq!(5, parsed.count);
+        assert_eq!(bfe!(2), parsed.last_leaf_index);
+        assert_eq!(
+            archival_mutator_set_after(&leaves[0]).hash(),
+            parsed.mutator_set_hash
+        );
     }
 
     #[test]
