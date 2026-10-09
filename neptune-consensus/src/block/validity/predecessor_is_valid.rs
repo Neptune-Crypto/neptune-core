@@ -2715,6 +2715,7 @@ impl TritonProgram for PredecessorIsValid {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::collections::HashMap;
+    use std::convert::Infallible;
 
     use itertools::Itertools;
     use neptune_mutator_set::addition_record::AdditionRecord;
@@ -3925,10 +3926,14 @@ mod tests {
                 .into_iter()
                 .map(|leaf| leaf.with_padded_height(FIXTURE_LEAF_LOG2_PADDED_HEIGHT))
                 .collect::<Vec<_>>();
-                let (claim, proof) =
+                let (claim, proof) = futures::executor::block_on(
                     SwbfUpdateAggregation::new().tree(&leaves, |claim, program, nondeterminism| {
-                        load_proof_or_produce_and_save(claim, program, nondeterminism).into()
-                    });
+                        std::future::ready(Ok::<_, Infallible>(
+                            load_proof_or_produce_and_save(&claim, program, nondeterminism).into(),
+                        ))
+                    }),
+                )
+                .unwrap();
                 (claim, NeptuneProof::from(proof))
             });
             let claims = [

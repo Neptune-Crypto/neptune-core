@@ -46,7 +46,7 @@ use crate::transaction::transaction_kernel::TransactionKernel;
 /// ```
 #[derive(Clone, Debug)]
 pub struct BlockPrimitiveWitness {
-    pub(super) predecessor_block: Block,
+    pub(in crate::block) predecessor_block: Block,
 
     transaction: BlockTransaction,
 
