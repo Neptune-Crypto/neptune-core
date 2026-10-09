@@ -1,8 +1,10 @@
 # SOFuN — Standing Orders for Future Neptune
 
 Status: the lock script, the announcement, the order book and the fill are
-implemented (§9, phases 1 to 2b); the proposer side is not.
-Last updated: 2026-10-06.
+implemented (§9, phases 1 to 2b) for orders paid in NPT; this document now
+specifies orders paid in wrapped NPT (§4.11), which are not implemented, and
+neither is the proposer side.
+Last updated: 2026-10-10.
 
 ---
 
@@ -30,6 +32,17 @@ input and pay 67 NPT time-locked to a third party. The total output is 134, so
 of their own and ends with 67 liquid, where they had 64 liquid and 64
 time-locked. Of the 6 NPT the input brought, 3 go to the composer and 3 into
 the payment.
+
+A buyer who pays in NPT therefore pays twice what the composer receives. In
+the example, the buyer's 6 NPT buy 3 NPT of the composer's liquidity, and the
+other 3 come back to the buyer time-locked. The rule counts only coins of the
+`NativeCurrency` type script (`native_currency.rs:857`, `:888`), so a payment in
+any other coin adds nothing to the total output. SOFuN orders are therefore
+paid in **wrapped NPT** (wNPT). Every order has a vault of its own, a UTXO
+holding the order's NPT, and the order's wNPT are backed one to one by that
+vault and redeem nothing else (§4.11). The 6 wNPT input of
+the example leaves the total output at 128, the payment of 64 time-locked NPT
+discharges the whole lock, and the composer ends with 64 liquid NPT and 6 wNPT.
 
 Composers have real, immediate, denominated-in-fiat costs: electricity,
 hardware, hosting, salaries. Half their revenue arriving three years late is a
@@ -220,7 +233,8 @@ B dominates. **We choose B and reject C**; nothing below relies on C.
 | Release date `D` | Chosen by the accepter from a **grid** `D ∈ {D₀ + k·G : 0 ≤ k < K}` named by the proposer | Makes the reward enumerable by the proposer (§2) while letting `D` track the actual fill time. Shelf life `K·G` and waiting time `≈3 years + G` are then **independent knobs**, which is what a single fixed date cannot give. |
 | Payout announcement | **None** | Not needed once the reward is enumerable. Saves a field authentication, block space, and any reliance on accepter cooperation. |
 | Partial fills | **Not supported**, deliberately | One order = one UTXO = one fill; a proposer wanting granularity places several orders and chooses the granularity themselves. Moot for SOFuN, where one order takes the whole mandatory lock of one block (§4.1). Deferred rather than rejected for the general case — see §1.5. |
-| Reward amount `Y` | **Determined**: `⌊(C + X)/2⌋`, half of the subsidy and the offer together | That is exactly the time lock a fill's total output `C + X` requires, so the reward discharges all of it and the composer keeps their whole share liquid. One order fills one block exactly. Orders for the same subsidy differ only in `X`, and the composer takes the largest (§4.1, §4.7). |
+| Offered coin | **Wrapped NPT** (§4.11), not NPT | A coin other than NPT adds nothing to the fill's total output, so the buyer pays the composer the whole of `X` rather than half of it (§1.1). |
+| Reward amount `Y` | **Determined**: `⌊C/2⌋`, half of the subsidy | That is exactly the time lock a fill's total output `C` requires, so the reward discharges all of it and the composer keeps their whole share liquid. One order fills one block exactly. Orders for the same subsidy differ only in `X`, and the composer takes the largest (§4.1, §4.7). |
 | Who may fill | **Anyone** | The lock script does not and should not care. Only a coinbase transaction has a mandatory time-lock for the reward to discharge (§4.6), so composers select themselves; no restriction needs enforcing. |
 
 
@@ -228,8 +242,8 @@ B dominates. **We choose B and reject C**; nothing below relies on C.
 
 ### 4.1 The order UTXO
 
-The proposer places `X` NPT into a UTXO whose lock script admits two spending
-paths:
+The proposer places `X` wNPT (§4.11) into a UTXO whose lock script admits two
+spending paths:
 
 - **(a) Cancel.** The proposer's ordinary hash lock. Spendable at any time by the
   proposer, with no further conditions.
@@ -261,21 +275,23 @@ records the block pays. Write `D_max = D₀ + (K−1)·G` for the last grid poin
 
 **`Y` is not a free parameter either.** Write `C` for the block subsidy,
 `Block::block_subsidy(h)` (`block/mod.rs:427`). A coinbase transaction that
-fills an order and pays no fee has a total output of `C + X`, and the time-lock
-rule requires `⌊(C + X)/2⌋` of it to be time-locked. An order demands exactly
-that:
+fills an order and pays no fee has a total output of `C`, because the order
+input carries no NPT, and the time-lock rule requires `⌊C/2⌋` of it to be
+time-locked. An order demands exactly that:
 
 ```
-Y  =  ⌊(C + X)/2⌋
+Y  =  ⌊C/2⌋
 ```
 
 The reward then discharges the whole forced lock, and the composer keeps the
-rest, `⌈(C + X)/2⌉`, liquid. An order demanding less leaves the composer to lock
-the difference out of their own outputs. One demanding more takes the excess
-out of the composer's liquid share. And two orders in one block demand
-`C + (X₁ + X₂)/2` against a forced lock of `(C + X₁ + X₂)/2`, so the composer
-pays the excess, `C/2`, out of their liquid share. So an order is for
-one block, filled by its composer, and `Y` follows from `C` and `X`.
+rest, `⌈C/2⌉`, liquid, and receives the order's `X` wNPT besides. An order
+demanding less leaves the composer to lock the difference out of their own
+outputs. One demanding more takes the excess out of the composer's liquid
+share. And two orders in one block demand `2·⌊C/2⌋` against a forced lock of
+`⌊C/2⌋`, so the composer pays the second reward out of their liquid share,
+which they gain from only if the second order offers more wNPT than the NPT it
+demands, time-locked, in return. So an order is for one block, filled by its
+composer, and `Y` follows from `C` alone.
 
 `C` depends on the block's generation, which the order names as `epoch`. The
 subsidy halves every three years (`BLOCKS_PER_GENERATION = 160815` at 588
@@ -430,9 +446,8 @@ order has a one-element admissible set, no grid, and no origin to publish, so
 that the primitive be specifiable without reference to time locks at all.
 
 It does not need to. SOFuN's `demanded_amount` is not a free parameter: it is
-`Y = ⌊(C + X)/2⌋` (§4.1), where `X` is `offered_amount` and `epoch` says which
-generation's subsidy `C` is, so the amount is determined rather than
-transmitted. Those four elements are
+`Y = ⌊C/2⌋` (§4.1), where `epoch` says which generation's subsidy `C` is, so
+the amount is determined rather than transmitted. Those four elements are
 dead weight in a SOFuN order, and `d_zero` costs one of them. `epoch` takes a
 second and `padding` fills the remaining two, which keeps both schemas at 28
 elements and every shared field at the same offset.
@@ -555,15 +570,18 @@ deciding whether to pay. Escaping the configuration means shipping a new SOFuN
 schema version and convincing fillers to implement it — which is what
 element 2 is for, and is governance rather than a hole in it.
 
-**One seed, three public randomnesses.** The offered side's `sender_randomness`
-and `receiver_preimage` and the demanded side's `sender_randomness*` are all
-public by design, so publish one `seed` and derive them, after the pattern of
-`derive_receiver_id` (`neptune-wallet/src/address/common.rs:29`):
+**One seed, five public randomnesses.** The offered side's `sender_randomness`
+and `receiver_preimage`, the demanded side's `sender_randomness*`, and the two
+randomnesses of the order's vault (§4.11) are all public by design, so publish
+one `seed` and derive them, after the pattern of `derive_receiver_id`
+(`neptune-wallet/src/address/common.rs:29`):
 
 ```
 offered.sender_randomness   =  H(seed ‖ 0)
 offered.receiver_preimage   =  H(seed ‖ 1)
 demanded.sender_randomness* =  H(seed ‖ 2)
+vault.sender_randomness     =  H(seed ‖ 3)
+vault.receiver_preimage     =  H(seed ‖ 4)
 ```
 
 The reward's `receiver_digest*` cannot come from the seed and is published
@@ -571,11 +589,12 @@ directly: the seed is public, so anything derived from it is spendable by
 anyone, and that digest's preimage is exactly the proposer's custody of the
 reward. Deriving the rest collapses §7.1's freshness requirement to a single
 invariant — **one fresh seed per order** — which is a great deal easier for a
-wallet to get right than three independent ones.
+wallet to get right than five independent ones.
 
 **Naming the pair.** The type of a UTXO is determined by the type scripts of its
 coins, so a pair is `(offered type scripts, demanded type
-scripts)`. SOFuN's pair is `{NativeCurrency} → {NativeCurrency, TimeLock}`.
+scripts)`. SOFuN's pair is `{wNPT} → {NativeCurrency, TimeLock}`, where wNPT
+is the type script of §4.11.
 `pair_id` is the first element of the hash of the two sets, the way a receiver
 id is the first element of a hash of a seed: a filter, and an index. It is not
 authenticated by the body — a consumer that knows the schema recomputes it from
@@ -647,8 +666,9 @@ about an order; it is enough material to rebuild the order and check it against
 the chain. From the body an accepter reconstructs the lock script (`Y`, the
 grid, the reward address, `sender_randomness*`, `receiver_digest*` and the
 cancel post-image are all it hard-codes), hashes it, builds
-`utxo = {that hash, [NativeCurrency(X)]}`, computes its addition record from the
-seed-derived randomnesses, and looks for it in the AOCL. Every step is
+`utxo = {that hash, [W token(seed, X)]}`, computes its addition record from the
+seed-derived randomnesses, and looks for it in the AOCL. It does the same for
+the order's vault, `{VaultLockScript, [NativeCurrency(X), W vault(seed)]}`. Every step is
 verification against chain state, and there is no field left to take on trust.
 An accepter who skips it can be induced to pay for nothing (§7.3).
 
@@ -656,7 +676,8 @@ Note what this requires of the announcement: the cancel post-image is in the
 body precisely because path (a) hard-codes it, and a lock script that cannot be
 rebuilt cannot be checked.
 
-**SOFuN's instantiation.** `offered_amount = X` against a demanded
+**SOFuN's instantiation.** `offered_amount = X`, counted in wNPT, against a
+demanded
 `[NativeCurrency(Y), TimeLock(D)]` whose release date the grid supplies. A
 general swap over some other pair states its demanded coins concretely and needs
 no grid — a one-element admissible set (§1.5) — which in this encoding means a
@@ -666,11 +687,14 @@ different pair, a different schema, and a body without the three grid fields.
 
 ### 4.4 Lifecycle
 
-**Place.** Proposer builds a transaction spending `X` into the order UTXO and
-attaches the order announcement. The proposer precomputes the `K` candidate
-addition records `AR(D₀ + k·G)` and adds them to a watch set.
+**Place.** Proposer builds a transaction that creates a vault holding `X` NPT
+and the order UTXO holding `X` wNPT (§4.11), and attaches the order
+announcement. The proposer precomputes the `K` candidate addition records
+`AR(D₀ + k·G)` and adds them to a watch set.
 
-**Cancel.** Proposer spends the order UTXO via path (a). Costs a transaction fee.
+**Cancel.** Proposer spends the order UTXO via path (a), and in the same
+transaction destroys the order's vault with the order's `X` wNPT, paying the
+`X` NPT to themselves. Costs a transaction fee.
 
 **Fill.** A composer looks only at orders naming the generation of the block
 they are building, and ignores the rest (§4.7). Among those, they take the one
@@ -678,7 +702,12 @@ offering the most `X`. They include, in the coinbase transaction, the order UTXO
 as an input (satisfying path (b)) and `AR(D)` as an output, choosing a small `k`
 whose reward output still counts toward the mandatory lock, with a margin
 (§4.6). The reward is the whole mandatory lock, and they keep the rest,
-`⌈(C + X)/2⌉`, as liquid NPT.
+`⌈C/2⌉`, as liquid NPT, and the order's `X` wNPT.
+
+**Destroy.** In a later block, the composer destroys the order's vault with the
+`X` wNPT and receives `X` NPT. This is an ordinary transaction, never the
+coinbase transaction: the vault input carries NPT, and in a coinbase
+transaction half of it would have to be time-locked.
 
 **Claim.** The proposer's wallet matches a block's addition records against the
 watch set, hits one, recovers `k` and hence the full reward UTXO, and registers
@@ -778,8 +807,9 @@ lower — ignores it. Such an order computes `Y` from another subsidy. If that
 subsidy is smaller, the reward falls short of the forced lock and the composer
 locks the difference themselves; if it is larger, the reward exceeds the forced
 lock and the excess comes out of the composer's liquid share. What remains is a
-set of orders that differ only in `X`. The composer keeps `⌈(C + X)/2⌉` liquid,
-so they take the one offering the largest `X`.
+set of orders that differ only in `X`. The composer keeps `⌈C/2⌉` NPT liquid
+whichever order they fill, and `X` wNPT besides, so they take the one offering
+the largest `X`.
 
 This also makes the first step of finding an order the cheapest possible one. An
 order's `epoch` is a field in its announcement (§4.3), so the filter is a single
@@ -794,25 +824,26 @@ least half of everything the transaction pays out must be time-locked
 a fee, not an output: it is computed as the coinbase minus the composer's share
 and handed to the transaction as its fee (`composer_parameters.rs:200-215`).
 Since `total_input + coinbase = total_output + fee`, a guesser fraction `g`
-leaves a total output of `(1-g)·C + X`, and the forced lock is half of that. The
-reward `Y = (C + X)/2` does not shrink to match, so it exceeds the forced lock
-by `g·C/2`, which comes out of the composer's liquid share. The composer's
-liquid share is then `(C + X)/2 − g·C` against `(1-g)·C/2` without the fill, a
-gain of
+leaves a total output of `(1-g)·C`, and the forced lock is half of that. The
+reward `Y = C/2` does not shrink to match, so it exceeds the forced lock by
+`g·C/2`, which comes out of the composer's liquid share. The composer's liquid
+NPT is then `C/2 − g·C` against `(1-g)·C/2` without the fill, and the fill adds
+`X` wNPT, so the composer's liquid holding, counting wNPT at par, changes by
 
 ```
-(X − g·C) / 2
+X − g·C/2
 ```
 
-A composer keeping the whole subsidy gains `X/2` from every fill. One paying a
-guesser gains only from an order offering more than the guesser's share, and
-loses on any other. So order-filling is for composers who guess their own
-blocks.
+and their time-locked holding falls by `(1-g)·C/2`. A composer keeping the
+whole subsidy exchanges `C/2` time-locked NPT for `X` wNPT. One paying a guesser
+gains liquidity only from an order offering more than `g·C/2`, and pays for it
+with all of their time-locked NPT. So order-filling is for composers who guess
+their own blocks.
 
-**The composer is paid by an output, not by the fee.** A fill pays the
-composer one liquid output of `⌈(C + X)/2⌉`. Without the fill they would hold
-`C/2` liquid and `C/2` time-locked, so the fill gains them `X/2` liquid and
-costs them `C/2` time-locked. Paying any part of it as the transaction's fee
+**The composer is paid by outputs, not by the fee.** A fill pays the composer
+one liquid output of `⌈C/2⌉` NPT and one token of `X` wNPT (§4.9).
+Without the fill they would hold `C/2` liquid and `C/2` time-locked, so the
+fill gains them `X` wNPT and costs them `C/2` time-locked. Paying any part of it as the transaction's fee
 instead would send that part to whoever guesses the block, since a block's fee
 is the guesser's reward (`block_body.rs:204-210`), and half of the guesser's
 reward is time-locked (`block_kernel.rs:54-73`). A composer who guesses their
@@ -821,14 +852,14 @@ not get it at all.
 
 Besides the exchange, a fill adds to the composer's transaction one input, a
 lustration announcement when the input requires one, and a run of the order's
-lock script to prove. The composer weighs that work against the `X/2` they
-gain, and nothing pays for it separately. Among the orders a composer can fill,
+lock script and of wNPT's type script to prove. The composer weighs that work
+against the `X` they gain, and nothing pays for it separately. Among the orders a composer can fill,
 they take the one with the largest `X`, so a proposer who wants to be filled
 sooner raises `X`.
 
 **Where the policy lives: in the plugin.** The SOFuN plugin writes the whole
 coinbase transaction of a block that fills an order (§4.9), so it applies the
-rule itself, with `X` in the total it halves. The node's `CoinbaseDistribution`
+rule itself, to a total that `X` does not enter. The node's `CoinbaseDistribution`
 is not consulted for that block.
 
 ### 4.8 The order index
@@ -877,12 +908,13 @@ and keep a queue on `X` within each bucket.
 **Check on insert, not on query.** Anyone can publish an announcement in the
 format of a SOFuN order, and nothing in the announcement proves that a UTXO with
 the announced terms exists. The announcement is material to rebuild an order
-from: the plugin rebuilds the lock script, computes the order UTXO's addition
-record, and looks for that record among the outputs of the announcement's own
-block (§4.10). If the record is not there, there is no order, and a transaction
-that fills it is invalid. The plugin does this once, when it first sees the
-announcement, and admits the announcement to the index if and only if the
-record is there. So every row in the index is an order that exists, and the
+from: the plugin rebuilds the lock script, computes the addition records of
+the order UTXO and of its vault (§4.11), and looks for both among the outputs
+of the announcement's own block (§4.10). If the order's record is not there,
+there is no order, and a transaction that fills it is invalid; if the vault's
+is not, the order's wNPT were minted against a vault nobody can find. The
+plugin does this once, when it first sees the announcement, and admits the
+announcement to the index if and only if both records are there. So every row in the index is an order that exists, and the
 plugin building a coinbase transaction can take the best row without checking
 it again.
 
@@ -961,9 +993,10 @@ about orders. Only the hard fork of §5 makes such a transaction valid.
 
 - *Input:* the order UTXO, with its lock script and the fill witness, and its
   membership proof restored as §4.8 describes.
-- *Outputs:* the reward at the grid point §4.6 picks, and the composer's share,
-  paid to an address of the node's own wallet, which the plugin asks
-  `personal_generateAddress` for once, when it starts.
+- *Outputs:* the reward at the grid point §4.6 picks; the composer's share of
+  NPT, paid to an address of the node's own wallet, which the plugin asks
+  `personal_generateAddress` for once, when it starts; and a token of the
+  order's `X` wNPT, paid to the same address.
   The node registers no expected UTXOs for a transaction it did not build, so
   the composer's outputs carry on-chain notifications, which is how the wallet
   finds them.
@@ -972,8 +1005,14 @@ about orders. Only the hard fork of §5 makes such a transaction valid.
   (§4.7).
 - *Announcements:* a lustration announcement for the order input whenever the
   input's AOCL range requires one. On a young chain every input requires one.
-  Lustration reveals the input's amount, `X`, which the order announcement made
-  public already.
+  Lustration reveals the input's amount of NPT, which is zero.
+
+**The plugin supplies wNPT's type script witness.** The transaction builder of
+`neptune-consensus` generates type script witnesses only for `NativeCurrency`
+and `TimeLock`, and panics on any other type script
+(`known_type_scripts.rs:15-31`, `primitive_witness.rs:199`), and a fill now
+has a wNPT input and a wNPT output. So the builder must take the type scripts
+it does not know, with their witnesses, from its caller.
 
 **The witness depends on the kernel, and the kernel does not depend on the
 witness.** The fill witness contains the transaction's output list, its
@@ -984,20 +1023,29 @@ plugin builds the transaction with any witness on the order input, takes the
 kernel, computes the fill witness against it, and puts it in place. The node
 has nothing to complete.
 
-**The amounts.** Write `C` for the subsidy and `f` for the fee. By
-`total_input + coinbase = total_output + fee`, the total output is
-`C − f + X`, and the composer's outputs receive what the reward leaves of it:
+**The amounts.** Write `C` for the subsidy and `f` for the fee. The order input
+holds no NPT, so by `total_input + coinbase = total_output + fee` the total
+output is `C − f`, and the composer's NPT output receives what the reward leaves
+of it:
 
 ```
-own  =  C − f + X − Y
+own  =  C − f − Y
 ```
 
-The time-lock rule (§5) requires `⌊(C − f + X)/2⌋` of the total output to be
-time-locked, and the reward `Y = ⌊(C + X)/2⌋` is time-locked and at least that
-much. So the composer's own outputs lock nothing, and with no fee they receive
-`own = ⌈(C + X)/2⌉`, all of it liquid. The rule rounds half the total output
-down, so when `C + X` is odd the reward is the smaller half and the composer
-keeps the larger.
+The time-lock rule (§5) requires `⌊(C − f)/2⌋` of the total output to be
+time-locked, and the reward `Y = ⌊C/2⌋` is time-locked and at least that much.
+So the composer's own outputs lock nothing, and with no fee they receive
+`own = ⌈C/2⌉`, all of it liquid. The rule rounds half the total output down, so
+when `C` is odd the reward is the smaller half and the composer keeps the
+larger. The `X` wNPT pass from the order input to the composer's token, and
+wNPT's type script (§4.11) checks that they all arrive.
+
+**The wallet must hold wNPT.** The node's wallet refuses to register a UTXO
+carrying a coin of a type script it does not know (`state/mod.rs:2211`) and
+considers one unspendable (`utxo.rs:199-203`). So the wallet learns wNPT: it
+registers the composer's token, and it builds the transaction that destroys
+the order's vault with it (§4.4), which the builder change above makes
+possible.
 
 **What the plugin checks before setting the transaction.** The book verified the
 order when it admitted it (§4.8), but a block may have arrived since. So the
@@ -1244,13 +1292,12 @@ fields of `StandingSwapOrder<C>` are private to its module, so a value exists
 only if a constructor in that module or one of its children built it, and each
 configuration supplies its own. `StandingSwapOrder<Sofun>::new` takes the
 offered amount, the parameters and the four digests, and sets the demanded
-amount to `⌊(C + X)/2⌋`, with `C` the subsidy of the parameters' `epoch`
-(§4.1). Every SOFuN order therefore demands exactly what its offer and its
-`epoch` determine, the conversion to `SofunBody` is total, and decoding a body
-and encoding the result reproduces the body. Decoding is the direction that can
-fail, on a nonzero `padding`, a negative offer (§4.3), or an offer so large that
-`C + X` exceeds the largest amount there can be, and it builds its result
-through `new` as well. Were the terms and the parameters two
+amount to `⌊C/2⌋`, with `C` the subsidy of the parameters' `epoch` (§4.1).
+Every SOFuN order therefore demands exactly what its `epoch` determines, the
+conversion to `SofunBody` is total, and decoding a body and encoding the result
+reproduces the body. Decoding is the direction that can fail, on a nonzero
+`padding` or a negative offer (§4.3), and it builds its result through `new` as
+well. Were the terms and the parameters two
 separate values, a caller could pair the terms of one order with the parameters
 of another, and encoding would write an order whose announced amount disagrees
 with its lock script. A configuration with no relation between its terms and
@@ -1273,7 +1320,7 @@ offered amount. There is no global best order, only a best order for a given
 block, which is why the subsidy is an argument rather than a property of the
 book. Both halves are SOFuN's: the subsidy filter is its constraint, and
 ranking by offered amount is ranking by what the composer keeps only because
-every surviving order demands half of the subsidy and its own offer. A taker in
+every surviving order demands the same half of the subsidy. A taker in
 a general pair can pay many amounts and wants price across all of them. So
 `for_subsidy` is defined on
 `OrderBook<Sofun>` alone, built on the generic `open_orders`, and the
@@ -1392,6 +1439,97 @@ whether to fill, quote or display an order is decided by the caller, be it a
 market maker or a wallet.
 
 
+### 4.11 Wrapped NPT and vaults
+
+Fix a type script `B` whose coins carry an amount as their state. The
+**wrapping** of `B` is a type script `W(B)` whose coins carry one of two states,
+each naming a digest `id`:
+
+- a **token** `(id, a)`, with `a` the encoding of a `NativeCurrencyAmount`; a
+  UTXO carrying it holds `a` wrapped coins of `id`;
+- a **vault** `(id)`, which marks the UTXO carrying it.
+
+A **vault** of `id` is a UTXO whose lock script is `VaultLockScript`, a program
+that halts on every input, and whose coins are exactly two: a `B` coin of
+amount `v` and a `W(B)` coin in the vault state `(id)`. `v` is the vault's
+**holding**. **wNPT** is `W(NativeCurrency)`.
+
+`W(B)` accepts a transaction if and only if
+
+1. every output that carries a `W(B)` coin in a vault state is a vault,
+2. every token amount among the outputs is non-negative, and every sum below
+   lies in the range of `NativeCurrencyAmount`, and
+3. for every `id`, the token amounts and holdings of that `id` satisfy
+
+```
+Σ tokens(id) out − Σ tokens(id) in  =  Σ holdings(id) out − Σ holdings(id) in
+```
+
+where each sum ranges over the transaction's inputs or outputs.
+
+**For every `id`, the total of its tokens equals the total holding of its
+vaults.** Both are zero at genesis. A transaction that changes either total has
+a `W(B)` coin among its inputs or outputs, since every token carries one and
+every vault carries one, so `W(B)` runs on it, and by rule 3 the two totals
+change by the same amount. Rule 1 is checked on outputs only: every input was
+the output of an earlier transaction on which `W(B)` ran.
+
+**A vault is created once and destroyed once.** It is a UTXO, so it is
+confirmed once and spent once, and nothing else happens to it. Rule 3 gives
+both events:
+
+- **Create** a vault of `id` holding `v`: output it, and tokens of `id` of
+  total `v`.
+- **Destroy** a vault of `id` holding `v`: spend it, and tokens of `id` of total
+  `v`; output `v` of `B` to anyone.
+
+A transfer of tokens, which involves no vault, is rule 3 with both sides zero.
+
+**Tokens of one vault redeem no other.** Rule 3 balances each `id` on its own,
+so a vault can be destroyed only with its own tokens, and a holder of all of a
+vault's tokens is the only party who can destroy it. Nobody can make another
+vault's holding unreachable to them, and a vault that nobody announces backs
+only tokens that its creator minted.
+
+**Nothing makes an `id` unique, and nothing needs to.** A second vault of an
+existing `id` mints tokens of that `id` equal to its own holding, so for that
+`id` the total of tokens still equals the total holding. Its creator has added
+backing to someone else's tokens and can destroy either vault only with tokens
+of that `id`.
+
+**Why the lock script accepts everything.** Whoever holds a vault's tokens may
+destroy it, so no secret may stand between a vault and its spender. A lock
+script could not check the burn anyway, since it sees only addition records
+(§4.2); `W(B)` sees the UTXOs and checks it.
+
+**Why rule 1 fixes the lock script and the coins.** A vault under a lock script
+of its creator's choosing could be destroyed only by its creator. A vault
+carrying a `TimeLock` coin could be destroyed by nobody before the release
+date. In both cases the tokens of its `id` would still equal its holding, but
+not the NPT their holder can get back.
+
+**SOFuN creates a vault with every order.** The order's `id` is its seed (§4.3).
+Placing an order is one transaction that spends `X` NPT of the proposer's and
+outputs the vault `{VaultLockScript, [NativeCurrency(X), W vault(seed)]}` and
+the order UTXO holding the token `(seed, X)` (§4.4). The order announcement
+determines the vault, so there is no announcement of a vault's own: its UTXO
+follows from `X` and the seed, and its randomnesses come from the seed. The
+book admits an order if and only if both rebuilt addition records, the
+order's and the vault's, are among the outputs of the announcement's block
+(§4.8). The fill pays the composer the order's token, and the composer
+destroys the order's vault with it.
+
+**What another vault type changes.** `B` is a parameter, so wrapping any coin
+whose state is an amount is this section with `B` substituted. A vault type
+with another relation between a vault's tokens and its holding, such as shares
+in a holding that grows, replaces rule 3. Rules 1 and 2, the two coin states,
+and creation and destruction as the only events do not depend on rule 3.
+
+**No consensus change.** Consensus runs every type script the inputs and
+outputs name, whether or not the node knows it (`proof_collection.rs:176`), and
+the time-lock rule counts only `NativeCurrency` coins (`native_currency.rs:857`,
+`:888`). wNPT is defined in `neptune-defi`.
+
 ## 5. One consensus change
 
 A fill spends the order UTXO in the composer's coinbase transaction, and
@@ -1429,12 +1567,19 @@ merge cannot change this, since it raises the timestamp and never lowers it.
 
 *As part of the base.* The rule asks for half of the total output, and by
 `total_input + coinbase = total_output + fee` the total output includes what the
-inputs bring. An input therefore raises the amount that must be time-locked,
-never lowers it. For a fill, the order's `X` raises the total output to
-`(1-g)·C + X`, which is what §4.7's analysis of the composer's lock starts from.
+inputs bring in NPT. An input therefore raises the amount that must be
+time-locked, never lowers it. A fill's order input holds wNPT and no NPT, so it
+raises the total output by nothing, and the total output is `(1-g)·C`, which is
+what §4.7's analysis of the composer's lock starts from.
 
-SOFuN is therefore, apart from the fork, a lock-script, announcement and
-plugin feature. The node's part is one RPC, `mining_setCoinbaseTx`, which takes
+*As wrapped coins.* An input of wNPT brings no NPT, so it changes neither side
+of the rule. A composer can place wNPT in a coinbase transaction only by
+spending wNPT, which exists only against NPT held in a vault (§4.11), and
+the vault was created in a transaction of its own. So wNPT cannot lower the lock of a
+coinbase transaction either; it only keeps a payment from raising it.
+
+SOFuN is therefore, apart from the fork, a lock-script, type-script,
+announcement and plugin feature. The node's part is one RPC, `mining_setCoinbaseTx`, which takes
 a coinbase transaction and knows nothing about orders (§4.9).
 
 ## 6. Merging
@@ -1483,10 +1628,10 @@ free. The same applies to `n` orders.
 The grid widens this rather than narrowing it: two orders agreeing on `Y`,
 reward lock script hash, `sender_randomness*` and `receiver_digest*` collide at
 any grid point their grids share, and the accepter chooses `k`. Fixing `G` and
-`K` (§4.3) and deriving `Y` from the subsidy and the offer (§4.1) narrow the gap
+`K` (§4.3) and deriving `Y` from the subsidy alone (§4.1) narrow the gap
 further still — every order in the market shares the grid's step and length,
-two orders offering the same amount in one generation demand the same `Y`, and
-one wallet's orders may share a reward address. The seed is the only thing left
+every two orders in one generation demand the same `Y`, and one wallet's orders
+may share a reward address. The seed is the only thing left
 keeping two of a proposer's own orders apart.
 
 Mitigation: *every order must use a fresh seed*, hence fresh
@@ -1530,8 +1675,8 @@ before any lock script is rebuilt (§4.7).
 ## 8. Privacy
 
 SOFuN is public by construction. An order reveals `X`, its grid origin `D₀`,
-and the fact that some party wants to buy future NPT. `Y` follows from `X` and
-the generation (§4.1), and `G` and `K` are the same for every order (§4.3), so
+and the fact that some party wants to buy future NPT. `Y` follows from the
+generation (§4.1), and `G` and `K` are the same for every order (§4.3), so
 they reveal nothing more about this one.
 
 **Creation of the reward is fully public.** The grid is published, so anyone —
@@ -1559,6 +1704,9 @@ What does leak on the receiving side is the reward's **lock script hash**, since
 the announcement publishes it. That address is burned for the order: reuse it
 elsewhere and the two are linked. Proposers should use a fresh key and fresh
 randomness per order.
+
+An order's vault is public too: the order announcement determines its UTXO and
+randomnesses, so anyone sees when it is destroyed.
 
 
 ## 9. Progress
@@ -1677,7 +1825,13 @@ randomness per order.
 ### Phase 2b — fill
 - [x] `Y = ⌊(C + X)/2⌋`, so a fill leaves the composer no time-locked output of
       their own, and an offer for which `C + X` exceeds the largest amount
-      refused (§4.1, §4.9)
+      refused (§4.1, §4.9) — superseded by the next item
+- [ ] Orders paid in wNPT: `Y = ⌊C/2⌋`, the pair `{wNPT} → {NativeCurrency,
+      TimeLock}`, and the order UTXO holding a wNPT token (§4.1, §4.3)
+- [ ] The transaction builder takes type scripts it does not know, with their
+      witnesses, from its caller (§4.9)
+- [ ] The fill pays the order's wNPT to the composer's wallet, and the wallet
+      registers wNPT tokens and destroys vaults with them (§4.4, §4.9)
 - [x] `ConsensusRuleSet::allows_coinbase_inputs`: true on RegTest, false
       elsewhere until the fork (§4.9)
 - [x] `mining_setCoinbaseTx`, honored by every composer, with a fallback to the
@@ -1693,17 +1847,27 @@ randomness per order.
       counter, tested against a chain where lustration is in force
 - [ ] The fork's activation heights, once known (§5)
 
+### Phase 2c — wrapped NPT
+- [ ] `W(B)` as a type script generic over `B`, with wNPT as
+      `W(NativeCurrency)` (§4.11)
+- [ ] Tests: creation, destruction and transfer accepted; tokens minted without
+      a vault, a vault destroyed without a burn, a vault destroyed with another
+      vault's tokens, a negative token, a vault under another lock script and a
+      vault with a third coin rejected
+- [ ] The book admits an order only if its vault is in the same block (§4.8)
+
 ### Phase 3 — proposer side (wallet / `neptune-cli`)
-- [ ] Wallet API to place an order
+- [ ] Wallet API to place an order, creating its vault in the same transaction
+      (§4.4)
 - [ ] Order key derived at an index, with a flag of its own; freshness of the
       seed follows from the index rather than from an RNG (§4.5, §7.1)
-- [ ] Randomnesses derived from the public seed, matching §4.3's three domains
+- [ ] Randomnesses derived from the public seed, matching §4.3's five domains
 - [ ] Recovery test: wipe the wallet database, restore from the seed, and
       recover both an open order and a filled one (§4.5)
 - [ ] `K` candidate addition records computed and added to the watch set
 - [ ] Watch-set hit recovers `k`, materializes the `ExpectedUtxo`, claims it
 - [ ] Watch set restored on reorg (§7.2)
-- [ ] Cancel path
+- [ ] Cancel path, destroying the order's vault in the same transaction (§4.4)
 - [ ] CLI / RPC surface
 
 ### Phase 4 — release
