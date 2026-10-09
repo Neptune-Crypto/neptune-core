@@ -327,6 +327,7 @@ mod block_is_valid {
             genesis.clone(),
             transaction,
             plus_one_hour,
+            None,
             vm_job_queue(),
             job_options,
         )
@@ -496,6 +497,7 @@ mod block_is_valid {
                 block1.clone(),
                 block2_tx,
                 plus_eight_months,
+                None,
                 TritonVmJobQueue::get_instance(),
                 TritonVmProofJobOptions::default_with_network(network),
             )
@@ -556,6 +558,7 @@ mod block_is_valid {
                 block2_without_valid_pow.clone(),
                 block3_tx,
                 plus_nine_months,
+                None,
                 TritonVmJobQueue::get_instance(),
                 TritonVmProofJobOptions::default_with_network(network),
             )
@@ -946,6 +949,7 @@ async fn avoid_reselecting_same_input_utxos() {
                 "went through at least one iteration of above loop, so merge bit must be set",
             ),
             now,
+            None,
             job_queue.clone(),
             proof_job_options.clone(),
         )

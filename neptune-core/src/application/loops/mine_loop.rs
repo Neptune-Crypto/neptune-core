@@ -78,7 +78,7 @@ pub(crate) async fn compose_block_helper(
     // Real STARK composition path.
     let (transaction, composer_utxos) = create_block_transaction(
         &latest_block,
-        global_state_lock,
+        global_state_lock.clone(),
         coinbase_timestamp,
         job_options.clone(),
     )
@@ -88,10 +88,33 @@ pub(crate) async fn compose_block_helper(
     // coinbase timestamp here, but rather the actual timestamp from the
     // created transaction.
     let block_timestamp = transaction.kernel().timestamp;
+
+    // The composer's witness to the mutator set after the tip, from the
+    // archival state while it is still synced to that tip.
+    let network = global_state_lock.cli().network;
+    let next_height = latest_block.header().height.next();
+    let knows_mutator_set =
+        if ConsensusParameters::for_network(network).requires_mutator_set_reveals(next_height) {
+            let state = global_state_lock.lock_guard().await;
+            if state.chain.tip().hash() != latest_block.hash() {
+                bail!("tip changed while composing");
+            }
+            Some(
+                state
+                    .chain
+                    .archival_state()
+                    .knows_mutator_set_witness(latest_block.hash())
+                    .await,
+            )
+        } else {
+            None
+        };
+
     let compose_result = Block::compose(
         latest_block,
         transaction,
         block_timestamp,
+        knows_mutator_set,
         vm_job_queue(),
         job_options,
     )
@@ -1496,6 +1519,7 @@ pub(crate) mod tests {
                 genesis_block.clone(),
                 transaction_empty_mempool,
                 now,
+                None,
                 TritonVmJobQueue::get_instance(),
                 TritonVmProofJobOptions::default_with_network(network),
             )
@@ -1546,6 +1570,7 @@ pub(crate) mod tests {
                 genesis_block.clone(),
                 transaction_non_empty_mempool,
                 now,
+                None,
                 TritonVmJobQueue::get_instance(),
                 TritonVmProofJobOptions::default_with_network(network),
             )

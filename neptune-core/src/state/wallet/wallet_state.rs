@@ -5392,6 +5392,7 @@ pub(crate) mod tests {
                 genesis_block.clone(),
                 block1_tx,
                 block1_timestamp,
+                None,
                 dummy_queue.clone(),
                 job_options.clone(),
             )
@@ -5483,6 +5484,7 @@ pub(crate) mod tests {
                 block1.clone(),
                 block_transaction,
                 now,
+                None,
                 dummy_queue.clone(),
                 job_options.clone(),
             )
@@ -5563,6 +5565,7 @@ pub(crate) mod tests {
                 block2,
                 block3_transaction,
                 now + Timestamp::minutes(10),
+                None,
                 dummy_queue,
                 job_options,
             )

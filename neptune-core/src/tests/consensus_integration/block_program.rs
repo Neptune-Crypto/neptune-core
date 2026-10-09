@@ -48,6 +48,7 @@ async fn disallow_double_spends_across_blocks() {
             predecessor,
             block_tx,
             timestamp,
+            None,
             TritonVmJobQueue::get_instance(),
             job_options.clone(),
         )

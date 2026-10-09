@@ -619,6 +619,7 @@ pub(super) mod tests {
             genesis_block.clone(),
             block_tx,
             in_seven_months,
+            None,
             TritonVmJobQueue::get_instance(),
             TritonVmProofJobOptions::default_with_network(network),
         )
@@ -884,6 +885,7 @@ pub(super) mod tests {
             block_1.clone(),
             block_tx2,
             in_seven_months + network.minimum_block_time(),
+            None,
             TritonVmJobQueue::get_instance(),
             TritonVmProofJobOptions::default_with_network(network),
         )
