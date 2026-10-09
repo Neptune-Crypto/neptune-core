@@ -27,6 +27,7 @@ use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmoun
 use neptune_job_queue::errors::JobHandleError;
 use neptune_mempool::tx_upgrade_filter::TxUpgradeFilter;
 use neptune_mempool::upgrade_priority::UpgradePriority;
+use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_primitives::difficulty_control::difficulty_control;
 use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
@@ -89,23 +90,31 @@ pub(crate) async fn compose_block_helper(
     // created transaction.
     let block_timestamp = transaction.kernel().timestamp;
 
-    // The composer's witness to the mutator set after the tip, from the
-    // archival state while it is still synced to that tip.
+    // The composer's witness, from the archival state while it is still
+    // synced to the tip.
     let network = global_state_lock.cli().network;
     let next_height = latest_block.header().height.next();
-    let knows_mutator_set =
-        if ConsensusParameters::for_network(network).requires_mutator_set_reveals(next_height) {
+    let composer_witness =
+        if ConsensusRuleSet::infer_from(network, next_height).requires_predecessor_claim() {
             let state = global_state_lock.lock_guard().await;
             if state.chain.tip().hash() != latest_block.hash() {
                 bail!("tip changed while composing");
             }
-            Some(
-                state
-                    .chain
-                    .archival_state()
-                    .knows_mutator_set_witness(latest_block.hash())
-                    .await,
-            )
+            let archival_state = state.chain.archival_state();
+            let knows_mutator_set = archival_state
+                .knows_mutator_set_witness(latest_block.hash())
+                .await;
+            let prev_block_transaction_mutator_set = match archival_state
+                .get_block(latest_block.header().prev_block_digest)
+                .await?
+            {
+                Some(grandparent) => grandparent.mutator_set_accumulator_after()?,
+                None => MutatorSetAccumulator::default(),
+            };
+            Some(ComposerWitness {
+                knows_mutator_set,
+                prev_block_transaction_mutator_set,
+            })
         } else {
             None
         };
@@ -114,7 +123,7 @@ pub(crate) async fn compose_block_helper(
         latest_block,
         transaction,
         block_timestamp,
-        knows_mutator_set,
+        composer_witness,
         vm_job_queue(),
         job_options,
     )

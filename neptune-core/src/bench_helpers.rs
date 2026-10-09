@@ -190,7 +190,7 @@ fn block_from_tx_kernel(parent: &Block, network: Network, txkernel: TransactionK
     let body = block_primitive_witness.body().to_owned();
     let header = block_primitive_witness.header(timestamp, network.target_block_interval());
     let (appendix, proof) = {
-        let block_proof_witness = BlockProofWitness::produce(block_primitive_witness);
+        let block_proof_witness = BlockProofWitness::produce(block_primitive_witness, vec![]);
         let appendix = block_proof_witness.appendix();
         let invalid_proof = NeptuneProof::invalid();
         (appendix, BlockProof::SingleProof(invalid_proof))
