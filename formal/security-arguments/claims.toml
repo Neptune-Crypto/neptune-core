@@ -1,0 +1,36 @@
+# Claims registry for the proof-system and privacy security arguments.
+# status: open | stated | checked | refuted. "checked" means ./check.sh passes
+# (no sorry, only standard axioms) AND every pin in ../pins.toml for the claim
+# matches. A checked component bound is NOT a whole-system security claim.
+
+[[claim]]
+id = "SA-1"
+statement = "Query counting: Stark::default() performs 80 FRI collinearity checks; Stark::new loses at most k-1 bits to rounding; with expansion factor 4 the query phase gives exactly 160 bits under the per-query error rho = 1/4, and 80 bits under per-query error sqrt(rho) = 1/2. F_{p^3} has more than 2^191 elements."
+theorem = ["SecurityArguments.neptune_num_checks", "SecurityArguments.query_bits_floor_loss", "SecurityArguments.neptune_conjectured_query_error", "SecurityArguments.neptune_provable_query_bits", "SecurityArguments.extension_field_size"]
+status = "checked"
+assumptions = ["The per-query soundness error of FRI is rho (conjectured regime) or about sqrt(rho) (provable regime). These are modelling assumptions, not proved here."]
+scope_note = "Query phase only. Commit-phase folding errors, DEEP/out-of-domain sampling error, and Fiat-Shamir are separate terms and are not covered."
+
+[[claim]]
+id = "SA-2"
+statement = "Merkle-leaf injectivity: two different leaves at the same node index that both verify to the same root with equal-length authentication paths yield an explicit collision of hash_pair."
+theorem = ["SecurityArguments.leaf_injective_or_collision", "SecurityArguments.leaf_unique"]
+status = "checked"
+assumptions = ["None for the extraction statement. Uniqueness needs collision resistance of Tip5 hash_pair."]
+scope_note = "Covers the single-path walk of MmrMembershipProof::verify. The batched authentication structure of MerkleTreeInclusionProof and the peak/index bookkeeping of MMRs are not modelled."
+
+[[claim]]
+id = "SA-3"
+statement = "Exact sampling: Tip5::sample_indices(2^20, _) maps accepted field elements (all but p-1) to indices so that every index r < 2^20 has exactly 2^44 - 2^12 preimages; without rejecting p-1, index 0 would have one more."
+theorem = ["SecurityArguments.count_residue", "SecurityArguments.sample_index_exactly_uniform", "SecurityArguments.without_rejection_zero_is_biased"]
+status = "checked"
+assumptions = ["Squeezed field elements are uniform and independent (random-oracle model of Tip5)."]
+scope_note = "Uniformity of each index given uniform field elements; does not model the sponge."
+
+[[claim]]
+id = "SA-4"
+statement = "Privacy overlap / false positives: at most 4088 distinct outputs can set bits in any window, so at most 45*4088 bits are set there, and a fresh output's 45 indices all land on set bits with probability below 2^-112 (exact exponent 112.99)."
+theorem = ["SecurityArguments.window_overlap", "SecurityArguments.contributors_le", "SecurityArguments.setBits_le", "SecurityArguments.tcount_all", "SecurityArguments.false_positive_bound", "SecurityArguments.false_positive_end_to_end"]
+status = "checked"
+assumptions = ["Random-oracle model of Tip5 (fresh indices uniform and independent of the filter, cf. SA-3).", "Each AOCL position is spent at most once (MS-1).", "Removal records only touch their own window (MS-W); the end-to-end theorem takes this as the hypothesis hnear, which follows from MS-W and SA-4a. Composing the two Lean projects into one proof is open."]
+scope_note = "Liveness bound (a never-spent output appearing spent). It does not bound linkability (MS-5, open)."

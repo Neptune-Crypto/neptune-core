@@ -6,16 +6,20 @@ on:
     paths:
       - "formal/**"
       - "neptune-mutator-set/**"
+      - "neptune-consensus/**"
+      - "Cargo.lock"
       - ".github/workflows/formal.yml"
   pull_request:
     paths:
       - "formal/**"
       - "neptune-mutator-set/**"
+      - "neptune-consensus/**"
+      - "Cargo.lock"
       - ".github/workflows/formal.yml"
 
 jobs:
-  mutator-set:
-    name: Mutator set proofs
+  proofs:
+    name: Lean proofs and source pins
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,6 +28,11 @@ jobs:
           curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
             | sh -s -- -y --default-toolchain none
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
-      - name: Build, check axioms, compare vectors
+      - name: Mutator set
         working-directory: formal/mutator-set
         run: ./check.sh
+      - name: Security arguments
+        working-directory: formal/security-arguments
+        run: ./check.sh
+      - name: Source pins (including upstream items)
+        run: python3 formal/pins.py check --upstream

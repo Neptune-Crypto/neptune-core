@@ -1,0 +1,157 @@
+# Source pins for the formal claims in formal/mutator-set and
+# formal/security-arguments. Each
+
+[[pin]]
+claims = ["MS-1", "MS-W", "MS-3", "MS-4a", "SA-4"]
+kind = "rust-item"
+file = "neptune-mutator-set/src/shared.rs"
+item = "pub const WINDOW_SIZE"
+sha256 = "553db4ed62f676e1c8f05297fbaab4a2fa7b3b0615ea70d19f7ca7b7e49f539a"
+
+[[pin]]
+claims = ["MS-W", "MS-3", "MS-4a", "SA-4"]
+kind = "rust-item"
+file = "neptune-mutator-set/src/shared.rs"
+item = "pub const CHUNK_SIZE"
+sha256 = "0f5c6e9d2d1055fe231a5101cb255e74e33645f9358c3fdaefbd4304d120e5a4"
+
+[[pin]]
+claims = ["MS-W", "MS-3", "MS-4a", "SA-4"]
+kind = "rust-item"
+file = "neptune-mutator-set/src/shared.rs"
+item = "pub const BATCH_SIZE"
+sha256 = "ba0f68d1ee3ef4c229adfdd6186a28f8fdf2fbcb5760a343723dabf2b7ae617e"
+
+[[pin]]
+claims = ["MS-W", "MS-3", "MS-4a", "SA-4"]
+kind = "rust-item"
+file = "neptune-mutator-set/src/shared.rs"
+item = "pub const NUM_TRIALS"
+sha256 = "ea7e0918c1e5c311ee7df7f14714d2af879869aef5c1feb0e4e1909c97d83f33"
+
+[[pin]]
+claims = ["MS-2", "MS-W", "MS-3", "MS-4a", "SA-3", "SA-4"]
+kind = "rust-item"
+file = "neptune-mutator-set/src/removal_record/absolute_index_set.rs"
+item = "    pub fn compute("
+sha256 = "6785e7d293a96948d1d42f65daf5a8c0aa5a881cd812f5f4c974f5b2cc7b6c56"
+
+[[pin]]
+claims = ["MS-3", "MS-4a"]
+kind = "rust-item"
+file = "neptune-mutator-set/src/removal_record/absolute_index_set.rs"
+item = "    pub fn aocl_range("
+sha256 = "613a83aeae59d8b644a72d9e7b8b6bc3d0a9b39199fd5452cddef6dbe04e3af4"
+
+[[pin]]
+claims = ["MS-1"]
+kind = "rust-item"
+file = "neptune-mutator-set/src/mutator_set_accumulator.rs"
+item = "    pub fn can_remove_all("
+sha256 = "39af715b600ebdc55760e86f621bfa6837fc3bd73be42952ef131a174e1745b7"
+
+[[pin]]
+claims = ["MS-3"]
+kind = "rust-item"
+file = "neptune-mutator-set/src/removal_record/absolute_index_set.rs"
+item = "mod lean_model_vectors {"
+sha256 = "b3303d78ad743019376bc977368267510020f2138afc625906df6f75836f8501"
+
+[[pin]]
+claims = ["SA-1"]
+kind = "rust-item"
+file = "neptune-consensus/src/proof_abstractions/verifier.rs"
+item = "expected_num_proof_items(Stark::default(), proof)"
+sha256 = "7035529c2bdd65ef95b9252b879fbe69776a9be1cc9441dca3fcca34f4d0d7dd"
+
+[[pin]]
+claims = ["SA-1"]
+kind = "crate"
+name = "triton-vm"
+version = "9.0.0"
+sha256 = "dc5c2b343f60bdaaff8f5174a237a32609a07cc865713b9b0f1f8f39c8839b58"
+
+[[pin]]
+claims = ["SA-1"]
+kind = "upstream-item"
+file = "triton-vm/src/stark.rs"
+item = "impl Default for Stark {"
+repo = "https://github.com/TritonVM/triton-vm"
+tag = "v9.0.0"
+sha256 = "18c3921b401477a0f8891339a14fe4d912b34a79253d4615bd4a108b534f568e"
+
+[[pin]]
+claims = ["SA-1"]
+kind = "upstream-item"
+file = "triton-vm/src/stark.rs"
+item = "    pub fn new(security_level: usize, log2_of_fri_expansion_factor: usize) -> Self {"
+repo = "https://github.com/TritonVM/triton-vm"
+tag = "v9.0.0"
+sha256 = "0ca60cc3dcac0a45b1a745bb7dbd63b2d50a040defd8164cb3a97d7954b3a03f"
+
+[[pin]]
+claims = ["SA-2", "SA-3"]
+kind = "crate"
+name = "twenty-first"
+version = "3.0.0"
+sha256 = "94fc33f2bb02d443dfb444a5181d8e2361295e59e8c8f84772d1572697221c1b"
+
+[[pin]]
+claims = ["SA-2"]
+kind = "upstream-item"
+file = "twenty-first/src/util_types/mmr/mmr_membership_proof.rs"
+item = "    pub fn verify("
+repo = "https://github.com/Neptune-Crypto/twenty-first"
+tag = "v3.0.0"
+sha256 = "fd669d20a4dc4583fb3ba7731bd138a4ba6caf4d360df60e1a830edef37e26d8"
+
+[[pin]]
+claims = ["SA-3"]
+kind = "upstream-item"
+file = "twenty-first/src/tip5/mod.rs"
+item = "    pub fn sample_indices("
+repo = "https://github.com/Neptune-Crypto/twenty-first"
+tag = "v3.0.0"
+sha256 = "96bdad7460dc1e0a9edf6020bf70b201631ef0e70fbc09f21fd77717b3dc2a96"
+
+[[pin]]
+claims = ["MS-3", "MS-4a"]
+kind = "lean-file"
+file = "formal/mutator-set/MutatorSet/AoclRange.lean"
+sha256 = "58cd6ff6eb29e0f3fba2c7ec8facd4d071aa3ff35ae5768bb86724ae7afc3d3f"
+
+[[pin]]
+claims = ["MS-W", "MS-3", "MS-4a"]
+kind = "lean-file"
+file = "formal/mutator-set/MutatorSet/IndexSet.lean"
+sha256 = "35e6b3e2aa0a79f969b6825bf9aa5fdbff661a3502990ce8a07eab6618971295"
+
+[[pin]]
+claims = ["MS-1", "MS-2"]
+kind = "lean-file"
+file = "formal/mutator-set/MutatorSet/Filter.lean"
+sha256 = "b3c1116f8f1806f589fae898e94dd6738aed53ce3ee598fa05df794846b9348e"
+
+[[pin]]
+claims = ["SA-1"]
+kind = "lean-file"
+file = "formal/security-arguments/SecurityArguments/QueryCounting.lean"
+sha256 = "df0b4dbb0ca8aebc9dbd2405bd99d3b09def49964c981adcf7de8ccf5f055bdc"
+
+[[pin]]
+claims = ["SA-2"]
+kind = "lean-file"
+file = "formal/security-arguments/SecurityArguments/MerkleBinding.lean"
+sha256 = "cfe42ed58c1191f7ef87a4ef83c42375390df6eb1e46ef57deefdcc4e248c19b"
+
+[[pin]]
+claims = ["SA-3"]
+kind = "lean-file"
+file = "formal/security-arguments/SecurityArguments/Sampling.lean"
+sha256 = "e653a1e21b764a73cc541966b4a2ccdfee0a451c055b4cafd91a8aa480d0c218"
+
+[[pin]]
+claims = ["SA-4"]
+kind = "lean-file"
+file = "formal/security-arguments/SecurityArguments/Overlap.lean"
+sha256 = "dad657db447a1c9fafd5547ba6df707be2f6a22b488fd6a77f2e5a239b2ebf97"
