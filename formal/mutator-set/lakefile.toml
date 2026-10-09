@@ -1,0 +1,10 @@
+name = "mutator-set"
+version = "0.1.0"
+defaultTargets = ["MutatorSet", "genvectors"]
+
+[[lean_lib]]
+name = "MutatorSet"
+
+[[lean_exe]]
+name = "genvectors"
+root = "GenVectors"
