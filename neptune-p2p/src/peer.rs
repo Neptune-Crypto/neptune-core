@@ -20,6 +20,7 @@ use neptune_consensus::block::Block;
 use neptune_consensus::block::block_header::BlockHeader;
 use neptune_consensus::block::block_header::BlockHeaderWithBlockHashWitness;
 use neptune_mempool::transaction_kernel_id::TransactionKernelId;
+use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::difficulty_control::Difficulty;
 use neptune_primitives::difficulty_control::ProofOfWork;
@@ -464,6 +465,18 @@ pub struct ValidatedBlockRequestByHeight {
     pub anchor: MmrAccumulator,
 }
 
+/// A block together with the mutator set accumulator that its transaction
+/// kernel commits to, so that the block can be validated by a receiver who does
+/// not hold the parent block.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BlockWithParentAccumulator {
+    pub block: TransferBlock,
+
+    /// The mutator set accumulator after the parent block. Its hash must be
+    /// the `mutator_set_hash` of the block's transaction kernel.
+    pub parent_accumulator: MutatorSetAccumulator,
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BlockProposalRequest {
     pub body_mast_hash: Digest,
@@ -547,6 +560,16 @@ pub enum PeerMessage {
     /// requesting the block. Peers with a version exceeding 0.19.0 send and
     /// understand this message in place of [`PeerMessage::BlockNotification`].
     BlockNotificationWithPowWitness(Box<BlockHeaderWithBlockHashWitness>),
+
+    /// Request the receiver's tip together with the mutator set accumulator
+    /// after its parent, for validating the tip without the parent block.
+    /// Answered with [`PeerMessage::TipWithParentAccumulator`] if the receiver
+    /// holds that accumulator. Only peers with a version exceeding 0.19.0
+    /// understand this message.
+    TipWithParentAccumulatorRequest,
+
+    /// Response to [`PeerMessage::TipWithParentAccumulatorRequest`].
+    TipWithParentAccumulator(Box<BlockWithParentAccumulator>),
     // New variants must be added here at the bottom to be backwards compatible.
 }
 
@@ -555,6 +578,7 @@ impl PeerMessage {
         match self {
             PeerMessage::Handshake { .. } => "handshake",
             PeerMessage::Block(_) => "block",
+            PeerMessage::TipWithParentAccumulator(_) => "tip with parent accumulator",
             PeerMessage::BlockNotificationRequest => "block notification request",
             PeerMessage::BlockNotification(_) => "block notification",
             PeerMessage::BlockNotificationWithPowWitness(_) => {
@@ -562,6 +586,7 @@ impl PeerMessage {
             }
             PeerMessage::BlockRequestByHeight(_) => "block req by height",
             PeerMessage::BlockRequestByHash(_) => "block req by hash",
+            PeerMessage::TipWithParentAccumulatorRequest => "tip with parent accumulator req",
             PeerMessage::BlockRequestBatch(_) => "block req batch",
             PeerMessage::BlockResponseBatch(_) => "block resp batch",
             PeerMessage::Transaction(_) => "send",
@@ -591,11 +616,13 @@ impl PeerMessage {
         match self {
             PeerMessage::Handshake { .. } => false,
             PeerMessage::Block(_) => false,
+            PeerMessage::TipWithParentAccumulator(_) => false,
             PeerMessage::BlockNotificationRequest => false,
             PeerMessage::BlockNotification(_) => false,
             PeerMessage::BlockNotificationWithPowWitness(_) => false,
             PeerMessage::BlockRequestByHeight(_) => false,
             PeerMessage::BlockRequestByHash(_) => false,
+            PeerMessage::TipWithParentAccumulatorRequest => false,
             PeerMessage::BlockRequestBatch(_) => false,
             PeerMessage::BlockResponseBatch(_) => true,
             PeerMessage::Transaction(_) => false,
@@ -625,11 +652,13 @@ impl PeerMessage {
         match self {
             PeerMessage::Handshake { .. } => false,
             PeerMessage::Block(_) => false,
+            PeerMessage::TipWithParentAccumulator(_) => false,
             PeerMessage::BlockNotificationRequest => false,
             PeerMessage::BlockNotification(_) => false,
             PeerMessage::BlockNotificationWithPowWitness(_) => false,
             PeerMessage::BlockRequestByHeight(_) => false,
             PeerMessage::BlockRequestByHash(_) => false,
+            PeerMessage::TipWithParentAccumulatorRequest => false,
             PeerMessage::BlockRequestBatch(_) => false,
             PeerMessage::BlockResponseBatch(_) => false,
             PeerMessage::Transaction(_) => true,
@@ -660,11 +689,13 @@ impl PeerMessage {
         match self {
             PeerMessage::Handshake { .. } => false,
             PeerMessage::Block(_) => true,
+            PeerMessage::TipWithParentAccumulator(_) => true,
             PeerMessage::BlockNotificationRequest => true,
             PeerMessage::BlockNotification(_) => true,
             PeerMessage::BlockNotificationWithPowWitness(_) => true,
             PeerMessage::BlockRequestByHeight(_) => true,
             PeerMessage::BlockRequestByHash(_) => true,
+            PeerMessage::TipWithParentAccumulatorRequest => true,
             PeerMessage::BlockRequestBatch(_) => true,
             PeerMessage::BlockResponseBatch(_) => true,
             PeerMessage::UnableToSatisfyBatchRequest => true,
