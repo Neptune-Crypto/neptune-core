@@ -38,6 +38,7 @@ multiaddr = "0.19.0"
 multihash = "0.19.5"
 neptune-consensus = { version = "0.19.0", path = "../neptune-consensus" }
 neptune-mempool = { version = "0.19.0", path = "../neptune-mempool" }
+neptune-mutator-set = { version = "0.19.0", path = "../neptune-mutator-set" }
 neptune-primitives = { version = "0.19.0", path = "../neptune-primitives" }
 num-bigint = { version = "0.4", features = ["serde"] }
 num-traits = "0.2"

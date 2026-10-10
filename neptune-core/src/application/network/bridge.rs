@@ -1,6 +1,9 @@
 use std::io;
 use std::pin::Pin;
 
+use bincode::Options;
+use futures::AsyncRead;
+use futures::AsyncWrite;
 use futures::Sink;
 use futures::SinkExt;
 use futures::Stream;
@@ -10,7 +13,9 @@ use neptune_p2p::peer::PeerMessage;
 use tokio_util::codec::Framed;
 use tokio_util::compat::FuturesAsyncReadCompatExt;
 
+use crate::application::loops::connect_to_peers::bincode_options;
 use crate::application::loops::connect_to_peers::get_codec_rules;
+use crate::application::network::handshake::WireEncoding;
 
 /// A transport-agnostic wrapper for peer communication.
 ///
@@ -66,12 +71,22 @@ impl<T> PeerStream for T where
 /// 1. **IO Compatibility**: Bridges `futures::io` ---> `tokio::io` using
 ///    `.compat()`.
 /// 2. **Framing**: Applies length-delimited prefixing via [`get_codec_rules`].
-/// 3. **Serialization**: Chains [`serde_json`] logic to transform raw bytes
-///    into [`PeerMessage`] enums.
+/// 3. **Serialization**: Transforms raw bytes into [`PeerMessage`] enums with
+///    the negotiated [`WireEncoding`].
 ///
 /// The resulting stream is pinned and boxed to satisfy the `Unpin` and `Send`
 /// requirements of the peer message handling loops.
-pub(crate) fn bridge_libp2p_stream(raw_stream: Libp2pStream) -> Pin<Box<dyn PeerStream>> {
+pub(crate) fn bridge_libp2p_stream(
+    raw_stream: Libp2pStream,
+    encoding: WireEncoding,
+) -> Pin<Box<dyn PeerStream>> {
+    bridge_stream(raw_stream, encoding)
+}
+
+fn bridge_stream<S>(raw_stream: S, encoding: WireEncoding) -> Pin<Box<dyn PeerStream>>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
     let tokio_compat_stream = raw_stream.compat();
     let framed_bytes = Framed::new(tokio_compat_stream, get_codec_rules());
 
@@ -82,17 +97,66 @@ pub(crate) fn bridge_libp2p_stream(raw_stream: Libp2pStream) -> Pin<Box<dyn Peer
         .err_into::<io::Error>()
         // The .with and .and_then blocks are what caused the Unpin error.
         // We ensure the resulting wrapper is boxed if necessary.
-        .with(|msg: PeerMessage| {
-            let res = serde_json::to_vec(&msg)
-                .map(bytes::Bytes::from)
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e));
-            futures::future::ready(res)
-        })
-        .and_then(|bytes| {
-            let res = serde_json::from_slice::<PeerMessage>(&bytes)
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e));
-            futures::future::ready(res)
-        });
+        .with(move |msg: PeerMessage| futures::future::ready(encode(encoding, &msg)))
+        .and_then(move |bytes| futures::future::ready(decode(encoding, &bytes)));
 
     Box::pin(stream)
+}
+
+fn encode(encoding: WireEncoding, msg: &PeerMessage) -> io::Result<bytes::Bytes> {
+    let bytes = match encoding {
+        WireEncoding::Json => serde_json::to_vec(msg).map_err(invalid_data)?,
+        WireEncoding::Bincode => bincode_options().serialize(msg).map_err(invalid_data)?,
+    };
+    Ok(bytes::Bytes::from(bytes))
+}
+
+fn decode(encoding: WireEncoding, bytes: &[u8]) -> io::Result<PeerMessage> {
+    match encoding {
+        WireEncoding::Json => serde_json::from_slice(bytes).map_err(invalid_data),
+        WireEncoding::Bincode => bincode_options().deserialize(bytes).map_err(invalid_data),
+    }
+}
+
+fn invalid_data(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, error)
+}
+
+#[cfg(test)]
+mod tests {
+    use futures::StreamExt;
+    use tokio_util::compat::TokioAsyncReadCompatExt;
+
+    use super::*;
+
+    type Bridged = Pin<Box<dyn PeerStream>>;
+
+    fn connected_pair(
+        alice_encoding: WireEncoding,
+        bob_encoding: WireEncoding,
+    ) -> (Bridged, Bridged) {
+        let (alice, bob) = tokio::io::duplex(1 << 20);
+        (
+            bridge_stream(alice.compat(), alice_encoding),
+            bridge_stream(bob.compat(), bob_encoding),
+        )
+    }
+
+    #[tokio::test]
+    async fn messages_round_trip_in_every_encoding() {
+        for encoding in WireEncoding::SUPPORTED {
+            let (mut alice, mut bob) = connected_pair(encoding, encoding);
+            for msg in [PeerMessage::BlockNotificationRequest, PeerMessage::Bye] {
+                alice.send(msg.clone()).await.unwrap();
+                assert_eq!(msg, bob.next().await.unwrap().unwrap());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn encodings_are_distinct() {
+        let (mut alice, mut bob) = connected_pair(WireEncoding::Bincode, WireEncoding::Json);
+        alice.send(PeerMessage::Bye).await.unwrap();
+        assert!(bob.next().await.unwrap().is_err());
+    }
 }

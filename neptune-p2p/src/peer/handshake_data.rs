@@ -37,6 +37,16 @@ impl VersionString {
         Self(array_string)
     }
 
+    /// Whether a peer of this version announces new blocks with
+    /// [`PeerMessage::BlockNotificationWithPowWitness`](super::PeerMessage::BlockNotificationWithPowWitness)
+    /// rather than
+    /// [`PeerMessage::BlockNotification`](super::PeerMessage::BlockNotification),
+    /// and expects the same of its peers. True for every version above
+    /// 0.19.0.
+    pub fn announces_blocks_with_pow(self) -> bool {
+        semver::Version::parse(&self).is_ok_and(|version| version > semver::Version::new(0, 19, 0))
+    }
+
     pub fn versions_are_compatible(own: Self, other: Self) -> bool {
         let own = semver::Version::parse(&own)
             .unwrap_or_else(|_| panic!("Must be able to parse own version string. Got: {own}"));
@@ -280,6 +290,16 @@ mod tests {
                 VersionString::new_from_str("0.12.0"),
                 VersionString::new_from_str(b)
             ));
+        }
+    }
+
+    #[test]
+    fn versions_above_0_19_0_announce_blocks_with_pow() {
+        for version in ["0.19.1", "0.19.1-alpha.1", "0.20.0", "1.0.0"] {
+            assert!(VersionString::new_from_str(version).announces_blocks_with_pow());
+        }
+        for version in ["0.19.0", "0.18.3", "0.19.0-rc.1", "potato", ""] {
+            assert!(!VersionString::new_from_str(version).announces_blocks_with_pow());
         }
     }
 

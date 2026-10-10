@@ -24,8 +24,11 @@ use tasm_lib::twenty_first::prelude::MerkleTree;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
 use super::Block;
+use super::BlockField;
+use crate::block::block_kernel::BlockKernelField;
 use crate::block::guesser_receiver_data::GuesserReceiverData;
 use crate::block::pow::Pow;
+use crate::block::pow::PowMastPaths;
 use crate::consensus_rule_set::ConsensusRuleSet;
 
 pub const BLOCK_HEADER_VERSION: BFieldElement = BFieldElement::new(0);
@@ -246,6 +249,20 @@ impl HeaderToBlockHashWitness {
     }
 }
 
+/// The reasons why a block header, with a witness to its block hash, can fail
+/// [validation against its parent](BlockHeaderWithBlockHashWitness::validate_against_parent).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum BlockHeaderValidationError {
+    #[error("block height must equal that of predecessor plus one")]
+    BlockHeight,
+    #[error("target difficulty must be updated correctly")]
+    Difficulty,
+    #[error("block cumulative proof-of-work must be updated correctly")]
+    CumulativeProofOfWork,
+    #[error("block must have sufficient proof of work")]
+    ProofOfWork,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BlockHeaderWithBlockHashWitness {
     pub(crate) header: BlockHeader,
@@ -255,6 +272,114 @@ pub struct BlockHeaderWithBlockHashWitness {
 impl BlockHeaderWithBlockHashWitness {
     pub fn new(header: BlockHeader, witness: HeaderToBlockHashWitness) -> Self {
         Self { header, witness }
+    }
+
+    /// The MAST authentication paths that verifying the proof of work needs.
+    /// Agree with [`Block::pow_mast_paths`] for the block the witness is from.
+    fn pow_mast_paths(&self) -> PowMastPaths {
+        let pow = self
+            .header
+            .mast_path(BlockHeaderField::Pow)
+            .try_into()
+            .unwrap();
+
+        let block_header_leaf = Tip5::hash_varlen(&self.header.mast_hash().encode());
+        let kernel_tree = MerkleTree::sequential_new(&[
+            block_header_leaf,
+            self.witness.body_leaf,
+            self.witness.appendix_leaf,
+            Digest::default(),
+        ])
+        .unwrap();
+        let header = kernel_tree
+            .authentication_structure(&[BlockKernelField::Header.discriminant()])
+            .unwrap()
+            .try_into()
+            .unwrap();
+
+        let block_tree = MerkleTree::sequential_new(&[
+            Tip5::hash_varlen(&kernel_tree.root().encode()),
+            self.witness.proof_leaf,
+        ])
+        .unwrap();
+        let kernel = block_tree
+            .authentication_structure(&[BlockField::Kernel.discriminant()])
+            .unwrap()
+            .try_into()
+            .unwrap();
+
+        PowMastPaths {
+            pow,
+            header,
+            kernel,
+        }
+    }
+
+    /// Check what the header and the witness can vouch for about the block:
+    /// that height, difficulty and cumulative proof of work follow from the
+    /// parent's, and that the proof of work meets the target. Says nothing
+    /// about the block's body or proof.
+    ///
+    /// `parent` must be the header of the block that `prev_block_digest`
+    /// refers to; this is not checked here. Only blocks whose own difficulty
+    /// dictates the target, as all blocks since
+    /// [`ConsensusRuleSet::HardforkBeta`] do, are handled.
+    pub fn validate_against_parent(
+        &self,
+        parent: &BlockHeader,
+        network: Network,
+    ) -> Result<(), BlockHeaderValidationError> {
+        let header = &self.header;
+        if parent.height.next() != header.height {
+            return Err(BlockHeaderValidationError::BlockHeight);
+        }
+
+        let difficulty_is_reset =
+            Block::should_reset_difficulty(network, header.timestamp, parent.timestamp);
+        let expected_difficulty = if difficulty_is_reset {
+            network.genesis_difficulty()
+        } else {
+            difficulty_control(
+                header.timestamp,
+                parent.timestamp,
+                parent.difficulty,
+                network.target_block_interval(),
+                parent.height,
+            )
+        };
+        if header.difficulty != expected_difficulty {
+            return Err(BlockHeaderValidationError::Difficulty);
+        }
+
+        if header.cumulative_proof_of_work != parent.cumulative_proof_of_work + header.difficulty {
+            return Err(BlockHeaderValidationError::CumulativeProofOfWork);
+        }
+
+        // Like `Block::has_proof_of_work`, demand no proof of work from a block
+        // that resets the difficulty.
+        if difficulty_is_reset {
+            return Ok(());
+        }
+        let target = header.difficulty.target();
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, header.height);
+        let has_proof_of_work = if network.allows_mock_pow() {
+            self.hash() <= target
+        } else {
+            header
+                .pow
+                .validate(
+                    self.pow_mast_paths(),
+                    target,
+                    consensus_rule_set,
+                    header.prev_block_digest,
+                )
+                .is_ok()
+        };
+        if !has_proof_of_work {
+            return Err(BlockHeaderValidationError::ProofOfWork);
+        }
+
+        Ok(())
     }
 
     /// The block header.
@@ -368,6 +493,7 @@ pub(crate) mod tests {
     use rand::RngExt;
 
     use super::*;
+    use crate::block::test_helpers::invalid_empty_block;
     use crate::block::test_helpers::invalid_empty_block_with_proof_size;
 
     proptest::proptest! {
@@ -377,6 +503,64 @@ pub(crate) mod tests {
             let decoded = *BlockHeader::decode(&encoded).unwrap();
             assert_eq!(block_header, decoded);
         }
+    }
+
+    #[test]
+    fn header_with_witness_is_validated_against_parent() {
+        let network = Network::Testnet(42);
+        let genesis = Block::genesis(network);
+        let parent = genesis.header();
+        let mut block = invalid_empty_block(&genesis, network);
+        let with_witness =
+            |block: &Block| BlockHeaderWithBlockHashWitness::new(*block.header(), block.into());
+        let target = block.header().difficulty.target();
+
+        let mut insufficient_pow = with_witness(&block);
+        while insufficient_pow.hash() <= target {
+            insufficient_pow.header.pow.nonce = rng().random();
+        }
+        assert_eq!(
+            Err(BlockHeaderValidationError::ProofOfWork),
+            insufficient_pow.validate_against_parent(parent, network)
+        );
+
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, block.header().height);
+        block.satisfy_pow(parent.difficulty, consensus_rule_set);
+        assert!(block.has_proof_of_work(network, parent));
+        let valid = with_witness(&block);
+        assert_eq!(Ok(()), valid.validate_against_parent(parent, network));
+
+        // The proof of work commits to the whole block, so a different body
+        // invalidates it.
+        let mut other_body = valid.clone();
+        while other_body.hash() <= target {
+            other_body.witness.body_leaf = rng().random();
+        }
+        assert_eq!(
+            Err(BlockHeaderValidationError::ProofOfWork),
+            other_body.validate_against_parent(parent, network)
+        );
+
+        let mut wrong_height = valid.clone();
+        wrong_height.header.height = valid.header.height.next();
+        assert_eq!(
+            Err(BlockHeaderValidationError::BlockHeight),
+            wrong_height.validate_against_parent(parent, network)
+        );
+
+        let mut wrong_difficulty = valid.clone();
+        wrong_difficulty.header.difficulty = Difficulty::new([u32::MAX, 0, 0, 0, 0]);
+        assert_eq!(
+            Err(BlockHeaderValidationError::Difficulty),
+            wrong_difficulty.validate_against_parent(parent, network)
+        );
+
+        let mut wrong_cumulative_pow = valid.clone();
+        wrong_cumulative_pow.header.cumulative_proof_of_work = parent.cumulative_proof_of_work;
+        assert_eq!(
+            Err(BlockHeaderValidationError::CumulativeProofOfWork),
+            wrong_cumulative_pow.validate_against_parent(parent, network)
+        );
     }
 
     #[test]

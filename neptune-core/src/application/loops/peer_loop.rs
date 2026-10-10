@@ -15,6 +15,8 @@ use futures::stream::TryStreamExt;
 use futures::FutureExt;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
+use neptune_consensus::block::block_header::BlockHeaderWithBlockHashWitness;
+use neptune_consensus::block::block_header::HeaderToBlockHashWitness;
 use neptune_consensus::block::Block;
 use neptune_consensus::chaintx::link_tx::LinkTx;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
@@ -30,12 +32,14 @@ use neptune_mempool::tx_admission::TxAdmissionError;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_mutator_set::removal_record::RemovalRecordValidityError;
 use neptune_p2p::peer::handshake_data::HandshakeData;
+use neptune_p2p::peer::peer_block_notifications::PeerBlockNotification;
 use neptune_p2p::peer::peer_info::PeerConnectionInfo;
 use neptune_p2p::peer::peer_info::PeerInfo;
 use neptune_p2p::peer::transfer_block::TransferBlock;
 use neptune_p2p::peer::transfer_link_tx::TransferLinkTx;
 use neptune_p2p::peer::BlockProposalRequest;
 use neptune_p2p::peer::BlockRequestBatch;
+use neptune_p2p::peer::BlockWithParentAccumulator;
 use neptune_p2p::peer::IssuedSyncChallenge;
 use neptune_p2p::peer::MutablePeerState;
 use neptune_p2p::peer::NegativePeerSanction;
@@ -163,12 +167,27 @@ impl PeerLoopHandler {
         }
     }
 
+    /// The message that notifies the connected peer of `block`, in the form
+    /// its version understands.
+    fn block_notification(&self, block: &Block) -> PeerMessage {
+        if self.peer_handshake_data.version.announces_blocks_with_pow() {
+            let with_witness = BlockHeaderWithBlockHashWitness::new(
+                *block.header(),
+                HeaderToBlockHashWitness::from(block),
+            );
+            PeerMessage::BlockNotificationWithPowWitness(Box::new(with_witness))
+        } else {
+            PeerMessage::BlockNotification(block.into())
+        }
+    }
+
     /// The connected peer, as the announcer of an object it has notified us
     /// about.
     fn announcer(&self) -> Announcer {
         Announcer {
             peer: self.peer_id,
             inbound: self.inbound_connection,
+            verified: false,
         }
     }
 
@@ -1022,19 +1041,117 @@ impl PeerLoopHandler {
                 debug!("Ignoring unsolicited peer list");
                 Ok(KEEP_CONNECTION_ALIVE)
             }
+            PeerMessage::TipWithParentAccumulatorRequest => {
+                // Serving this response is intended to be very low cost. So
+                // avoid reading from disk/archival state to fetch earlier
+                // mutator set accumulators.
+                let response = {
+                    let state = self.global_state_lock.lock_guard().await;
+                    let tip = state.chain.tip();
+                    let parent_accumulator = state
+                        .chain
+                        .recent_mutator_sets()
+                        .mutator_set(tip.body().transaction_kernel().mutator_set_hash);
+                    match parent_accumulator {
+                        Some(parent_accumulator) => Some(BlockWithParentAccumulator {
+                            block: tip.try_into()?,
+                            parent_accumulator: parent_accumulator.clone(),
+                        }),
+                        None => None,
+                    }
+                };
+                match response {
+                    Some(response) => {
+                        peer.send(PeerMessage::TipWithParentAccumulator(Box::new(response)))
+                            .await?;
+                    }
+                    None => {
+                        debug!("Cannot serve tip with its parent's accumulator");
+                    }
+                }
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            PeerMessage::TipWithParentAccumulator(_) => {
+                // This node never requests one.
+                debug!("Ignoring unsolicited tip with parent accumulator");
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
             PeerMessage::BlockNotificationRequest => {
                 debug!("Got BlockNotificationRequest");
 
-                peer.send(PeerMessage::BlockNotification(
-                    self.global_state_lock.lock_guard().await.chain.tip().into(),
-                ))
-                .await?;
+                let notification = {
+                    let state = self.global_state_lock.lock_guard().await;
+                    self.block_notification(state.chain.tip())
+                };
+                peer.send(notification).await?;
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
-            PeerMessage::BlockNotification(block_notification) => {
+            PeerMessage::BlockNotification(_) | PeerMessage::BlockNotificationWithPowWitness(_) => {
                 const SYNC_CHALLENGE_COOLDOWN: Timestamp = Timestamp::minutes(10);
 
+                let (block_notification, verified) = match msg {
+                    PeerMessage::BlockNotification(block_notification) => {
+                        if self.peer_handshake_data.version.announces_blocks_with_pow() {
+                            warn!(
+                                "Peer of version {} announced a block without its proof of work",
+                                self.peer_handshake_data.version
+                            );
+                            self.punish(NegativePeerSanction::UnwantedMessage).await?;
+                            return Ok(KEEP_CONNECTION_ALIVE);
+                        }
+                        (block_notification, false)
+                    }
+                    PeerMessage::BlockNotificationWithPowWitness(with_witness) => {
+                        // The notification is verified against the parent if that
+                        // is known. Otherwise, it is treated like a notification
+                        // without witness.
+                        let network = self.global_state_lock.cli().network;
+                        let parent_digest = with_witness.header().prev_block_digest;
+                        let parent = {
+                            let state = self.global_state_lock.lock_guard().await;
+                            let tip = state.chain.tip();
+                            if tip.hash() == parent_digest {
+                                Some(*tip.header())
+                            } else if state.chain.is_archival_node() {
+                                state
+                                    .chain
+                                    .archival_state()
+                                    .get_block_header(parent_digest)
+                                    .await
+                            } else {
+                                None
+                            }
+                        };
+                        let verified = match parent {
+                            Some(parent) => {
+                                if let Err(error) =
+                                    with_witness.validate_against_parent(&parent, network)
+                                {
+                                    warn!(
+                                        "Block notification from {} is invalid: {error}",
+                                        self.peer_id
+                                    );
+                                    self.punish(NegativePeerSanction::InvalidBlock((
+                                        with_witness.header().height,
+                                        with_witness.hash(),
+                                    )))
+                                    .await?;
+                                    return Ok(KEEP_CONNECTION_ALIVE);
+                                }
+                                true
+                            }
+                            None => {
+                                debug!(
+                                    "Cannot verify block notification; parent {parent_digest} is unknown"
+                                );
+                                false
+                            }
+                        };
+                        (PeerBlockNotification::from(with_witness.as_ref()), verified)
+                    }
+                    _ => unreachable!(),
+                };
                 let (tip_header, sync_anchor_height) = {
                     let state = self.global_state_lock.lock_guard().await;
                     (
@@ -1134,7 +1251,14 @@ impl PeerLoopHandler {
                     let request_now = self
                         .global_state_lock
                         .pending_requests()
-                        .record_announcement(block, self.announcer(), self.system_time());
+                        .record_announcement(
+                            block,
+                            Announcer {
+                                verified,
+                                ..self.announcer()
+                            },
+                            self.system_time(),
+                        );
                     if !request_now {
                         debug!("block announcement recorded; not requesting it now");
                         return Ok(KEEP_CONNECTION_ALIVE);
@@ -2611,11 +2735,10 @@ impl PeerLoopHandler {
                 // own miner. It's always shared through this logic.
                 let new_block_height = block.kernel.header.height;
                 if new_block_height > peer_state_info.highest_shared_block_height {
-                    debug!("Sending PeerMessage::BlockNotification");
                     peer_state_info.highest_shared_block_height = new_block_height;
-                    peer.send(PeerMessage::BlockNotification(block.as_ref().into()))
-                        .await?;
-                    debug!("Sent PeerMessage::BlockNotification");
+                    let notification = self.block_notification(&block);
+                    debug!("Sending {}", notification.get_type());
+                    peer.send(notification).await?;
                 }
                 Ok(KEEP_CONNECTION_ALIVE)
             }
@@ -3062,7 +3185,7 @@ mod tests {
     use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
     use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use neptune_mempool::upgrade_priority::UpgradePriority;
-    use neptune_p2p::peer::peer_block_notifications::PeerBlockNotification;
+    use neptune_p2p::peer::handshake_data::VersionString;
     use neptune_p2p::peer::peer_info::pseudorandom_peer_id;
     use neptune_p2p::peer::transaction_notification::TransactionNotification;
     use neptune_p2p::peer::Sanction;
@@ -5105,6 +5228,11 @@ mod tests {
             ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network))
                 .await
                 .unwrap();
+            // Peers of this version announce blocks without proof of work.
+            let hsd = HandshakeData {
+                version: VersionString::new_from_str("0.19.0"),
+                ..hsd
+            };
             let block_1 = fake_valid_block_for_tests(&state_lock, rng.random()).await;
             let notification_height1 = (&block_1).into();
             let mock = Mock::new(vec![
@@ -5648,6 +5776,11 @@ mod tests {
                 mut state_lock,
                 hsd,
             ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network)).await?;
+            // Peers of this version announce blocks without proof of work.
+            let hsd = HandshakeData {
+                version: VersionString::new_from_str("0.19.0"),
+                ..hsd
+            };
             let peer_socket_address: SocketAddr = get_dummy_socket_address(0);
             let genesis_block: Block = state_lock
                 .lock_guard()
@@ -6838,7 +6971,10 @@ mod tests {
         use super::block_proposals::genesis_setup;
         use super::block_proposals::TestSetup;
         use super::*;
+        use crate::state::pending_requests::HEDGE_DELAY;
+        use crate::state::pending_requests::INBOUND_REQUEST_DELAY;
         use crate::state::pending_requests::TRANSACTION_REQUEST_TIMEOUT;
+        use crate::tests::shared::blocks::fake_valid_successor_for_tests;
 
         /// A peer loop for another peer of the same node, at a mocked time.
         fn peer_loop_at(
@@ -6880,10 +7016,313 @@ mod tests {
             now + Timestamp::millis(u64::try_from(delay.as_millis()).unwrap())
         }
 
+        /// A notification with pow witness of the block of height 1, together
+        /// with the block.
+        async fn notification_with_witness(
+            setup: &TestSetup,
+        ) -> (Block, BlockHeaderWithBlockHashWitness) {
+            let block1 = fake_valid_block_for_tests(
+                &setup.peer_loop_handler.global_state_lock,
+                StdRng::seed_from_u64(5550004).random(),
+            )
+            .await;
+            let with_witness = BlockHeaderWithBlockHashWitness::new(
+                *block1.header(),
+                HeaderToBlockHashWitness::from(&block1),
+            );
+            (block1, with_witness)
+        }
+
+        fn latest_punishment(setup: &TestSetup) -> Option<NegativePeerSanction> {
+            setup
+                .peer_loop_handler
+                .global_state_lock
+                .peers()
+                .with_connected(|connected| {
+                    connected[&setup.peer_loop_handler.peer_id]
+                        .standing
+                        .latest_punishment
+                        .map(|(sanction, _)| sanction)
+                })
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn notification_with_pow_witness_from_inbound_peer_is_requested_at_once() {
+            let cli = cli_args::Args::default_with_network(Network::Testnet(42));
+            let mut setup = genesis_setup(cli).await;
+            let (block1, with_witness) = notification_with_witness(&setup).await;
+            assert!(setup.peer_loop_handler.inbound_connection);
+
+            let stream = Mock::new(vec![
+                Action::Read(PeerMessage::BlockNotificationWithPowWitness(Box::new(
+                    with_witness,
+                ))),
+                Action::Write(PeerMessage::BlockRequestByHeight(block1.header().height)),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let from_main = setup.peer_broadcast_tx.subscribe();
+            setup
+                .peer_loop_handler
+                .run(stream, from_main, &mut setup.peer_state)
+                .await
+                .unwrap();
+            assert_eq!(None, latest_punishment(&setup));
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn verified_block_is_requested_from_second_announcer_after_hedge_delay() {
+            let cli = cli_args::Args::default_with_network(Network::Testnet(42));
+            let mut setup = genesis_setup(cli).await;
+            let (block1, with_witness) = notification_with_witness(&setup).await;
+            let notification = PeerMessage::BlockNotificationWithPowWitness(Box::new(with_witness));
+            let request = PeerMessage::BlockRequestByHeight(block1.header().height);
+            let now = Timestamp::now();
+            setup.peer_loop_handler.mock_now = Some(now);
+            let mut bob = peer_loop_at(&setup, 6, false, now);
+
+            // Alice announces and is asked.
+            let alice_stream = Mock::new(vec![
+                Action::Read(notification.clone()),
+                Action::Write(request.clone()),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let alice_from_main = setup.peer_broadcast_tx.subscribe();
+            setup
+                .peer_loop_handler
+                .run(alice_stream, alice_from_main, &mut setup.peer_state)
+                .await
+                .unwrap();
+
+            // Bob announces the same block and is not asked yet.
+            let bob_stream = Mock::new(vec![
+                Action::Read(notification),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let bob_from_main = setup.peer_broadcast_tx.subscribe();
+            let height = setup.genesis_block.header().height;
+            bob.run(
+                bob_stream,
+                bob_from_main,
+                &mut MutablePeerState::new(height),
+            )
+            .await
+            .unwrap();
+
+            // Alice has not delivered within the hedge delay, so bob is asked
+            // too.
+            let mut bob_stream_later = Mock::new(vec![Action::Write(request)]);
+            bob.mock_now = Some(after(now, HEDGE_DELAY));
+            bob.request_due_objects(&mut bob_stream_later)
+                .await
+                .unwrap();
+            assert!(bob_stream_later.is_done());
+            assert_eq!(None, latest_punishment(&setup));
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn legacy_block_notification_from_inbound_peer_waits() {
+            let cli = cli_args::Args::default_with_network(Network::Testnet(42));
+            let mut setup = genesis_setup(cli).await;
+            let (block1, _) = notification_with_witness(&setup).await;
+            let height = block1.header().height;
+            let now = Timestamp::now();
+            setup.peer_loop_handler.mock_now = Some(now);
+            setup.peer_loop_handler.peer_handshake_data.version =
+                VersionString::new_from_str("0.19.0");
+
+            let stream = Mock::new(vec![
+                Action::Read(PeerMessage::BlockNotification((&block1).into())),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let from_main = setup.peer_broadcast_tx.subscribe();
+            setup
+                .peer_loop_handler
+                .run(stream, from_main, &mut setup.peer_state)
+                .await
+                .unwrap();
+
+            let mut stream_later = Mock::new(vec![Action::Write(
+                PeerMessage::BlockRequestByHeight(height),
+            )]);
+            setup.peer_loop_handler.mock_now = Some(after(now, INBOUND_REQUEST_DELAY));
+            setup
+                .peer_loop_handler
+                .request_due_objects(&mut stream_later)
+                .await
+                .unwrap();
+            assert!(stream_later.is_done());
+            assert_eq!(None, latest_punishment(&setup));
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn notification_with_insufficient_pow_is_punished() {
+            let cli = cli_args::Args::default_with_network(Network::Testnet(42));
+            let mut setup = genesis_setup(cli).await;
+            let (_, mut with_witness) = notification_with_witness(&setup).await;
+            let target = with_witness.header().difficulty.target();
+            while with_witness.hash() <= target {
+                with_witness.header_mut().pow.nonce = rand::random();
+            }
+            let announced = (with_witness.header().height, with_witness.hash());
+
+            let stream = Mock::new(vec![
+                Action::Read(PeerMessage::BlockNotificationWithPowWitness(Box::new(
+                    with_witness,
+                ))),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let from_main = setup.peer_broadcast_tx.subscribe();
+            setup
+                .peer_loop_handler
+                .run(stream, from_main, &mut setup.peer_state)
+                .await
+                .unwrap();
+            assert_eq!(
+                Some(NegativePeerSanction::InvalidBlock(announced)),
+                latest_punishment(&setup)
+            );
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn notification_with_pow_witness_for_unknown_parent_is_requested_unverified() {
+            let cli = cli_args::Args::default_with_network(Network::Testnet(42));
+            let mut setup = genesis_setup(cli).await;
+            let (block1, _) = notification_with_witness(&setup).await;
+            let block2 = fake_valid_successor_for_tests(
+                &block1,
+                block1.header().timestamp + Timestamp::hours(1),
+                StdRng::seed_from_u64(5550005).random(),
+                Network::Testnet(42),
+            )
+            .await;
+            let with_witness = BlockHeaderWithBlockHashWitness::new(
+                *block2.header(),
+                HeaderToBlockHashWitness::from(&block2),
+            );
+            let now = Timestamp::now();
+            setup.peer_loop_handler.mock_now = Some(now);
+
+            // Block 1 is unknown, so the notification cannot be verified and
+            // the inbound peer is asked only after the delay.
+            let stream = Mock::new(vec![
+                Action::Read(PeerMessage::BlockNotificationWithPowWitness(Box::new(
+                    with_witness,
+                ))),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let from_main = setup.peer_broadcast_tx.subscribe();
+            setup
+                .peer_loop_handler
+                .run(stream, from_main, &mut setup.peer_state)
+                .await
+                .unwrap();
+            assert_eq!(None, latest_punishment(&setup));
+
+            let mut stream_later = Mock::new(vec![Action::Write(
+                PeerMessage::BlockRequestByHeight(block2.header().height),
+            )]);
+            setup.peer_loop_handler.mock_now = Some(after(now, INBOUND_REQUEST_DELAY));
+            setup
+                .peer_loop_handler
+                .request_due_objects(&mut stream_later)
+                .await
+                .unwrap();
+            assert!(stream_later.is_done());
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn legacy_block_notification_from_new_peer_is_unwanted() {
+            let cli = cli_args::Args::default_with_network(Network::Testnet(42));
+            let mut setup = genesis_setup(cli).await;
+            let (block1, _) = notification_with_witness(&setup).await;
+            setup.peer_loop_handler.peer_handshake_data.version =
+                VersionString::new_from_str("0.19.1");
+
+            let stream = Mock::new(vec![
+                Action::Read(PeerMessage::BlockNotification((&block1).into())),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let from_main = setup.peer_broadcast_tx.subscribe();
+            setup
+                .peer_loop_handler
+                .run(stream, from_main, &mut setup.peer_state)
+                .await
+                .unwrap();
+            assert_eq!(
+                Some(NegativePeerSanction::UnwantedMessage),
+                latest_punishment(&setup)
+            );
+            assert!(setup
+                .peer_loop_handler
+                .global_state_lock
+                .pending_requests()
+                .due_requests(setup.peer_loop_handler.peer_id, SystemTime::now())
+                .is_empty());
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn new_blocks_are_notified_with_pow_witness_to_new_peers_only() {
+            let cli = cli_args::Args::default_with_network(Network::Testnet(42));
+            let mut setup = genesis_setup(cli).await;
+            let (block1, with_witness) = notification_with_witness(&setup).await;
+            let genesis = &setup.genesis_block;
+            let genesis_with_witness = BlockHeaderWithBlockHashWitness::new(
+                *genesis.header(),
+                HeaderToBlockHashWitness::from(genesis),
+            );
+
+            for (version, expected, expected_on_request) in [
+                (
+                    "0.19.0",
+                    PeerMessage::BlockNotification((&block1).into()),
+                    PeerMessage::BlockNotification(genesis.into()),
+                ),
+                (
+                    "0.19.1",
+                    PeerMessage::BlockNotificationWithPowWitness(Box::new(with_witness.clone())),
+                    PeerMessage::BlockNotificationWithPowWitness(Box::new(
+                        genesis_with_witness.clone(),
+                    )),
+                ),
+            ] {
+                setup.peer_loop_handler.peer_handshake_data.version =
+                    VersionString::new_from_str(version);
+                let mut peer_state = MutablePeerState::new(genesis.header().height);
+
+                // A new block from main
+                let mut stream = Mock::new(vec![Action::Write(expected)]);
+                setup
+                    .peer_loop_handler
+                    .handle_main_task_message(
+                        MainToPeerTask::Block(Box::new(block1.clone())),
+                        &mut stream,
+                        &mut peer_state,
+                    )
+                    .await
+                    .unwrap();
+                assert!(stream.is_done(), "version {version}");
+
+                // The peer asks for the tip, which is still genesis
+                let mut request_stream = Mock::new(vec![Action::Write(expected_on_request)]);
+                setup
+                    .peer_loop_handler
+                    .handle_peer_message(
+                        PeerMessage::BlockNotificationRequest,
+                        &mut request_stream,
+                        &mut peer_state,
+                    )
+                    .await
+                    .unwrap();
+                assert!(request_stream.is_done(), "version {version} on request");
+            }
+        }
+
         #[apply(shared_tokio_runtime)]
         async fn stalled_announcer_is_punished() {
             let cli = cli_args::Args::default_with_network(Network::Testnet(42));
             let mut setup = genesis_setup(cli).await;
+            // The node's registered peer is asked without delay.
+            setup.peer_loop_handler.inbound_connection = false;
             let (notification, request) = proposal_announcement(&setup).await;
             let height = setup.genesis_block.header().height;
             let now = Timestamp::now();
@@ -6951,6 +7390,8 @@ mod tests {
         async fn invalid_delivery_leaves_the_request_to_the_fallback() {
             let cli = cli_args::Args::default_with_network(Network::Testnet(42));
             let mut setup = genesis_setup(cli).await;
+            // The node's registered peer is asked without delay.
+            setup.peer_loop_handler.inbound_connection = false;
             let block1 = fake_valid_block_for_tests(
                 &setup.peer_loop_handler.global_state_lock,
                 StdRng::seed_from_u64(5550003).random(),
@@ -7065,6 +7506,8 @@ mod tests {
             for kernel_is_rejected in [false, true] {
                 let cli = cli_args::Args::default_with_network(Network::Testnet(42));
                 let mut setup = genesis_setup(cli).await;
+                // The node's registered peer is asked without delay.
+                setup.peer_loop_handler.inbound_connection = false;
                 let height = setup.genesis_block.header().height;
                 let now = Timestamp::now();
                 let transaction = invalid_empty_single_proof_transaction();
@@ -7217,6 +7660,112 @@ mod tests {
                 .await
                 .unwrap();
             assert!(bob_stream_later.is_done(), "asked after the timeout");
+        }
+    }
+
+    mod tip_with_parent_accumulator {
+        use neptune_p2p::peer::peer_info::pseudorandom_peer_id;
+
+        use super::*;
+
+        #[apply(shared_tokio_runtime)]
+        async fn serves_the_tip_with_its_parents_accumulator() {
+            let network = Network::Testnet(42);
+            let mut rng = StdRng::seed_from_u64(5553002);
+            let (
+                peer_broadcast_tx,
+                _from_main_rx,
+                to_main_tx,
+                _to_main_rx,
+                _,
+                _,
+                mut state_lock,
+                hsd,
+            ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network))
+                .await
+                .unwrap();
+            let genesis = Block::genesis(network);
+            let peer_address = get_dummy_socket_address(0);
+            let mut peer_loop_handler = PeerLoopHandler::new(
+                to_main_tx,
+                state_lock.clone(),
+                pseudorandom_peer_id(&peer_address),
+                socketaddr_to_multiaddr(peer_address),
+                hsd,
+                true,
+            );
+
+            // Genesis has no parent, so there is nothing to serve yet.
+            let mock_at_genesis = Mock::new(vec![
+                Action::Read(PeerMessage::TipWithParentAccumulatorRequest),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            peer_loop_handler
+                .run(
+                    mock_at_genesis,
+                    peer_broadcast_tx.subscribe(),
+                    &mut MutablePeerState::new(genesis.header().height),
+                )
+                .await
+                .unwrap();
+
+            let [block1, block2] = fake_valid_sequence_of_blocks_for_tests(
+                &genesis,
+                Timestamp::hours(1),
+                rng.random(),
+                network,
+            )
+            .await;
+            state_lock.set_new_tip(block1.clone()).await.unwrap();
+            state_lock.set_new_tip(block2.clone()).await.unwrap();
+
+            let parent_accumulator = block1.mutator_set_accumulator_after().unwrap();
+            assert_eq!(
+                block2.body().transaction_kernel().mutator_set_hash,
+                parent_accumulator.hash()
+            );
+            let response =
+                PeerMessage::TipWithParentAccumulator(Box::new(BlockWithParentAccumulator {
+                    block: block2.clone().try_into().unwrap(),
+                    parent_accumulator,
+                }));
+            let mock_at_block2 = Mock::new(vec![
+                Action::Read(PeerMessage::TipWithParentAccumulatorRequest),
+                Action::Write(response),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            peer_loop_handler
+                .run(
+                    mock_at_block2,
+                    peer_broadcast_tx.subscribe(),
+                    &mut MutablePeerState::new(genesis.header().height),
+                )
+                .await
+                .unwrap();
+
+            // A reorganization reduces the window of recent mutator sets to
+            // the new tip, and its parent is not read from disk.
+            let [block2_prime] = fake_valid_sequence_of_blocks_for_tests(
+                &block1,
+                Timestamp::hours(1),
+                rng.random(),
+                network,
+            )
+            .await;
+            assert_ne!(block2.hash(), block2_prime.hash());
+            state_lock.set_new_tip(block2_prime).await.unwrap();
+            let mock_after_reorganization = Mock::new(vec![
+                Action::Read(PeerMessage::TipWithParentAccumulatorRequest),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            peer_loop_handler
+                .run(
+                    mock_after_reorganization,
+                    peer_broadcast_tx.subscribe(),
+                    &mut MutablePeerState::new(genesis.header().height),
+                )
+                .await
+                .unwrap();
         }
     }
 
@@ -7582,6 +8131,11 @@ mod tests {
                 bob.set_new_tip(block.clone()).await?;
             }
             let bob_tip = blocks.last().unwrap();
+            // Peers of this version announce blocks without proof of work.
+            let alice_hsd = HandshakeData {
+                version: VersionString::new_from_str("0.19.0"),
+                ..alice_hsd
+            };
 
             let block_notification_from_bob = PeerBlockNotification {
                 hash: bob_tip.hash(),
