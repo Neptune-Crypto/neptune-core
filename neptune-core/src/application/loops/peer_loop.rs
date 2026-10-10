@@ -39,6 +39,7 @@ use neptune_p2p::peer::transfer_block::TransferBlock;
 use neptune_p2p::peer::transfer_link_tx::TransferLinkTx;
 use neptune_p2p::peer::BlockProposalRequest;
 use neptune_p2p::peer::BlockRequestBatch;
+use neptune_p2p::peer::BlockWithParentAccumulator;
 use neptune_p2p::peer::IssuedSyncChallenge;
 use neptune_p2p::peer::MutablePeerState;
 use neptune_p2p::peer::NegativePeerSanction;
@@ -1038,6 +1039,41 @@ impl PeerLoopHandler {
                 // Peer lists are never requested anymore; peers are discovered
                 // through the DHT.
                 debug!("Ignoring unsolicited peer list");
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            PeerMessage::TipWithParentAccumulatorRequest => {
+                // Serving this response is intended to be very low cost. So
+                // avoid reading from disk/archival state to fetch earlier
+                // mutator set accumulators.
+                let response = {
+                    let state = self.global_state_lock.lock_guard().await;
+                    let tip = state.chain.tip();
+                    let parent_accumulator = state
+                        .chain
+                        .recent_mutator_sets()
+                        .mutator_set(tip.body().transaction_kernel().mutator_set_hash);
+                    match parent_accumulator {
+                        Some(parent_accumulator) => Some(BlockWithParentAccumulator {
+                            block: tip.try_into()?,
+                            parent_accumulator: parent_accumulator.clone(),
+                        }),
+                        None => None,
+                    }
+                };
+                match response {
+                    Some(response) => {
+                        peer.send(PeerMessage::TipWithParentAccumulator(Box::new(response)))
+                            .await?;
+                    }
+                    None => {
+                        debug!("Cannot serve tip with its parent's accumulator");
+                    }
+                }
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            PeerMessage::TipWithParentAccumulator(_) => {
+                // This node never requests one.
+                debug!("Ignoring unsolicited tip with parent accumulator");
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockNotificationRequest => {
@@ -7624,6 +7660,112 @@ mod tests {
                 .await
                 .unwrap();
             assert!(bob_stream_later.is_done(), "asked after the timeout");
+        }
+    }
+
+    mod tip_with_parent_accumulator {
+        use neptune_p2p::peer::peer_info::pseudorandom_peer_id;
+
+        use super::*;
+
+        #[apply(shared_tokio_runtime)]
+        async fn serves_the_tip_with_its_parents_accumulator() {
+            let network = Network::Testnet(42);
+            let mut rng = StdRng::seed_from_u64(5553002);
+            let (
+                peer_broadcast_tx,
+                _from_main_rx,
+                to_main_tx,
+                _to_main_rx,
+                _,
+                _,
+                mut state_lock,
+                hsd,
+            ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network))
+                .await
+                .unwrap();
+            let genesis = Block::genesis(network);
+            let peer_address = get_dummy_socket_address(0);
+            let mut peer_loop_handler = PeerLoopHandler::new(
+                to_main_tx,
+                state_lock.clone(),
+                pseudorandom_peer_id(&peer_address),
+                socketaddr_to_multiaddr(peer_address),
+                hsd,
+                true,
+            );
+
+            // Genesis has no parent, so there is nothing to serve yet.
+            let mock_at_genesis = Mock::new(vec![
+                Action::Read(PeerMessage::TipWithParentAccumulatorRequest),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            peer_loop_handler
+                .run(
+                    mock_at_genesis,
+                    peer_broadcast_tx.subscribe(),
+                    &mut MutablePeerState::new(genesis.header().height),
+                )
+                .await
+                .unwrap();
+
+            let [block1, block2] = fake_valid_sequence_of_blocks_for_tests(
+                &genesis,
+                Timestamp::hours(1),
+                rng.random(),
+                network,
+            )
+            .await;
+            state_lock.set_new_tip(block1.clone()).await.unwrap();
+            state_lock.set_new_tip(block2.clone()).await.unwrap();
+
+            let parent_accumulator = block1.mutator_set_accumulator_after().unwrap();
+            assert_eq!(
+                block2.body().transaction_kernel().mutator_set_hash,
+                parent_accumulator.hash()
+            );
+            let response =
+                PeerMessage::TipWithParentAccumulator(Box::new(BlockWithParentAccumulator {
+                    block: block2.clone().try_into().unwrap(),
+                    parent_accumulator,
+                }));
+            let mock_at_block2 = Mock::new(vec![
+                Action::Read(PeerMessage::TipWithParentAccumulatorRequest),
+                Action::Write(response),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            peer_loop_handler
+                .run(
+                    mock_at_block2,
+                    peer_broadcast_tx.subscribe(),
+                    &mut MutablePeerState::new(genesis.header().height),
+                )
+                .await
+                .unwrap();
+
+            // A reorganization reduces the window of recent mutator sets to
+            // the new tip, and its parent is not read from disk.
+            let [block2_prime] = fake_valid_sequence_of_blocks_for_tests(
+                &block1,
+                Timestamp::hours(1),
+                rng.random(),
+                network,
+            )
+            .await;
+            assert_ne!(block2.hash(), block2_prime.hash());
+            state_lock.set_new_tip(block2_prime).await.unwrap();
+            let mock_after_reorganization = Mock::new(vec![
+                Action::Read(PeerMessage::TipWithParentAccumulatorRequest),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            peer_loop_handler
+                .run(
+                    mock_after_reorganization,
+                    peer_broadcast_tx.subscribe(),
+                    &mut MutablePeerState::new(genesis.header().height),
+                )
+                .await
+                .unwrap();
         }
     }
 

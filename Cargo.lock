@@ -4109,6 +4109,7 @@ dependencies = [
  "multihash",
  "neptune-consensus",
  "neptune-mempool",
+ "neptune-mutator-set",
  "neptune-p2p",
  "neptune-primitives",
  "num-bigint",
