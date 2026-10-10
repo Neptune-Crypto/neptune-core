@@ -3830,6 +3830,7 @@ dependencies = [
  "libp2p",
  "macro_rules_attr",
  "memmap2",
+ "multistream-select",
  "neptune-archival-mmr",
  "neptune-archive",
  "neptune-cash",

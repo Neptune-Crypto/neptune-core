@@ -37,6 +37,7 @@ use crate::application::network::channel::NetworkEvent;
 use crate::application::network::config::NetworkConfig;
 use crate::application::network::gateway::GatewayEvent;
 use crate::application::network::gateway::StreamGateway;
+use crate::application::network::handshake::WireEncoding;
 use crate::application::network::observed_ips::ip_of;
 use crate::application::network::observed_ips::ObservedIps;
 use crate::application::network::overview::NetworkOverview;
@@ -1596,6 +1597,7 @@ impl NetworkActor {
         let GatewayEvent::HandshakeReceived {
             peer_id,
             remote_handshake,
+            encoding,
             stream,
         } = event;
 
@@ -1632,6 +1634,7 @@ impl NetworkActor {
                 .cloned()
                 .unwrap_or_else(|| Multiaddr::from(Ipv4Addr::new(127, 0, 0, 1))),
             remote_handshake,
+            encoding,
             stream,
             from_main_rx,
         ) {
@@ -2271,6 +2274,7 @@ impl NetworkActor {
         peer_id: PeerId,
         peer_address: Multiaddr,
         remote_handshake: HandshakeData,
+        encoding: WireEncoding,
         raw_stream: libp2p::Stream,
         from_main_rx: tokio::sync::broadcast::Receiver<MainToPeerTask>,
     ) -> Option<JoinHandle<()>> {
@@ -2294,7 +2298,7 @@ impl NetworkActor {
             self.swarm.behaviour_mut().kademlia.bootstrap().ok();
         }
 
-        tracing::debug!("Spawning peer loop from libp2p network actor");
+        tracing::info!(peer = %peer_id, ?encoding, "Spawning peer loop from libp2p network actor");
 
         // Create immutable (across the lifetime of the connection) peer state.
         // This variable needs to be mutable because of efficient pointer reuse
@@ -2308,7 +2312,7 @@ impl NetworkActor {
             rand::rng().random_bool(0.5f64),
         );
 
-        let peer_stream = bridge_libp2p_stream(raw_stream);
+        let peer_stream = bridge_libp2p_stream(raw_stream, encoding);
 
         let upgraded = self.upgraded_peers.clone();
         Some(tokio::spawn(async move {
@@ -2909,6 +2913,31 @@ mod tests {
 
         dialer.task.abort();
         reserved.task.abort();
+    }
+
+    /// Two nodes of this version agree on bincode for their peer loops.
+    #[tokio::test]
+    #[tracing_test::traced_test]
+    async fn current_nodes_run_their_peer_loops_over_bincode() {
+        let (dialer_keypair, listener_keypair) = ordered_keypairs();
+        let listener_address = free_localhost_tcp_address();
+        let mut listener =
+            TestNode::start(listener_keypair, vec![listener_address.clone()], false).await;
+        listener
+            .command(NetworkActorCommand::Listen(listener_address.clone()))
+            .await;
+
+        let mut dialer = TestNode::start(dialer_keypair, vec![], false).await;
+        dialer.dial_until_connected(listener_address, 1).await;
+        dialer.wait_for_peer_loops(1).await;
+        listener.wait_for_peer_loops(1).await;
+
+        assert!(logs_contain("Spawning peer loop"));
+        assert!(logs_contain("encoding=Bincode"));
+        assert!(!logs_contain("encoding=Json"));
+
+        dialer.task.abort();
+        listener.task.abort();
     }
 
     /// Without a direct address to punch towards, the connection stays
