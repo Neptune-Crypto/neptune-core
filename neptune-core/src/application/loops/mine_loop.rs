@@ -570,16 +570,21 @@ pub(crate) async fn make_coinbase_transaction_stateless(
     Ok((transaction, composer_outputs))
 }
 
-/// The coinbase transaction an RPC caller set, if the successor of
-/// `predecessor` may use it.
+/// The witness of the coinbase transaction an RPC caller set, if that
+/// transaction qualifies for the block after `predecessor`, and `None`
+/// otherwise, in which case the composer builds its own.
 ///
-/// The successor uses it if and only if the consensus rules at its height
-/// allow coinbase inputs, and the transaction is valid, was built against
-/// the mutator set after `predecessor`, claims a non-negative coinbase no
-/// greater than the block subsidy, pays a non-negative fee, is timestamped
-/// no earlier than the minimum block time after `predecessor`, and lustrates
-/// every input that must lustrate, by no more than the lustration counter
-/// allows. Otherwise the composer builds its own coinbase transaction.
+/// Let `h` be the height after `predecessor`. The transaction qualifies if
+/// and only if all of the following hold:
+///
+/// - the consensus rules at `h` allow coinbase inputs;
+/// - its mutator set hash is that of the mutator set after `predecessor`;
+/// - its coinbase is present and lies in `[0, Block::block_subsidy(h)]`;
+/// - its fee is non-negative;
+/// - its timestamp is at least `predecessor`'s plus the minimum block time;
+/// - if `predecessor` is at or above the first lustration block, the amount
+///   its inputs lustrate is at most `predecessor`'s lustration counter;
+/// - its witness validates.
 pub(crate) async fn caller_coinbase_tx(
     predecessor: &Block,
     global_state_lock: &GlobalStateLock,
