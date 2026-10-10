@@ -67,21 +67,25 @@ pub(crate) fn get_codec_rules() -> LengthDelimitedCodec {
     codec_rules
 }
 
-/// Returns a bincode codec with allocation limits to prevent OOM attacks.
+/// The bincode options for peer messages, with allocation limits to prevent
+/// OOM attacks.
 ///
 /// This prevents "length bomb" attacks where a malicious peer sends a tiny
 /// frame claiming to contain a Vec with billions of elements. Without limits,
 /// bincode would pre-allocate memory based on the claimed length, causing OOM.
 ///
 /// The limit is set to match MAX_PEER_FRAME_LENGTH_IN_BYTES (500MB).
+pub(crate) fn bincode_options() -> impl Options + Copy {
+    bincode::DefaultOptions::new().with_limit(MAX_PEER_FRAME_LENGTH_IN_BYTES as u64)
+}
+
+/// Returns a bincode codec using [`bincode_options`].
 fn get_bincode_codec<Item, SinkItem>() -> Bincode<Item, SinkItem, impl Options + Copy>
 where
     Item: serde::de::DeserializeOwned,
     SinkItem: serde::Serialize,
 {
-    bincode::DefaultOptions::new()
-        .with_limit(MAX_PEER_FRAME_LENGTH_IN_BYTES as u64)
-        .into()
+    bincode_options().into()
 }
 
 /// Infallible absolute difference between two timestamps, in seconds.

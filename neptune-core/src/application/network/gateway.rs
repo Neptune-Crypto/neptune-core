@@ -23,6 +23,7 @@ use neptune_p2p::peer::handshake_data::HandshakeData;
 use crate::application::network::actor::NetworkActor;
 use crate::application::network::handshake::HandshakeResult;
 use crate::application::network::handshake::HandshakeUpgrade;
+use crate::application::network::handshake::WireEncoding;
 use crate::state::GlobalStateLock;
 
 /// Manages the lifecycle of one specific connection.
@@ -86,7 +87,12 @@ impl GatewayHandler {
     ///
     /// A paused handler never drains its queue, so a stream kept there would
     /// stay open for the lifetime of the connection.
-    fn queue_handshake_success(&mut self, remote_handshake: HandshakeData, stream: libp2p::Stream) {
+    fn queue_handshake_success(
+        &mut self,
+        remote_handshake: HandshakeData,
+        encoding: WireEncoding,
+        stream: libp2p::Stream,
+    ) {
         if self.pause {
             tracing::debug!("Dropping handshake completed over a paused connection.");
             drop(stream);
@@ -97,6 +103,7 @@ impl GatewayHandler {
             .push_back(ConnectionHandlerEvent::NotifyBehaviour(
                 HandshakeResult::Success {
                     remote_handshake,
+                    encoding,
                     stream,
                 },
             ));
@@ -179,16 +186,16 @@ impl ConnectionHandler for GatewayHandler {
             ConnectionEvent::FullyNegotiatedInbound(FullyNegotiatedInbound {
                 protocol, ..
             }) => {
-                let (handshake, stream) = protocol;
-                self.queue_handshake_success(handshake, stream);
+                let (handshake, encoding, stream) = protocol;
+                self.queue_handshake_success(handshake, encoding, stream);
             }
 
             // Outbound success
             ConnectionEvent::FullyNegotiatedOutbound(
                 libp2p::swarm::handler::FullyNegotiatedOutbound { protocol, .. },
             ) => {
-                let (handshake, stream) = protocol;
-                self.queue_handshake_success(handshake, stream);
+                let (handshake, encoding, stream) = protocol;
+                self.queue_handshake_success(handshake, encoding, stream);
             }
 
             ConnectionEvent::DialUpgradeError(error) => {
@@ -268,6 +275,8 @@ pub(crate) enum GatewayEvent {
         peer_id: PeerId,
         /// The verified handshake sent by the peer.
         remote_handshake: HandshakeData,
+        /// The encoding of peer messages on the stream.
+        encoding: WireEncoding,
         /// The live, bidirectional stream ready for inner protocol messages.
         stream: libp2p::Stream,
     },
@@ -497,6 +506,7 @@ impl NetworkBehaviour for StreamGateway {
         match event {
             HandshakeResult::Success {
                 remote_handshake,
+                encoding,
                 stream,
             } => {
                 // This is the "Hijack" point.
@@ -504,6 +514,7 @@ impl NetworkBehaviour for StreamGateway {
                     .push_back(ToSwarm::GenerateEvent(GatewayEvent::HandshakeReceived {
                         peer_id,
                         remote_handshake,
+                        encoding,
                         stream,
                     }));
             } // If we later add a HandshakeResult::Failure, we handle it here
