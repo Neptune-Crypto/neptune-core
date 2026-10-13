@@ -552,6 +552,7 @@ mod tests {
     use super::*;
     use crate::application::config::cli_args;
     use crate::application::config::parser::multiaddr::socketaddr_to_multiaddr;
+    use crate::application::network::frame_codec::OversizedFrame;
     use crate::tests::shared::globalstate::get_dummy_handshake_data_for_genesis;
     use crate::tests::shared::globalstate::get_dummy_peer_connection_data_genesis;
     use crate::tests::shared::globalstate::get_dummy_peer_incoming;
@@ -561,6 +562,23 @@ mod tests {
     use crate::tests::shared_tokio_runtime;
     use crate::MAGIC_STRING_REQUEST;
     use crate::MAGIC_STRING_RESPONSE;
+
+    #[tokio::test]
+    async fn an_oversized_frame_is_reported_through_the_legacy_codec() {
+        use futures::TryStreamExt;
+        use neptune_p2p::peer::PeerMessageKind;
+
+        let mut frame = (100u32 * 1024 * 1024).to_be_bytes().to_vec();
+        frame.extend(bincode_options().serialize(&PeerMessage::Bye).unwrap());
+        let stream = Builder::new().read(&frame).build();
+
+        let framed = Framed::new(stream, PeerFrameCodec::new(WireEncoding::Bincode));
+        let mut peer: SymmetricallyFramed<_, PeerMessage, _> =
+            SymmetricallyFramed::new(framed, get_bincode_codec::<PeerMessage, PeerMessage>());
+        let error = peer.try_next().await.unwrap_err();
+        let oversized = OversizedFrame::behind(&error).unwrap();
+        assert_eq!(PeerMessageKind::Bye, oversized.kind);
+    }
 
     async fn standing_written_at_close(address: Multiaddr, ip: IpAddr) -> Option<PeerStanding> {
         use neptune_p2p::peer::peer_info::PeerConnectionInfo;

@@ -100,7 +100,8 @@ pub enum NegativePeerSanction {
     DoubleSpendingTransaction,
     CannotApplyTransactionToMutatorSet,
     OversizedAnnouncement,
-    /// Block exceeds size limit during fork reconciliation (RAM exhaustion attack)
+    /// A message exceeds the size limit for its kind, or a block does during
+    /// fork reconciliation (RAM exhaustion attack).
     OversizedBlock,
 
     InvalidBlockMmrAuthentication,
@@ -174,7 +175,7 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::DoubleSpendingTransaction => -7,
             NegativePeerSanction::CannotApplyTransactionToMutatorSet => -3,
             NegativePeerSanction::OversizedAnnouncement => -10,
-            NegativePeerSanction::OversizedBlock => -50,
+            NegativePeerSanction::OversizedBlock => -200,
             NegativePeerSanction::NonMinedTransactionHasCoinbase => -10,
             NegativePeerSanction::NoStandingFoundMaybeCrash => -20,
             NegativePeerSanction::BlockProposalNotFound => -1,

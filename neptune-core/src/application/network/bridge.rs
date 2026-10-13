@@ -125,9 +125,12 @@ fn invalid_data(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> i
 #[cfg(test)]
 mod tests {
     use futures::StreamExt;
+    use neptune_p2p::peer::PeerMessageKind;
+    use tokio::io::AsyncWriteExt;
     use tokio_util::compat::TokioAsyncReadCompatExt;
 
     use super::*;
+    use crate::application::network::frame_codec::OversizedFrame;
 
     type Bridged = Pin<Box<dyn PeerStream>>;
 
@@ -151,6 +154,20 @@ mod tests {
                 assert_eq!(msg, bob.next().await.unwrap().unwrap());
             }
         }
+    }
+
+    #[tokio::test]
+    async fn an_oversized_frame_is_reported_through_the_bridge() {
+        let (mut alice, bob) = tokio::io::duplex(1 << 20);
+        let mut bob = bridge_stream(bob.compat(), WireEncoding::Bincode);
+
+        let mut frame = (100u32 * 1024 * 1024).to_be_bytes().to_vec();
+        frame.extend(bincode_options().serialize(&PeerMessage::Bye).unwrap());
+        alice.write_all(&frame).await.unwrap();
+
+        let error = bob.next().await.unwrap().unwrap_err();
+        let oversized = OversizedFrame::behind(&error).unwrap();
+        assert_eq!(PeerMessageKind::Bye, oversized.kind);
     }
 
     #[tokio::test]

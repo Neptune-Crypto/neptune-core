@@ -35,6 +35,25 @@ const KIND_PEEK_LEN: usize = 64;
 /// JSON, against nine bytes as bincode.
 const JSON_SIZE_FACTOR: usize = 3;
 
+/// A frame announced more bytes than a message of its kind may have.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("{kind} message of {frame_len} bytes exceeds the limit of {limit} bytes")]
+pub(crate) struct OversizedFrame {
+    pub(crate) kind: PeerMessageKind,
+    pub(crate) frame_len: usize,
+    pub(crate) limit: usize,
+}
+
+impl OversizedFrame {
+    /// The oversized frame that an error from a peer stream reports, if any.
+    pub(crate) fn behind<'a>(error: &'a (dyn std::error::Error + 'static)) -> Option<&'a Self> {
+        error
+            .downcast_ref::<io::Error>()?
+            .get_ref()?
+            .downcast_ref::<Self>()
+    }
+}
+
 pub(crate) struct PeerFrameCodec {
     inner: LengthDelimitedCodec,
     encoding: WireEncoding,
@@ -101,9 +120,11 @@ impl PeerFrameCodec {
         };
         let limit = self.frame_limit(kind);
         if frame_len > limit {
-            return Err(invalid_data(format!(
-                "{kind} message of {frame_len} bytes exceeds the limit of {limit} bytes"
-            )));
+            return Err(invalid_data(OversizedFrame {
+                kind,
+                frame_len,
+                limit,
+            }));
         }
 
         Ok(true)
@@ -223,6 +244,31 @@ mod tests {
             assert_eq!(io::ErrorKind::InvalidData, error.kind());
             assert!(error.to_string().contains("Bye message"), "{error}");
         }
+    }
+
+    #[test]
+    fn an_oversized_frame_is_reported_with_its_kind_and_limit() {
+        let claimed = 100 * 1024 * 1024;
+        let mut src = frame_start(WireEncoding::Bincode, &PeerMessage::Bye, claimed);
+        let error = PeerFrameCodec::new(WireEncoding::Bincode)
+            .decode(&mut src)
+            .unwrap_err();
+        let oversized = OversizedFrame::behind(&error).unwrap();
+        assert_eq!(PeerMessageKind::Bye, oversized.kind);
+        assert_eq!(claimed as usize, oversized.frame_len);
+        assert_eq!(
+            PeerMessageKind::Bye.max_frame_length().unwrap(),
+            oversized.limit
+        );
+
+        // A frame of unknown kind is refused for another reason.
+        let mut unknown = BytesMut::new();
+        unknown.extend_from_slice(&64u32.to_be_bytes());
+        unknown.extend_from_slice(&[250u8; KIND_PEEK_LEN]);
+        let other_error = PeerFrameCodec::new(WireEncoding::Bincode)
+            .decode(&mut unknown)
+            .unwrap_err();
+        assert!(OversizedFrame::behind(&other_error).is_none());
     }
 
     #[test]

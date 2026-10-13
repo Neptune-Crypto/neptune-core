@@ -2962,6 +2962,14 @@ impl PeerLoopHandler {
                                 break;
                             }
 
+                            // The rest of the frame cannot be read, so the
+                            // connection is of no further use.
+                            if let Some(oversized) = OversizedFrame::behind(&err) {
+                                warn!("Closing connection to {peer_address}: {oversized}");
+                                self.punish(NegativePeerSanction::OversizedBlock).await?;
+                                break;
+                            }
+
                             // Don't disconnect if message type is unknown, as
                             // this allows the adding of new message types in
                             // the future.
