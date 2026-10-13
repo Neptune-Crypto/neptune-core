@@ -2,6 +2,7 @@ use get_size2::GetSize;
 use itertools::Itertools;
 use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::commit;
+use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
 use neptune_primitives::mast_hash::HasDiscriminant;
 use neptune_primitives::mast_hash::MastHash;
@@ -100,6 +101,16 @@ impl BlockKernel {
                 commit(item, sender_randomness, receiver_digest)
             })
             .collect_vec())
+    }
+
+    /// The index sets of the block's inputs.
+    pub fn removal_index_sets(&self) -> Vec<AbsoluteIndexSet> {
+        self.body
+            .transaction_kernel
+            .inputs
+            .iter()
+            .map(|removal_record| removal_record.absolute_indices)
+            .collect()
     }
 
     /// Return the mutator set update, including guesser fee outputs, invoked by

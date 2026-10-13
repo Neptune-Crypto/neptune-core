@@ -570,11 +570,6 @@ impl ArchivalState {
         self: &mut ArchivalState,
         new_block: &Block,
     ) -> Result<Vec<(BlockIndexKey, BlockIndexValue)>> {
-        // abort early if mutator set update is invalid.
-        if new_block.mutator_set_update(self.network).is_err() {
-            bail!("invalid block: could not get mutator set update");
-        }
-
         // Fetch last file record to find disk location to store block.
         // This record must exist in the DB already, unless this is the first block
         // stored on disk.
@@ -670,9 +665,8 @@ impl ArchivalState {
         let mut block_index_entries: Vec<(BlockIndexKey, BlockIndexValue)> = vec![];
         let block_record_key: BlockIndexKey = BlockIndexKey::Block(new_block.hash());
         let num_additions: u64 = new_block
-            .mutator_set_update(self.network)
-            .expect("MS update for new block must exist")
-            .additions
+            .all_addition_records()
+            .map_err(|err| anyhow::anyhow!("invalid block: {err}"))?
             .len()
             .try_into()
             .expect("Num addition records cannot exceed u64::MAX");
@@ -2162,21 +2156,16 @@ impl ArchivalState {
                 rollback_block.header().height
             );
 
-            let MutatorSetUpdate {
-                additions,
-                removals,
-            } = rollback_block
-                .mutator_set_update(self.network)
-                .expect("Block from state must have mutator set update");
-
             // Roll back all removal records contained in block
-            let index_sets = removals.iter().map(|rr| rr.absolute_indices).collect_vec();
             self.archival_mutator_set
                 .ams_mut()
-                .revert_batch_remove(&index_sets)
+                .revert_batch_remove(&rollback_block.kernel.removal_index_sets())
                 .await;
 
             // Roll back all addition records contained in block
+            let additions = rollback_block
+                .all_addition_records()
+                .expect("Block from state must have addition records");
             for addition_record in additions.iter().rev() {
                 assert!(
                     self.archival_mutator_set
@@ -2214,14 +2203,10 @@ impl ArchivalState {
                     .standard_format()
             );
 
-            let MutatorSetUpdate {
-                additions,
-                removals,
-            } = apply_forward_block
-                .mutator_set_update(self.network)
-                .expect("Block from state must have mutator set update");
-
             // Add items, thus adding the output UTXOs to the mutator set
+            let additions = apply_forward_block
+                .all_addition_records()
+                .expect("Block from state must have addition records");
             for addition_record in &additions {
                 self.archival_mutator_set
                     .ams_mut()
@@ -2232,10 +2217,9 @@ impl ArchivalState {
             // Remove items, thus removing the input UTXOs from the mutator
             // set. The index sets are absolute, so the additions leave them
             // as they are.
-            let index_sets = removals.iter().map(|rr| rr.absolute_indices).collect_vec();
             self.archival_mutator_set
                 .ams_mut()
-                .batch_remove(&index_sets)
+                .batch_remove(&apply_forward_block.kernel.removal_index_sets())
                 .await;
         }
 

@@ -36,7 +36,7 @@ impl LightState {
     /// Contruct a new light state, from a block.
     pub fn new(block: Block, network: Network) -> Self {
         Self {
-            recent_mutator_sets: RecentMutatorSets::new(&block, network),
+            recent_mutator_sets: RecentMutatorSets::new(&block),
             tip: block,
             time_to_mine: None,
             network,
@@ -77,7 +77,7 @@ impl LightState {
             None
         };
 
-        self.recent_mutator_sets.update(&new_block, self.network);
+        self.recent_mutator_sets.update(&new_block);
 
         self.tip = new_block;
         self.time_to_mine = time_to_mine;
