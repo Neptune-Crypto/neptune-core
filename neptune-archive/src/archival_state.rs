@@ -18,7 +18,7 @@ use neptune_consensus::block::block_header::BlockHeaderWithBlockHashWitness;
 use neptune_consensus::block::block_header::HeaderToBlockHashWitness;
 use neptune_consensus::block::block_kernel::BlockKernel;
 use neptune_consensus::block::guesser_receiver_data::GuesserReceiverData;
-use neptune_consensus::block::mutator_set_update::MutatorSetUpdate;
+use neptune_consensus::block::mutator_set_update::MutatorSetCatchUp;
 use neptune_consensus::block::validity::knows_mutator_set::KnowsMutatorSetWitness;
 use neptune_consensus::block::validity::knows_mutator_set::sampled_leafs;
 use neptune_consensus::block::validity::swbfi_reveal::guesser_node_index;
@@ -26,6 +26,7 @@ use neptune_consensus::proof_abstractions::verifier::CHECKPOINT_MAIN;
 use neptune_consensus::proof_abstractions::verifier::CHECKPOINT_TESTNET_0;
 use neptune_consensus::proof_abstractions::verifier::cache_true_claims;
 use neptune_consensus::transaction::lock_script::LockScript;
+use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
 use neptune_consensus::transaction::transaction_kernel::TransactionKernelProxy;
 use neptune_consensus::transaction::utxo::Utxo;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -36,6 +37,7 @@ use neptune_database::storage::storage_schema::traits::*;
 use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::commit;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use neptune_mutator_set::removal_record::RemovalRecord;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use neptune_mutator_set::removal_record::chunk::Chunk;
 use neptune_primitives::block_height::BLOCKS_PER_GENERATION;
@@ -1786,117 +1788,118 @@ impl ArchivalState {
         ret
     }
 
-    /// Returns the old mutator set matching the provided digest as well as the
-    /// mutator set update required to go from the old state to that in the tip.
+    /// Return an old mutator set, identified by its hash.
+    ///
+    /// Searches at most `max_search_depth` blocks back. None if no match is
+    /// found.
     ///
     /// # Warning
     ///
     /// This can be a very expensive function to run if it's called with a high
     /// max search depth, as it loads all the blocks in the search path into
     /// memory. A max search depth of 0 means that only the tip is checked.
-    async fn mutator_set_to_tip_internal(
+    pub async fn ancestor_mutator_set(
         &self,
-        old_ms_digest: Digest,
-        old_aocl_num_leafs: Option<u64>,
+        mutator_set_hash: Digest,
         max_search_depth: usize,
-    ) -> Option<(MutatorSetAccumulator, MutatorSetUpdate)> {
+    ) -> Option<MutatorSetAccumulator> {
         let mut search_depth = 0;
-        let mut block_mutations = vec![];
-
         let mut haystack = self.get_tip().await;
-        let mut parent = self.get_tip_parent().await;
-        let old_msa = loop {
+        loop {
             let haystack_msa = haystack
                 .mutator_set_accumulator_after()
                 .expect("Block from state must have mutator set after");
-            if haystack_msa.hash() == old_ms_digest {
-                break haystack_msa;
+            if haystack_msa.hash() == mutator_set_hash {
+                return Some(haystack_msa);
             }
 
             search_depth += 1;
-
-            // Notice that comparing the whole mutator set accumulator and not
-            // just its hash allows us to do early return here. Parent == None
-            // indicates that we've gone all the way back to genesis, with no
-            // match.
-            if old_aocl_num_leafs
-                .is_some_and(|old_num_leafs| old_num_leafs > haystack_msa.aocl.num_leafs())
-                || search_depth > max_search_depth
-                || parent.is_none()
-            {
+            if search_depth > max_search_depth {
                 return None;
             }
-
-            let mutator_set_update = haystack
-                .mutator_set_update(self.network)
-                .expect("Block from state must have mutator set update");
-            let predecessor_msa = parent
-                .as_ref()
-                .unwrap()
-                .mutator_set_accumulator_after()
-                .expect("Block from state must have mutator set after");
-            block_mutations.push((predecessor_msa, mutator_set_update));
-
-            haystack = parent.unwrap();
-            parent = self
+            haystack = self
                 .get_block(haystack.header().prev_block_digest)
                 .await
-                .expect("Must succeed in reading block");
-        };
-
-        let timer = std::time::Instant::now();
-        let mutator_set_update = MutatorSetUpdate::compose(&block_mutations);
-        if block_mutations.len() > 1 {
-            info!(
-                "Composed mutator-set update to tip spanning {} blocks, with {} removals \
-                 and {} additions, in {:?}",
-                block_mutations.len(),
-                mutator_set_update.removals.len(),
-                mutator_set_update.additions.len(),
-                timer.elapsed(),
-            );
+                .expect("Must succeed in reading block")?;
         }
-
-        Some((old_msa, mutator_set_update))
     }
 
-    /// Returns the old mutator set matching the provided digest as well as the
-    /// mutator set update required to go from the old state to that in the tip.
+    /// Return the data required to update a transaction built on the specified
+    /// mutator set hash, with the specified inputs, to a new mutator set.
     ///
-    /// # Warning
-    ///
-    /// This can be a very expensive function to run if it's called with a high
-    /// max search depth, as it loads all the blocks in the search path into
-    /// memory. A max search depth of 0 means that only the tip is checked.
-    pub async fn old_mutator_set_and_mutator_set_update_to_tip(
+    /// Returns the old mutator set, and the catch-up data required to update
+    /// the transaction.
+    pub async fn catch_up_to_tip(
         &self,
-        old_mutator_set_digest: Digest,
+        old_mutator_set_hash: Digest,
+        tx_inputs: &[AbsoluteIndexSet],
         max_search_depth: usize,
-    ) -> Option<(MutatorSetAccumulator, MutatorSetUpdate)> {
-        self.mutator_set_to_tip_internal(old_mutator_set_digest, None, max_search_depth)
-            .await
+    ) -> Option<(MutatorSetAccumulator, MutatorSetCatchUp)> {
+        let old_mutator_set = self
+            .ancestor_mutator_set(old_mutator_set_hash, max_search_depth)
+            .await?;
+        let ams = self.archival_mutator_set.ams();
+        let mutator_set = ams.accumulator().await;
+        let (old_num_leafs, num_leafs) = (
+            old_mutator_set.aocl.num_leafs(),
+            mutator_set.aocl.num_leafs(),
+        );
+        let appended_aocl_leafs = if old_num_leafs < num_leafs {
+            ams.aocl
+                .get_leaf_range_inclusive_async(old_num_leafs..=num_leafs - 1)
+                .await
+        } else {
+            vec![]
+        };
+        let mut catch_up = MutatorSetCatchUp {
+            new_mutator_set: mutator_set,
+            new_inputs: vec![],
+            appended_aocl_leafs,
+        };
+        for &absolute_indices in tx_inputs {
+            catch_up.new_inputs.push(RemovalRecord {
+                absolute_indices,
+                target_chunks: ams.chunk_dictionary(absolute_indices).await,
+            });
+        }
+        Some((old_mutator_set, catch_up))
     }
 
-    /// Returns Some(MutatorSetUpdate) if a path could be found from tip to a
-    /// block with the indicated mutator set.
+    /// Return a primitive witness synced to the tip. Built from the archival
+    /// mutator set and a (potentially) unsynced primitive witness.
     ///
-    /// # Warning
+    /// Assumes that the lock scripts and type scripts stay valid under the new
+    /// block/mutator set.
     ///
-    /// This can be a very expensive function to run if it's called with a high
-    /// max search depth, as it loads all the blocks in the search path into
-    /// memory. A max search depth of 0 means that only the tip is checked.
-    pub async fn get_mutator_set_update_to_tip(
+    /// None if any AOCL leafs are from the future.
+    pub async fn catch_up_primitive_witness(
         &self,
-        mutator_set: &MutatorSetAccumulator,
-        max_search_depth: usize,
-    ) -> Option<MutatorSetUpdate> {
-        self.mutator_set_to_tip_internal(
-            mutator_set.hash(),
-            Some(mutator_set.aocl.num_leafs()),
-            max_search_depth,
+        primitive_witness: &PrimitiveWitness,
+    ) -> Option<PrimitiveWitness> {
+        let ams = self.archival_mutator_set.ams();
+        let mut membership_proofs = vec![];
+        for (utxo, old_proof) in primitive_witness
+            .input_utxos
+            .utxos
+            .iter()
+            .zip(&primitive_witness.input_membership_proofs)
+        {
+            let membership_proof = ams
+                .restore_membership_proof(
+                    Tip5::hash(utxo),
+                    old_proof.sender_randomness,
+                    old_proof.receiver_preimage,
+                    old_proof.aocl_leaf_index,
+                )
+                .await
+                .ok()?;
+            membership_proofs.push(membership_proof);
+        }
+        Some(
+            primitive_witness
+                .clone()
+                .with_mutator_set(ams.accumulator().await, membership_proofs),
         )
-        .await
-        .map(|(_, msa)| msa)
     }
 
     /// Update the archival mutator set with a new block.
@@ -2783,13 +2786,13 @@ mod tests {
             .await;
 
         for i in 0..10 {
-            assert!(
-                archival_state
-                    .get_mutator_set_update_to_tip(&current_msa, i)
-                    .await
-                    .unwrap()
-                    .is_empty()
-            );
+            let (old_msa, catch_up) = archival_state
+                .catch_up_to_tip(current_msa.hash(), &[], i)
+                .await
+                .unwrap();
+            assert_eq!(current_msa, old_msa);
+            assert_eq!(current_msa, catch_up.new_mutator_set);
+            assert!(catch_up.appended_aocl_leafs.is_empty());
         }
     }
 
@@ -3158,16 +3161,22 @@ mod tests {
             .ams()
             .accumulator()
             .await;
-        let mut new_msa = past_msa.to_owned();
+        let inputs = archival_state.get_tip().await.kernel.removal_index_sets();
+        let (old_msa, catch_up) = archival_state
+            .catch_up_to_tip(past_msa.hash(), &inputs, search_depth)
+            .await
+            .unwrap();
+        assert_eq!(*past_msa, old_msa);
+        assert_eq!(tip_msa, catch_up.new_mutator_set);
         assert!(
-            archival_state
-                .get_mutator_set_update_to_tip(&new_msa, search_depth)
-                .await
-                .unwrap()
-                .apply_to_accumulator(&mut new_msa)
-                .is_ok()
+            catch_up
+                .aocl_successor_proof(&past_msa.aocl)
+                .verify(&past_msa.aocl, &tip_msa.aocl)
         );
-        assert_eq!(tip_msa, new_msa);
+        assert_eq!(inputs.len(), catch_up.new_inputs.len());
+        for record in &catch_up.new_inputs {
+            assert!(record.validate(&tip_msa));
+        }
     }
 
     #[traced_test]
@@ -3528,7 +3537,7 @@ mod tests {
             if search_depth < 5 {
                 assert!(
                     archival_state
-                        .get_mutator_set_update_to_tip(&genesis_msa, search_depth)
+                        .catch_up_to_tip(genesis_msa.hash(), &[], search_depth)
                         .await
                         .is_none()
                 );
@@ -3543,7 +3552,7 @@ mod tests {
         for i in 0..10 {
             assert!(
                 genesis_archival_state
-                    .get_mutator_set_update_to_tip(&current_msa, i)
+                    .catch_up_to_tip(current_msa.hash(), &[], i)
                     .await
                     .is_none()
             );
@@ -3681,7 +3690,7 @@ mod tests {
         positive_prop_ms_update_to_tip(block_1a_msa, &mut archival_state, search_depth).await;
         assert!(
             archival_state
-                .get_mutator_set_update_to_tip(block_1b_msa, 1)
+                .catch_up_to_tip(block_1b_msa.hash(), &[], 1)
                 .await
                 .is_none()
         );
@@ -3691,7 +3700,7 @@ mod tests {
         positive_prop_ms_update_to_tip(genesis_msa, &mut archival_state, search_depth).await;
         assert!(
             archival_state
-                .get_mutator_set_update_to_tip(block_1a_msa, 1)
+                .catch_up_to_tip(block_1a_msa.hash(), &[], 1)
                 .await
                 .is_none()
         );
@@ -3725,13 +3734,13 @@ mod tests {
         archival_state.set_new_tip(&block_1a).await.unwrap();
         assert!(
             archival_state
-                .get_mutator_set_update_to_tip(block_2a_msa, search_depth)
+                .catch_up_to_tip(block_2a_msa.hash(), &[], search_depth)
                 .await
                 .is_none()
         );
         assert!(
             archival_state
-                .get_mutator_set_update_to_tip(block_2b_msa, search_depth)
+                .catch_up_to_tip(block_2b_msa.hash(), &[], search_depth)
                 .await
                 .is_none()
         );
@@ -3740,13 +3749,13 @@ mod tests {
         archival_state.set_new_tip(&block_1b).await.unwrap();
         assert!(
             archival_state
-                .get_mutator_set_update_to_tip(block_2a_msa, search_depth)
+                .catch_up_to_tip(block_2a_msa.hash(), &[], search_depth)
                 .await
                 .is_none()
         );
         assert!(
             archival_state
-                .get_mutator_set_update_to_tip(block_2b_msa, search_depth)
+                .catch_up_to_tip(block_2b_msa.hash(), &[], search_depth)
                 .await
                 .is_none()
         );
@@ -3758,13 +3767,13 @@ mod tests {
         positive_prop_ms_update_to_tip(block_2a_msa, &mut archival_state, search_depth).await;
         assert!(
             archival_state
-                .get_mutator_set_update_to_tip(block_1b_msa, search_depth)
+                .catch_up_to_tip(block_1b_msa.hash(), &[], search_depth)
                 .await
                 .is_none()
         );
         assert!(
             archival_state
-                .get_mutator_set_update_to_tip(block_2b_msa, search_depth)
+                .catch_up_to_tip(block_2b_msa.hash(), &[], search_depth)
                 .await
                 .is_none()
         );
@@ -3776,13 +3785,13 @@ mod tests {
         positive_prop_ms_update_to_tip(block_2b_msa, &mut archival_state, search_depth).await;
         assert!(
             archival_state
-                .get_mutator_set_update_to_tip(block_1a_msa, search_depth)
+                .catch_up_to_tip(block_1a_msa.hash(), &[], search_depth)
                 .await
                 .is_none()
         );
         assert!(
             archival_state
-                .get_mutator_set_update_to_tip(block_2a_msa, search_depth)
+                .catch_up_to_tip(block_2a_msa.hash(), &[], search_depth)
                 .await
                 .is_none()
         );

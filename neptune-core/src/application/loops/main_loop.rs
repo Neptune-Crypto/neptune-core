@@ -252,27 +252,18 @@ impl MainLoopHandler {
             match &job {
                 MempoolUpdateJob::PrimitiveWitness(pw_update)
                 | MempoolUpdateJob::ProofCollection(pw_update) => {
-                    let old_msa = &pw_update.old_primitive_witness.mutator_set_accumulator;
-
                     // Acquire lock, and drop it immediately.
-                    let msa_update = global_state_lock
+                    let new_pw = global_state_lock
                         .lock_guard()
                         .await
                         .chain
                         .archival_state()
-                        .get_mutator_set_update_to_tip(
-                            old_msa,
-                            SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE,
-                        )
+                        .catch_up_primitive_witness(&pw_update.old_primitive_witness)
                         .await;
-                    let Some(msa_update) = msa_update else {
+                    let Some(new_pw) = new_pw else {
                         result.push(MempoolUpdateJobResult::Failure(txid));
                         continue;
                     };
-                    let new_pw = pw_update
-                        .old_primitive_witness
-                        .clone()
-                        .update_with_new_ms_data(msa_update);
                     let upgraded_tx = match &job {
                         MempoolUpdateJob::PrimitiveWitness(_) => Transaction {
                             kernel: new_pw.kernel.clone(),
@@ -308,18 +299,26 @@ impl MainLoopHandler {
                     });
                 }
                 MempoolUpdateJob::Link { old_link_tx } => {
+                    let inputs = old_link_tx
+                        .kernel
+                        .kernel
+                        .inputs
+                        .iter()
+                        .map(|removal_record| removal_record.absolute_indices)
+                        .collect::<Vec<_>>();
                     // Acquire lock, and drop it immediately.
                     let msa_lookup_result = global_state_lock
                         .lock_guard()
                         .await
                         .chain
                         .archival_state()
-                        .old_mutator_set_and_mutator_set_update_to_tip(
+                        .catch_up_to_tip(
                             old_link_tx.kernel.kernel.mutator_set_hash,
+                            &inputs,
                             SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE,
                         )
                         .await;
-                    let Some((old_msa, mutator_set_update)) = msa_lookup_result else {
+                    let Some((old_msa, catch_up)) = msa_lookup_result else {
                         result.push(MempoolUpdateJobResult::Failure(txid));
                         continue;
                     };
@@ -334,7 +333,7 @@ impl MainLoopHandler {
                         .clone()
                         .new_with_updated_mutator_set_records(
                             &old_msa,
-                            &mutator_set_update,
+                            &catch_up,
                             single_proof_digest,
                             job_queue.clone(),
                             proof_job_options.clone(),

@@ -373,7 +373,7 @@ pub(super) mod tests {
                 .ams()
                 .hash()
                 .await,
-            "get_mutator_set_update_to_tip must leave the mutator set unchanged."
+            "catch_up_to_tip must leave the mutator set unchanged."
         );
 
         // Verify that both active and inactive SWBF are non-empty.
@@ -1045,8 +1045,6 @@ pub(super) mod tests {
     /// archival state
     mod recover {}
 
-    /// Verify that `get_mutator_set_update_to_tip` returns Some(ms_update), and
-    /// that the returned MS update produces the current MSA tip.
     async fn positive_prop_ms_update_to_tip(
         past_msa: &MutatorSetAccumulator,
         archival_state: &mut ArchivalState,
@@ -1057,14 +1055,20 @@ pub(super) mod tests {
             .ams()
             .accumulator()
             .await;
-        let mut new_msa = past_msa.to_owned();
-        assert!(archival_state
-            .get_mutator_set_update_to_tip(&new_msa, search_depth)
+        let inputs = archival_state.get_tip().await.kernel.removal_index_sets();
+        let (old_msa, catch_up) = archival_state
+            .catch_up_to_tip(past_msa.hash(), &inputs, search_depth)
             .await
-            .unwrap()
-            .apply_to_accumulator(&mut new_msa)
-            .is_ok());
-        assert_eq!(tip_msa, new_msa);
+            .unwrap();
+        assert_eq!(*past_msa, old_msa);
+        assert_eq!(tip_msa, catch_up.new_mutator_set);
+        assert!(catch_up
+            .aocl_successor_proof(&past_msa.aocl)
+            .verify(&past_msa.aocl, &tip_msa.aocl));
+        assert_eq!(inputs.len(), catch_up.new_inputs.len());
+        for record in &catch_up.new_inputs {
+            assert!(record.validate(&tip_msa));
+        }
     }
 
     mod import_blocks_tests {}
