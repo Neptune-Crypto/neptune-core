@@ -1206,7 +1206,7 @@ impl Block {
 
     /// 2.v) The proof-of-work field reveals the sampled leaf of the inactive
     /// SWBF after the parent.
-    fn validate_guesser_reveal(
+    pub fn validate_guesser_reveal(
         &self,
         parent_swbfi: &MmrAccumulator,
     ) -> Result<(), BlockValidationError> {
@@ -1766,7 +1766,7 @@ mod test_support {
                 "Don't use high difficulty in test. Got: {difficulty}"
             );
 
-            let puzzle = ProofOfWorkPuzzle::new(self.clone(), difficulty);
+            let puzzle = ProofOfWorkPuzzle::new(self.clone(), difficulty, None);
             let valid_pow = puzzle.solve(consensus_rule_set);
 
             self.set_header_pow(valid_pow);

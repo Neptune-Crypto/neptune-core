@@ -64,6 +64,7 @@ use libp2p::Multiaddr;
 use neptune_consensus::block::block_header::BlockHeader;
 use neptune_consensus::block::block_header::BlockPow;
 use neptune_consensus::block::block_kernel::BlockKernel;
+use neptune_consensus::block::guesser_receiver_data::GuesserReceiverData;
 use neptune_consensus::block::proof_of_work_puzzle::ProofOfWorkPuzzle;
 use neptune_consensus::block::Block;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
@@ -2222,8 +2223,13 @@ impl NeptuneRPCServer {
             proposal.header().difficulty
         };
 
-        proposal.set_header_guesser_data(guesser_address.into());
-        let puzzle = ProofOfWorkPuzzle::new(proposal.clone(), difficulty);
+        let receiver_data: GuesserReceiverData = guesser_address.into();
+        let swbfi_reveal = state
+            .chain
+            .guesser_swbfi_reveal(proposal.header(), &receiver_data, network)
+            .await;
+        proposal.set_header_guesser_data(receiver_data);
+        let puzzle = ProofOfWorkPuzzle::new(proposal.clone(), difficulty, swbfi_reveal);
 
         // Record block proposal in case of guesser-success, for later
         // retrieval. But limit number of blocks stored this way.
@@ -4139,7 +4145,9 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        let (mut proposal, difficulty) = {
+        let network = self.state.cli().network;
+        let receiver_data: GuesserReceiverData = guesser_fee_address.into();
+        let (mut proposal, difficulty, swbfi_reveal) = {
             let global_state = self.state.lock_guard().await;
             let Some(proposal) = global_state
                 .mining_state
@@ -4151,19 +4159,22 @@ impl RPC for NeptuneRPCServer {
 
             let latest_block_header = *global_state.chain.tip().header();
 
-            let network = self.state.cli().network;
             let next_rules = ConsensusRuleSet::infer_from(network, proposal.header().height);
             let difficulty = if next_rules.use_parent_difficulty() {
                 latest_block_header.difficulty
             } else {
                 proposal.header().difficulty
             };
-            (proposal, difficulty)
+            let swbfi_reveal = global_state
+                .chain
+                .guesser_swbfi_reveal(proposal.header(), &receiver_data, network)
+                .await;
+            (proposal, difficulty, swbfi_reveal)
         };
 
-        proposal.set_header_guesser_data(guesser_fee_address.into());
+        proposal.set_header_guesser_data(receiver_data);
 
-        let puzzle = ProofOfWorkPuzzle::new(proposal.clone(), difficulty);
+        let puzzle = ProofOfWorkPuzzle::new(proposal.clone(), difficulty, swbfi_reveal);
 
         Ok(Some((proposal, puzzle)))
     }
@@ -6157,7 +6168,7 @@ mod tests {
             block1.set_header_guesser_data(guesser_address.into());
 
             let guess_challenge =
-                ProofOfWorkPuzzle::new(block1.clone(), genesis.header().difficulty);
+                ProofOfWorkPuzzle::new(block1.clone(), genesis.header().difficulty, None);
             assert_eq!(guess_challenge.prev_block, genesis.hash());
 
             let pow: BlockPow = random();

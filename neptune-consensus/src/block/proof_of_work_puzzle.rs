@@ -16,7 +16,7 @@ use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
 /// Data required to attempt to solve the proof-of-work puzzle that allows the
 /// minting of the next block.
-#[derive(Clone, Debug, Copy, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProofOfWorkPuzzle {
     // All fields public since used downstream by mining pool software.
     /// The MAST paths that allow for fast guessing
@@ -46,17 +46,29 @@ pub struct ProofOfWorkPuzzle {
 
     /// The version field in the header.
     pub version: BFieldElement,
+
+    /// The reveal of the inactive SWBF that the PoW field must carry for the
+    /// guesser address the puzzle is for, only active from hard fork epsilon.
+    /// Must be set prior to calculating the block's hash, as
+    /// [`BlockPow::set_swbfi_reveal`] lays it out.
+    ///
+    /// None if the rule set doesn't require a reveal of an SWBF leaf.
+    pub swbfi_reveal: Option<(Digest, Vec<Digest>)>,
 }
 
 impl ProofOfWorkPuzzle {
     /// Return a PoW puzzle assuming that the caller has already set the correct
-    /// guesser digest.
+    /// guesser digest, with the reveal for that guesser.
     ///
     /// # Warning
     /// - The provided difficulty will be used, regardless of the consensus
     ///   rule set. So it must be correct.
     // TODO: Remove 2nd argument when hardfork-beta is activated
-    pub fn new(block_proposal: Block, difficulty: Difficulty) -> Self {
+    pub fn new(
+        block_proposal: Block,
+        difficulty: Difficulty,
+        swbfi_reveal: Option<(Digest, Vec<Digest>)>,
+    ) -> Self {
         let guesser_reward = block_proposal
             .body()
             .total_guesser_reward()
@@ -77,6 +89,7 @@ impl ProofOfWorkPuzzle {
             prev_block,
             lustration_status,
             version: block_proposal.header().version,
+            swbfi_reveal,
         }
     }
 
@@ -100,7 +113,7 @@ impl ProofOfWorkPuzzle {
                     self.threshold,
                     self.lustration_status,
                     Some(self.version),
-                    None,
+                    self.swbfi_reveal.as_ref(),
                 )
             })
             .find_map(|x| x)

@@ -35,15 +35,31 @@ pub async fn can_find_valid_pow_solution() {
         .expect("Just set block proposal")
         .clone();
     let (guesser_address, _) = alice.gsl.lock_guard().await.mining_rewards_address();
-    proposal.set_header_guesser_data(guesser_address.into());
+    proposal.set_header_guesser_data(guesser_address.clone().into());
 
-    let latest_block_header = *alice.gsl.lock_guard().await.chain.tip().header();
-    let puzzle = ProofOfWorkPuzzle::new(proposal.clone(), latest_block_header.difficulty);
-    println!("puzzle:\n\n{}", serde_json::to_string(&puzzle).unwrap());
+    for consensus_rule_set in [
+        ConsensusRuleSet::HardforkGamma,
+        ConsensusRuleSet::HardforkEpsilon,
+    ] {
+        let (latest_block_header, swbfi_reveal) = {
+            let state = alice.gsl.lock_guard().await;
+            let swbfi_reveal = state
+                .chain
+                .guesser_swbfi_reveal(proposal.header(), &guesser_address.clone().into(), network)
+                .await;
+            (*state.chain.tip().header(), swbfi_reveal)
+        };
+        let puzzle = ProofOfWorkPuzzle::new(
+            proposal.clone(),
+            latest_block_header.difficulty,
+            swbfi_reveal,
+        );
+        println!("puzzle:\n\n{}", serde_json::to_string(&puzzle).unwrap());
 
-    let solution = puzzle.solve(ConsensusRuleSet::HardforkGamma);
-    println!("solution:\n\n{}", serde_json::to_string(&solution).unwrap());
-    proposal.set_header_pow(solution);
+        let solution = puzzle.solve(consensus_rule_set);
+        println!("solution:\n\n{}", serde_json::to_string(&solution).unwrap());
+        proposal.set_header_pow(solution);
 
-    assert!(proposal.has_proof_of_work(network, &latest_block_header))
+        assert!(proposal.has_proof_of_work(network, &latest_block_header))
+    }
 }
