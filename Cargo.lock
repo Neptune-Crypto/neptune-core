@@ -3901,6 +3901,7 @@ dependencies = [
  "clienter",
  "codspeed-divan-compat",
  "field_count",
+ "futures",
  "get-size2",
  "hex",
  "itertools",

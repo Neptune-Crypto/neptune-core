@@ -36,7 +36,6 @@ use neptune_database::storage::storage_schema::traits::*;
 use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::commit;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use neptune_mutator_set::removal_record::RemovalRecord;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use neptune_mutator_set::removal_record::chunk::Chunk;
 use neptune_primitives::block_height::BLOCKS_PER_GENERATION;
@@ -1948,11 +1947,6 @@ impl ArchivalState {
             return Ok(());
         }
 
-        // cannot get the mutator set update from new block, so abort early
-        if new_block.mutator_set_update(self.network).is_err() {
-            bail!("invalid block: could not get mutator set update");
-        }
-
         let (forwards, backwards) = {
             // Get the block digest that the mutator set was most recently synced to
             let ms_block_sync_digest = self.archival_mutator_set.get_sync_label();
@@ -1994,12 +1988,11 @@ impl ArchivalState {
                 .expect("Block from state must have mutator set update");
 
             // Roll back all removal records contained in block
-            for removal_record in &removals {
-                self.archival_mutator_set
-                    .ams_mut()
-                    .revert_remove(removal_record)
-                    .await;
-            }
+            let index_sets = removals.iter().map(|rr| rr.absolute_indices).collect_vec();
+            self.archival_mutator_set
+                .ams_mut()
+                .revert_batch_remove(&index_sets)
+                .await;
 
             // Roll back all addition records contained in block
             for addition_record in additions.iter().rev() {
@@ -2040,35 +2033,27 @@ impl ArchivalState {
             );
 
             let MutatorSetUpdate {
-                mut additions,
-                mut removals,
+                additions,
+                removals,
             } = apply_forward_block
                 .mutator_set_update(self.network)
                 .expect("Block from state must have mutator set update");
-            additions.reverse();
-            removals.reverse();
-
-            let mut removals_mutable = removals.iter_mut().collect::<Vec<_>>();
 
             // Add items, thus adding the output UTXOs to the mutator set
-            while let Some(addition_record) = additions.pop() {
-                // Batch-update all removal records to keep them valid after next addition
-                RemovalRecord::batch_update_from_addition(
-                    &mut removals_mutable,
-                    &self.archival_mutator_set.ams().accumulator().await,
-                );
-
-                // Add the element to the mutator set
+            for addition_record in &additions {
                 self.archival_mutator_set
                     .ams_mut()
-                    .add(&addition_record)
+                    .add(addition_record)
                     .await;
             }
 
-            // Remove items, thus removing the input UTXOs from the mutator set
+            // Remove items, thus removing the input UTXOs from the mutator
+            // set. The index sets are absolute, so the additions leave them
+            // as they are.
+            let index_sets = removals.iter().map(|rr| rr.absolute_indices).collect_vec();
             self.archival_mutator_set
                 .ams_mut()
-                .batch_remove(removals)
+                .batch_remove(&index_sets)
                 .await;
         }
 
