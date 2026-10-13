@@ -352,9 +352,7 @@ impl Block {
         let proof = ProofBuilder::new()
             .program(program.program())
             .claim(claim.clone())
-            .nondeterminism(|| {
-                witness.nondeterminism(&program, &ConsensusRuleSet::epoch_table(network))
-            })
+            .nondeterminism(|| witness.nondeterminism(&program, network))
             .job_queue(triton_vm_job_queue)
             .proof_job_options(proof_job_options)
             .build()

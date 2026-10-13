@@ -139,7 +139,12 @@ impl PredecessorIsValidWitness {
         self
     }
 
-    pub fn nondeterminism(
+    /// Under the network's table.
+    pub fn nondeterminism(&self, program: &PredecessorIsValid, network: Network) -> NonDeterminism {
+        self.nondeterminism_under(program, &ConsensusRuleSet::epoch_table(network))
+    }
+
+    fn nondeterminism_under(
         &self,
         program: &PredecessorIsValid,
         epochs: &EpochTable,
@@ -327,9 +332,31 @@ impl PredecessorIsValid {
         }
     }
 
+    /// The claim a block at this height with this body must carry, by
+    /// program, version and input, under the network's genesis block and
+    /// table. The output is unbound in this context.
+    pub fn required_claim(
+        next_block_body_mh: Digest,
+        height: BlockHeight,
+        network: Network,
+    ) -> Claim {
+        let input = Self::claim_input(
+            next_block_body_mh,
+            height,
+            Block::genesis_digest(network),
+            &ConsensusRuleSet::epoch_table(network),
+        );
+        let version = ConsensusRuleSet::infer_from(network, height)
+            .triton_proof_version()
+            .version();
+        Claim::new(Self::new().hash())
+            .with_input(input)
+            .about_version(version)
+    }
+
     /// The claim's input: the block's body hash and height, the network's
     /// genesis block hash, and the epoch table.
-    pub(crate) fn claim_input(
+    fn claim_input(
         body_mast_hash: Digest,
         height: BlockHeight,
         genesis_digest: Digest,
@@ -3820,7 +3847,7 @@ mod tests {
         let claim = own_claim_with_epochs(program, prev_block, next_body, next_header, epochs);
         let witness = witness_for(prev_block, next_body);
 
-        (claim, witness.nondeterminism(program, epochs))
+        (claim, witness.nondeterminism_under(program, epochs))
     }
 
     /// Run the program in Rust and in Triton VM, and check that both agree
@@ -3962,7 +3989,7 @@ mod tests {
             let proof = load_proof_or_produce_and_save(
                 &claim,
                 program.program(),
-                witness.nondeterminism(&program, &epochs()),
+                witness.nondeterminism_under(&program, &epochs()),
             );
 
             (claim, proof)
@@ -6809,7 +6836,7 @@ ones):
             program
                 .test_assertion_failure(
                     PublicInput::new(claim.input),
-                    witness.nondeterminism(&program, &epochs()),
+                    witness.nondeterminism_under(&program, &epochs()),
                     &[BlockValidationRule::TransactionMutatorSetMismatch.error_id()],
                 )
                 .unwrap();

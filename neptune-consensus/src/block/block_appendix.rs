@@ -59,10 +59,12 @@ impl BlockAppendix {
             .collect()
     }
 
-    /// The claims a block's appendix must hold that bind nothing of the
-    /// parent, by program, version and input; the outputs are the proofs'
-    /// business. The transaction's, and from hard fork epsilon on the
-    /// predecessor claim under the network's table and genesis.
+    /// The claims that a block's appendix must hold, without relying on
+    /// information about the bloc's parent.
+    ///
+    /// Binds claims by program, version, and input. The outputs of the
+    /// executions are not bound since they allow the program execution to
+    /// communicate values that are needed for recursive, in-vm, verificataion.
     pub(crate) fn consensus_claims_without_parent(
         block_body: &BlockBody,
         height: BlockHeight,
@@ -75,17 +77,11 @@ impl BlockAppendix {
         );
         let mut claims = vec![tx_is_valid];
         if consensus_rule_set.requires_predecessor_claim() {
-            let input = PredecessorIsValid::claim_input(
+            claims.push(PredecessorIsValid::required_claim(
                 block_body.mast_hash(),
                 height,
-                Block::genesis_digest(network),
-                &ConsensusRuleSet::epoch_table(network),
-            );
-            claims.push(
-                Claim::new(PredecessorIsValid::new().hash())
-                    .with_input(input)
-                    .about_version(consensus_rule_set.triton_proof_version().version()),
-            );
+                network,
+            ));
         }
         claims
     }
@@ -112,13 +108,13 @@ impl BlockAppendix {
                     consensus_rule_set,
                 ));
             }
-            let input = CorrectSwbfUpdate::claim_input(
+            let swbf_update_input = CorrectSwbfUpdate::claim_input(
                 parent_mutator_set,
                 bfe!(CorrectSwbfUpdate::FIRST_LEAF_INDEX),
             );
             claims.push(
                 Claim::new(SwbfUpdateAggregation::new().hash())
-                    .with_input(input)
+                    .with_input(swbf_update_input)
                     .about_version(consensus_rule_set.triton_proof_version().version()),
             );
         }
