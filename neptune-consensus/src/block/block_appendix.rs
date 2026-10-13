@@ -8,7 +8,6 @@ use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::mast_hash::MastHash;
 use neptune_primitives::network::Network;
-use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
@@ -24,7 +23,6 @@ use crate::block::validity::swbf_update::aggregation::SwbfUpdateAggregation;
 use crate::block::validity::swbf_update::leaf::CorrectSwbfUpdate;
 use crate::block::Block;
 use crate::block::Claim;
-use crate::block::ConsensusParameters;
 use crate::block::Tip5;
 use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::proof_abstractions::tasm::program::TritonProgram;
@@ -65,12 +63,12 @@ impl BlockAppendix {
     /// parent, by program, version and input; the outputs are the proofs'
     /// business. The transaction's, and from hard fork epsilon on the
     /// predecessor claim under the network's table and genesis.
-    pub fn consensus_claims_without_parent(
+    pub(crate) fn consensus_claims_without_parent(
         block_body: &BlockBody,
         height: BlockHeight,
-        parameters: &ConsensusParameters,
+        network: Network,
     ) -> Vec<Claim> {
-        let consensus_rule_set = ConsensusRuleSet::infer_from(parameters.network, height);
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, height);
         let tx_is_valid = Self::transaction_validity_claim(
             block_body.transaction_kernel.mast_hash(),
             consensus_rule_set,
@@ -80,11 +78,11 @@ impl BlockAppendix {
             let input = PredecessorIsValid::claim_input(
                 block_body.mast_hash(),
                 height,
-                Block::genesis_digest(parameters.network),
-                &parameters.epochs,
+                Block::genesis_digest(network),
+                &ConsensusRuleSet::epoch_table(network),
             );
             claims.push(
-                Claim::new(parameters.predecessor_program.hash())
+                Claim::new(PredecessorIsValid::new().hash())
                     .with_input(input)
                     .about_version(consensus_rule_set.triton_proof_version().version()),
             );
@@ -95,20 +93,19 @@ impl BlockAppendix {
     /// Every claim a block's appendix must hold, by program, version and
     /// input, given its parent's hash and the mutator set after it: those
     /// above, and from hard fork epsilon on the composer's claim to know
-    /// that mutator set, where the epoch requires reveals, and the SWBF
+    /// that mutator set, where the rules require reveals, and the SWBF
     /// update claim about the transaction on it.
     pub fn consensus_claims(
         block_body: &BlockBody,
         height: BlockHeight,
         parent_digest: Digest,
         parent_mutator_set: &MutatorSetAccumulator,
-        parameters: &ConsensusParameters,
+        network: Network,
     ) -> Vec<Claim> {
-        let consensus_rule_set = ConsensusRuleSet::infer_from(parameters.network, height);
-        let mut claims = Self::consensus_claims_without_parent(block_body, height, parameters);
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, height);
+        let mut claims = Self::consensus_claims_without_parent(block_body, height, network);
         if consensus_rule_set.requires_predecessor_claim() {
-            let epoch = parameters.epochs.in_force_at(height);
-            if !epoch.requires_mutator_set_reveals.is_zero() {
+            if consensus_rule_set.miners_must_prove_ams_knowledge(network) {
                 claims.push(KnowsMutatorSet::claim(
                     parent_digest,
                     parent_mutator_set,

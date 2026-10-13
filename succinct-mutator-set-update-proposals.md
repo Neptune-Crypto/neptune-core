@@ -5,14 +5,15 @@ on `thv/swbfi-tree`. The options a) through i) below are the ones weighed;
 the sections after them record what was built from d) with e1), e'_1) and
 e'_2), with measurements.
 
-## Where we stand (2026-10-08)
+## Where we stand (2026-10-09)
 
 Built in `neptune-consensus`, gated by the epoch table, not activated.
 
 - **d)** `CorrectSwbfUpdate` leaf, `SwbfUpdateAggregation`, trees of any
   height; `PredecessorIsValid` takes an aggregation as the root. Leaf: 50.7k
   processor rows per input at fixture density, 40.8k with empty chunks, RAM
-  45.8k; about 41 inputs per 2^21 proof.
+  45.8k; the composer puts at most 36 inputs in a 2^21 leaf, measured safe
+  for an inactive SWBF of 2^27 chunks.
 - **Work floor** `min_swbf_padded_rows`: leaves idle to a height,
   aggregations sum the heights verification binds, claims carry leaf
   positions.
@@ -46,6 +47,31 @@ about 2^19 rows:
 
 Sequential about 105 s; with the leaves in parallel and the predecessor
 and mutator set claims alongside the tree, about 45 s. Block time 588 s.
+
+Application integration, in commit order. Done: the per-network epoch
+table and `HardforkEpsilon`; the host requires the predecessor claim, the
+SWBF root claim and the mutator set claim in the tip and checks the root's
+output and the guesser's reveal; archival helpers supply the composer's
+witness and the guesser's reveal; the composer proves the SWBF tree, the
+mutator set claim and the predecessor claim, sequentially through the job
+queue, and the mine loop fills the guesser's reveal once per proposal.
+
+To do:
+
+1. The puzzle RPC endpoint carries the reveal for external guessers.
+2. The archival update from index sets alone.
+3. Chunk data stripped at block inclusion; the host validates chunkless
+   blocks.
+4. Block validation takes the archival mutator set where there is one, so
+   archival nodes recheck removals, as defense in depth.
+5. A tip-and-parent endpoint and `validate_tip` for light nodes.
+6. A coinbase may have inputs under epsilon; proof fixtures regenerate on
+   the dedicated machine.
+7. Activation heights; until then every network but Main and Testnet(0)
+   activates at height 1, and tests that compose on real-proof test
+   networks need a composer witness.
+8. The leaves, and the predecessor and mutator set claims, proven in
+   parallel rather than one after another.
 
 ## Starting point (2026-09-21)
 
@@ -373,8 +399,9 @@ proof covers the claim's proof, and the claim depends on the parent alone, so
 the composer proves it as soon as the parent lands, in parallel with the
 rest. The guarantee is not that the composer holds the whole set, but that
 one without it fetches unpredictable pieces per block from someone who does. Cost: in the claim two chunk hashes and three
-paths, in `PredecessorIsValid` a claim search and two bags of peaks. Not yet
-wired: building the claim in the composer and the tip check on the host.
+paths, in `PredecessorIsValid` a claim search and two bags of peaks. Wired
+2026-10-09: the host requires the claim in the tip, and the composer builds
+it from archival state and proves it.
 
 ### e'_2) Guesser proves knowledge of the archival mutator set
 
@@ -402,9 +429,10 @@ shifted down. A tree taller than 54 levels, that is more than 2^54 chunks, is
 revealed from the node 54 levels below the root on the sampled leaf's path,
 at the sample's bits above the levels left out.
 Host side, `guesser_reveal_is_valid(header, swbfi)` is the same check as an MMR
-membership proof against the first peak, for the tip. Not yet wired: the
-mining loop filling the reveal before guessing (the nonce loop itself is
-unchanged) and the RPC puzzle endpoints handing it to external guessers.
+membership proof against the first peak, for the tip. Wired 2026-10-09: the
+mining loop reads the reveal from archival state once per proposal and sets
+it on every guess. Not yet wired: the RPC puzzle endpoints handing it to
+external guessers.
 
 ### e'') Composer reveals knowledge of the archival mutator set
 

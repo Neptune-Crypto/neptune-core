@@ -894,8 +894,8 @@ pub(crate) async fn mine(
                 let state = global_state_lock.lock_guard().await;
                 let tip = state.chain.tip();
                 let reveal = if tip.hash() == proposal.header().prev_block_digest
-                    && ConsensusParameters::for_network(network)
-                        .requires_mutator_set_reveals(proposal.header().height)
+                    && ConsensusRuleSet::infer_from(network, proposal.header().height)
+                        .miners_must_prove_ams_knowledge(network)
                 {
                     state
                         .chain

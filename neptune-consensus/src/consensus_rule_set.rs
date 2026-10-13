@@ -3,9 +3,12 @@ use neptune_primitives::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
 use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 use num_traits::Zero;
+use tasm_lib::twenty_first::bfe;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 
 use crate::block::pow::LustrationStatus;
+use crate::block::validity::epoch_table::Epoch;
+use crate::block::validity::epoch_table::EpochTable;
 use crate::block::INITIAL_BLOCK_SUBSIDY;
 use crate::block::MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS;
 use crate::block::PREMINE_MAX_SIZE;
@@ -222,6 +225,71 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::HardforkDelta => false,
             ConsensusRuleSet::HardforkEpsilon => true,
         }
+    }
+
+    /// Whether the miners, composer and guesser, must prove knowledge of the
+    /// archival mutator set.
+    pub fn miners_must_prove_ams_knowledge(&self, network: Network) -> bool {
+        match self {
+            ConsensusRuleSet::Reboot
+            | ConsensusRuleSet::HardforkAlpha
+            | ConsensusRuleSet::TvmProofVersion1
+            | ConsensusRuleSet::HardforkBeta
+            | ConsensusRuleSet::HardforkGamma
+            | ConsensusRuleSet::HardforkDelta => false,
+            ConsensusRuleSet::HardforkEpsilon => !network.use_mock_proof(),
+        }
+    }
+
+    /// Minimum proving work associated with the SWBF update claim.
+    ///
+    /// A minimum value for the sum of padded heights of all leaf proofs in the
+    /// SWBF update tree. Enforced to avoid that the composer who build empty
+    /// blocks can build the block proposal faster than those who include
+    /// transactions.
+    pub fn min_swbf_padded_rows(&self, network: Network) -> u64 {
+        match self {
+            ConsensusRuleSet::Reboot
+            | ConsensusRuleSet::HardforkAlpha
+            | ConsensusRuleSet::TvmProofVersion1
+            | ConsensusRuleSet::HardforkBeta
+            | ConsensusRuleSet::HardforkGamma
+            | ConsensusRuleSet::HardforkDelta => 0,
+            ConsensusRuleSet::HardforkEpsilon => match network {
+                Network::Main | Network::Testnet(0) => 1 << 23,
+                Network::Testnet(1) => 1 << 22,
+                _ if network.use_mock_proof() => 0,
+                _ => 1 << 21,
+            },
+        }
+    }
+
+    /// The table a network's blocks carry in the `PredecessorIsValid` claim
+    /// from hard fork epsilon on, with the parameters of the latest rule set.
+    pub fn epoch_table(network: Network) -> EpochTable {
+        let activation_height = Self::hardfork_epsilon_activation_block_height(network);
+        let rule_set = Self::infer_from(network, activation_height);
+        let initial_counter = Self::lustration_counter_initial(network, activation_height)
+            .expect("all hard fork epsilon blocks lustrate");
+        let epoch_resets_lustration = Self::resets_lustration_status(network, activation_height);
+        EpochTable::new(&[Epoch {
+            height: activation_height.into(),
+            minimum_block_time: network.minimum_block_time(),
+            target_block_interval: network.target_block_interval(),
+            max_num_inputs: bfe!(rule_set.max_num_inputs() as u64),
+            max_num_outputs: bfe!(rule_set.max_num_outputs() as u64),
+            max_num_announcements: bfe!(rule_set.max_num_announcements() as u64),
+            max_block_size: bfe!(rule_set.max_block_size() as u64),
+            transaction_backdating_threshold: rule_set
+                .transaction_backdating_threshold()
+                .expect("epsilon limits backdating"),
+            lustration_counter_initial: initial_counter,
+            resets_lustration_status: bfe!(u64::from(epoch_resets_lustration)),
+            min_swbf_padded_rows: bfe!(rule_set.min_swbf_padded_rows(network)),
+            requires_mutator_set_reveals: bfe!(u64::from(
+                rule_set.miners_must_prove_ams_knowledge(network)
+            )),
+        }])
     }
 
     pub fn memory_hard_pow(&self) -> bool {
@@ -630,6 +698,85 @@ pub(crate) mod tests {
             let activation = ConsensusRuleSet::hardfork_epsilon_activation_block_height(network);
             assert!(requires(network, activation.value()));
             assert!(!requires(network, activation.value() - 1));
+        }
+    }
+
+    #[test]
+    fn epsilon_sets_the_floor_and_the_reveals_per_network() {
+        let delta = ConsensusRuleSet::HardforkDelta;
+        let epsilon = ConsensusRuleSet::HardforkEpsilon;
+        assert_eq!(0, delta.min_swbf_padded_rows(Network::Main));
+        assert!(!delta.miners_must_prove_ams_knowledge(Network::Main));
+        assert_eq!(1 << 23, epsilon.min_swbf_padded_rows(Network::Main));
+        assert_eq!(1 << 23, epsilon.min_swbf_padded_rows(Network::Testnet(0)));
+        assert_eq!(1 << 22, epsilon.min_swbf_padded_rows(Network::Testnet(1)));
+        assert_eq!(1 << 21, epsilon.min_swbf_padded_rows(Network::Testnet(42)));
+        for network in Network::all_networks() {
+            assert_eq!(
+                network.use_mock_proof(),
+                !epsilon.miners_must_prove_ams_knowledge(network)
+            );
+            assert_eq!(
+                network.use_mock_proof(),
+                epsilon.min_swbf_padded_rows(network) == 0
+            );
+        }
+    }
+
+    #[test]
+    fn epoch_on_main_net() {
+        let table = ConsensusRuleSet::epoch_table(Network::Main);
+        let expected = Epoch {
+            height: bfe!(65_000),
+            minimum_block_time: Timestamp::seconds(60),
+            target_block_interval: Timestamp::millis(588_000),
+            max_num_inputs: bfe!(1 << 14),
+            max_num_outputs: bfe!(1 << 14),
+            max_num_announcements: bfe!(1 << 14),
+            max_block_size: bfe!(1_000_000),
+            transaction_backdating_threshold: Timestamp::days(3),
+            lustration_counter_initial: NativeCurrencyAmount::coins(8_717_568),
+            resets_lustration_status: bfe!(0),
+            min_swbf_padded_rows: bfe!(1u64 << 23),
+            requires_mutator_set_reveals: bfe!(1),
+        };
+        assert_eq!(EpochTable::new(&[expected]), table);
+        assert_eq!(expected, table.in_force_at(65_000.into()));
+        assert_eq!(expected, table.in_force_at(1_000_000.into()));
+    }
+
+    #[test]
+    fn epoch_on_testnet_0() {
+        let table = ConsensusRuleSet::epoch_table(Network::Testnet(0));
+        let expected = Epoch {
+            height: bfe!(6_260),
+            lustration_counter_initial: NativeCurrencyAmount::coins(4_154_368),
+            ..ConsensusRuleSet::epoch_table(Network::Main).in_force_at(65_000.into())
+        };
+        assert_eq!(EpochTable::new(&[expected]), table);
+    }
+
+    #[test]
+    fn network_table_activates_with_hardfork_epsilon() {
+        for network in Network::all_networks() {
+            let table = ConsensusRuleSet::epoch_table(network);
+            let height = table.activation_height();
+            let rule_set = ConsensusRuleSet::infer_from(network, height);
+            assert!(rule_set.requires_predecessor_claim());
+            let before = height.previous().unwrap();
+            assert_eq!(
+                before.is_genesis(),
+                ConsensusRuleSet::infer_from(network, before).requires_predecessor_claim()
+            );
+            let epoch = table.in_force_at(height);
+            assert_eq!(
+                bfe!(rule_set.min_swbf_padded_rows(network)),
+                epoch.min_swbf_padded_rows
+            );
+            assert_eq!(
+                bfe!(u64::from(rule_set.miners_must_prove_ams_knowledge(network))),
+                epoch.requires_mutator_set_reveals
+            );
         }
     }
 

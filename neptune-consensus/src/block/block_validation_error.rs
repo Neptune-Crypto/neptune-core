@@ -56,6 +56,12 @@ pub enum BlockValidationError {
     ///        in place of a proof.
     #[error("Parent at height zero must be the named genesis block")]
     GenesisHash,
+    ///   1.h) The children of an aggregated SWBF update claim must chain: The
+    ///        right child must continue where the left stopped. Checked as part
+    ///        of proof verification, not on the host machine. The host machine
+    ///        only checks the root proof.
+    #[error("SWBF update claims must chain across adjacent input ranges")]
+    SwbfUpdateChaining,
 
     // 2. The transaction is valid.
     ///   2.a) Unpack the transaction's inputs (removal records). This operation
@@ -149,26 +155,24 @@ pub enum BlockValidationError {
     #[error("Block timestamp must not exceed transaction-retirement value")]
     TransactionRetired,
 
-    /// The removal records' index sets are not the ones a claim commits to.
-    #[error("Removal records must match the claim's index commitment")]
-    RemovalIndexCommitmentMismatch,
-
-    /// An aggregated SWBF update claim's children do not chain.
-    #[error("SWBF update claims must chain across adjacent input ranges")]
-    SwbfUpdateChaining,
-
-    /// The leaf proofs of the SWBF update claim must contain a certain amount
-    /// of proving work. This is to incentivize composers to pick up
-    /// transactions with many inputs. The metric is the padded height of the
-    /// proofs of the leaf program execution in the SWBF update tree.
-    #[error("SWBF update leaf proofs must meet the epoch's padded rows")]
-    SwbfUpdateBelowWorkFloor,
-
     /// 2.v) The guesser's proof-of-work field reveals a leaf of the first
     ///      Merkle tree of the inactive SWBF, at the position sampled by the
     ///      parent's hash and the guesser's receiver data.
     #[error("Proof-of-work field must reveal the sampled leaf of the inactive SWBF")]
     GuesserSwbfiReveal,
+
+    /// 2.w) The leaf proofs of the SWBF update claim must contain a certain
+    ///      amount of proving complexity. This is to incentivize composers to
+    ///      pick up transactions with many inputs. The metric is the padded
+    ///      height of the proofs of the leaf program execution in the SWBF
+    ///      update tree.
+    #[error("SWBF update leaf proofs must meet the work floor")]
+    SwbfUpdateBelowWorkFloor,
+
+    /// 2.x) The removal records' index sets are the ones the SWBF update
+    ///      claim commits to.
+    #[error("Removal records must match the claim's index commitment")]
+    RemovalIndexCommitmentMismatch,
 }
 
 impl From<RemovalRecordListUnpackError> for BlockValidationError {

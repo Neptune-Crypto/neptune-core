@@ -407,7 +407,7 @@ impl PredecessorIsValid {
             height,
             prev_block,
             Block::genesis_digest(network),
-            &EpochTable::for_network(network),
+            &ConsensusRuleSet::epoch_table(network),
             ConsensusRuleSet::infer_from(network, height),
         )
     }
@@ -2755,7 +2755,6 @@ mod tests {
     use crate::block::validity::block_proof_witness::BlockProofWitness;
     use crate::block::BlockProof;
     use crate::block::BlockValidationError;
-    use crate::block::ConsensusParameters;
     use crate::consensus_rule_set::LustrationRule;
     use crate::proof_abstractions::tasm::builtins as tasm;
     use crate::proof_abstractions::tasm::builtins::verify_stark;
@@ -3857,15 +3856,7 @@ mod tests {
             let predecessor =
                 predecessor_of(prev_block).expect("test case must be built on a block");
             prev_block
-                .validate_without_proof_with(
-                    &predecessor,
-                    prev_block.header().timestamp,
-                    &ConsensusParameters {
-                        network: Network::Main,
-                        epochs: *epochs,
-                        predecessor_program: *program,
-                    },
-                )
+                .validate_without_proof(&predecessor, prev_block.header().timestamp, Network::Main)
                 .expect("host must accept a previous block the program accepts");
         }
     }
