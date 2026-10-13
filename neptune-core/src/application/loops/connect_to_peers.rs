@@ -49,9 +49,9 @@ use crate::HandshakeData;
 use crate::MAGIC_STRING_REQUEST;
 use crate::MAGIC_STRING_RESPONSE;
 
-// Max peer message size is 500MB. Should be enough to send 250 blocks in a
-// block batch-response.
-pub const MAX_PEER_FRAME_LENGTH_IN_BYTES: usize = 500 * 1024 * 1024;
+/// Largest peer message should be 22 blocks in a sync challenge response, with
+/// each block being maximum 8MB.
+pub const MAX_PEER_FRAME_LENGTH_IN_BYTES: usize = 300 * 1024 * 1024;
 
 /// Only accept connections where peer's reported timestamp deviates from our
 /// by less than this value.
@@ -73,7 +73,7 @@ pub(crate) fn get_codec_rules() -> LengthDelimitedCodec {
 /// frame claiming to contain a Vec with billions of elements. Without limits,
 /// bincode would pre-allocate memory based on the claimed length, causing OOM.
 ///
-/// The limit is set to match MAX_PEER_FRAME_LENGTH_IN_BYTES (500MB).
+/// The limit is set to match [`MAX_PEER_FRAME_LENGTH_IN_BYTES`].
 pub(crate) fn bincode_options() -> impl Options + Copy {
     bincode::DefaultOptions::new().with_limit(MAX_PEER_FRAME_LENGTH_IN_BYTES as u64)
 }
