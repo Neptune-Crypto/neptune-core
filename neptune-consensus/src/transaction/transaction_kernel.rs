@@ -8,12 +8,15 @@ use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordListUnpackError;
 use neptune_mutator_set::removal_record::RemovalRecord;
 use neptune_mutator_set::shared::deserialize_bounded_vec;
+use neptune_mutator_set::shared::deserialize_checked_vec;
+use neptune_mutator_set::shared::NUM_TRIALS;
 use neptune_primitives::mast_hash::HasDiscriminant;
 use neptune_primitives::mast_hash::MastHash;
 use neptune_primitives::timestamp::Timestamp;
 use num_traits::CheckedAdd;
 use num_traits::Zero;
 use serde::Deserialize;
+use serde::Deserializer;
 use serde::Serialize;
 use strum::EnumCount;
 use strum::VariantArray;
@@ -36,9 +39,7 @@ pub(crate) const LUSTRATION_FLAG: BFieldElement = BFieldElement::new(51022176260
 #[derive(Debug, Clone, Serialize, Deserialize, GetSize, BFieldCodec, TasmObject)]
 pub struct TransactionKernel {
     // note: see field descriptions in [`TransactionKernelProxy`]
-    #[serde(
-        deserialize_with = "deserialize_bounded_vec::<_, _, MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS>"
-    )]
+    #[serde(deserialize_with = "deserialize_inputs")]
     pub inputs: Vec<RemovalRecord>,
     #[serde(
         deserialize_with = "deserialize_bounded_vec::<_, _, MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS>"
@@ -63,6 +64,29 @@ pub struct TransactionKernel {
     #[tasm_object(ignore)]
     #[get_size(ignore)]
     mast_sequences: OnceLock<Vec<Vec<BFieldElement>>>,
+}
+
+/// Deserialize the inputs of a kernel, refusing more than the maximum number of
+/// inputs and refusing a removal record after the first that has more chunks
+/// than its indices can hit. Only the first record of a packed list carries the
+/// chunks of the other records.
+fn deserialize_inputs<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<RemovalRecord>, D::Error> {
+    let max_chunks = NUM_TRIALS as usize;
+    deserialize_checked_vec::<D, _, MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS>(
+        deserializer,
+        |index, record: &RemovalRecord| {
+            let num_chunks = record.target_chunks.len();
+            if index > 0 && num_chunks > max_chunks {
+                return Err(format!(
+                    "removal record {index} has {num_chunks} chunks, more than the {max_chunks} \
+                     its indices can hit"
+                ));
+            }
+            Ok(())
+        },
+    )
 }
 
 impl std::fmt::Display for TransactionKernel {
@@ -721,6 +745,68 @@ pub mod tests {
             if let Ok(decoded) = decoded {
                 assert_eq!(kernel, decoded);
             }
+        }
+    }
+
+    #[test]
+    fn only_the_first_input_may_carry_many_chunks() {
+        use bincode::Options;
+        use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+        use neptune_mutator_set::removal_record::chunk::Chunk;
+        use neptune_mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
+        use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
+
+        let record_with_chunks = |num_chunks: u64| RemovalRecord {
+            absolute_indices: AbsoluteIndexSet::new([0; NUM_TRIALS as usize]),
+            target_chunks: ChunkDictionary::new(
+                (0..num_chunks)
+                    .map(|i| (i, (MmrMembershipProof::new(vec![]), Chunk::empty_chunk())))
+                    .collect(),
+            ),
+        };
+        let kernel_with_inputs = |inputs: Vec<RemovalRecord>| {
+            TransactionKernelProxy {
+                inputs,
+                outputs: vec![],
+                announcements: vec![],
+                fee: NativeCurrencyAmount::zero(),
+                coinbase: None,
+                timestamp: Timestamp::now(),
+                mutator_set_hash: Digest::default(),
+                merge_bit: false,
+            }
+            .into_kernel()
+        };
+
+        let many = u64::from(NUM_TRIALS) * 1000;
+        let full = u64::from(NUM_TRIALS);
+        let packed = kernel_with_inputs(vec![
+            record_with_chunks(many),
+            record_with_chunks(0),
+            record_with_chunks(0),
+        ]);
+        let unpacked = kernel_with_inputs(vec![record_with_chunks(full); 3]);
+        let hostile = kernel_with_inputs(vec![record_with_chunks(many); 3]);
+        let hostile_too =
+            kernel_with_inputs(vec![record_with_chunks(0), record_with_chunks(full + 1)]);
+
+        let options = bincode::DefaultOptions::new();
+        for (kernel, accepted) in [
+            (packed, true),
+            (unpacked, true),
+            (hostile, false),
+            (hostile_too, false),
+        ] {
+            let bytes = options.serialize(&kernel).unwrap();
+            let decoded = options.deserialize::<TransactionKernel>(&bytes);
+            assert_eq!(accepted, decoded.is_ok(), "bincode: {decoded:?}");
+            if let Ok(decoded) = decoded {
+                assert_eq!(kernel, decoded);
+            }
+
+            let json = serde_json::to_vec(&kernel).unwrap();
+            let decoded = serde_json::from_slice::<TransactionKernel>(&json);
+            assert_eq!(accepted, decoded.is_ok(), "json: {decoded:?}");
         }
     }
 
