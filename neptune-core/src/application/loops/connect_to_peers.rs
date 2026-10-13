@@ -43,6 +43,8 @@ use crate::application::config::parser::multiaddr::socketaddr_to_multiaddr;
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
 use crate::application::loops::peer_loop::channel::PeerTaskToMain;
 use crate::application::loops::peer_loop::PeerLoopHandler;
+use crate::application::network::frame_codec::PeerFrameCodec;
+use crate::application::network::handshake::WireEncoding;
 use crate::application::network::observed_ips::attributable_ip;
 use crate::state::GlobalStateLock;
 use crate::HandshakeData;
@@ -56,15 +58,6 @@ pub const MAX_PEER_FRAME_LENGTH_IN_BYTES: usize = 300 * 1024 * 1024;
 /// Only accept connections where peer's reported timestamp deviates from our
 /// by less than this value.
 const PEER_TIME_DIFFERENCE_THRESHOLD_IN_SECONDS: u128 = 90;
-
-/// Use this function to ensure that the same rules apply for both
-/// ingoing and outgoing connections. This limits the size of messages
-/// peers can send.
-pub(crate) fn get_codec_rules() -> LengthDelimitedCodec {
-    let mut codec_rules = LengthDelimitedCodec::new();
-    codec_rules.set_max_frame_length(MAX_PEER_FRAME_LENGTH_IN_BYTES);
-    codec_rules
-}
 
 /// The bincode options for peer messages, with allocation limits to prevent
 /// OOM attacks.
@@ -351,7 +344,7 @@ where
     debug!("Established incoming TCP connection with {peer_address}");
 
     // Build the communication/serialization/frame handler
-    let length_delimited = Framed::new(stream, get_codec_rules());
+    let length_delimited = Framed::new(stream, PeerFrameCodec::new(WireEncoding::Bincode));
     let mut peer = SymmetricallyFramed::new(length_delimited, get_bincode_codec());
 
     // Complete Neptune handshake

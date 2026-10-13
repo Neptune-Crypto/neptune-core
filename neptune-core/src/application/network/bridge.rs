@@ -14,7 +14,7 @@ use tokio_util::codec::Framed;
 use tokio_util::compat::FuturesAsyncReadCompatExt;
 
 use crate::application::loops::connect_to_peers::bincode_options;
-use crate::application::loops::connect_to_peers::get_codec_rules;
+use crate::application::network::frame_codec::PeerFrameCodec;
 use crate::application::network::handshake::WireEncoding;
 
 /// A transport-agnostic wrapper for peer communication.
@@ -70,7 +70,7 @@ impl<T> PeerStream for T where
 ///
 /// 1. **IO Compatibility**: Bridges `futures::io` ---> `tokio::io` using
 ///    `.compat()`.
-/// 2. **Framing**: Applies length-delimited prefixing via [`get_codec_rules`].
+/// 2. **Framing**: Applies length-delimited prefixing via [`PeerFrameCodec`].
 /// 3. **Serialization**: Transforms raw bytes into [`PeerMessage`] enums with
 ///    the negotiated [`WireEncoding`].
 ///
@@ -88,7 +88,7 @@ where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     let tokio_compat_stream = raw_stream.compat();
-    let framed_bytes = Framed::new(tokio_compat_stream, get_codec_rules());
+    let framed_bytes = Framed::new(tokio_compat_stream, PeerFrameCodec::new(encoding));
 
     // By calling .sink_err_into() and .err_into(), we normalize the error types.
     // By using the combinators carefully, we build the final type.

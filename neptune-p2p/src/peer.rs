@@ -489,7 +489,18 @@ impl BlockProposalRequest {
 }
 
 #[non_exhaustive]
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, strum::EnumDiscriminants)]
+#[strum_discriminants(
+    name(PeerMessageKind),
+    // strum only forwards attributes of the form `name(...)`; this one is
+    // always `#[non_exhaustive]`.
+    cfg_attr(all(), non_exhaustive),
+    derive(Hash, strum::Display, strum::EnumString, strum::FromRepr),
+    doc = "The kind of a [`PeerMessage`], without the payload.",
+    doc = "",
+    doc = "The variant index is the tag that starts a bincode encoding of the",
+    doc = "message, and the variant name is the tag that starts a JSON encoding."
+)]
 pub enum PeerMessage {
     Handshake {
         magic_value: [u8; 15],
@@ -501,8 +512,8 @@ pub enum PeerMessage {
     BlockRequestByHeight(BlockHeight),
     BlockRequestByHash(Digest),
 
-    BlockRequestBatch(BlockRequestBatch), // TODO: Consider restricting this in size
-    BlockResponseBatch(Vec<(TransferBlock, MmrMembershipProof)>), // TODO: Consider restricting this in size
+    BlockRequestBatch(BlockRequestBatch),
+    BlockResponseBatch(Vec<(TransferBlock, MmrMembershipProof)>),
     UnableToSatisfyBatchRequest,
 
     SyncChallenge(SyncChallenge),
@@ -571,6 +582,58 @@ pub enum PeerMessage {
     /// Response to [`PeerMessage::TipWithParentAccumulatorRequest`].
     TipWithParentAccumulator(Box<BlockWithParentAccumulator>),
     // New variants must be added here at the bottom to be backwards compatible.
+}
+
+impl PeerMessageKind {
+    /// The kind of message that a bincode frame carries, given the variant
+    /// index that starts the frame.
+    pub fn from_bincode_tag(tag: u32) -> Option<Self> {
+        Self::from_repr(usize::try_from(tag).ok()?)
+    }
+
+    /// Upper bound on the bincode size of a message of this kind, or `None`
+    /// if only the frame limit of the transport applies.
+    ///
+    /// The bounds leave room for the largest message consensus allows. A block
+    /// has at most one million field elements, nine bytes each as bincode, and
+    /// a sync challenge response carries 22 blocks. A transaction can carry a
+    /// proof collection with a proof per input, each around a megabyte.
+    pub fn max_frame_length(self) -> Option<usize> {
+        const KIB: usize = 1024;
+        const MIB: usize = 1024 * KIB;
+
+        let limit = match self {
+            Self::Handshake
+            | Self::BlockNotificationRequest
+            | Self::BlockNotification
+            | Self::BlockRequestByHeight
+            | Self::BlockRequestByHash
+            | Self::UnableToSatisfyBatchRequest
+            | Self::SyncChallenge
+            | Self::BlockProposalNotification
+            | Self::BlockProposalRequest
+            | Self::TransactionNotification
+            | Self::TransactionRequest
+            | Self::PeerListRequest
+            | Self::Bye
+            | Self::ConnectionStatus
+            | Self::ValidatedBlockRequestByHeight
+            | Self::LinkTxNotification
+            | Self::LinkTxRequest
+            | Self::BlockNotificationWithPowWitness
+            | Self::TipWithParentAccumulatorRequest => 64 * KIB,
+            Self::BlockRequestBatch | Self::PeerListResponse | Self::SyncCoverage => 2 * MIB,
+            Self::Block
+            | Self::BlockProposal
+            | Self::ValidatedBlock
+            | Self::TipWithParentAccumulator => 20 * MIB,
+            Self::LinkTx => 64 * MIB,
+            Self::Transaction | Self::SyncChallengeResponse => 270 * MIB,
+            Self::BlockResponseBatch => return None,
+        };
+
+        Some(limit)
+    }
 }
 
 impl PeerMessage {
@@ -1206,6 +1269,7 @@ impl PeerStanding {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use bincode::Options;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
     use rand::RngExt;
@@ -1213,6 +1277,30 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
+
+    #[test]
+    fn message_kinds_are_the_tags_on_the_wire() {
+        let messages = [
+            PeerMessage::Bye,
+            PeerMessage::BlockRequestByHeight(BlockHeight::genesis()),
+            PeerMessage::TipWithParentAccumulatorRequest,
+        ];
+        let expected = [
+            PeerMessageKind::Bye,
+            PeerMessageKind::BlockRequestByHeight,
+            PeerMessageKind::TipWithParentAccumulatorRequest,
+        ];
+        for (message, kind) in messages.into_iter().zip(expected) {
+            let bincode = bincode::DefaultOptions::new().serialize(&message).unwrap();
+            let tag = bincode::DefaultOptions::new()
+                .deserialize_from::<_, u32>(bincode.as_slice())
+                .unwrap();
+            assert_eq!(Some(kind), PeerMessageKind::from_bincode_tag(tag));
+
+            let json = serde_json::to_string(&message).unwrap();
+            assert!(json.contains(&format!("\"{kind}\"")), "{json}");
+        }
+    }
 
     /// Build a standing that was punished into the given value, `ago` in the
     /// past.
