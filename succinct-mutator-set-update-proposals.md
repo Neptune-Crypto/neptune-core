@@ -58,19 +58,18 @@ queue, and the mine loop fills the guesser's reveal once per proposal.
 
 To do:
 
-1. The puzzle RPC endpoint carries the reveal for external guessers.
-2. The archival update from index sets alone.
-3. Chunk data stripped at block inclusion; the host validates chunkless
+1. The archival update from index sets alone.
+2. Chunk data stripped at block inclusion; the host validates chunkless
    blocks.
-4. Block validation takes the archival mutator set where there is one, so
+3. Block validation takes the archival mutator set where there is one, so
    archival nodes recheck removals, as defense in depth.
-5. A tip-and-parent endpoint and `validate_tip` for light nodes.
-6. A coinbase may have inputs under epsilon; proof fixtures regenerate on
+4. A tip-and-parent endpoint and `validate_tip` for light nodes.
+5. A coinbase may have inputs under epsilon; proof fixtures regenerate on
    the dedicated machine.
-7. Activation heights; until then every network but Main and Testnet(0)
+6. Activation heights; until then every network but Main and Testnet(0)
    activates at height 1, and tests that compose on real-proof test
    networks need a composer witness.
-8. The leaves, and the predecessor and mutator set claims, proven in
+7. The leaves, and the predecessor and mutator set claims, proven in
    parallel rather than one after another.
 
 ## Starting point (2026-09-21)
@@ -431,8 +430,8 @@ at the sample's bits above the levels left out.
 Host side, `guesser_reveal_is_valid(header, swbfi)` is the same check as an MMR
 membership proof against the first peak, for the tip. Wired 2026-10-09: the
 mining loop reads the reveal from archival state once per proposal and sets
-it on every guess. Not yet wired: the RPC puzzle endpoints handing it to
-external guessers.
+it on every guess, and the puzzle and block template endpoints hand it to
+external guessers for the address they are requested for.
 
 ### e'') Composer reveals knowledge of the archival mutator set
 

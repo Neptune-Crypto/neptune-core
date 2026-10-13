@@ -889,24 +889,17 @@ pub(crate) async fn mine(
                 .await
                 .mining_rewards_address();
 
-            // The reveal comes from the archival state synced to the tip.
             let (latest_block_header, swbfi_reveal) = {
                 let state = global_state_lock.lock_guard().await;
-                let tip = state.chain.tip();
-                let reveal = if tip.hash() == proposal.header().prev_block_digest
-                    && ConsensusRuleSet::infer_from(network, proposal.header().height)
-                        .miners_must_prove_ams_knowledge(network)
-                {
-                    state
-                        .chain
-                        .archival_state()
-                        .guesser_swbfi_reveal(tip.hash(), &guesser_address.clone().into())
-                        .await
-                } else {
-                    // Guess is stale, and will be cancelled
-                    None
-                };
-                (tip.header().to_owned(), reveal)
+                let swbfi_reveal = state
+                    .chain
+                    .guesser_swbfi_reveal(
+                        proposal.header(),
+                        &guesser_address.clone().into(),
+                        network,
+                    )
+                    .await;
+                (state.chain.tip().header().to_owned(), swbfi_reveal)
             };
             let guesser_task = guess_nonce(
                 network,
