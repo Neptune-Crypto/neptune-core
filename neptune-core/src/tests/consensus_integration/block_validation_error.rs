@@ -376,9 +376,10 @@ async fn block_whose_transaction_names_another_mutator_set_fails_2t(
         .modify(b_new.kernel.body.transaction_kernel.clone());
     b_new.kernel_mut().body.transaction_kernel = new_kernel;
     let consensus_rule_set = ConsensusRuleSet::infer_from(network, b_new.header().height);
-    b_new.set_appendix(BlockAppendix::new(BlockAppendix::consensus_claims(
+    b_new.set_appendix(BlockAppendix::new(BlockAppendix::mock_consensus_claims(
         b_new.body(),
-        consensus_rule_set,
+        &b_prev,
+        network,
     )));
 
     cache_true_claims([BlockProgram::claim(

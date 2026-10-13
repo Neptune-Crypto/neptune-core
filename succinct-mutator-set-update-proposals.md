@@ -56,20 +56,24 @@ witness and the guesser's reveal; the composer proves the SWBF tree, the
 mutator set claim and the predecessor claim, sequentially through the job
 queue, and the mine loop fills the guesser's reveal once per proposal.
 
+Done 2026-10-13: the archival mutator set applies and reverts a block's
+removals from the inputs' index sets alone, `batch_remove` and
+`revert_batch_remove`, reading the chunks it touches in one batch and
+mutating the inactive SWBF's MMR level by level, each node once.
+
 To do:
 
-1. The archival update from index sets alone.
-2. Chunk data stripped at block inclusion; the host validates chunkless
+1. Chunk data stripped at block inclusion; the host validates chunkless
    blocks.
-3. Block validation takes the archival mutator set where there is one, so
+2. Block validation takes the archival mutator set where there is one, so
    archival nodes recheck removals, as defense in depth.
-4. A tip-and-parent endpoint and `validate_tip` for light nodes.
-5. A coinbase may have inputs under epsilon; proof fixtures regenerate on
+3. A tip-and-parent endpoint and `validate_tip` for light nodes.
+4. A coinbase may have inputs under epsilon; proof fixtures regenerate on
    the dedicated machine.
-6. Activation heights; until then every network but Main and Testnet(0)
+5. Activation heights; until then every network but Main and Testnet(0)
    activates at height 1, and tests that compose on real-proof test
    networks need a composer witness.
-7. The leaves, and the predecessor and mutator set claims, proven in
+6. The leaves, and the predecessor and mutator set claims, proven in
    parallel rather than one after another.
 
 ## Starting point (2026-09-21)
