@@ -2253,6 +2253,7 @@ pub(crate) mod tests {
 
     use generation_address::GenerationSpendingKey;
     use macro_rules_attr::apply;
+    use neptune_consensus::block::mutator_set_update::MutatorSetCatchUp;
     use neptune_consensus::block::test_helpers::invalid_block_with_transaction;
     use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
     use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
@@ -5509,11 +5510,17 @@ pub(crate) mod tests {
             // upgrade transaction again
             // this time mutator set data
             let block1_mutator_set = block1.mutator_set_accumulator_after().unwrap();
+            let catch_up = MutatorSetCatchUp::from_update(
+                &block1_mutator_set,
+                &single_proof_transaction.kernel.inputs,
+                &block2.mutator_set_update(network).unwrap(),
+            )
+            .unwrap();
             let upgrade_job_two = UpgradeJob::UpdateMutatorSetData(UpdateMutatorSetDataJob::new(
                 single_proof_transaction.kernel,
                 single_proof_transaction.proof.into_single_proof(),
                 block1_mutator_set,
-                block2.mutator_set_update(network).unwrap(),
+                catch_up,
                 upgrade_incentive,
                 consensus_rule_set1,
             ));

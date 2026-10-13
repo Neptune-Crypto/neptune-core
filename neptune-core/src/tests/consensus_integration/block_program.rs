@@ -1,5 +1,6 @@
 use macro_rules_attr::apply;
 use neptune_consensus::block::block_validation_error::BlockValidationError;
+use neptune_consensus::block::mutator_set_update::MutatorSetCatchUp;
 use neptune_consensus::block::Block;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
@@ -108,10 +109,16 @@ async fn disallow_double_spends_across_blocks() {
     // Update transaction, stick it into block 3, and verify that block 3
     // is invalid.
     let later = now + Timestamp::months(1);
+    let catch_up = MutatorSetCatchUp::from_update(
+        &block1.mutator_set_accumulator_after().unwrap(),
+        &tx.kernel.inputs,
+        &block2.mutator_set_update(network).unwrap(),
+    )
+    .unwrap();
     let tx = Transaction::new_with_updated_mutator_set_records_given_proof(
         tx.kernel,
         &block1.mutator_set_accumulator_after().unwrap(),
-        &block2.mutator_set_update(network).unwrap(),
+        &catch_up,
         tx.proof.into_single_proof(),
         TritonVmJobQueue::get_instance(),
         TritonVmProofJobOptions::default_with_network(network),

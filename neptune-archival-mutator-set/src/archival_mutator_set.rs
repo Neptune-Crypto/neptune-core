@@ -249,32 +249,7 @@ where
         let auth_path_aocl = self.get_aocl_authentication_path(aocl_leaf_index).await?;
         let swbf_indices =
             AbsoluteIndexSet::compute(item, sender_randomness, receiver_preimage, aocl_leaf_index);
-
-        let batch_index = self.get_batch_index_async().await;
-        let window_start = batch_index * u128::from(CHUNK_SIZE);
-
-        let chunk_indices: Vec<u64> = swbf_indices
-            .to_array()
-            .iter()
-            .filter(|bi| **bi < window_start)
-            .map(|bi| (*bi / u128::from(CHUNK_SIZE)) as u64)
-            .collect();
-        let mut target_chunks: ChunkDictionary = ChunkDictionary::default();
-
-        // This is maximum 45 chunks, so it's OK to get all at once. No need
-        // to have a stream. Stream didn't work when this function was called
-        // from RPC server, so we just collect all here.
-        let chunks = self.chunks.get_many(&chunk_indices).await;
-
-        for (chunk_index, chunk) in chunk_indices.into_iter().zip_eq(chunks) {
-            assert!(
-                self.chunks.len().await > chunk_index,
-                "Chunks must be known if its authentication path is known."
-            );
-            let chunk_membership_proof: mmr::mmr_membership_proof::MmrMembershipProof =
-                self.swbf_inactive.prove_membership_async(chunk_index).await;
-            target_chunks.insert(chunk_index, (chunk_membership_proof, chunk.to_owned()));
-        }
+        let target_chunks = self.chunk_dictionary(swbf_indices).await;
 
         Ok(MsMembershipProof {
             auth_path_aocl,
@@ -283,6 +258,31 @@ where
             target_chunks,
             aocl_leaf_index,
         })
+    }
+
+    /// The chunks for the inactive SWBF that the indices belong to, along with
+    /// the chunks authentication paths.
+    pub async fn chunk_dictionary(&self, absolute_indices: AbsoluteIndexSet) -> ChunkDictionary {
+        let window_start = self.get_batch_index_async().await * u128::from(CHUNK_SIZE);
+        let chunk_indices = absolute_indices
+            .iter()
+            .filter(|index| *index < window_start)
+            .map(|index| (index / u128::from(CHUNK_SIZE)) as u64)
+            .sorted()
+            .dedup()
+            .collect_vec();
+        let mut target_chunks = ChunkDictionary::default();
+
+        // This is maximum 45 chunks, so it's OK to get all at once. No need
+        // to have a stream. Stream didn't work when this function was called
+        // from RPC server, so we just collect all here.
+        let chunks = self.chunks.get_many(&chunk_indices).await;
+        for (chunk_index, chunk) in chunk_indices.into_iter().zip_eq(chunks) {
+            let chunk_membership_proof =
+                self.swbf_inactive.prove_membership_async(chunk_index).await;
+            target_chunks.insert(chunk_index, (chunk_membership_proof, chunk));
+        }
+        target_chunks
     }
 
     /// Restore a mutator set membership proof in a privacy-preserving manner,

@@ -7,6 +7,7 @@ mod tests {
     use itertools::Itertools;
     use macro_rules_attr::apply;
     use neptune_consensus::block::block_transaction::BlockTransaction;
+    use neptune_consensus::block::mutator_set_update::MutatorSetCatchUp;
     use neptune_consensus::block::test_helpers::invalid_empty_block_with_timestamp;
     use neptune_consensus::block::Block;
     use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
@@ -134,11 +135,17 @@ mod tests {
                 } => {
                     let consensus_rule_set =
                         ConsensusRuleSet::infer_from(network, new_block.header().height);
+                    let catch_up = MutatorSetCatchUp::from_update(
+                        &old_mutator_set,
+                        &old_kernel.inputs,
+                        &mutator_set_update,
+                    )
+                    .unwrap();
                     let upgrade_result = UpdateMutatorSetDataJob::new(
                         old_kernel,
                         old_single_proof,
                         old_mutator_set.clone(),
-                        mutator_set_update.clone(),
+                        catch_up,
                         UpgradeIncentive::Critical,
                         consensus_rule_set,
                     )
@@ -177,11 +184,17 @@ mod tests {
         while let Some((old_kernel, old_single_proof, upgrade_priority)) =
             mempool.preferred_update(TxUpgradeFilter::match_all())
         {
+            let catch_up = MutatorSetCatchUp::from_update(
+                &old_mutator_set,
+                &old_kernel.inputs,
+                &mutator_set_update,
+            )
+            .unwrap();
             let job = UpdateMutatorSetDataJob::new(
                 old_kernel.to_owned(),
                 old_single_proof.to_owned(),
                 old_mutator_set.clone(),
-                mutator_set_update.clone(),
+                catch_up,
                 upgrade_priority.incentive_given_gobble_potential(NativeCurrencyAmount::zero()),
                 consensus_rule_set,
             );

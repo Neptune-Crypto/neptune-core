@@ -3459,16 +3459,15 @@ impl GlobalState {
         proof: ProofCollection,
         upgrade_incentive: UpgradeIncentive,
     ) -> Result<ProofCollectionToSingleProof> {
-        let msa_lookup_result = self
+        let Some(transaction_msa) = self
             .chain
             .archival_state()
-            .old_mutator_set_and_mutator_set_update_to_tip(
+            .ancestor_mutator_set(
                 kernel.mutator_set_hash,
                 SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE,
             )
-            .await;
-
-        let Some((transaction_msa, _)) = msa_lookup_result else {
+            .await
+        else {
             bail!("Could not find mutator set update for update job");
         };
 
@@ -3495,27 +3494,36 @@ impl GlobalState {
         old_proof: NeptuneProof,
         upgrade_incentive: UpgradeIncentive,
     ) -> Result<UpdateMutatorSetDataJob> {
+        let inputs = old_kernel
+            .inputs
+            .iter()
+            .map(|removal_record| removal_record.absolute_indices)
+            .collect::<Vec<_>>();
         let msa_lookup_result = self
             .chain
             .archival_state()
-            .old_mutator_set_and_mutator_set_update_to_tip(
+            .catch_up_to_tip(
                 old_kernel.mutator_set_hash,
+                &inputs,
                 SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE,
             )
             .await;
 
-        let Some((old_msa, mutator_set_update)) = msa_lookup_result else {
+        let Some((old_msa, catch_up)) = msa_lookup_result else {
             bail!("Could not find mutator set update for update job");
         };
 
-        ensure!(!mutator_set_update.is_empty(), "No update needed");
+        ensure!(
+            old_msa.hash() != catch_up.new_mutator_set.hash(),
+            "No update needed"
+        );
 
         let consensus_rule_set = self.consensus_rule_set();
         Ok(UpdateMutatorSetDataJob::new(
             old_kernel,
             old_proof,
             old_msa,
-            mutator_set_update,
+            catch_up,
             upgrade_incentive,
             consensus_rule_set,
         ))

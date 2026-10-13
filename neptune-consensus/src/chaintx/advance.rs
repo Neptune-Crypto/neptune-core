@@ -52,7 +52,7 @@ use super::link_proof_witness::LinkProofWitnessMemory;
 use super::link_proof_witness::DISCRIMINANT_FOR_ADVANCE;
 use super::link_tx::LinkTx;
 use super::link_tx::LinkTxProof;
-use crate::block::mutator_set_update::MutatorSetUpdate;
+use crate::block::mutator_set_update::MutatorSetCatchUp;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
@@ -179,7 +179,7 @@ impl LinkTx {
     pub async fn new_with_updated_mutator_set_records(
         self,
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
-        mutator_set_update: &MutatorSetUpdate,
+        catch_up: &MutatorSetCatchUp,
         single_proof_digest: Digest,
         triton_vm_job_queue: std::sync::Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
@@ -194,40 +194,22 @@ impl LinkTx {
             "Can only advance a proof-backed link transaction."
         );
 
-        // apply mutator set update to get new mutator set accumulator
-        let addition_records = mutator_set_update.additions.clone();
-        let mut calculated_new_mutator_set = previous_mutator_set_accumulator.clone();
-        let mut new_inputs = self.kernel.kernel.inputs.clone();
-        mutator_set_update
-            .apply_to_accumulator_and_records(
-                &mut calculated_new_mutator_set,
-                &mut new_inputs.iter_mut().collect_vec(),
-                &mut [],
-            )
-            .map_err(|err| anyhow::anyhow!("Could not apply mutator set update: {err}"))?;
-
-        let aocl_successor_proof = MmrSuccessorProof::new_from_batch_append(
-            &previous_mutator_set_accumulator.aocl,
-            &addition_records
-                .iter()
-                .map(|addition_record| addition_record.canonical_commitment)
-                .collect_vec(),
-        );
+        let aocl_successor_proof =
+            catch_up.aocl_successor_proof(&previous_mutator_set_accumulator.aocl);
 
         // compute new kernel; thruputs unchanged
         let new_kernel = LinkKernel {
             kernel: TransactionKernelModifier::default()
-                .inputs(new_inputs)
-                .mutator_set_hash(calculated_new_mutator_set.hash())
+                .inputs(catch_up.new_inputs.clone())
+                .mutator_set_hash(catch_up.new_mutator_set.hash())
                 .clone_modify(&self.kernel.kernel),
             thruputs: self.kernel.thruputs.clone(),
         };
 
         anyhow::ensure!(
-            self.kernel
-                .thruputs
-                .iter()
-                .all(|tp| !addition_records.contains(tp)),
+            self.kernel.thruputs.iter().all(|tp| !catch_up
+                .appended_aocl_leafs
+                .contains(&tp.canonical_commitment)),
             "This function does not have the witness data to promote thruputs to confirmed inputs"
         );
         let promotions = vec![];
@@ -237,7 +219,7 @@ impl LinkTx {
             self,
             previous_mutator_set_accumulator,
             new_kernel.clone(),
-            &calculated_new_mutator_set,
+            &catch_up.new_mutator_set,
             aocl_successor_proof,
             promotions,
             single_proof_digest,
