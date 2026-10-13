@@ -32,7 +32,6 @@ use tokio::time::timeout;
 use tokio_serde::formats::Bincode;
 use tokio_serde::SymmetricallyFramed;
 use tokio_util::codec::Framed;
-use tokio_util::codec::LengthDelimitedCodec;
 use tracing::debug;
 use tracing::error;
 use tracing::info;

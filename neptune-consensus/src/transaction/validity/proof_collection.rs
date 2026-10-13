@@ -5,7 +5,9 @@ use itertools::Itertools;
 use neptune_primitives::mast_hash::HasDiscriminant;
 use neptune_primitives::mast_hash::MastHash;
 use neptune_primitives::network::Network;
+use serde::de::SeqAccess;
 use serde::Deserialize;
+use serde::Deserializer;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 use tasm_lib::structure::tasm_object::TasmObject;
@@ -18,6 +20,7 @@ use tracing::trace;
 use super::collect_type_scripts::CollectTypeScriptsWitness;
 use super::kernel_to_outputs::KernelToOutputsWitness;
 use super::removal_records_integrity::RemovalRecordsIntegrity;
+use crate::block::MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS;
 use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::proof_abstractions::error::CreateProofError;
 use crate::proof_abstractions::tasm::program::TritonProgram;
@@ -36,13 +39,56 @@ use crate::transaction::validity::neptune_proof::Proof;
 use crate::transaction::validity::removal_records_integrity::RemovalRecordsIntegrityWitness;
 use crate::transaction::BFieldCodec;
 
+const MAX_NUM_SCRIPT_PROOFS: usize = 2 * MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS;
+
+/// Deserialize a list of proofs, refusing if there are too many proofs.
+fn deserialize_script_proofs<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<Proof>, D::Error> {
+    struct BoundedProofs;
+
+    impl<'de> serde::de::Visitor<'de> for BoundedProofs {
+        type Value = Vec<Proof>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            write!(
+                formatter,
+                "a list of at most {MAX_NUM_SCRIPT_PROOFS} proofs"
+            )
+        }
+
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+            if let Some(announced) = seq.size_hint() {
+                if announced > MAX_NUM_SCRIPT_PROOFS {
+                    return Err(serde::de::Error::invalid_length(announced, &self));
+                }
+            }
+
+            let capacity = seq.size_hint().unwrap_or(0).min(MAX_NUM_SCRIPT_PROOFS);
+            let mut proofs = Vec::with_capacity(capacity);
+            while let Some(proof) = seq.next_element()? {
+                if proofs.len() == MAX_NUM_SCRIPT_PROOFS {
+                    return Err(serde::de::Error::invalid_length(proofs.len() + 1, &self));
+                }
+                proofs.push(proof);
+            }
+
+            Ok(proofs)
+        }
+    }
+
+    deserializer.deserialize_seq(BoundedProofs)
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]
 pub struct ProofCollection {
     pub removal_records_integrity: Proof,
     pub collect_lock_scripts: Proof,
+    #[serde(deserialize_with = "deserialize_script_proofs")]
     pub lock_scripts_halt: Vec<Proof>,
     pub kernel_to_outputs: Proof,
     pub collect_type_scripts: Proof,
+    #[serde(deserialize_with = "deserialize_script_proofs")]
     pub type_scripts_halt: Vec<Proof>,
     pub lock_script_hashes: Vec<Digest>,
     pub type_script_hashes: Vec<Digest>,
@@ -576,6 +622,76 @@ pub mod tests {
 
     use super::*;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
+
+    /// A collection whose two lists of script proofs hold `num` empty proofs
+    /// each. Not valid, but shaped like one a peer could send.
+    fn collection_with_script_proofs(num: usize) -> ProofCollection {
+        ProofCollection {
+            removal_records_integrity: Proof::invalid(),
+            collect_lock_scripts: Proof::invalid(),
+            lock_scripts_halt: vec![Proof::invalid(); num],
+            kernel_to_outputs: Proof::invalid(),
+            collect_type_scripts: Proof::invalid(),
+            type_scripts_halt: vec![Proof::invalid(); num],
+            lock_script_hashes: vec![],
+            type_script_hashes: vec![],
+            kernel_mast_hash: Digest::default(),
+            salted_inputs_hash: Digest::default(),
+            salted_outputs_hash: Digest::default(),
+            merge_bit_mast_path: vec![],
+        }
+    }
+
+    #[test]
+    fn announced_length_is_refused_before_the_elements_are_read() {
+        use bincode::Options;
+
+        let announced: u32 = 10_000_000;
+        let mut bytes = vec![0u8, 0u8]; // two empty proofs
+        bytes.push(252); // bincode varint marker for a u32 length
+        bytes.extend(announced.to_le_bytes());
+        bytes.extend(std::iter::repeat_n(0u8, 1000)); // far fewer than announced
+
+        let error = bincode::DefaultOptions::new()
+            .deserialize::<ProofCollection>(&bytes)
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("at most"),
+            "refused for the length, not for running out of bytes: {error}"
+        );
+    }
+
+    #[test]
+    fn script_proof_lists_are_bounded_on_the_wire() {
+        use bincode::Options;
+
+        let options = bincode::DefaultOptions::new();
+        for (num, accepted) in [
+            (0, true),
+            (1, true),
+            (MAX_NUM_SCRIPT_PROOFS, true),
+            (MAX_NUM_SCRIPT_PROOFS + 1, false),
+            (4 * MAX_NUM_SCRIPT_PROOFS, false),
+        ] {
+            let collection = collection_with_script_proofs(num);
+
+            // Each empty proof is a single byte of bincode.
+            let bincode_bytes = options.serialize(&collection).unwrap();
+            assert!(bincode_bytes.len() < 2 * num + 256);
+            let decoded = options.deserialize::<ProofCollection>(&bincode_bytes);
+            assert_eq!(accepted, decoded.is_ok(), "bincode, {num} proofs");
+            if let Ok(decoded) = decoded {
+                assert_eq!(collection, decoded);
+            }
+
+            let json_bytes = serde_json::to_vec(&collection).unwrap();
+            let decoded = serde_json::from_slice::<ProofCollection>(&json_bytes);
+            assert_eq!(accepted, decoded.is_ok(), "json, {num} proofs");
+            if let Ok(decoded) = decoded {
+                assert_eq!(collection, decoded);
+            }
+        }
+    }
     use crate::proof_abstractions::test_runtime::shared_tokio_runtime;
     use crate::proof_abstractions::triton_vm_job_queue::vm_job_queue;
     use crate::transaction::transaction_kernel::TransactionKernelModifier;
