@@ -7,6 +7,7 @@ use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordListUnpackError;
 use neptune_mutator_set::removal_record::RemovalRecord;
+use neptune_mutator_set::shared::deserialize_bounded_vec;
 use neptune_primitives::mast_hash::HasDiscriminant;
 use neptune_primitives::mast_hash::MastHash;
 use neptune_primitives::timestamp::Timestamp;
@@ -22,6 +23,7 @@ use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
 use super::announcement::Announcement;
+use crate::block::MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS;
 use crate::transaction::transparent_input::TransparentInput;
 use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
@@ -34,8 +36,17 @@ pub(crate) const LUSTRATION_FLAG: BFieldElement = BFieldElement::new(51022176260
 #[derive(Debug, Clone, Serialize, Deserialize, GetSize, BFieldCodec, TasmObject)]
 pub struct TransactionKernel {
     // note: see field descriptions in [`TransactionKernelProxy`]
+    #[serde(
+        deserialize_with = "deserialize_bounded_vec::<_, _, MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS>"
+    )]
     pub inputs: Vec<RemovalRecord>,
+    #[serde(
+        deserialize_with = "deserialize_bounded_vec::<_, _, MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS>"
+    )]
     pub outputs: Vec<AdditionRecord>,
+    #[serde(
+        deserialize_with = "deserialize_bounded_vec::<_, _, MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS>"
+    )]
     pub announcements: Vec<Announcement>,
     pub fee: NativeCurrencyAmount,
     pub coinbase: Option<NativeCurrencyAmount>,
@@ -683,6 +694,35 @@ pub mod tests {
     use crate::transaction::PrimitiveWitness;
     use crate::transaction::Transaction;
     use crate::transaction::TransactionProof;
+
+    #[test]
+    fn kernel_lists_are_bounded_on_the_wire() {
+        use bincode::Options;
+
+        let max = MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS;
+        for (num, accepted) in [(0, true), (max, true), (max + 1, false)] {
+            let kernel = TransactionKernelProxy {
+                inputs: vec![],
+                outputs: vec![],
+                announcements: vec![Announcement::default(); num],
+                fee: NativeCurrencyAmount::zero(),
+                coinbase: None,
+                timestamp: Timestamp::now(),
+                mutator_set_hash: Digest::default(),
+                merge_bit: false,
+            }
+            .into_kernel();
+
+            // Each empty announcement is a single byte of bincode.
+            let bytes = bincode::DefaultOptions::new().serialize(&kernel).unwrap();
+            assert!(bytes.len() < num + 256);
+            let decoded = bincode::DefaultOptions::new().deserialize::<TransactionKernel>(&bytes);
+            assert_eq!(accepted, decoded.is_ok(), "{num} announcements");
+            if let Ok(decoded) = decoded {
+                assert_eq!(kernel, decoded);
+            }
+        }
+    }
 
     #[test]
     pub fn arbitrary_tx_kernel_is_deterministic() {

@@ -1,7 +1,12 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::marker::PhantomData;
 
 use itertools::Itertools;
+use serde::de::SeqAccess;
+use serde::de::Visitor;
+use serde::Deserialize;
+use serde::Deserializer;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
@@ -14,6 +19,47 @@ pub const WINDOW_SIZE: u32 = 1 << 20;
 pub const CHUNK_SIZE: u32 = 1 << 12;
 pub const BATCH_SIZE: u32 = 1 << 3;
 pub const NUM_TRIALS: u32 = 45;
+
+/// Deserialize a list of at most `MAX` elements, for use with
+/// `#[serde(deserialize_with = "...")]`. An announced length above `MAX` is
+/// refused before any element is read, so that a short encoding cannot make
+/// the receiver allocate a long list.
+pub fn deserialize_bounded_vec<'de, D, T, const MAX: usize>(
+    deserializer: D,
+) -> Result<Vec<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    struct Bounded<T, const MAX: usize>(PhantomData<T>);
+
+    impl<'de, T: Deserialize<'de>, const MAX: usize> Visitor<'de> for Bounded<T, MAX> {
+        type Value = Vec<T>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            write!(formatter, "a list of at most {MAX} elements")
+        }
+
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+            let announced = seq.size_hint().unwrap_or(0);
+            if announced > MAX {
+                return Err(serde::de::Error::invalid_length(announced, &self));
+            }
+
+            let mut elements = Vec::with_capacity(announced);
+            while let Some(element) = seq.next_element()? {
+                if elements.len() == MAX {
+                    return Err(serde::de::Error::invalid_length(elements.len() + 1, &self));
+                }
+                elements.push(element);
+            }
+
+            Ok(elements)
+        }
+    }
+
+    deserializer.deserialize_seq(Bounded::<T, MAX>(PhantomData))
+}
 
 /// Given a set of absolute indices, return a hashmap of
 /// {chunk_index => absolute_indices}
@@ -371,4 +417,57 @@ pub fn prepare_authenticated_batch_modification_for_removal_record_reversion(
             .map(|(i, (p, l))| (*i, p.clone(), *l))
             .collect_vec(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use bincode::Options;
+    use serde::Serialize;
+
+    use super::*;
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    struct AtMostThree {
+        #[serde(deserialize_with = "deserialize_bounded_vec::<_, _, 3>")]
+        elements: Vec<Vec<u8>>,
+    }
+
+    #[test]
+    fn bounded_lists_accept_up_to_the_bound_in_every_encoding() {
+        for (num, accepted) in [(0, true), (3, true), (4, false), (100, false)] {
+            let value = AtMostThree {
+                elements: vec![vec![]; num],
+            };
+
+            let bincode = bincode::DefaultOptions::new().serialize(&value).unwrap();
+            let decoded = bincode::DefaultOptions::new().deserialize::<AtMostThree>(&bincode);
+            assert_eq!(accepted, decoded.is_ok(), "bincode, {num} elements");
+            if let Ok(decoded) = decoded {
+                assert_eq!(value, decoded);
+            }
+
+            let json = serde_json::to_vec(&value).unwrap();
+            let decoded = serde_json::from_slice::<AtMostThree>(&json);
+            assert_eq!(accepted, decoded.is_ok(), "json, {num} elements");
+            if let Ok(decoded) = decoded {
+                assert_eq!(value, decoded);
+            }
+        }
+    }
+
+    #[test]
+    fn announced_length_is_refused_before_the_elements_are_read() {
+        let announced: u32 = 10_000_000;
+        let mut bytes = vec![252]; // bincode varint marker for a u32 length
+        bytes.extend(announced.to_le_bytes());
+        bytes.extend(std::iter::repeat_n(0u8, 1000)); // far fewer than announced
+
+        let error = bincode::DefaultOptions::new()
+            .deserialize::<AtMostThree>(&bytes)
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("at most"),
+            "refused for the length, not for running out of bytes: {error}"
+        );
+    }
 }

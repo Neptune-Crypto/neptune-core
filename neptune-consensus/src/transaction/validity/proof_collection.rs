@@ -2,12 +2,11 @@ use std::sync::Arc;
 
 use get_size2::GetSize;
 use itertools::Itertools;
+use neptune_mutator_set::shared::deserialize_bounded_vec;
 use neptune_primitives::mast_hash::HasDiscriminant;
 use neptune_primitives::mast_hash::MastHash;
 use neptune_primitives::network::Network;
-use serde::de::SeqAccess;
 use serde::Deserialize;
-use serde::Deserializer;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 use tasm_lib::structure::tasm_object::TasmObject;
@@ -41,54 +40,15 @@ use crate::transaction::BFieldCodec;
 
 const MAX_NUM_SCRIPT_PROOFS: usize = 2 * MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS;
 
-/// Deserialize a list of proofs, refusing if there are too many proofs.
-fn deserialize_script_proofs<'de, D: Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Vec<Proof>, D::Error> {
-    struct BoundedProofs;
-
-    impl<'de> serde::de::Visitor<'de> for BoundedProofs {
-        type Value = Vec<Proof>;
-
-        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-            write!(
-                formatter,
-                "a list of at most {MAX_NUM_SCRIPT_PROOFS} proofs"
-            )
-        }
-
-        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-            if let Some(announced) = seq.size_hint() {
-                if announced > MAX_NUM_SCRIPT_PROOFS {
-                    return Err(serde::de::Error::invalid_length(announced, &self));
-                }
-            }
-
-            let capacity = seq.size_hint().unwrap_or(0).min(MAX_NUM_SCRIPT_PROOFS);
-            let mut proofs = Vec::with_capacity(capacity);
-            while let Some(proof) = seq.next_element()? {
-                if proofs.len() == MAX_NUM_SCRIPT_PROOFS {
-                    return Err(serde::de::Error::invalid_length(proofs.len() + 1, &self));
-                }
-                proofs.push(proof);
-            }
-
-            Ok(proofs)
-        }
-    }
-
-    deserializer.deserialize_seq(BoundedProofs)
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]
 pub struct ProofCollection {
     pub removal_records_integrity: Proof,
     pub collect_lock_scripts: Proof,
-    #[serde(deserialize_with = "deserialize_script_proofs")]
+    #[serde(deserialize_with = "deserialize_bounded_vec::<_, _, MAX_NUM_SCRIPT_PROOFS>")]
     pub lock_scripts_halt: Vec<Proof>,
     pub kernel_to_outputs: Proof,
     pub collect_type_scripts: Proof,
-    #[serde(deserialize_with = "deserialize_script_proofs")]
+    #[serde(deserialize_with = "deserialize_bounded_vec::<_, _, MAX_NUM_SCRIPT_PROOFS>")]
     pub type_scripts_halt: Vec<Proof>,
     pub lock_script_hashes: Vec<Digest>,
     pub type_script_hashes: Vec<Digest>,
