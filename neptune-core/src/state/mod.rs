@@ -2229,9 +2229,8 @@ impl GlobalState {
                         .num_leafs()
                         - 1;
                     let num_outputs_in_block: u64 = block
-                        .mutator_set_update(self.cli().network)
-                        .expect("Block from state must have mutator set update")
-                        .additions
+                        .all_addition_records()
+                        .expect("Block from state must have addition records")
                         .len()
                         .try_into()
                         .unwrap();

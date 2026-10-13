@@ -212,7 +212,6 @@ impl MutatorSetAccumulator {
             }
         }
 
-        let active_window_start = u128::from(self.get_batch_index()) * u128::from(CHUNK_SIZE);
         removal_records.iter().all(|removal_record| {
             if !removal_record.validate(self) {
                 return false;
@@ -234,25 +233,31 @@ impl MutatorSetAccumulator {
 
                 // Determine if index was set prior to the application of these
                 // removal records.
-                if inserted_index < active_window_start {
-                    // Index lives in a chunk
-                    let inserted_index_chunkidx = (inserted_index / u128::from(CHUNK_SIZE)) as u64;
-                    let (_mmr_mp, chunk) = removal_record
-                        .target_chunks
-                        .get(&inserted_index_chunkidx)
-                        .expect(
-                            "Presence of required MMR MPs should have already been established.",
-                        );
-                    let relative_index = (inserted_index % u128::from(CHUNK_SIZE)) as u32;
-                    !chunk.contains(relative_index)
-                } else {
-                    // Index lives in the active window
-                    let relative_index = u32::try_from(inserted_index - active_window_start)
-                        .expect("Relative index for active window must be valid u32");
-                    !self.swbf_active.contains(relative_index)
-                }
+                !self.index_is_set(removal_record, inserted_index)
             })
         })
+    }
+
+    /// Whether this index of the removal record's is set in the Bloom filter:
+    /// in the record's own chunk if inactive, in the window if active.
+    ///
+    /// # Panics
+    ///
+    /// If the index is inactive and the record lacks its chunk.
+    pub fn index_is_set(&self, removal_record: &RemovalRecord, index: u128) -> bool {
+        let active_window_start = u128::from(self.get_batch_index()) * u128::from(CHUNK_SIZE);
+        if index < active_window_start {
+            let chunk_index = (index / u128::from(CHUNK_SIZE)) as u64;
+            let (_mmr_mp, chunk) = removal_record
+                .target_chunks
+                .get(&chunk_index)
+                .expect("Presence of required MMR MPs should have already been established.");
+            chunk.contains((index % u128::from(CHUNK_SIZE)) as u32)
+        } else {
+            let relative_index = u32::try_from(index - active_window_start)
+                .expect("Relative index for active window must be valid u32");
+            self.swbf_active.contains(relative_index)
+        }
     }
 }
 

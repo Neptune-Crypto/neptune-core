@@ -5,7 +5,8 @@
 //! built for, then brought forward to the tip to confirm that no input was
 //! spent in between.
 //!
-//! Derived from blocks as they become the tip, so it needs no archive. A
+//! Derived from blocks as they become the tip, so it needs no archive, and
+//! from their inputs' index sets alone, so it needs no chunk data. A
 //! reorganization reduces the window to the new tip.
 
 use std::collections::HashSet;
@@ -13,34 +14,31 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use neptune_consensus::block::Block;
-use neptune_consensus::block::mutator_set_update::MutatorSetUpdate;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_mutator_set::removal_record::RemovalRecord;
-use neptune_primitives::network::Network;
+use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use tasm_lib::prelude::Digest;
 
 /// How many blocks behind the tip a transaction's mutator set may be for the
 /// transaction to be judged against it. Policy, not consensus.
 ///
-/// Memory grows with the depth: each block held keeps its removal records
-/// unpacked, tens of kilobytes per input.
+/// Memory grows with the depth: each block held keeps its inputs' index
+/// sets, under a kilobyte per input.
 pub const MAX_TX_SYNC_DEPTH: usize = 3;
 
-/// A block's mutator set update and the mutator set that resulted.
+/// The index sets a block removed and the mutator set that resulted.
 #[derive(Debug, Clone)]
 struct Entry {
     block_hash: Digest,
     mutator_set_hash: Digest,
     mutator_set: MutatorSetAccumulator,
 
-    /// `None` for the oldest entry, whose update is never read. Also `None`
-    /// if it could not be derived from the block, which validation rules out;
-    /// records cannot be brought forward across such an entry.
-    update: Option<MutatorSetUpdate>,
+    /// `None` for the oldest entry.
+    removed: Option<Vec<AbsoluteIndexSet>>,
 }
 
 /// The mutator set at the tip and at up to [`MAX_TX_SYNC_DEPTH`] of its
-/// nearest ancestors, with the updates between them.
+/// nearest ancestors, with the index sets removed between them.
 ///
 /// Cheap to clone: entries are shared, so a caller can take a snapshot and
 /// release the chain-state lock before verifying a proof.
@@ -50,7 +48,7 @@ pub struct RecentMutatorSets {
     entries: VecDeque<Arc<Entry>>,
 }
 
-/// Why removal records could not be brought forward to the tip.
+/// Why removal records do not hold at the tip.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CatchUpError {
     /// Neither the tip's mutator set nor a held ancestor's.
@@ -58,9 +56,6 @@ pub enum CatchUpError {
 
     /// The input at this index was spent by a block since.
     SpentSince(usize),
-
-    /// A held update did not apply. Indicates a bug in the window.
-    Inconsistent,
 }
 
 impl RecentMutatorSets {
@@ -69,23 +64,22 @@ impl RecentMutatorSets {
     /// # Panics
     ///
     /// Panics if the block has no mutator set after.
-    pub fn new(tip: &Block, network: Network) -> Self {
-        let entry = Self::entry_for(tip, network);
+    pub fn new(tip: &Block) -> Self {
+        let entry = Self::entry_for(tip);
         Self {
             entries: VecDeque::from([Arc::new(entry)]),
         }
     }
 
-    fn entry_for(block: &Block, network: Network) -> Entry {
+    fn entry_for(block: &Block) -> Entry {
         let mutator_set = block
             .mutator_set_accumulator_after()
             .expect("Block held as tip must have mutator set after");
-        let update = block.mutator_set_update(network).ok();
         Entry {
             block_hash: block.hash(),
             mutator_set_hash: mutator_set.hash(),
             mutator_set,
-            update,
+            removed: Some(block.kernel.removal_index_sets()),
         }
     }
 
@@ -95,8 +89,8 @@ impl RecentMutatorSets {
     /// # Panics
     ///
     /// Panics if the block has no mutator set after.
-    pub fn update(&mut self, new_tip: &Block, network: Network) {
-        let entry = Self::entry_for(new_tip, network);
+    pub fn update(&mut self, new_tip: &Block) {
+        let entry = Self::entry_for(new_tip);
         if new_tip.header().prev_block_digest != self.tip_block_hash() {
             self.entries.clear();
         }
@@ -110,17 +104,17 @@ impl RecentMutatorSets {
         }
 
         // Records are only ever brought forward across the entries after the
-        // oldest, so its update is dead weight, and the bulk of the entry.
+        // oldest, so its removals are dead weight.
         let oldest = self
             .entries
             .front_mut()
             .expect("Window always holds at least the tip");
-        if oldest.update.is_some() {
+        if oldest.removed.is_some() {
             *oldest = Arc::new(Entry {
                 block_hash: oldest.block_hash,
                 mutator_set_hash: oldest.mutator_set_hash,
                 mutator_set: oldest.mutator_set.clone(),
-                update: None,
+                removed: None,
             });
         }
     }
@@ -170,74 +164,40 @@ impl RecentMutatorSets {
             .map(|position| &self.entries[position].mutator_set)
     }
 
-    /// Bring removal records forward from the mutator set with the given
-    /// hash to the tip. The caller must have validated them against the
-    /// former. The returned records validate against the tip and are all
-    /// removable there.
+    /// Whether removal records validated against the mutator set with the
+    /// given hash still hold at the tip: no input was spent by a block
+    /// since. An input is spent once every index is set, by its own block,
+    /// which the record's chunks and the window say, or by a block since.
     pub fn catch_up(
         &self,
         mutator_set_hash: Digest,
         removal_records: &[RemovalRecord],
-    ) -> Result<Vec<RemovalRecord>, CatchUpError> {
+    ) -> Result<(), CatchUpError> {
         let Some(position) = self.position(mutator_set_hash) else {
             return Err(CatchUpError::UnknownMutatorSet);
         };
-
-        let Some(updates_since) = self
+        let ancestor = &self.entries[position].mutator_set;
+        let spent_since: HashSet<u128> = self
             .entries
             .iter()
             .skip(position + 1)
-            .map(|entry| entry.update.as_ref())
-            .collect::<Option<Vec<_>>>()
-        else {
-            return Err(CatchUpError::Inconsistent);
-        };
-
-        let spent_indices: HashSet<u128> = updates_since
-            .iter()
-            .flat_map(|update| update.removals.iter())
-            .flat_map(|removal_record| removal_record.absolute_indices.to_array())
+            .flat_map(|entry| entry.removed.iter().flatten())
+            .flat_map(|index_set| index_set.iter())
             .collect();
-        let spent_since = removal_records.iter().position(|removal_record| {
-            removal_record
-                .absolute_indices
-                .to_array()
-                .iter()
-                .all(|index| spent_indices.contains(index))
+        let spent = removal_records.iter().position(|removal_record| {
+            removal_record.absolute_indices.iter().all(|index| {
+                spent_since.contains(&index) || ancestor.index_is_set(removal_record, index)
+            })
         });
-        if let Some(index) = spent_since {
-            return Err(CatchUpError::SpentSince(index));
+        match spent {
+            Some(index) => Err(CatchUpError::SpentSince(index)),
+            None => Ok(()),
         }
-
-        let mut mutator_set = self.entries[position].mutator_set.clone();
-        let mut removal_records = removal_records.to_vec();
-        for update in updates_since {
-            let mut records = removal_records.iter_mut().collect::<Vec<_>>();
-            if update
-                .apply_to_accumulator_and_records(&mut mutator_set, &mut records, &mut [])
-                .is_err()
-            {
-                return Err(CatchUpError::Inconsistent);
-            }
-        }
-
-        if mutator_set.hash() != self.tip_mutator_set_hash() {
-            return Err(CatchUpError::Inconsistent);
-        }
-
-        // The exact test: indices set before the transaction's block may
-        // combine with those set since to cover an input.
-        if let Some(index) = removal_records
-            .iter()
-            .position(|removal_record| !mutator_set.can_remove(removal_record))
-        {
-            return Err(CatchUpError::SpentSince(index));
-        }
-
-        Ok(removal_records)
     }
 }
 
+#[cfg(any(test, feature = "test-helpers"))]
+use neptune_consensus::block::mutator_set_update::MutatorSetUpdate;
 #[cfg(any(test, feature = "test-helpers"))]
 use tasm_lib::prelude::Tip5;
 
@@ -249,7 +209,7 @@ impl RecentMutatorSets {
             block_hash: Digest::default(),
             mutator_set_hash: mutator_set.hash(),
             mutator_set,
-            update: None,
+            removed: None,
         };
         Self {
             entries: VecDeque::from([Arc::new(entry)]),
@@ -262,11 +222,16 @@ impl RecentMutatorSets {
         update
             .apply_to_accumulator(&mut mutator_set)
             .expect("Test update must apply to tip mutator set");
+        let removed = update
+            .removals
+            .iter()
+            .map(|removal_record| removal_record.absolute_indices)
+            .collect();
         let entry = Entry {
             block_hash: Tip5::hash_pair(self.tip_block_hash(), mutator_set.hash()),
             mutator_set_hash: mutator_set.hash(),
             mutator_set,
-            update: Some(update),
+            removed: Some(removed),
         };
         self.push(entry);
     }
@@ -279,6 +244,7 @@ mod tests {
     use neptune_consensus::block::test_helpers::invalid_empty_block_with_num_outputs;
     use neptune_mutator_set::addition_record::AdditionRecord;
     use neptune_mutator_set::msa_and_records::MsaAndRecords;
+    use neptune_primitives::network::Network;
     use proptest::arbitrary::Arbitrary;
     use proptest::strategy::Strategy;
     use proptest::strategy::ValueTree;
@@ -304,7 +270,7 @@ mod tests {
     fn new_window_holds_only_the_tip() {
         let network = Network::Main;
         let genesis = Block::genesis(network);
-        let window = RecentMutatorSets::new(&genesis, network);
+        let window = RecentMutatorSets::new(&genesis);
         let genesis_msh = genesis.mutator_set_accumulator_after().unwrap().hash();
 
         assert_eq!(0, window.num_ancestors());
@@ -320,11 +286,11 @@ mod tests {
     fn window_keeps_at_most_max_depth_ancestors() {
         let network = Network::Main;
         let blocks = chain(network, MAX_TX_SYNC_DEPTH + 3);
-        let mut window = RecentMutatorSets::new(&blocks[0], network);
+        let mut window = RecentMutatorSets::new(&blocks[0]);
         let msh = |block: &Block| block.mutator_set_accumulator_after().unwrap().hash();
 
         for (i, block) in blocks.iter().enumerate().skip(1) {
-            window.update(block, network);
+            window.update(&block);
             assert_eq!(block.hash(), window.tip_block_hash());
             assert_eq!(msh(block), window.tip_mutator_set_hash());
             assert_eq!(i.min(MAX_TX_SYNC_DEPTH), window.num_ancestors());
@@ -344,16 +310,16 @@ mod tests {
     fn reorganization_reduces_window_to_new_tip() {
         let network = Network::Main;
         let blocks = chain(network, 3);
-        let mut window = RecentMutatorSets::new(&blocks[0], network);
+        let mut window = RecentMutatorSets::new(&blocks[0]);
         for block in &blocks[1..] {
-            window.update(block, network);
+            window.update(&block);
         }
         assert_eq!(3.min(MAX_TX_SYNC_DEPTH), window.num_ancestors());
 
         // A competing block 2, not extending the current tip (block 3).
         let block_2b = invalid_empty_block(&blocks[1], network);
         assert_ne!(block_2b.hash(), blocks[2].hash());
-        window.update(&block_2b, network);
+        window.update(&block_2b);
 
         assert_eq!(0, window.num_ancestors());
         assert_eq!(block_2b.hash(), window.tip_block_hash());
@@ -367,10 +333,10 @@ mod tests {
         // must not grow.
         let network = Network::Main;
         let blocks = chain(network, 2);
-        let mut window = RecentMutatorSets::new(&blocks[0], network);
-        window.update(&blocks[1], network);
-        window.update(&blocks[2], network);
-        window.update(&blocks[2], network);
+        let mut window = RecentMutatorSets::new(&blocks[0]);
+        window.update(&blocks[1]);
+        window.update(&blocks[2]);
+        window.update(&blocks[2]);
         assert_eq!(0, window.num_ancestors());
     }
 
@@ -401,12 +367,7 @@ mod tests {
         assert_eq!(1, window.num_ancestors());
         assert_ne!(old_msh, window.tip_mutator_set_hash());
 
-        let caught_up = window.catch_up(old_msh, &records).unwrap();
-        let tip = window.tip_mutator_set();
-        for record in &caught_up {
-            assert!(record.validate(tip));
-            assert!(tip.can_remove(record));
-        }
+        assert_eq!(Ok(()), window.catch_up(old_msh, &records));
     }
 
     #[test]
@@ -427,23 +388,17 @@ mod tests {
 
         // The other two, on their own, come through fine.
         let others = [records[0].clone(), records[2].clone()];
-        let caught_up = window.catch_up(old_msh, &others).unwrap();
-        let tip = window.tip_mutator_set();
-        for record in &caught_up {
-            assert!(record.validate(tip));
-            assert!(tip.can_remove(record));
-        }
+        assert_eq!(Ok(()), window.catch_up(old_msh, &others));
     }
 
     #[test]
-    fn catch_up_at_tip_is_identity() {
+    fn catch_up_at_tip_holds() {
         let msa_and_records = msa_with_records(2);
         let msh = msa_and_records.mutator_set_accumulator.hash();
         let records = msa_and_records.unpacked_removal_records();
         let window = RecentMutatorSets::for_mutator_set(msa_and_records.mutator_set_accumulator);
 
-        let caught_up = window.catch_up(msh, &records).unwrap();
-        assert_eq!(records, caught_up);
+        assert_eq!(Ok(()), window.catch_up(msh, &records));
     }
 
     #[test]
@@ -473,14 +428,16 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         let depth = MAX_TX_SYNC_DEPTH as u64;
-        for seed in 1..depth {
-            window.push_update(MutatorSetUpdate::new(vec![], additions(seed, 9)));
-        }
         // The spent record must be synced to the state it is applied to.
-        let spent = window
-            .catch_up(old_msh, std::slice::from_ref(&records[3]))
-            .unwrap()
-            .remove(0);
+        let mut spent = records[3].clone();
+        let mut synced_to = window.tip_mutator_set().clone();
+        for seed in 1..depth {
+            let update = MutatorSetUpdate::new(vec![], additions(seed, 9));
+            update
+                .apply_to_accumulator_and_records(&mut synced_to, &mut [&mut spent], &mut [])
+                .unwrap();
+            window.push_update(update);
+        }
         window.push_update(MutatorSetUpdate::new(vec![spent], additions(depth, 17)));
         assert_eq!(Some(MAX_TX_SYNC_DEPTH), window.depth_of(old_msh));
 
@@ -489,11 +446,6 @@ mod tests {
             window.catch_up(old_msh, &records)
         );
 
-        let caught_up = window.catch_up(old_msh, &records[..3]).unwrap();
-        let tip = window.tip_mutator_set();
-        for record in &caught_up {
-            assert!(record.validate(tip));
-            assert!(tip.can_remove(record));
-        }
+        assert_eq!(Ok(()), window.catch_up(old_msh, &records[..3]));
     }
 }
