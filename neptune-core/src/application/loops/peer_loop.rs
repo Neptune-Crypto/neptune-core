@@ -3124,6 +3124,18 @@ impl PeerLoopHandler {
                     bail!("Already connected to peer with this peer ID. Aborting connection.");
                 }
 
+                if let (true, Some(cap), Some(ip)) =
+                    (self.inbound_connection, cli_args.max_connections_per_ip, maybe_ip)
+                {
+                    let from_same_ip = peer_map
+                        .values()
+                        .filter(|pi| attributable_ip(&pi.address()) == Some(ip))
+                        .count();
+                    if from_same_ip >= cap {
+                        bail!("Attempted to connect to more peers from {ip} than allowed. Aborting connection.");
+                    }
+                }
+
                 // Inserting a peer into the peer map is where the connection is
                 // considered fully established on the application level. This code
                 // is prohibited from crashing or returning between here and the
@@ -3161,6 +3173,8 @@ impl PeerLoopHandler {
             }
         };
 
+        // The peer is removed from the peer map in this callback, effectively
+        // ending the connection.
         close_peer_connected_callback(
             self.global_state_lock.clone(),
             self.peer_address.clone(),
@@ -4001,6 +4015,47 @@ mod tests {
             if !alice.peers().is_empty() {
                 bail!("peer map must be empty after closing connection gracefully");
             }
+
+            Ok(())
+        }
+
+        /// Two handshakes from one IP can both pass admission before either is
+        /// in the peer map, so the insertion must enforce the per-IP cap again.
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn inbound_peer_beyond_ip_cap_is_refused_at_insertion() -> Result<()> {
+            use crate::tests::shared::globalstate::get_dummy_peer_incoming;
+
+            let network = Network::Main;
+            let cli = cli_args::Args {
+                max_connections_per_ip: Some(1),
+                network,
+                ..Default::default()
+            };
+            let (peer_broadcast_tx, _from_main_rx, to_main_tx, _to_main_rx, _, _, state_lock, hsd) =
+                get_test_genesis_setup(0, cli).await?;
+
+            // One peer from the IP is already connected.
+            let first: std::net::SocketAddr = "253.4.5.1:28011".parse()?;
+            state_lock
+                .peers()
+                .insert(pseudorandom_peer_id(&first), get_dummy_peer_incoming(first));
+
+            let second: std::net::SocketAddr = "253.4.5.1:28012".parse()?;
+            let mut peer_loop_handler = PeerLoopHandler::new(
+                to_main_tx.clone(),
+                state_lock.clone(),
+                pseudorandom_peer_id(&second),
+                socketaddr_to_multiaddr(second),
+                hsd,
+                true,
+            );
+            let mock = Mock::new(vec![Action::Read(PeerMessage::Bye)]);
+            let result = peer_loop_handler
+                .run_wrapper(mock, peer_broadcast_tx.subscribe())
+                .await;
+            assert!(result.is_err(), "second peer from the IP must be refused");
+            assert_eq!(1, state_lock.peers().len());
 
             Ok(())
         }
