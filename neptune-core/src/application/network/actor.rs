@@ -384,6 +384,13 @@ impl NetworkActor {
 
         // well above the peer limit, since it only matters under a flood.
         let max_pending_incoming = u32::try_from(max_num_peers * 2 + 4).unwrap_or(u32::MAX);
+
+        // Physical connections are bounded too, since a peer is only counter
+        // once in `active_connections` however many connections it holds.
+        // A peer legitimately has a relayed and a direct connection while a
+        // hole punch completes, so at least two per peer should be accepted.
+        let max_established_incoming = max_pending_incoming;
+        let max_established_per_peer = 3;
         let source_limits = config.source_limits;
 
         // Configure autoNAT
@@ -466,7 +473,9 @@ impl NetworkActor {
                 NetworkStack {
                     connection_limits: libp2p::connection_limits::Behaviour::new(
                         libp2p::connection_limits::ConnectionLimits::default()
-                            .with_max_pending_incoming(Some(max_pending_incoming)),
+                            .with_max_pending_incoming(Some(max_pending_incoming))
+                            .with_max_established_incoming(Some(max_established_incoming))
+                            .with_max_established_per_peer(Some(max_established_per_peer)),
                     ),
                     source_limits: SourceLimits::new(source_limits),
                     ping: libp2p::ping::Behaviour::new(ping_config),
