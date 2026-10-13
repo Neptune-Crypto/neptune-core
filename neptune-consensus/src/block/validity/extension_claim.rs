@@ -333,6 +333,7 @@ impl TritonProgramSpecification for ExtensionClaim {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use neptune_primitives::network::Network;
     use rand::rngs::StdRng;
     use rand::RngExt;
     use rand::SeedableRng;
@@ -340,8 +341,6 @@ mod tests {
     use super::*;
     use crate::block::block_body::BlockBody;
     use crate::block::block_header::BlockHeader;
-    use crate::block::validity::epoch_table::Epoch;
-    use crate::block::validity::epoch_table::EpochTable;
     use crate::block::BlockProof;
 
     const ACTIVATION_HEIGHT: u64 = 100;
@@ -366,24 +365,11 @@ mod tests {
         )
     }
 
-    /// The shape of the predecessor claim a block carries about its parent:
-    /// the block's body hash and height first in the input, the parent's
-    /// hash first in the output.
+    /// The predecessor claim a block carries about its parent, with the
+    /// parent's hash first in the output.
     fn predecessor_claim(parent: &Block, body: &BlockBody, height: u64) -> Claim {
-        let epochs = EpochTable::new(&[Epoch {
-            height: bfe!(ACTIVATION_HEIGHT),
-            ..Default::default()
-        }]);
-        let input = [
-            body.mast_hash().reversed().values().to_vec(),
-            vec![bfe!(height)],
-            Digest::default().reversed().values().to_vec(),
-            epochs.encode(),
-        ]
-        .concat();
         let output = [parent.hash().values().to_vec(), vec![bfe!(0); 20]].concat();
-        Claim::new(PredecessorIsValid::new().hash())
-            .with_input(input)
+        PredecessorIsValid::required_claim(body.mast_hash(), height.into(), Network::Main)
             .with_output(output)
     }
 
