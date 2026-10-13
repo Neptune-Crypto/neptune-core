@@ -60,8 +60,6 @@ use tracing::warn;
 use validity::block_primitive_witness::BlockPrimitiveWitness;
 use validity::block_program::BlockProgram;
 use validity::block_proof_witness::BlockProofWitness;
-use validity::epoch_table::Epoch;
-use validity::epoch_table::EpochTable;
 use validity::knows_mutator_set::KnowsMutatorSet;
 use validity::knows_mutator_set::KnowsMutatorSetWitness;
 use validity::predecessor_is_valid::PredecessorIsValid;
@@ -190,39 +188,6 @@ impl BlockProof {
 // exist no impls for `OnceLock<_>` so derive fails.
 //
 // A unit test-suite exists in module tests::digest_encapsulation.
-#[readonly::make]
-/// What the rules take beyond a block: the network, its epoch table, and
-/// the predecessor program whose claim they require. Tests substitute the
-/// last two.
-#[derive(Debug, Clone, Copy)]
-pub struct ConsensusParameters {
-    pub network: Network,
-    pub epochs: EpochTable,
-    pub predecessor_program: PredecessorIsValid,
-}
-
-impl ConsensusParameters {
-    pub fn for_network(network: Network) -> Self {
-        Self {
-            network,
-            epochs: EpochTable::for_network(network),
-            predecessor_program: PredecessorIsValid::new(),
-        }
-    }
-
-    /// Whether a block at this height must reveal the mutator set after its
-    /// parent: the composer through the `KnowsMutatorSet` claim, the guesser
-    /// in the proof-of-work field.
-    pub fn requires_mutator_set_reveals(&self, height: BlockHeight) -> bool {
-        ConsensusRuleSet::infer_from(self.network, height).requires_predecessor_claim()
-            && !self
-                .epochs
-                .in_force_at(height)
-                .requires_mutator_set_reveals
-                .is_zero()
-    }
-}
-
 /// The witness data required for claims activated with hard fork epsilon: The
 /// witness data that it knows the mutator set, and the mutator set the
 /// predecessor's transaction was built on.
@@ -301,8 +266,7 @@ impl Block {
                     header.height
                 )
             })?;
-            let parameters = ConsensusParameters::for_network(network);
-            if parameters.requires_mutator_set_reveals(header.height) {
+            if consensus_rule_set.miners_must_prove_ams_knowledge(network) {
                 proven.push(
                     Self::prove_knows_mutator_set(
                         composer_witness.knows_mutator_set,
@@ -346,7 +310,7 @@ impl Block {
                 header.height,
                 parent_digest,
                 &parent_mutator_set,
-                &ConsensusParameters::for_network(network),
+                network,
             );
             anyhow::ensure!(
                 required.iter().all(|claim| appendix.find(claim).is_some()),
@@ -388,7 +352,9 @@ impl Block {
         let proof = ProofBuilder::new()
             .program(program.program())
             .claim(claim.clone())
-            .nondeterminism(|| witness.nondeterminism(&program, &EpochTable::for_network(network)))
+            .nondeterminism(|| {
+                witness.nondeterminism(&program, &ConsensusRuleSet::epoch_table(network))
+            })
             .job_queue(triton_vm_job_queue)
             .proof_job_options(proof_job_options)
             .build()
@@ -432,10 +398,7 @@ impl Block {
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<(Claim, Proof)> {
         let network = proof_job_options.job_settings.network;
-        let floor = EpochTable::for_network(network)
-            .in_force_at(height)
-            .min_swbf_padded_rows
-            .value();
+        let floor = ConsensusRuleSet::infer_from(network, height).min_swbf_padded_rows(network);
         let inputs = &body.transaction_kernel.inputs;
         info!(
             "Sizing the SWBF update tree for {} inputs at a floor of {floor} padded rows; \
@@ -809,21 +772,6 @@ impl Block {
         now: Timestamp,
         network: Network,
     ) -> Result<(), BlockValidationError> {
-        self.validate_except_proof_with(
-            previous_block,
-            now,
-            &ConsensusParameters::for_network(network),
-        )
-    }
-
-    /// As [`Self::validate_except_proof`], under these parameters.
-    pub(crate) fn validate_except_proof_with(
-        &self,
-        previous_block: &Block,
-        now: Timestamp,
-        parameters: &ConsensusParameters,
-    ) -> Result<(), BlockValidationError> {
-        let network = parameters.network;
         // Note that there is a correspondence between the logic here and the
         // error types in `BlockValidationError`.
 
@@ -899,7 +847,7 @@ impl Block {
             new_height,
             previous_block.hash(),
             &parent_mutator_set,
-            parameters,
+            network,
         );
         self.validate_appendix(&required_claims)?;
 
@@ -948,11 +896,14 @@ impl Block {
             let swbf_claim = required_claims
                 .last()
                 .expect("the SWBF update claim comes last");
-            let epoch = parameters.epochs.in_force_at(new_height);
-            self.validate_swbf_update_claim(swbf_claim, hash_after_removals, &epoch)?;
+            self.validate_swbf_update_claim(
+                swbf_claim,
+                hash_after_removals,
+                consensus_rule_set.min_swbf_padded_rows(network),
+            )?;
 
             // 2.v)
-            if !epoch.requires_mutator_set_reveals.is_zero() {
+            if consensus_rule_set.miners_must_prove_ams_knowledge(network) {
                 self.validate_guesser_reveal(&parent_mutator_set.swbf_inactive)?;
             }
         }
@@ -1211,11 +1162,10 @@ impl Block {
     /// Validate the proof of a block, an that the proof relates to the expected
     /// appendices.
     pub async fn validate_block_proof(&self, network: Network) -> Result<(), BlockValidationError> {
-        let parameters = ConsensusParameters::for_network(network);
         let required_claims = BlockAppendix::consensus_claims_without_parent(
             self.body(),
             self.header().height,
-            &parameters,
+            network,
         );
         self.validate_appendix(&required_claims)?;
         self.validate_proof(network).await
@@ -1223,14 +1173,14 @@ impl Block {
 
     /// The aggregated SWBF update claim about the block's transaction on the
     /// mutator set after its parent, as the program checks it for a parent:
-    /// present, with leaf proofs reaching the epoch's floor, covering every
-    /// input, committing to the inputs' index sets, and ending on the mutator
-    /// set the removals leave.
+    /// present, with leaf proofs reaching the floor, covering every input,
+    /// committing to the inputs' index sets, and ending on the mutator set
+    /// the removals leave.
     fn validate_swbf_update_claim(
         &self,
         shape: &Claim,
         hash_after_removals: Option<Digest>,
-        epoch: &Epoch,
+        min_swbf_padded_rows: u64,
     ) -> Result<(), BlockValidationError> {
         let claim = self
             .appendix()
@@ -1238,13 +1188,18 @@ impl Block {
             .ok_or(BlockValidationError::AppendixMissingClaim)?;
         let output = ClaimOutput::try_parse(&claim.output)
             .ok_or(BlockValidationError::MutatorSetUpdateIntegrity)?;
-        if output.padded_rows.value() < epoch.min_swbf_padded_rows.value() {
+        // 2.w)
+        if output.padded_rows.value() < min_swbf_padded_rows {
             return Err(BlockValidationError::SwbfUpdateBelowWorkFloor);
         }
+
+        // 2.x)
         let inputs = &self.body().transaction_kernel.inputs;
         if output.count != inputs.len() || output.peaks != RemovalIndexCommitment::peaks(inputs) {
             return Err(BlockValidationError::RemovalIndexCommitmentMismatch);
         }
+
+        // 2.e)
         if Some(output.mutator_set_hash) != hash_after_removals {
             return Err(BlockValidationError::MutatorSetUpdateIntegrity);
         }
@@ -1926,14 +1881,14 @@ pub(crate) mod tests {
 
     impl Block {
         /// Every rule of [`Block::validate`] except the block's proof, for
-        /// tests on blocks without valid proofs, under these parameters.
-        pub(crate) fn validate_without_proof_with(
+        /// tests on blocks without valid proofs.
+        pub(crate) fn validate_without_proof(
             &self,
             previous_block: &Block,
             now: Timestamp,
-            parameters: &ConsensusParameters,
+            network: Network,
         ) -> Result<(), BlockValidationError> {
-            self.validate_except_proof_with(previous_block, now, parameters)
+            self.validate_except_proof(previous_block, now, network)
         }
     }
 
@@ -1993,9 +1948,8 @@ pub(crate) mod tests {
         let mut block1 = invalid_empty_block(&genesis, network);
         let height = block1.header().height;
         assert!(ConsensusRuleSet::infer_from(network, height).requires_predecessor_claim());
-        let parameters = ConsensusParameters::for_network(network);
         let required =
-            BlockAppendix::consensus_claims_without_parent(block1.body(), height, &parameters);
+            BlockAppendix::consensus_claims_without_parent(block1.body(), height, network);
         let [transaction_claim, predecessor_shape] = required.as_slice() else {
             panic!("the transaction claim and the predecessor claim are required");
         };
@@ -2022,17 +1976,16 @@ pub(crate) mod tests {
         let mut block1 = invalid_empty_block(&genesis, network);
         let height = block1.header().height;
         assert!(!ConsensusRuleSet::infer_from(network, height).requires_predecessor_claim());
-        let parameters = ConsensusParameters::for_network(network);
         let required =
-            BlockAppendix::consensus_claims_without_parent(block1.body(), height, &parameters);
+            BlockAppendix::consensus_claims_without_parent(block1.body(), height, network);
         assert_eq!(1, required.len());
         block1.set_appendix(BlockAppendix::new(required.clone()));
         assert_eq!(Ok(()), block1.validate_appendix(&required));
     }
 
     /// The composer's claim to know the mutator set after the parent is
-    /// required where the epoch requires reveals, which the mock-proof
-    /// networks' does not.
+    /// required where the rules require reveals, which the mock-proof
+    /// networks' do not.
     #[test]
     fn mutator_set_claim_is_required_where_reveals_are() {
         let required_claims = |network: Network| {
@@ -2050,7 +2003,7 @@ pub(crate) mod tests {
                 height,
                 genesis.hash(),
                 &mutator_set,
-                &ConsensusParameters::for_network(network),
+                network,
             );
             (required, sample_claim)
         };
@@ -2099,9 +2052,7 @@ pub(crate) mod tests {
         let genesis = Block::genesis(network);
         let block1 = invalid_empty_block(&genesis, network);
         let height = block1.header().height;
-        let parameters = ConsensusParameters::for_network(network);
-        let epoch = parameters.epochs.in_force_at(height);
-        let floor = epoch.min_swbf_padded_rows.value();
+        let floor = ConsensusRuleSet::infer_from(network, height).min_swbf_padded_rows(network);
         assert!(floor > 0);
         let mutator_set = genesis.mutator_set_accumulator_after().unwrap();
         let inputs = &block1.body().transaction_kernel.inputs;
@@ -2112,11 +2063,11 @@ pub(crate) mod tests {
             height,
             genesis.hash(),
             &mutator_set,
-            &parameters,
+            network,
         );
         let shape = required.last().unwrap();
         let check =
-            |block: &Block| block.validate_swbf_update_claim(shape, hash_after_removals, &epoch);
+            |block: &Block| block.validate_swbf_update_claim(shape, hash_after_removals, floor);
         let with_claim = |claim: Claim| {
             let mut block = block1.clone();
             block.set_appendix(BlockAppendix::new(vec![claim]));
@@ -2464,7 +2415,7 @@ pub(crate) mod tests {
             let claims = BlockAppendix::consensus_claims_without_parent(
                 block.body(),
                 block.header().height,
-                &ConsensusParameters::for_network(network),
+                network,
             );
             let block = Block::new(
                 *block.header(),

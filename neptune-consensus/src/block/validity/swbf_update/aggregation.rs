@@ -340,6 +340,7 @@ impl TritonProgram for SwbfUpdateAggregation {
             .version();
         let digests_are_equal = DataType::Digest.compare();
         let read_digest = triton_asm!(addi {Digest::LEN - 1} read_mem {Digest::LEN} pop 1);
+        // 1.h)
         let chaining = BlockValidationRule::SwbfUpdateChaining.error_id();
 
         // BEFORE: _ *list
@@ -667,7 +668,6 @@ pub(in crate::block::validity) mod tests {
     use super::super::leaf::tests::chained_witnesses;
     use super::super::removal_index_commitment::RemovalIndexCommitment;
     use super::*;
-    use crate::block::validity::epoch_table::EpochTable;
     use crate::proof_abstractions::tasm::builtins as tasm;
     use crate::proof_abstractions::tasm::builtins::verify_stark;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
@@ -933,11 +933,7 @@ pub(in crate::block::validity) mod tests {
 
     #[test]
     fn one_tall_leaf_and_an_empty_leaf_clear_the_floor() {
-        let table = EpochTable::for_network(Network::Main);
-        let floor = table
-            .in_force_at(table.activation_height())
-            .min_swbf_padded_rows
-            .value();
+        let floor = ConsensusRuleSet::HardforkEpsilon.min_swbf_padded_rows(Network::Main);
         let tall_log2 = floor.ilog2();
         let empty_log2 = 10;
 
