@@ -749,9 +749,17 @@ impl ArchivalState {
     /// - If the new tip does not have a mutator set update.
     /// - If databases are in an inconsistent state.
     pub async fn set_new_tip(&mut self, block: &Block) -> Result<()> {
-        self.write_block_as_tip(block).await?;
-        self.append_to_archival_block_mmr(block).await;
+        self.write_block_not_tip(block).await?;
         self.update_mutator_set(block).await?;
+
+        // Only mark as tip once the mutator set update passed.
+        let mut mark_tip = WriteBatchAsync::new();
+        mark_tip.op_write(
+            BlockIndexKey::BlockTipDigest,
+            BlockIndexValue::BlockTipDigest(block.hash()),
+        );
+        self.block_index_db.batch_write(mark_tip).await;
+        self.append_to_archival_block_mmr(block).await;
         self.update_utxo_index(block).await;
 
         Ok(())
@@ -785,15 +793,6 @@ impl ArchivalState {
     /// database entries and block stored on disk are considered valid.
     pub async fn write_block_not_tip(&mut self, block: &Block) -> Result<()> {
         self.write_block_internal(block, false).await
-    }
-
-    /// Write a newly found block to database and to disk, and set it as tip.
-    ///
-    /// If block was already written to database, then it is only marked as
-    /// tip, and no write to disk occurs. Instead, the old block database entry
-    /// is assumed to be valid, and so is the block stored on disk.
-    pub(crate) async fn write_block_as_tip(&mut self, new_block: &Block) -> Result<()> {
-        self.write_block_internal(new_block, true).await
     }
 
     /// Sets a block as tip for the archival block MMR.
@@ -2087,7 +2086,7 @@ impl ArchivalState {
     /// Update the archival mutator set with a new block.
     ///
     /// Assumes the block in question has already been stored to the database
-    /// (or else it is the genesis block). This function handles rollback of the
+    /// (or is the genesis block). This function handles rollback of the mutat
     /// mutator set if needed but requires that all blocks that are rolled back
     /// are present in the database. The input block is considered chain tip.
     /// All blocks stored in the database are assumed to be valid. The given
@@ -2206,6 +2205,25 @@ impl ArchivalState {
                     .standard_format()
             );
 
+            // Apply removals, with a defense-in-depth sanity check
+            if let Err(double_spend) = self
+                .archival_mutator_set
+                .ams_mut()
+                .batch_remove(&apply_forward_block.kernel.removal_index_sets())
+                .await
+            {
+                // Set right sync label on failure.
+                self.archival_mutator_set
+                    .set_sync_label(apply_forward_block.header().prev_block_digest)
+                    .await;
+                self.archival_mutator_set.persist().await;
+                bail!(
+                    "Block {:x} at height {} spends an input twice: {double_spend:?}",
+                    apply_forward_block.hash(),
+                    apply_forward_block.header().height
+                );
+            }
+
             // Add items, thus adding the output UTXOs to the mutator set
             let additions = apply_forward_block
                 .all_addition_records()
@@ -2216,14 +2234,6 @@ impl ArchivalState {
                     .add(addition_record)
                     .await;
             }
-
-            // Remove items, thus removing the input UTXOs from the mutator
-            // set. The index sets are absolute, so the additions leave them
-            // as they are.
-            self.archival_mutator_set
-                .ams_mut()
-                .batch_remove(&apply_forward_block.kernel.removal_index_sets())
-                .await;
         }
 
         // Sanity check that archival mutator set has been updated consistently with the new block
@@ -2731,6 +2741,14 @@ mod tests {
     use crate::block_index::FileRecord;
     use crate::block_index::LastFileRecord;
     use crate::test_utils::shared_tokio_runtime;
+
+    impl ArchivalState {
+        /// Write a block to database and to disk, and set it as tip, with no
+        /// other part of the archival state updated.
+        async fn write_block_as_tip(&mut self, new_block: &Block) -> Result<()> {
+            self.write_block_internal(new_block, true).await
+        }
+    }
 
     /// A throwaway per-process temp data directory for tests.
     fn unit_test_data_directory(network: Network) -> Result<DataDirectory> {
@@ -5549,6 +5567,38 @@ mod tests {
         }
 
         #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn double_spending_block_is_refused() {
+            use neptune_wallet::address::generation_address::GenerationSpendingKey;
+            use neptune_wallet::mock_block::make_mock_block_with_inputs_and_outputs;
+
+            let network = Network::Main;
+            let genesis = Block::genesis(network);
+            let mut archival_state = make_test_archival_state(network, false).await;
+            let block1 = block_with_num_puts(network, &genesis, 2, 3);
+            archival_state.set_new_tip(&block1).await.unwrap();
+
+            let spent_inputs = block1.body().transaction_kernel.inputs.clone();
+            let (block2, _) = make_mock_block_with_inputs_and_outputs(
+                &block1,
+                spent_inputs,
+                vec![],
+                None,
+                GenerationSpendingKey::derive_from_seed(random()),
+                random(),
+                network,
+            );
+            assert!(archival_state.set_new_tip(&block2).await.is_err());
+            assert_eq!(
+                block1.hash(),
+                archival_state.archival_mutator_set.get_sync_label()
+            );
+            assert_eq!(
+                block1.mutator_set_accumulator_after().unwrap().hash(),
+                archival_state.archival_mutator_set.ams().hash().await
+            );
+        }
+
         #[apply(shared_tokio_runtime)]
         async fn canonical_block_with_input_block1() {
             let network = Network::Main;

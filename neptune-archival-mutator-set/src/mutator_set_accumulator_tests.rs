@@ -192,7 +192,8 @@ async fn mutator_set_accumulator_pbt() {
                 accumulator.remove(&removal_record);
                 archival_after_remove
                     .remove(removal_record.absolute_indices)
-                    .await;
+                    .await
+                    .unwrap();
 
                 // Verify that removal record's indices are all set
                 for removed_index in removal_record.absolute_indices.to_vec() {
@@ -205,7 +206,8 @@ async fn mutator_set_accumulator_pbt() {
 
                 archival_before_remove
                     .remove(removal_record_copy.absolute_indices)
-                    .await;
+                    .await
+                    .unwrap();
                 assert!(!accumulator.verify(removal_item, &removal_mp));
 
                 // Verify that the sequential `update_from_remove` return value is correct

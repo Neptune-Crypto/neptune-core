@@ -81,16 +81,28 @@ where
         }
     }
 
-    pub async fn remove(&mut self, absolute_indices: AbsoluteIndexSet) {
-        self.batch_remove(&[absolute_indices]).await;
+    pub async fn remove(
+        &mut self,
+        absolute_indices: AbsoluteIndexSet,
+    ) -> Result<(), AbsoluteIndexSet> {
+        self.batch_remove(&[absolute_indices]).await
     }
 
     /// Apply these index sets to the Bloom filter, as removal records with
     /// them would: the active window directly, the inactive chunks read,
     /// changed, hashed and written as one batch, with one batch mutation of
     /// the MMR over them.
-    pub async fn batch_remove(&mut self, index_sets: &[AbsoluteIndexSet]) {
-        self.apply_index_sets(index_sets, true).await;
+    ///
+    /// Nothing is applied if any index set is a double spend. In that case, the
+    /// offending index set is returned.
+    pub async fn batch_remove(
+        &mut self,
+        index_sets: &[AbsoluteIndexSet],
+    ) -> Result<(), AbsoluteIndexSet> {
+        match self.apply_index_sets(index_sets, true).await {
+            Some(double_spend) => Err(double_spend),
+            None => Ok(()),
+        }
     }
 
     /// Undo [`Self::batch_remove`] of these index sets.
@@ -104,7 +116,14 @@ where
 
     /// Abstract, internal method for either applying or reverting the
     /// application of a collection of absolute index sets.
-    async fn apply_index_sets(&mut self, index_sets: &[AbsoluteIndexSet], insert: bool) {
+    ///
+    /// When applying, checks for double spends. If one is found, the mutator
+    /// set is left untouched, and the offending index set is returned.
+    async fn apply_index_sets(
+        &mut self,
+        index_sets: &[AbsoluteIndexSet],
+        insert: bool,
+    ) -> Option<AbsoluteIndexSet> {
         let batch_index = self.get_batch_index_async().await;
         let active_window_start = batch_index * u128::from(CHUNK_SIZE);
 
@@ -124,6 +143,45 @@ where
             }
         }
 
+        let (chunk_indices, relative_indices): (Vec<u64>, Vec<Vec<u32>>) =
+            per_chunk.into_iter().unzip();
+        let mut chunks = self.chunks.get_many(&chunk_indices).await;
+
+        if insert {
+            let chunk_position: HashMap<u64, usize> = chunk_indices
+                .iter()
+                .enumerate()
+                .map(|(position, &chunk_index)| (chunk_index, position))
+                .collect();
+            let is_set = |index: u128| {
+                if index >= active_window_start {
+                    self.swbf_active
+                        .contains((index - active_window_start) as u32)
+                } else {
+                    let position = chunk_position[&((index / u128::from(CHUNK_SIZE)) as u64)];
+                    chunks[position].contains((index % u128::from(CHUNK_SIZE)) as u32)
+                }
+            };
+            let mut multiplicity: HashMap<u128, u32> = HashMap::new();
+            for index in index_sets.iter().flat_map(|index_set| index_set.iter()) {
+                *multiplicity.entry(index).or_default() += 1;
+            }
+
+            let already_set = |index_set: &AbsoluteIndexSet| {
+                let mut own: HashMap<u128, u32> = HashMap::new();
+                for index in index_set.iter() {
+                    *own.entry(index).or_default() += 1;
+                }
+                !own.into_iter()
+                    // If just *one* index was not set, and touched only by this
+                    // index set, then it's not a double spend.
+                    .any(|(index, own_count)| multiplicity[&index] == own_count && !is_set(index))
+            };
+            if let Some(double_spend) = index_sets.iter().find(|index_set| already_set(index_set)) {
+                return Some(*double_spend);
+            }
+        }
+
         if insert {
             self.swbf_active.insert_many(&active);
         } else {
@@ -132,9 +190,6 @@ where
             }
         }
 
-        let (chunk_indices, relative_indices): (Vec<u64>, Vec<Vec<u32>>) =
-            per_chunk.into_iter().unzip();
-        let mut chunks = self.chunks.get_many(&chunk_indices).await;
         for (chunk, relative_indices) in chunks.iter_mut().zip(&relative_indices) {
             if insert {
                 chunk.insert_many(relative_indices);
@@ -153,6 +208,7 @@ where
         self.chunks
             .set_many(chunk_indices.into_iter().zip(chunks))
             .await;
+        None
     }
 
     pub async fn hash(&self) -> Digest {
@@ -818,7 +874,10 @@ mod tests {
                 .absolute_index_set_was_applied(rem0.absolute_indices)
                 .await
         );
-        archival_mutator_set.remove(rem0.absolute_indices).await;
+        archival_mutator_set
+            .remove(rem0.absolute_indices)
+            .await
+            .unwrap();
         assert!(
             archival_mutator_set
                 .absolute_index_set_was_applied(rem0.absolute_indices)
@@ -868,7 +927,10 @@ mod tests {
                 .absolute_index_set_was_applied(rem1.absolute_indices)
                 .await
         );
-        archival_mutator_set.remove(rem1.absolute_indices).await;
+        archival_mutator_set
+            .remove(rem1.absolute_indices)
+            .await
+            .unwrap();
         assert!(
             archival_mutator_set
                 .absolute_index_set_was_applied(rem1.absolute_indices)
@@ -1066,7 +1128,8 @@ mod tests {
             );
             archival_mutator_set
                 .remove(removal_record.absolute_indices)
-                .await;
+                .await
+                .unwrap();
             assert!(
                 !archival_mutator_set
                     .verify(item, &restored_membership_proof)
@@ -1129,7 +1192,7 @@ mod tests {
         let mut accumulator = ams.accumulator().await;
         accumulator.batch_remove(removal_records, &mut []);
 
-        ams.batch_remove(&index_sets).await;
+        ams.batch_remove(&index_sets).await.unwrap();
         assert_eq!(accumulator.hash(), ams.hash().await);
         for (mp, &item) in membership_proofs.iter().zip_eq(&items) {
             assert!(!ams.verify(item, mp).await);
@@ -1140,6 +1203,48 @@ mod tests {
         for (mp, &item) in membership_proofs.iter().zip_eq(&items) {
             assert!(ams.verify(item, mp).await);
         }
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn batch_remove_rejects_a_double_spend() {
+        let mut rms = empty_rusty_mutator_set().await;
+        let ams = rms.ams_mut();
+        let mut membership_proofs: Vec<MsMembershipProof> = vec![];
+        let mut items: Vec<Digest> = vec![];
+        for _ in 0..45 * BATCH_SIZE {
+            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
+            let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
+            let membership_proof = ams.prove(item, sender_randomness, receiver_preimage).await;
+            MsMembershipProof::batch_update_from_addition(
+                &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
+                &items,
+                &ams.accumulator().await,
+                &addition_record,
+            )
+            .expect("MS membership update must work");
+            ams.add(&addition_record).await;
+            membership_proofs.push(membership_proof);
+            items.push(item);
+        }
+        // The first items' indices reach into the inactive chunks.
+        let first = ams
+            .drop(items[0], &membership_proofs[0])
+            .await
+            .absolute_indices;
+        let second = ams
+            .drop(items[1], &membership_proofs[1])
+            .await
+            .absolute_indices;
+        ams.batch_remove(&[first]).await.unwrap();
+        let after_first = ams.hash().await;
+
+        assert_eq!(Err(first), ams.batch_remove(&[first]).await);
+        assert_eq!(Err(first), ams.batch_remove(&[second, first]).await);
+        assert_eq!(Err(second), ams.batch_remove(&[second, second]).await);
+        assert_eq!(after_first, ams.hash().await, "nothing applied");
+
+        ams.batch_remove(&[second]).await.unwrap();
+        assert!(!ams.verify(items[1], &membership_proofs[1]).await);
     }
 
     #[apply(shared_tokio_runtime)]
@@ -1175,7 +1280,7 @@ mod tests {
         let mut after_removals = before.clone();
         after_removals.batch_remove(removal_records, &mut []);
 
-        ams.batch_remove(&index_sets).await;
+        ams.batch_remove(&index_sets).await.unwrap();
         for _ in 0..3 * BATCH_SIZE {
             let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
             ams.add(&commit(item, sender_randomness, receiver_preimage.hash()))
@@ -1237,7 +1342,10 @@ mod tests {
             .iter()
             .map(|rr| rr.absolute_indices)
             .collect_vec();
-        archival_mutator_set.batch_remove(&index_sets).await;
+        archival_mutator_set
+            .batch_remove(&index_sets)
+            .await
+            .unwrap();
         for (mp, &item) in membership_proofs.iter().zip_eq(items.iter()) {
             assert!(!archival_mutator_set.verify(item, mp).await);
         }
@@ -1301,7 +1409,7 @@ mod tests {
                 .iter()
                 .map(|rr| rr.absolute_indices)
                 .collect_vec();
-            ams_batch.batch_remove(&index_sets).await;
+            ams_batch.batch_remove(&index_sets).await.unwrap();
 
             let mut applied_rrs = removal_records.clone();
             while let Some(rr) = applied_rrs.pop() {
@@ -1314,7 +1422,7 @@ mod tests {
                     &rr,
                 )
                 .unwrap();
-                ams_separate.remove(rr.absolute_indices).await;
+                ams_separate.remove(rr.absolute_indices).await.unwrap();
             }
 
             // Ensure both AMSs are in the same state.
