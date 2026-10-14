@@ -136,7 +136,7 @@ mod tests {
                     let consensus_rule_set =
                         ConsensusRuleSet::infer_from(network, new_block.header().height);
                     let catch_up = MutatorSetCatchUp::from_update(
-                        &old_mutator_set,
+                        old_mutator_set,
                         &old_kernel.inputs,
                         &mutator_set_update,
                     )
