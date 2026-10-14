@@ -1252,7 +1252,7 @@ impl NetworkActor {
                     return;
                 }
 
-                // If the sets of supported subprotocols differ, log a warning
+                // If the sets of supported subprotocols differ, log a debug
                 // message.
                 if let Some(local_protocols) = &self.active_protocols {
                     let remote_protocols: HashSet<_> = info.protocols.iter().cloned().collect();
@@ -1262,7 +1262,7 @@ impl NetworkActor {
                         remote_protocols.difference(local_protocols).collect();
 
                     if !missing_in_remote.is_empty() || !extra_in_remote.is_empty() {
-                        tracing::warn!(
+                        tracing::debug!(
                             "Protocol mismatch with peer {peer_id}. Missing: [{}], Extra: [{}]",
                             missing_in_remote.iter().join(", "),
                             extra_in_remote.iter().join(", "),
