@@ -526,6 +526,7 @@ mod tests {
     use rand::rngs::StdRng;
     use rand::RngExt;
     use rand::SeedableRng;
+    use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 
     use super::*;
     use crate::test_shared::empty_rusty_mutator_set;
@@ -1139,6 +1140,57 @@ mod tests {
         for (mp, &item) in membership_proofs.iter().zip_eq(&items) {
             assert!(ams.verify(item, mp).await);
         }
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn swbfi_prefix_peaks_are_the_peaks_after_removals() {
+        let mut rms = empty_rusty_mutator_set().await;
+        let ams = rms.ams_mut();
+        let mut membership_proofs: Vec<MsMembershipProof> = vec![];
+        let mut items: Vec<Digest> = vec![];
+        for _ in 0..45 * BATCH_SIZE {
+            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
+            let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
+            let membership_proof = ams.prove(item, sender_randomness, receiver_preimage).await;
+            MsMembershipProof::batch_update_from_addition(
+                &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
+                &items,
+                &ams.accumulator().await,
+                &addition_record,
+            )
+            .expect("MS membership update must work");
+            ams.add(&addition_record).await;
+            membership_proofs.push(membership_proof);
+            items.push(item);
+        }
+        let mut removal_records = vec![];
+        for (mp, &item) in membership_proofs.iter().zip_eq(&items).step_by(7) {
+            removal_records.push(ams.drop(item, mp).await);
+        }
+        let index_sets = removal_records
+            .iter()
+            .map(|rr| rr.absolute_indices)
+            .collect_vec();
+        let before = ams.accumulator().await;
+        let mut after_removals = before.clone();
+        after_removals.batch_remove(removal_records, &mut []);
+
+        ams.batch_remove(&index_sets).await;
+        for _ in 0..3 * BATCH_SIZE {
+            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
+            ams.add(&commit(item, sender_randomness, receiver_preimage.hash()))
+                .await;
+        }
+
+        let peaks_after_removals = after_removals.swbf_inactive.peaks();
+        assert_ne!(before.swbf_inactive.peaks(), peaks_after_removals);
+        assert_ne!(ams.swbf_inactive.peaks().await, peaks_after_removals);
+        assert_eq!(
+            peaks_after_removals,
+            ams.swbf_inactive
+                .peaks_at(before.swbf_inactive.num_leafs())
+                .await
+        );
     }
 
     #[apply(shared_tokio_runtime)]

@@ -44,6 +44,7 @@ use rayon::iter::ParallelIterator;
 use rayon::ThreadPoolBuilder;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::twenty_first::tip5::digest::Digest;
+use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -111,9 +112,21 @@ pub(crate) async fn compose_block_helper(
                 Some(grandparent) => grandparent.mutator_set_accumulator_after()?,
                 None => MutatorSetAccumulator::default(),
             };
+
+            // Internal nodes of the predecessor block SWBF MMR, after applying
+            // the removals of the predecessor block, match tip's SWBF MMR since
+            // no removals have been applied since. The window may have slid but
+            // that does not change internal nodes.
+            let prev_block_swbfi_peaks_after_removals = archival_state
+                .archival_mutator_set
+                .ams()
+                .swbf_inactive
+                .peaks_at(prev_block_transaction_mutator_set.swbf_inactive.num_leafs())
+                .await;
             Some(ComposerWitness {
                 knows_mutator_set,
                 prev_block_transaction_mutator_set,
+                prev_block_swbfi_peaks_after_removals,
             })
         } else {
             None

@@ -142,6 +142,10 @@ impl BlockProof {
 pub struct ComposerWitness {
     pub knows_mutator_set: KnowsMutatorSetWitness,
     pub prev_block_transaction_mutator_set: MutatorSetAccumulator,
+
+    /// Peaks of the inactive SWBF after the predecessor's removals, before
+    /// its additions.
+    pub prev_block_swbfi_peaks_after_removals: Vec<Digest>,
 }
 
 /// Public fields of `Block` are read-only, enforced by #[readonly::make].
@@ -282,6 +286,7 @@ impl Block {
                     &primitive_witness.predecessor_block,
                     &body,
                     composer_witness.prev_block_transaction_mutator_set,
+                    composer_witness.prev_block_swbfi_peaks_after_removals,
                     triton_vm_job_queue.clone(),
                     proof_job_options.clone(),
                 )
@@ -334,12 +339,12 @@ impl Block {
     }
 
     /// The claim that the predecessor is valid, with its proof, for a block
-    /// with this body on it. The mutator set is the one the predecessor's
-    /// transaction was built on.
+    /// with this body.
     async fn prove_predecessor_is_valid(
         predecessor: &Block,
         body: &BlockBody,
         prev_block_transaction_mutator_set: MutatorSetAccumulator,
+        prev_block_swbfi_peaks_after_removals: Vec<Digest>,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<(Claim, Proof)> {
@@ -347,7 +352,8 @@ impl Block {
         let program = PredecessorIsValid::new();
         let claim = PredecessorIsValid::claim_about(predecessor, body.mast_hash(), network);
         let witness =
-            PredecessorIsValidWitness::new(predecessor, body, prev_block_transaction_mutator_set);
+            PredecessorIsValidWitness::new(predecessor, body, prev_block_transaction_mutator_set)
+                .with_swbfi_peaks_after_removals(prev_block_swbfi_peaks_after_removals);
         info!("Proving that the predecessor is valid");
         let proof = ProofBuilder::new()
             .program(program.program())
