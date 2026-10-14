@@ -190,7 +190,8 @@ mod tests {
             rusty_mutator_set
                 .ams_mut()
                 .remove(removal_record.absolute_indices)
-                .await;
+                .await
+                .unwrap();
 
             removed_items.push(items.remove(index));
             removed_mps.push(mps.remove(index));

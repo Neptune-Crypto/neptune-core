@@ -125,7 +125,8 @@ async fn revert_update_from_remove_test(
 
         archival_mutator_set
             .remove(applied_removal_record.absolute_indices)
-            .await;
+            .await
+            .unwrap();
 
         if i + 1 == cutoff_point {
             membership_proof_snapshot = Some(own_membership_proof.as_ref().unwrap().clone());
@@ -205,7 +206,7 @@ async fn revert_update_single_remove_test() {
     let mut removal_records = vec![];
     for i in 0..ms_size {
         let removal_record = ams.drop(items[i], &mps[i]).await;
-        ams.remove(removal_record.absolute_indices).await;
+        ams.remove(removal_record.absolute_indices).await.unwrap();
         MsMembershipProof::batch_update_from_remove(
             &mut mps.iter_mut().collect_vec(),
             &removal_record,
@@ -521,7 +522,8 @@ async fn revert_updates_mixed_test() {
             // remove the item from the mutator set
             archival_mutator_set
                 .remove(removal_record.absolute_indices)
-                .await;
+                .await
+                .unwrap();
 
             // record record
             records.push(Either::Right(removal_record));
