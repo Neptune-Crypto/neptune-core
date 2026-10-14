@@ -278,7 +278,7 @@ impl SyncLoop {
                             last_peer_disconnect_time = Some(SystemTime::now());
                         }
                         MainToSync::ReceiveBlock { peer_handle, block, auth_path } => {
-                            tracing::info!(
+                            tracing::debug!(
                                 "Sync loop: receiving block {} out of [{}:{}) ...",
                                 block.header().height,
                                 self.download_state.coverage().lower_bound,
@@ -783,7 +783,7 @@ impl SyncLoop {
             return;
         }
 
-        tracing::info!(
+        tracing::debug!(
             "Sync loop: requesting blocks [{}] from peers",
             block_requests.iter().map(|br| br.height.value()).join(", ")
         );
