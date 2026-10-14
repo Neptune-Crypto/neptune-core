@@ -750,7 +750,32 @@ impl Block {
     /// proof of work; that must be done separately by the caller, for instance
     /// by calling [`Self::has_proof_of_work`].
     pub async fn is_valid(&self, previous_block: &Block, now: Timestamp, network: Network) -> bool {
-        match self.validate(previous_block, now, network).await {
+        self.is_valid_as(previous_block, now, network, true).await
+    }
+
+    /// Verify a block proposal: like [`Self::is_valid`], but the guesser's
+    /// reveal in the proof-of-work field is not checked, as only the guesser
+    /// should populate this value.
+    pub async fn is_valid_proposal(
+        &self,
+        previous_block: &Block,
+        now: Timestamp,
+        network: Network,
+    ) -> bool {
+        self.is_valid_as(previous_block, now, network, false).await
+    }
+
+    async fn is_valid_as(
+        &self,
+        previous_block: &Block,
+        now: Timestamp,
+        network: Network,
+        guessed: bool,
+    ) -> bool {
+        match self
+            .validate_as(previous_block, now, network, guessed)
+            .await
+        {
             Ok(_) => true,
             Err(e) => {
                 warn!("{e}");
@@ -772,7 +797,18 @@ impl Block {
         now: Timestamp,
         network: Network,
     ) -> Result<(), BlockValidationError> {
-        self.validate_except_proof(previous_block, now, network)?;
+        self.validate_as(previous_block, now, network, true).await
+    }
+
+    /// `guessed` says whether the guesser has filled the proof-of-work field.
+    async fn validate_as(
+        &self,
+        previous_block: &Block,
+        now: Timestamp,
+        network: Network,
+        guessed: bool,
+    ) -> Result<(), BlockValidationError> {
+        self.validate_except_proof(previous_block, now, network, guessed)?;
 
         // 1.c) 1.d)
         self.validate_proof(network).await
@@ -783,6 +819,7 @@ impl Block {
         previous_block: &Block,
         now: Timestamp,
         network: Network,
+        guessed: bool,
     ) -> Result<(), BlockValidationError> {
         // Note that there is a correspondence between the logic here and the
         // error types in `BlockValidationError`.
@@ -915,7 +952,7 @@ impl Block {
             )?;
 
             // 2.v)
-            if consensus_rule_set.miners_must_prove_ams_knowledge(network) {
+            if guessed && consensus_rule_set.miners_must_prove_ams_knowledge(network) {
                 self.validate_guesser_reveal(&parent_mutator_set.swbf_inactive)?;
             }
         }
@@ -1893,7 +1930,7 @@ pub(crate) mod tests {
             now: Timestamp,
             network: Network,
         ) -> Result<(), BlockValidationError> {
-            self.validate_except_proof(previous_block, now, network)
+            self.validate_except_proof(previous_block, now, network, true)
         }
     }
 

@@ -3007,7 +3007,10 @@ impl PeerLoopHandler {
 
                 // Is the proposal valid?
                 let network = self.global_state_lock.cli().network;
-                if !new_proposal.is_valid(&tip, self.now(), network).await {
+                if !new_proposal
+                    .is_valid_proposal(&tip, self.now(), network)
+                    .await
+                {
                     self.punish(NegativePeerSanction::InvalidBlockProposal)
                         .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
