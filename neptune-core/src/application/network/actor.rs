@@ -389,7 +389,6 @@ impl NetworkActor {
         // once in `active_connections` however many connections it holds.
         // A peer legitimately has a relayed and a direct connection while a
         // hole punch completes, so at least two per peer should be accepted.
-        let max_established_incoming = max_pending_incoming;
         let max_established_per_peer = 3;
         let source_limits = config.source_limits;
 
@@ -432,6 +431,14 @@ impl NetworkActor {
             // time for hole punch only
             reservation_duration: Self::RELAY_RESERVATION_DURATION,
             ..Default::default()
+        };
+
+        let max_established_incoming = if relay_server_enabled {
+            let max_reservations =
+                u32::try_from(relay_server_config.max_reservations).unwrap_or(u32::MAX);
+            max_pending_incoming.saturating_add(max_reservations)
+        } else {
+            max_pending_incoming
         };
 
         // Configure Kademlia
