@@ -136,6 +136,14 @@ impl BlockProof {
     pub const SINGLE_PROOF_PREFIX_LEN: u64 = 2;
 }
 
+/// Witness data required for consensus-required claims activated with hard fork
+/// epsilon.
+#[derive(Debug, Clone)]
+pub struct ComposerWitness {
+    pub knows_mutator_set: KnowsMutatorSetWitness,
+    pub prev_block_transaction_mutator_set: MutatorSetAccumulator,
+}
+
 /// Public fields of `Block` are read-only, enforced by #[readonly::make].
 /// Modifications are possible only through `Block` methods.
 ///
@@ -188,15 +196,7 @@ impl BlockProof {
 // exist no impls for `OnceLock<_>` so derive fails.
 //
 // A unit test-suite exists in module tests::digest_encapsulation.
-/// The witness data required for claims activated with hard fork epsilon: The
-/// witness data that it knows the mutator set, and the mutator set the
-/// predecessor's transaction was built on.
-#[derive(Debug, Clone)]
-pub struct ComposerWitness {
-    pub knows_mutator_set: KnowsMutatorSetWitness,
-    pub prev_block_transaction_mutator_set: MutatorSetAccumulator,
-}
-
+#[readonly::make]
 #[derive(Debug, Clone, Serialize, Deserialize, BFieldCodec, GetSize)]
 pub struct Block {
     /// Everything but the proof

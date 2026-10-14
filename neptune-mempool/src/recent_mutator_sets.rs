@@ -300,7 +300,7 @@ mod tests {
         let msh = |block: &Block| block.mutator_set_accumulator_after().unwrap().hash();
 
         for (i, block) in blocks.iter().enumerate().skip(1) {
-            window.update(&block);
+            window.update(block);
             assert_eq!(block.hash(), window.tip_block_hash());
             assert_eq!(msh(block), window.tip_mutator_set_hash());
             assert_eq!(i.min(MAX_TX_SYNC_DEPTH), window.num_ancestors());
@@ -326,7 +326,7 @@ mod tests {
         let blocks = chain(network, 3);
         let mut window = RecentMutatorSets::new(&blocks[0]);
         for block in &blocks[1..] {
-            window.update(&block);
+            window.update(block);
         }
         assert_eq!(3.min(MAX_TX_SYNC_DEPTH), window.num_ancestors());
 
