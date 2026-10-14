@@ -31,7 +31,7 @@ pub const MAX_TX_SYNC_DEPTH: usize = 3;
 struct Entry {
     block_hash: Digest,
     mutator_set_hash: Digest,
-    mutator_set: MutatorSetAccumulator,
+    mutator_set_after: MutatorSetAccumulator,
 
     /// `None` for the oldest entry.
     removed: Option<Vec<AbsoluteIndexSet>>,
@@ -72,13 +72,13 @@ impl RecentMutatorSets {
     }
 
     fn entry_for(block: &Block) -> Entry {
-        let mutator_set = block
+        let mutator_set_after = block
             .mutator_set_accumulator_after()
             .expect("Block held as tip must have mutator set after");
         Entry {
             block_hash: block.hash(),
-            mutator_set_hash: mutator_set.hash(),
-            mutator_set,
+            mutator_set_hash: mutator_set_after.hash(),
+            mutator_set_after,
             removed: Some(block.kernel.removal_index_sets()),
         }
     }
@@ -113,7 +113,7 @@ impl RecentMutatorSets {
             *oldest = Arc::new(Entry {
                 block_hash: oldest.block_hash,
                 mutator_set_hash: oldest.mutator_set_hash,
-                mutator_set: oldest.mutator_set.clone(),
+                mutator_set_after: oldest.mutator_set_after.clone(),
                 removed: None,
             });
         }
@@ -130,7 +130,7 @@ impl RecentMutatorSets {
     }
 
     pub fn tip_mutator_set(&self) -> &MutatorSetAccumulator {
-        &self.tip_entry().mutator_set
+        &self.tip_entry().mutator_set_after
     }
 
     pub fn tip_mutator_set_hash(&self) -> Digest {
@@ -161,7 +161,17 @@ impl RecentMutatorSets {
 
     pub fn mutator_set(&self, mutator_set_hash: Digest) -> Option<&MutatorSetAccumulator> {
         self.position(mutator_set_hash)
-            .map(|position| &self.entries[position].mutator_set)
+            .map(|position| &self.entries[position].mutator_set_after)
+    }
+
+    /// Return the mutator set after the specified block.
+    pub fn mutator_set_by_block_digest(&self, block_hash: Digest) -> Option<MutatorSetAccumulator> {
+        let position = self
+            .entries
+            .iter()
+            .position(|entry| entry.block_hash == block_hash)?;
+
+        Some(self.entries[position].mutator_set_after.to_owned())
     }
 
     /// Return the mutator set after the specified block.
@@ -186,7 +196,7 @@ impl RecentMutatorSets {
         let Some(position) = self.position(mutator_set_hash) else {
             return Err(CatchUpError::UnknownMutatorSet);
         };
-        let ancestor = &self.entries[position].mutator_set;
+        let ancestor = &self.entries[position].mutator_set_after;
         let spent_since: HashSet<u128> = self
             .entries
             .iter()
@@ -214,11 +224,11 @@ use tasm_lib::prelude::Tip5;
 #[cfg(any(test, feature = "test-helpers"))]
 impl RecentMutatorSets {
     /// A window holding only the given mutator set, for tests without blocks.
-    pub fn for_mutator_set(mutator_set: MutatorSetAccumulator) -> Self {
+    pub fn for_mutator_set(mutator_set_after: MutatorSetAccumulator) -> Self {
         let entry = Entry {
             block_hash: Digest::default(),
-            mutator_set_hash: mutator_set.hash(),
-            mutator_set,
+            mutator_set_hash: mutator_set_after.hash(),
+            mutator_set_after,
             removed: None,
         };
         Self {
@@ -228,9 +238,9 @@ impl RecentMutatorSets {
 
     /// Extend the window by one block applying `update`, without a [`Block`].
     pub fn push_update(&mut self, update: MutatorSetUpdate) {
-        let mut mutator_set = self.tip_mutator_set().clone();
+        let mut mutator_set_after = self.tip_mutator_set().clone();
         update
-            .apply_to_accumulator(&mut mutator_set)
+            .apply_to_accumulator(&mut mutator_set_after)
             .expect("Test update must apply to tip mutator set");
         let removed = update
             .removals
@@ -238,9 +248,9 @@ impl RecentMutatorSets {
             .map(|removal_record| removal_record.absolute_indices)
             .collect();
         let entry = Entry {
-            block_hash: Tip5::hash_pair(self.tip_block_hash(), mutator_set.hash()),
-            mutator_set_hash: mutator_set.hash(),
-            mutator_set,
+            block_hash: Tip5::hash_pair(self.tip_block_hash(), mutator_set_after.hash()),
+            mutator_set_hash: mutator_set_after.hash(),
+            mutator_set_after,
             removed: Some(removed),
         };
         self.push(entry);

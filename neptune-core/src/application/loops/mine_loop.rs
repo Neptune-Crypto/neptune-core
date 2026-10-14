@@ -28,7 +28,6 @@ use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmoun
 use neptune_job_queue::errors::JobHandleError;
 use neptune_mempool::tx_upgrade_filter::TxUpgradeFilter;
 use neptune_mempool::upgrade_priority::UpgradePriority;
-use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_primitives::difficulty_control::difficulty_control;
 use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
@@ -96,42 +95,41 @@ pub(crate) async fn compose_block_helper(
     // synced to the tip.
     let network = global_state_lock.cli().network;
     let next_height = latest_block.header().height.next();
-    let composer_witness =
-        if ConsensusRuleSet::infer_from(network, next_height).requires_predecessor_claim() {
-            let state = global_state_lock.lock_guard().await;
-            if state.chain.tip().hash() != latest_block.hash() {
-                bail!("tip changed while composing");
-            }
-            let archival_state = state.chain.archival_state();
-            let knows_mutator_set = archival_state
-                .knows_mutator_set_witness(latest_block.hash())
-                .await;
-            let prev_block_transaction_mutator_set = match archival_state
-                .get_block(latest_block.header().prev_block_digest)
-                .await?
-            {
-                Some(grandparent) => grandparent.mutator_set_accumulator_after()?,
-                None => MutatorSetAccumulator::default(),
-            };
+    let consensus_rules = ConsensusRuleSet::infer_from(network, next_height);
+    let composer_witness = if consensus_rules.requires_predecessor_claim() {
+        let state = global_state_lock.lock_guard().await;
+        if state.chain.tip().hash() != latest_block.hash() {
+            bail!("tip changed while composing");
+        }
+        let knows_ams = state
+            .chain
+            .archival_state()
+            .knows_mutator_set_witness(latest_block.hash())
+            .await;
+        let prev_block_transaction_mutator_set = state
+            .chain
+            .mutator_set_after_by_block_hash(latest_block.header().prev_block_digest)
+            .await
+            .unwrap_or_default();
 
-            // Internal nodes of the predecessor block SWBF MMR, after applying
-            // the removals of the predecessor block, match tip's SWBF MMR since
-            // no removals have been applied since. The window may have slid but
-            // that does not change internal nodes.
-            let prev_block_swbfi_peaks_after_removals = archival_state
-                .archival_mutator_set
-                .ams()
-                .swbf_inactive
-                .peaks_at(prev_block_transaction_mutator_set.swbf_inactive.num_leafs())
-                .await;
-            Some(ComposerWitness {
-                knows_mutator_set,
-                prev_block_transaction_mutator_set,
-                prev_block_swbfi_peaks_after_removals,
-            })
-        } else {
-            None
-        };
+        // Internal nodes of SWBFI MMR after parent removals will agree with
+        // that of tip, which includes both parent removals, and its additions.
+        let prev_block_swbfi_peaks_after_removals = state
+            .chain
+            .archival_state()
+            .archival_mutator_set
+            .ams()
+            .swbf_inactive
+            .peaks_at(prev_block_transaction_mutator_set.swbf_inactive.num_leafs())
+            .await;
+        Some(ComposerWitness {
+            knows_ams,
+            prev_block_transaction_mutator_set,
+            prev_block_swbfi_peaks_after_removals,
+        })
+    } else {
+        None
+    };
 
     let compose_result = Block::compose(
         latest_block,

@@ -140,7 +140,7 @@ impl BlockProof {
 /// epsilon.
 #[derive(Debug, Clone)]
 pub struct ComposerWitness {
-    pub knows_mutator_set: KnowsMutatorSetWitness,
+    pub knows_ams: KnowsMutatorSetWitness,
     pub prev_block_transaction_mutator_set: MutatorSetAccumulator,
 
     /// Peaks of the inactive SWBF after the predecessor's removals, before
@@ -273,7 +273,7 @@ impl Block {
             if consensus_rule_set.miners_must_prove_ams_knowledge(network) {
                 proven.push(
                     Self::prove_knows_mutator_set(
-                        composer_witness.knows_mutator_set,
+                        composer_witness.knows_ams,
                         consensus_rule_set,
                         triton_vm_job_queue.clone(),
                         proof_job_options.clone(),
