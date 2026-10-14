@@ -141,6 +141,10 @@ pub struct PeerLoopHandler {
     peer_address: Multiaddr,
     peer_handshake_data: HandshakeData,
     inbound_connection: bool,
+
+    /// Whether transactions should be announced, or sent to, this peer.
+    peer_tx_relay: bool,
+
     rng: StdRng,
     #[cfg(test)]
     mock_now: Option<Timestamp>,
@@ -162,6 +166,7 @@ impl PeerLoopHandler {
             peer_address,
             peer_handshake_data,
             inbound_connection,
+            peer_tx_relay: peer_handshake_data.relays_transactions(),
             rng: StdRng::from_rng(&mut rand::rng()),
             #[cfg(test)]
             mock_now: None,
@@ -179,6 +184,24 @@ impl PeerLoopHandler {
             PeerMessage::BlockNotificationWithPowWitness(Box::new(with_witness))
         } else {
             PeerMessage::BlockNotification(block.into())
+        }
+    }
+
+    /// If this node is blocks-only, whether to disconnect for the transaction
+    /// or announcement received. Peers that were told not to send it are
+    /// punished and disconnected; older peers are ignored.
+    async fn refuses_transactions(&self) -> Result<Option<bool>> {
+        if !self.global_state_lock.cli().blocks_only {
+            return Ok(None);
+        }
+
+        if self.peer_handshake_data.version.honors_tx_relay_flag() {
+            warn!("Peer sent a transaction or its announcement to this blocks-only node");
+            self.punish(NegativePeerSanction::UnwantedMessage).await?;
+            Ok(Some(DISCONNECT_CONNECTION))
+        } else {
+            debug!("Ignoring transaction or its announcement; this node is blocks-only");
+            Ok(Some(KEEP_CONNECTION_ALIVE))
         }
     }
 
@@ -2073,6 +2096,10 @@ impl PeerLoopHandler {
             PeerMessage::Transaction(transaction) => {
                 log_slow_scope!(fn_name!() + "::PeerMessage::Transaction");
 
+                if let Some(disconnect) = self.refuses_transactions().await? {
+                    return Ok(disconnect);
+                }
+
                 // Early check for oversized announcements to prevent DoS
                 for announcement in &transaction.kernel.announcements {
                     if announcement.message.len() > MAX_ANNOUNCEMENT_MESSAGE_SIZE {
@@ -2208,6 +2235,10 @@ impl PeerLoopHandler {
                 {
                     log_slow_scope!(fn_name!() + "::PeerMessage::TransactionNotification");
 
+                    if let Some(disconnect) = self.refuses_transactions().await? {
+                        return Ok(disconnect);
+                    }
+
                     // 0. Check that transaction meets relay criteria
                     if !self.global_state_lock.cli().relay_transaction(
                         tx_notification.num_inputs,
@@ -2289,6 +2320,10 @@ impl PeerLoopHandler {
             }
             PeerMessage::LinkTx(transfer_link_tx) => {
                 log_slow_scope!(fn_name!() + "::PeerMessage::LinkTx");
+
+                if let Some(disconnect) = self.refuses_transactions().await? {
+                    return Ok(disconnect);
+                }
 
                 // Early check for oversized announcements to prevent DoS
                 for announcement in &transfer_link_tx.kernel.kernel.announcements {
@@ -2424,6 +2459,10 @@ impl PeerLoopHandler {
             PeerMessage::LinkTxNotification(link_tx_notification) => {
                 {
                     log_slow_scope!(fn_name!() + "::PeerMessage::LinkTxNotification");
+
+                    if let Some(disconnect) = self.refuses_transactions().await? {
+                        return Ok(disconnect);
+                    }
 
                     // No negative fees anywhere in the chain pipeline.
                     if link_tx_notification.fee.is_negative() {
@@ -2820,6 +2859,11 @@ impl PeerLoopHandler {
                 Ok(DISCONNECT_CONNECTION)
             }
             MainToPeerTask::TransactionNotification(transaction_notification) => {
+                if !self.peer_tx_relay {
+                    debug!("Not announcing transaction to this peer");
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
                 debug!("Sending PeerMessage::TransactionNotification");
                 peer.send(PeerMessage::TransactionNotification(
                     transaction_notification,
@@ -2829,6 +2873,11 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             MainToPeerTask::LinkTxNotification(link_tx_notification) => {
+                if !self.peer_tx_relay {
+                    debug!("Not announcing link transaction to this peer");
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
                 debug!("Sending PeerMessage::LinkTxNotification");
                 peer.send(PeerMessage::LinkTxNotification(link_tx_notification))
                     .await?;
@@ -3255,6 +3304,7 @@ mod tests {
                 peer_address,
                 peer_handshake_data,
                 inbound_connection,
+                peer_tx_relay: peer_handshake_data.relays_transactions(),
                 mock_now: Some(mocked_time),
                 rng: StdRng::from_rng(&mut rand::rng()),
             }
@@ -6056,11 +6106,15 @@ mod tests {
             let dummy_tx = invalid_empty_single_proof_transaction();
             let txid = dummy_tx.kernel.txid();
 
-            for transaction_is_known in [false, true] {
+            for (transaction_is_known, blocks_only) in
+                [(false, false), (true, false), (false, true), (true, true)]
+            {
+                let cli = cli_args::Args {
+                    blocks_only,
+                    ..cli_args::Args::default_with_network(network)
+                };
                 let (_peer_broadcast_tx, from_main_rx, to_main_tx, _, _, _, mut state_lock, _hsd) =
-                    get_test_genesis_setup(1, cli_args::Args::default_with_network(network))
-                        .await
-                        .unwrap();
+                    get_test_genesis_setup(1, cli).await.unwrap();
                 if transaction_is_known {
                     state_lock
                         .lock_guard_mut()
@@ -6747,6 +6801,163 @@ mod tests {
 
             drop(to_main_rx);
             drop(main_to_peer_tx);
+        }
+    }
+
+    mod blocks_only {
+        use neptune_mempool::transaction_proof_quality::TransactionProofQuality;
+        use neptune_p2p::peer::link_tx_notification::LinkTxNotification;
+
+        use super::block_proposals::genesis_setup;
+        use super::*;
+
+        fn tx_notification(setup: &block_proposals::TestSetup) -> TransactionNotification {
+            TransactionNotification {
+                txid: invalid_empty_single_proof_transaction().kernel.txid(),
+                mutator_set_hash: setup
+                    .genesis_block
+                    .mutator_set_accumulator_after()
+                    .unwrap()
+                    .hash(),
+                proof_quality: TransactionProofQuality::SingleProof,
+                fee: NativeCurrencyAmount::coins(1),
+                num_inputs: 1,
+                num_outputs: 1,
+            }
+        }
+
+        fn link_tx_notification(setup: &block_proposals::TestSetup) -> LinkTxNotification {
+            LinkTxNotification {
+                txid: invalid_empty_single_proof_transaction().kernel.txid(),
+                mutator_set_hash: setup
+                    .genesis_block
+                    .mutator_set_accumulator_after()
+                    .unwrap()
+                    .hash(),
+                fee: NativeCurrencyAmount::coins(1),
+                num_inputs: 1,
+                num_outputs: 1,
+                num_thruputs: 0,
+            }
+        }
+
+        fn peer_standing(setup: &block_proposals::TestSetup) -> i32 {
+            setup
+                .peer_loop_handler
+                .global_state_lock
+                .peers()
+                .with_connected(|connected| connected.values().next().unwrap().standing().standing)
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn blocks_only_node_ignores_old_peers_transactions_and_disconnects_new_ones() {
+            let network = Network::Main;
+            let cli = cli_args::Args {
+                blocks_only: true,
+                ..cli_args::Args::default_with_network(network)
+            };
+            let mut setup = genesis_setup(cli).await;
+            let transaction = Box::new(
+                (&invalid_empty_single_proof_transaction())
+                    .try_into()
+                    .unwrap(),
+            );
+            let messages = [
+                PeerMessage::TransactionNotification(tx_notification(&setup)),
+                PeerMessage::Transaction(transaction),
+                PeerMessage::LinkTxNotification(link_tx_notification(&setup)),
+            ];
+
+            let mut expected_standing = 0;
+            for (version, disconnects) in [("0.19.0", false), ("0.19.1", true)] {
+                setup.peer_loop_handler.peer_handshake_data.version =
+                    VersionString::new_from_str(version);
+                for message in messages.clone() {
+                    // Nothing may be requested or sent in return.
+                    let mut stream = Mock::new(vec![]);
+                    let disconnect = setup
+                        .peer_loop_handler
+                        .handle_peer_message(message, &mut stream, &mut setup.peer_state)
+                        .await
+                        .unwrap();
+                    assert_eq!(disconnects, disconnect, "version {version}");
+
+                    if disconnects {
+                        expected_standing += NegativePeerSanction::UnwantedMessage.severity();
+                    }
+                    assert_eq!(
+                        expected_standing,
+                        peer_standing(&setup),
+                        "version {version}"
+                    );
+                }
+            }
+
+            assert!(
+                matches!(setup.to_main_rx.try_recv(), Err(TryRecvError::Empty)),
+                "nothing may reach the main loop"
+            );
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn transactions_are_announced_only_to_relaying_peers_also_if_we_are_blocks_only() {
+            // Ensure that a blocks-only node relays transactions it has in
+            // mempool since they must originate from this node. And ensure
+            // that transactions are only relayed to peers that accept
+            // transactions.
+
+            let network = Network::Main;
+            for (blocks_only, peer_relays) in
+                [(false, true), (false, false), (true, true), (true, false)]
+            {
+                let cli = cli_args::Args {
+                    blocks_only,
+                    ..cli_args::Args::default_with_network(network)
+                };
+                let mut setup = genesis_setup(cli).await;
+                let mut peer_handshake_data = setup.peer_loop_handler.peer_handshake_data;
+                peer_handshake_data.extra_data = HandshakeData::extra_data(peer_relays);
+                setup.peer_loop_handler = PeerLoopHandler::new(
+                    setup.to_main_tx.clone(),
+                    setup.peer_loop_handler.global_state_lock.clone(),
+                    setup.peer_loop_handler.peer_id,
+                    setup.peer_loop_handler.peer_address.clone(),
+                    peer_handshake_data,
+                    true,
+                );
+
+                let tx_notification = tx_notification(&setup);
+                let link_tx_notification = link_tx_notification(&setup);
+                let from_main = [
+                    (
+                        MainToPeerTask::TransactionNotification(tx_notification),
+                        PeerMessage::TransactionNotification(tx_notification),
+                    ),
+                    (
+                        MainToPeerTask::LinkTxNotification(link_tx_notification),
+                        PeerMessage::LinkTxNotification(link_tx_notification),
+                    ),
+                ];
+                for (task, announcement) in from_main {
+                    let expected = if peer_relays {
+                        vec![Action::Write(announcement)]
+                    } else {
+                        vec![]
+                    };
+                    let mut stream = Mock::new(expected);
+                    setup
+                        .peer_loop_handler
+                        .handle_main_task_message(task, &mut stream, &mut setup.peer_state)
+                        .await
+                        .unwrap();
+                    assert!(
+                        stream.is_done(),
+                        "blocks-only {blocks_only}, peer relays {peer_relays}"
+                    );
+                }
+            }
         }
     }
 

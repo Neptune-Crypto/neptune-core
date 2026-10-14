@@ -44,6 +44,16 @@ impl VersionString {
     /// and expects the same of its peers. True for every version above
     /// 0.19.0.
     pub fn announces_blocks_with_pow(self) -> bool {
+        self.is_above_0_19_0()
+    }
+
+    /// Whether a peer of this version sends no transactions to a peer whose
+    /// handshake declines them. True for every version above 0.19.0.
+    pub fn honors_tx_relay_flag(self) -> bool {
+        self.is_above_0_19_0()
+    }
+
+    fn is_above_0_19_0(self) -> bool {
         semver::Version::parse(&self).is_ok_and(|version| version > semver::Version::new(0, 19, 0))
     }
 
@@ -74,7 +84,14 @@ impl VersionString {
     }
 }
 
+/// Handshake flags, one character each at a fixed position. A string too
+/// short to hold a flag reads as that flag's default.
 pub type ExtraDataString = ArrayString<U255>;
+
+/// `'0'` at this position means the node declines transactions from peers.
+const TX_RELAY_FLAG_POSITION: usize = 0;
+const NO_TX_RELAY: char = '0';
+const TX_RELAY: char = '1';
 
 /// Datastruct defining the handshake peers exchange when establishing a new
 /// connection.
@@ -95,8 +112,8 @@ pub struct HandshakeData {
     /// compare own timestamp to peer's or to a list of peers.
     pub timestamp: SystemTime,
 
-    /// Use this field to add extra data in a backwards compatible manner. An
-    /// encoding should be selected for this. Currently unused.
+    /// Flags added after the other fields, one character each if possible.
+    /// Otherwise, as few characters as possible, and statically sized.
     pub extra_data: ExtraDataString,
 }
 
@@ -122,6 +139,22 @@ pub enum HandshakeValidationError {
 }
 
 impl HandshakeData {
+    /// The flags of a node that does or does not relay transactions.
+    pub fn extra_data(relay_transactions: bool) -> ExtraDataString {
+        let tx_relay_flag = if relay_transactions {
+            TX_RELAY
+        } else {
+            NO_TX_RELAY
+        };
+        ExtraDataString::from_chars([tx_relay_flag])
+    }
+
+    /// Whether the peer accepts transactions and their announcements. It
+    /// announces and serves its own transactions either way.
+    pub fn relays_transactions(&self) -> bool {
+        self.extra_data.chars().nth(TX_RELAY_FLAG_POSITION) != Some(NO_TX_RELAY)
+    }
+
     /// Determine whether two handshakes are compatible, up to everything that
     /// can be checked without using async code.
     pub fn validate(
@@ -276,6 +309,7 @@ pub mod arbitrary_impls {
 
 #[cfg(test)]
 mod tests {
+    use proptest::prop_assert;
     use proptest::prop_assert_eq;
     use test_strategy::proptest;
 
@@ -300,6 +334,44 @@ mod tests {
         }
         for version in ["0.19.0", "0.18.3", "0.19.0-rc.1", "potato", ""] {
             assert!(!VersionString::new_from_str(version).announces_blocks_with_pow());
+        }
+    }
+
+    #[test]
+    fn versions_above_0_19_0_honor_tx_relay_flag() {
+        for version in ["0.19.1", "0.20.0", "1.0.0"] {
+            assert!(VersionString::new_from_str(version).honors_tx_relay_flag());
+        }
+        for version in ["0.19.0", "0.18.3", "potato", ""] {
+            assert!(!VersionString::new_from_str(version).honors_tx_relay_flag());
+        }
+    }
+
+    #[proptest(cases = 5)]
+    fn tx_relay_flag_is_the_first_character_of_the_extra_data(
+        #[strategy(HandshakeData::arbitrary())] mut handshake: HandshakeData,
+    ) {
+        handshake.extra_data = HandshakeData::extra_data(true);
+        prop_assert!(handshake.relays_transactions());
+        handshake.extra_data = HandshakeData::extra_data(false);
+        prop_assert!(!handshake.relays_transactions());
+
+        // Peers that predate the flag send no extra data.
+        let cases = [
+            ("", true),
+            ("1", true),
+            ("0", false),
+            ("0x", false),
+            ("x0", true),
+        ];
+        for (extra_data, relays) in cases {
+            handshake.extra_data = ExtraDataString::from_chars(extra_data.chars());
+            prop_assert_eq!(
+                relays,
+                handshake.relays_transactions(),
+                "extra data {:?}",
+                extra_data
+            );
         }
     }
 
