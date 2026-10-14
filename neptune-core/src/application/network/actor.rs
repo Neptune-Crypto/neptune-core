@@ -500,7 +500,9 @@ impl NetworkActor {
                     ),
                 }
             })?
-            .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(30)))
+            // A connection without a stream to the peer loop is closed after
+            // this long.
+            .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(120)))
             .build();
 
         for external_address in config.external_addresses() {

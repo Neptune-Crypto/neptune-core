@@ -255,8 +255,10 @@ impl ConnectionHandler for GatewayHandler {
         Poll::Pending
     }
 
+    /// Connections that are never upgraded to the peer loop should not be kept
+    /// alive indefinitely.
     fn connection_keep_alive(&self) -> bool {
-        true
+        false
     }
 }
 
