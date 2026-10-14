@@ -43,7 +43,7 @@ pub struct RpcBlockTemplateMetadata {
     /// The reveal of the inactive SWBF that must be contained in the pow field
     /// for the guesser address.
     ///
-    /// Only set from hardfork epsilon.
+    /// Only set from rule set epsilon and later.
     pub swbfi_reveal: Option<(Digest, Vec<Digest>)>,
 }
 

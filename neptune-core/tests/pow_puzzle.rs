@@ -39,7 +39,7 @@ pub async fn can_find_valid_pow_solution() {
 
     for consensus_rule_set in [
         ConsensusRuleSet::HardforkGamma,
-        ConsensusRuleSet::HardforkEpsilon,
+        ConsensusRuleSet::SoftforkEpsilon,
     ] {
         let (latest_block_header, swbfi_reveal) = {
             let state = alice.gsl.lock_guard().await;

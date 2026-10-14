@@ -59,14 +59,12 @@ pub const BLOCK_HEIGHT_HARDFORK_DELTA_MAIN_NET: BlockHeight =
 pub const BLOCK_HEIGHT_HARDFORK_DELTA_TESTNET: BlockHeight =
     BlockHeight::new(BFieldElement::new(5_400));
 
-/// Height of the first block that uses the hard-fork epsilon ruleset, on main
-/// net.
-pub const BLOCK_HEIGHT_HARDFORK_EPSILON_MAIN_NET: BlockHeight =
-    BlockHeight::new(BFieldElement::new(65_000u64));
+/// Height of the first block that uses the epsilon ruleset, on main net.
+pub const BLOCK_HEIGHT_SOFTFORK_EPSILON_MAIN_NET: BlockHeight =
+    BlockHeight::new(BFieldElement::new(61_000u64));
 
-/// Height of the first block that uses the hard-fork epsilon ruleset, on
-/// testnet-0.
-pub const BLOCK_HEIGHT_HARDFORK_EPSILON_TESTNET: BlockHeight =
+/// Height of the first block that uses the epsilon ruleset, on testnet-0.
+pub const BLOCK_HEIGHT_SOFTFORK_EPSILON_TESTNET: BlockHeight =
     BlockHeight::new(BFieldElement::new(6_260u64));
 
 /// Transactions that are more than three days older than the block are
@@ -120,11 +118,13 @@ pub enum ConsensusRuleSet {
 
     /// Succinct block validation.
     ///
-    /// A block carries the `PredecessorIsValid` claim, proof pair about its
-    /// parent; the SWBF update claim, and a claim proving knowledge of the
-    /// mutator set. And the guesser reveal an SWBF leaf. Also strips chunk data
-    /// from the transaction kernel.
-    HardforkEpsilon,
+    /// A block must prove the `PredecessorIsValid` claim, the SWBF update
+    /// claim, and a claim proving knowledge of the mutator set. The guesser
+    /// must reveal an SWBF leaf to prove access to the archival mutator set.
+    ///
+    /// A soft fork because adding more required claims is accepted by old
+    /// nodes, and because the guesser reveal goes into previously unbound data.
+    SoftforkEpsilon,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
@@ -177,10 +177,10 @@ impl ConsensusRuleSet {
                     ConsensusRuleSet::HardforkBeta
                 } else if block_height < BLOCK_HEIGHT_HARDFORK_DELTA_MAIN_NET {
                     ConsensusRuleSet::HardforkGamma
-                } else if block_height < BLOCK_HEIGHT_HARDFORK_EPSILON_MAIN_NET {
+                } else if block_height < BLOCK_HEIGHT_SOFTFORK_EPSILON_MAIN_NET {
                     ConsensusRuleSet::HardforkDelta
                 } else {
-                    ConsensusRuleSet::HardforkEpsilon
+                    ConsensusRuleSet::SoftforkEpsilon
                 }
             }
             Network::Testnet(0) => {
@@ -194,21 +194,21 @@ impl ConsensusRuleSet {
                     ConsensusRuleSet::HardforkBeta
                 } else if block_height < BLOCK_HEIGHT_HARDFORK_DELTA_TESTNET {
                     ConsensusRuleSet::HardforkGamma
-                } else if block_height < BLOCK_HEIGHT_HARDFORK_EPSILON_TESTNET {
+                } else if block_height < BLOCK_HEIGHT_SOFTFORK_EPSILON_TESTNET {
                     ConsensusRuleSet::HardforkDelta
                 } else {
-                    ConsensusRuleSet::HardforkEpsilon
+                    ConsensusRuleSet::SoftforkEpsilon
                 }
             }
-            _ => ConsensusRuleSet::HardforkEpsilon,
+            _ => ConsensusRuleSet::SoftforkEpsilon,
         }
     }
 
     /// The first block that must carry the succinctness claims
-    pub fn hardfork_epsilon_activation_block_height(network: Network) -> BlockHeight {
+    pub fn epsilon_activation_block_height(network: Network) -> BlockHeight {
         match network {
-            Network::Main => BLOCK_HEIGHT_HARDFORK_EPSILON_MAIN_NET,
-            Network::Testnet(0) => BLOCK_HEIGHT_HARDFORK_EPSILON_TESTNET,
+            Network::Main => BLOCK_HEIGHT_SOFTFORK_EPSILON_MAIN_NET,
+            Network::Testnet(0) => BLOCK_HEIGHT_SOFTFORK_EPSILON_TESTNET,
             _ => BlockHeight::genesis().next(),
         }
     }
@@ -223,7 +223,7 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::HardforkBeta
             | ConsensusRuleSet::HardforkGamma
             | ConsensusRuleSet::HardforkDelta => false,
-            ConsensusRuleSet::HardforkEpsilon => true,
+            ConsensusRuleSet::SoftforkEpsilon => true,
         }
     }
 
@@ -237,7 +237,7 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::HardforkBeta
             | ConsensusRuleSet::HardforkGamma
             | ConsensusRuleSet::HardforkDelta => false,
-            ConsensusRuleSet::HardforkEpsilon => !network.use_mock_proof(),
+            ConsensusRuleSet::SoftforkEpsilon => !network.use_mock_proof(),
         }
     }
 
@@ -255,7 +255,7 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::HardforkBeta
             | ConsensusRuleSet::HardforkGamma
             | ConsensusRuleSet::HardforkDelta => 0,
-            ConsensusRuleSet::HardforkEpsilon => match network {
+            ConsensusRuleSet::SoftforkEpsilon => match network {
                 Network::Main | Network::Testnet(0) => 1 << 23,
                 Network::Testnet(1) => 1 << 22,
                 _ if network.use_mock_proof() => 0,
@@ -267,7 +267,7 @@ impl ConsensusRuleSet {
     /// The table a network's blocks carry in the `PredecessorIsValid` claim
     /// from hard fork epsilon on, with the parameters of the latest rule set.
     pub fn epoch_table(network: Network) -> EpochTable {
-        let activation_height = Self::hardfork_epsilon_activation_block_height(network);
+        let activation_height = Self::epsilon_activation_block_height(network);
         let rule_set = Self::infer_from(network, activation_height);
         let initial_counter = Self::lustration_counter_initial(network, activation_height)
             .expect("all hard fork epsilon blocks lustrate");
@@ -300,7 +300,7 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::HardforkBeta => false,
             ConsensusRuleSet::HardforkGamma => false,
             ConsensusRuleSet::HardforkDelta => false,
-            ConsensusRuleSet::HardforkEpsilon => false,
+            ConsensusRuleSet::SoftforkEpsilon => false,
         }
     }
 
@@ -314,7 +314,7 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::HardforkBeta => false,
             ConsensusRuleSet::HardforkGamma => false,
             ConsensusRuleSet::HardforkDelta => false,
-            ConsensusRuleSet::HardforkEpsilon => false,
+            ConsensusRuleSet::SoftforkEpsilon => false,
         }
     }
 
@@ -326,7 +326,7 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::HardforkBeta => true,
             ConsensusRuleSet::HardforkGamma => true,
             ConsensusRuleSet::HardforkDelta => true,
-            ConsensusRuleSet::HardforkEpsilon => true,
+            ConsensusRuleSet::SoftforkEpsilon => true,
         }
     }
 
@@ -338,7 +338,7 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::HardforkBeta => true,
             ConsensusRuleSet::HardforkGamma => true,
             ConsensusRuleSet::HardforkDelta => true,
-            ConsensusRuleSet::HardforkEpsilon => true,
+            ConsensusRuleSet::SoftforkEpsilon => true,
         }
     }
 
@@ -350,7 +350,7 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::HardforkBeta => None,
             ConsensusRuleSet::HardforkGamma
             | ConsensusRuleSet::HardforkDelta
-            | ConsensusRuleSet::HardforkEpsilon => Some(TX_BACKDATING_LIMIT),
+            | ConsensusRuleSet::SoftforkEpsilon => Some(TX_BACKDATING_LIMIT),
         }
     }
 
@@ -371,7 +371,7 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::TvmProofVersion1 => false,
             ConsensusRuleSet::HardforkBeta => false,
             ConsensusRuleSet::HardforkGamma => false,
-            ConsensusRuleSet::HardforkDelta | ConsensusRuleSet::HardforkEpsilon => true,
+            ConsensusRuleSet::HardforkDelta | ConsensusRuleSet::SoftforkEpsilon => true,
         }
     }
 
@@ -393,7 +393,7 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::TvmProofVersion1
             | ConsensusRuleSet::HardforkBeta
             | ConsensusRuleSet::HardforkGamma => false,
-            ConsensusRuleSet::HardforkDelta | ConsensusRuleSet::HardforkEpsilon => true,
+            ConsensusRuleSet::HardforkDelta | ConsensusRuleSet::SoftforkEpsilon => true,
         }
     }
 
@@ -415,7 +415,7 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::TvmProofVersion1 => unreachable!("Lustration not active"),
             ConsensusRuleSet::HardforkBeta => false,
             ConsensusRuleSet::HardforkGamma => true,
-            ConsensusRuleSet::HardforkDelta | ConsensusRuleSet::HardforkEpsilon => true,
+            ConsensusRuleSet::HardforkDelta | ConsensusRuleSet::SoftforkEpsilon => true,
         }
     }
 
@@ -436,7 +436,7 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::TvmProofVersion1 => false,
             ConsensusRuleSet::HardforkBeta => false,
             ConsensusRuleSet::HardforkGamma => false,
-            ConsensusRuleSet::HardforkDelta | ConsensusRuleSet::HardforkEpsilon => true,
+            ConsensusRuleSet::HardforkDelta | ConsensusRuleSet::SoftforkEpsilon => true,
         }
     }
 
@@ -448,7 +448,7 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::TvmProofVersion1 => TritonProofVersion::V1,
             ConsensusRuleSet::HardforkBeta => TritonProofVersion::V1,
             ConsensusRuleSet::HardforkGamma => TritonProofVersion::V5,
-            ConsensusRuleSet::HardforkDelta | ConsensusRuleSet::HardforkEpsilon => {
+            ConsensusRuleSet::HardforkDelta | ConsensusRuleSet::SoftforkEpsilon => {
                 TritonProofVersion::V8
             }
         }
@@ -463,7 +463,7 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::HardforkBeta
             | ConsensusRuleSet::HardforkGamma
             | ConsensusRuleSet::HardforkDelta
-            | ConsensusRuleSet::HardforkEpsilon => {
+            | ConsensusRuleSet::SoftforkEpsilon => {
                 // This size is 8MB which should keep it feasible to run archival nodes for
                 // many years without requiring excessive disk space.
                 1_000_000
@@ -496,7 +496,7 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::HardforkBeta
             | ConsensusRuleSet::HardforkGamma
             | ConsensusRuleSet::HardforkDelta
-            | ConsensusRuleSet::HardforkEpsilon => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
+            | ConsensusRuleSet::SoftforkEpsilon => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
         }
     }
     pub fn max_num_outputs(&self) -> usize {
@@ -507,7 +507,7 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::HardforkBeta
             | ConsensusRuleSet::HardforkGamma
             | ConsensusRuleSet::HardforkDelta
-            | ConsensusRuleSet::HardforkEpsilon => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
+            | ConsensusRuleSet::SoftforkEpsilon => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
         }
     }
     pub fn max_num_announcements(&self) -> usize {
@@ -518,7 +518,7 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::HardforkBeta
             | ConsensusRuleSet::HardforkGamma
             | ConsensusRuleSet::HardforkDelta
-            | ConsensusRuleSet::HardforkEpsilon => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
+            | ConsensusRuleSet::SoftforkEpsilon => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
         }
     }
 
@@ -679,23 +679,19 @@ pub(crate) mod tests {
     /// The predecessor claim is required from the epsilon heights on, and
     /// from height 1 on the networks that are always on epsilon.
     #[test]
-    fn hardfork_epsilon_activates_the_predecessor_claim() {
+    fn ruleset_epsilon_activates_the_predecessor_claim() {
         let requires = |network, height: u64| {
             ConsensusRuleSet::infer_from(network, height.into()).requires_predecessor_claim()
         };
-        assert!(!requires(Network::Main, 64_999));
-        assert!(requires(Network::Main, 65_000));
-        assert!(!requires(Network::Testnet(0), 6_259));
-        assert!(requires(Network::Testnet(0), 6_260));
         for network in [Network::Testnet(1), Network::TestnetMock, Network::RegTest] {
             assert!(requires(network, 1));
             assert_eq!(
                 BlockHeight::from(1u64),
-                ConsensusRuleSet::hardfork_epsilon_activation_block_height(network)
+                ConsensusRuleSet::epsilon_activation_block_height(network)
             );
         }
         for network in [Network::Main, Network::Testnet(0)] {
-            let activation = ConsensusRuleSet::hardfork_epsilon_activation_block_height(network);
+            let activation = ConsensusRuleSet::epsilon_activation_block_height(network);
             assert!(requires(network, activation.value()));
             assert!(!requires(network, activation.value() - 1));
         }
@@ -704,7 +700,7 @@ pub(crate) mod tests {
     #[test]
     fn epsilon_sets_the_floor_and_the_reveals_per_network() {
         let delta = ConsensusRuleSet::HardforkDelta;
-        let epsilon = ConsensusRuleSet::HardforkEpsilon;
+        let epsilon = ConsensusRuleSet::SoftforkEpsilon;
         assert_eq!(0, delta.min_swbf_padded_rows(Network::Main));
         assert!(!delta.miners_must_prove_ams_knowledge(Network::Main));
         assert_eq!(1 << 23, epsilon.min_swbf_padded_rows(Network::Main));
@@ -727,7 +723,7 @@ pub(crate) mod tests {
     fn epoch_on_main_net() {
         let table = ConsensusRuleSet::epoch_table(Network::Main);
         let expected = Epoch {
-            height: bfe!(65_000),
+            height: bfe!(BLOCK_HEIGHT_SOFTFORK_EPSILON_MAIN_NET.value()),
             minimum_block_time: Timestamp::seconds(60),
             target_block_interval: Timestamp::millis(588_000),
             max_num_inputs: bfe!(1 << 14),
@@ -741,7 +737,10 @@ pub(crate) mod tests {
             requires_mutator_set_reveals: bfe!(1),
         };
         assert_eq!(EpochTable::new(&[expected]), table);
-        assert_eq!(expected, table.in_force_at(65_000.into()));
+        assert_eq!(
+            expected,
+            table.in_force_at(BLOCK_HEIGHT_SOFTFORK_EPSILON_MAIN_NET)
+        );
         assert_eq!(expected, table.in_force_at(1_000_000.into()));
     }
 
@@ -757,7 +756,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn network_table_activates_with_hardfork_epsilon() {
+    fn network_table_activates_with_epsilon() {
         for network in Network::all_networks() {
             let table = ConsensusRuleSet::epoch_table(network);
             let height = table.activation_height();

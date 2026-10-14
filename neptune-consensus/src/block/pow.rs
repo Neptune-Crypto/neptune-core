@@ -482,7 +482,7 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
             ConsensusRuleSet::HardforkBeta
             | ConsensusRuleSet::HardforkGamma
             | ConsensusRuleSet::HardforkDelta
-            | ConsensusRuleSet::HardforkEpsilon => {
+            | ConsensusRuleSet::SoftforkEpsilon => {
                 if !meets_threshold {
                     return Err(PowValidationError::ThresholdNotMet);
                 }
