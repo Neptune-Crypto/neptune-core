@@ -79,8 +79,17 @@ where
 
     /// Return the digests of the peaks of the MMR
     pub async fn peaks(&self) -> Vec<Digest> {
-        let leaf_count = self.num_leafs().await;
-        let (_, peak_node_indices) = get_peak_heights_and_peak_node_indices(leaf_count);
+        self.peaks_at(self.num_leafs().await).await
+    }
+
+    /// The peaks of the MMR over its first `num_leafs` leafs, as those leafs
+    /// are now.
+    ///
+    /// # Panics
+    ///
+    /// - if the argument exceeds the number of leafs in the MMR.
+    pub async fn peaks_at(&self, num_leafs: u64) -> Vec<Digest> {
+        let (_, peak_node_indices) = get_peak_heights_and_peak_node_indices(num_leafs);
         self.digests.get_many(&peak_node_indices).await
     }
 
@@ -771,6 +780,16 @@ pub(crate) mod tests {
             &accumulator_mmr.peaks(),
             accumulator_mmr.num_leafs()
         ));
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn peaks_at_are_the_peaks_of_the_prefix() {
+        let leafs: Vec<Digest> = random_elements(40);
+        let ammr = mock::get_ammr_from_digests(leafs.clone()).await;
+        for num_leafs in 0..=leafs.len() {
+            let prefix = MmrAccumulator::new_from_leafs(leafs[..num_leafs].to_vec());
+            assert_eq!(prefix.peaks(), ammr.peaks_at(num_leafs as u64).await);
+        }
     }
 
     #[apply(shared_tokio_runtime)]
