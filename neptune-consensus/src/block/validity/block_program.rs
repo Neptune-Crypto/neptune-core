@@ -64,7 +64,7 @@ impl BlockProgram {
                 ConsensusRuleSet::HardforkGamma => {
                     Digest::try_from_hex(HF_GAMMA_PROGRAM_HASH).unwrap()
                 }
-                ConsensusRuleSet::HardforkDelta | ConsensusRuleSet::HardforkEpsilon => {
+                ConsensusRuleSet::HardforkDelta | ConsensusRuleSet::SoftforkEpsilon => {
                     BlockProgram.hash()
                 }
             };

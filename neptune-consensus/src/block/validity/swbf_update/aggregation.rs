@@ -933,7 +933,7 @@ pub(in crate::block::validity) mod tests {
 
     #[test]
     fn one_tall_leaf_and_an_empty_leaf_clear_the_floor() {
-        let floor = ConsensusRuleSet::HardforkEpsilon.min_swbf_padded_rows(Network::Main);
+        let floor = ConsensusRuleSet::SoftforkEpsilon.min_swbf_padded_rows(Network::Main);
         let tall_log2 = floor.ilog2();
         let empty_log2 = 10;
 

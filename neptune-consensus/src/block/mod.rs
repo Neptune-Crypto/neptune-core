@@ -2611,7 +2611,7 @@ pub(crate) mod tests {
             ConsensusRuleSet::HardforkBeta,
             ConsensusRuleSet::HardforkGamma,
             ConsensusRuleSet::HardforkDelta,
-            ConsensusRuleSet::HardforkEpsilon,
+            ConsensusRuleSet::SoftforkEpsilon,
         ] {
             let mut invalid_block = invalid_empty_block(&genesis, network);
             let mast_auth_paths = invalid_block.pow_mast_paths();

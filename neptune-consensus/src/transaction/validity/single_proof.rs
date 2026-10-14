@@ -386,7 +386,7 @@ pub async fn produce_single_proof(
     consensus_rule_set: ConsensusRuleSet,
 ) -> Result<Proof, CreateProofError> {
     match consensus_rule_set {
-        ConsensusRuleSet::HardforkDelta | ConsensusRuleSet::HardforkEpsilon => {
+        ConsensusRuleSet::HardforkDelta | ConsensusRuleSet::SoftforkEpsilon => {
             SingleProof::new(consensus_rule_set)
                 .produce(primitive_witness, triton_vm_job_queue, proof_job_options)
                 .await
@@ -421,7 +421,7 @@ pub fn single_proof_claim(
             Claim::new(Digest::try_from_hex(SINGLE_PROOF_PROGRAM_DIGEST_HF_GAMMA).unwrap())
                 .with_input(tx_kernel_mast_hash.reversed().values().to_vec())
         }
-        ConsensusRuleSet::HardforkDelta | ConsensusRuleSet::HardforkEpsilon => {
+        ConsensusRuleSet::HardforkDelta | ConsensusRuleSet::SoftforkEpsilon => {
             SingleProof::new(consensus_rule_set).claim(tx_kernel_mast_hash)
         }
     };
