@@ -538,7 +538,7 @@ impl ArchivalState {
         let mut block_index_entries = if block_is_new {
             self.store_block(block).await?
         } else {
-            warn!(
+            debug!(
                 "Attempted to store block but block was already stored.\nBlock digest: {:x}",
                 block.hash()
             );
@@ -599,7 +599,7 @@ impl ArchivalState {
     pub async fn recover(&mut self) -> Result<()> {
         let tip = self.get_tip().await;
 
-        // Since the sub-parts of the archival state handles reorganizations,
+        // Since the sub-parts of the archival state handle reorganizations,
         // all we have to do is to call the tip updater again. Then all parts
         // will agree with the block index database.
         self.set_new_tip(&tip).await

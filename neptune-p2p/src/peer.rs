@@ -20,6 +20,7 @@ use neptune_consensus::block::Block;
 use neptune_consensus::block::block_header::BlockHeader;
 use neptune_consensus::block::block_header::BlockHeaderWithBlockHashWitness;
 use neptune_mempool::transaction_kernel_id::TransactionKernelId;
+use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::difficulty_control::Difficulty;
 use neptune_primitives::difficulty_control::ProofOfWork;
@@ -99,7 +100,8 @@ pub enum NegativePeerSanction {
     DoubleSpendingTransaction,
     CannotApplyTransactionToMutatorSet,
     OversizedAnnouncement,
-    /// Block exceeds size limit during fork reconciliation (RAM exhaustion attack)
+    /// A message exceeds the size limit for its kind, or a block does during
+    /// fork reconciliation (RAM exhaustion attack).
     OversizedBlock,
 
     InvalidBlockMmrAuthentication,
@@ -173,7 +175,7 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::DoubleSpendingTransaction => -7,
             NegativePeerSanction::CannotApplyTransactionToMutatorSet => -3,
             NegativePeerSanction::OversizedAnnouncement => -10,
-            NegativePeerSanction::OversizedBlock => -50,
+            NegativePeerSanction::OversizedBlock => -200,
             NegativePeerSanction::NonMinedTransactionHasCoinbase => -10,
             NegativePeerSanction::NoStandingFoundMaybeCrash => -20,
             NegativePeerSanction::BlockProposalNotFound => -1,
@@ -198,7 +200,7 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::MissingLustrationAnnouncement => -1,
             NegativePeerSanction::LustrationsWouldMakeCounterNegative => -1,
             NegativePeerSanction::InvalidSyncCoverage => -100,
-            NegativePeerSanction::StalledRequest => -5,
+            NegativePeerSanction::StalledRequest => -1,
         }
     }
 }
@@ -464,6 +466,18 @@ pub struct ValidatedBlockRequestByHeight {
     pub anchor: MmrAccumulator,
 }
 
+/// A block together with the mutator set accumulator that its transaction
+/// kernel commits to, so that the block can be validated by a receiver who does
+/// not hold the parent block.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BlockWithParentAccumulator {
+    pub block: TransferBlock,
+
+    /// The mutator set accumulator after the parent block. Its hash must be
+    /// the `mutator_set_hash` of the block's transaction kernel.
+    pub parent_accumulator: MutatorSetAccumulator,
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BlockProposalRequest {
     pub body_mast_hash: Digest,
@@ -476,7 +490,18 @@ impl BlockProposalRequest {
 }
 
 #[non_exhaustive]
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, strum::EnumDiscriminants)]
+#[strum_discriminants(
+    name(PeerMessageKind),
+    // strum only forwards attributes of the form `name(...)`; this one is
+    // always `#[non_exhaustive]`.
+    cfg_attr(all(), non_exhaustive),
+    derive(Hash, strum::Display, strum::EnumString, strum::FromRepr),
+    doc = "The kind of a [`PeerMessage`], without the payload.",
+    doc = "",
+    doc = "The variant index is the tag that starts a bincode encoding of the",
+    doc = "message, and the variant name is the tag that starts a JSON encoding."
+)]
 pub enum PeerMessage {
     Handshake {
         magic_value: [u8; 15],
@@ -488,8 +513,8 @@ pub enum PeerMessage {
     BlockRequestByHeight(BlockHeight),
     BlockRequestByHash(Digest),
 
-    BlockRequestBatch(BlockRequestBatch), // TODO: Consider restricting this in size
-    BlockResponseBatch(Vec<(TransferBlock, MmrMembershipProof)>), // TODO: Consider restricting this in size
+    BlockRequestBatch(BlockRequestBatch),
+    BlockResponseBatch(Vec<(TransferBlock, MmrMembershipProof)>),
     UnableToSatisfyBatchRequest,
 
     SyncChallenge(SyncChallenge),
@@ -541,7 +566,75 @@ pub enum PeerMessage {
 
     /// Send a full link transaction object to a peer.
     LinkTx(Box<TransferLinkTx>),
+
+    /// Notify a peer of a new block by its header and a witness to the block
+    /// hash, so that the receiver can verify the proof of work before
+    /// requesting the block. Peers with a version exceeding 0.19.0 send and
+    /// understand this message in place of [`PeerMessage::BlockNotification`].
+    BlockNotificationWithPowWitness(Box<BlockHeaderWithBlockHashWitness>),
+
+    /// Request the receiver's tip together with the mutator set accumulator
+    /// after its parent, for validating the tip without the parent block.
+    /// Answered with [`PeerMessage::TipWithParentAccumulator`] if the receiver
+    /// holds that accumulator. Only peers with a version exceeding 0.19.0
+    /// understand this message.
+    TipWithParentAccumulatorRequest,
+
+    /// Response to [`PeerMessage::TipWithParentAccumulatorRequest`].
+    TipWithParentAccumulator(Box<BlockWithParentAccumulator>),
     // New variants must be added here at the bottom to be backwards compatible.
+}
+
+impl PeerMessageKind {
+    /// The kind of message that a bincode frame carries, given the variant
+    /// index that starts the frame.
+    pub fn from_bincode_tag(tag: u32) -> Option<Self> {
+        Self::from_repr(usize::try_from(tag).ok()?)
+    }
+
+    /// Upper bound on the bincode size of a message of this kind, or `None`
+    /// if only the frame limit of the transport applies.
+    ///
+    /// The bounds leave room for the largest message consensus allows. A block
+    /// has at most one million field elements, nine bytes each as bincode, and
+    /// a sync challenge response carries 22 blocks. A transaction can carry a
+    /// proof collection with a proof per input, each around a megabyte.
+    pub fn max_frame_length(self) -> Option<usize> {
+        const KIB: usize = 1024;
+        const MIB: usize = 1024 * KIB;
+
+        let limit = match self {
+            Self::Handshake
+            | Self::BlockNotificationRequest
+            | Self::BlockNotification
+            | Self::BlockRequestByHeight
+            | Self::BlockRequestByHash
+            | Self::UnableToSatisfyBatchRequest
+            | Self::SyncChallenge
+            | Self::BlockProposalNotification
+            | Self::BlockProposalRequest
+            | Self::TransactionNotification
+            | Self::TransactionRequest
+            | Self::PeerListRequest
+            | Self::Bye
+            | Self::ConnectionStatus
+            | Self::ValidatedBlockRequestByHeight
+            | Self::LinkTxNotification
+            | Self::LinkTxRequest
+            | Self::BlockNotificationWithPowWitness
+            | Self::TipWithParentAccumulatorRequest => 64 * KIB,
+            Self::BlockRequestBatch | Self::PeerListResponse | Self::SyncCoverage => 2 * MIB,
+            Self::Block
+            | Self::BlockProposal
+            | Self::ValidatedBlock
+            | Self::TipWithParentAccumulator => 20 * MIB,
+            Self::LinkTx => 64 * MIB,
+            Self::Transaction | Self::SyncChallengeResponse => 270 * MIB,
+            Self::BlockResponseBatch => return None,
+        };
+
+        Some(limit)
+    }
 }
 
 impl PeerMessage {
@@ -549,10 +642,15 @@ impl PeerMessage {
         match self {
             PeerMessage::Handshake { .. } => "handshake",
             PeerMessage::Block(_) => "block",
+            PeerMessage::TipWithParentAccumulator(_) => "tip with parent accumulator",
             PeerMessage::BlockNotificationRequest => "block notification request",
             PeerMessage::BlockNotification(_) => "block notification",
+            PeerMessage::BlockNotificationWithPowWitness(_) => {
+                "block notification with pow witness"
+            }
             PeerMessage::BlockRequestByHeight(_) => "block req by height",
             PeerMessage::BlockRequestByHash(_) => "block req by hash",
+            PeerMessage::TipWithParentAccumulatorRequest => "tip with parent accumulator req",
             PeerMessage::BlockRequestBatch(_) => "block req batch",
             PeerMessage::BlockResponseBatch(_) => "block resp batch",
             PeerMessage::Transaction(_) => "send",
@@ -582,10 +680,13 @@ impl PeerMessage {
         match self {
             PeerMessage::Handshake { .. } => false,
             PeerMessage::Block(_) => false,
+            PeerMessage::TipWithParentAccumulator(_) => false,
             PeerMessage::BlockNotificationRequest => false,
             PeerMessage::BlockNotification(_) => false,
+            PeerMessage::BlockNotificationWithPowWitness(_) => false,
             PeerMessage::BlockRequestByHeight(_) => false,
             PeerMessage::BlockRequestByHash(_) => false,
+            PeerMessage::TipWithParentAccumulatorRequest => false,
             PeerMessage::BlockRequestBatch(_) => false,
             PeerMessage::BlockResponseBatch(_) => true,
             PeerMessage::Transaction(_) => false,
@@ -615,10 +716,13 @@ impl PeerMessage {
         match self {
             PeerMessage::Handshake { .. } => false,
             PeerMessage::Block(_) => false,
+            PeerMessage::TipWithParentAccumulator(_) => false,
             PeerMessage::BlockNotificationRequest => false,
             PeerMessage::BlockNotification(_) => false,
+            PeerMessage::BlockNotificationWithPowWitness(_) => false,
             PeerMessage::BlockRequestByHeight(_) => false,
             PeerMessage::BlockRequestByHash(_) => false,
+            PeerMessage::TipWithParentAccumulatorRequest => false,
             PeerMessage::BlockRequestBatch(_) => false,
             PeerMessage::BlockResponseBatch(_) => false,
             PeerMessage::Transaction(_) => true,
@@ -649,10 +753,13 @@ impl PeerMessage {
         match self {
             PeerMessage::Handshake { .. } => false,
             PeerMessage::Block(_) => true,
+            PeerMessage::TipWithParentAccumulator(_) => true,
             PeerMessage::BlockNotificationRequest => true,
             PeerMessage::BlockNotification(_) => true,
+            PeerMessage::BlockNotificationWithPowWitness(_) => true,
             PeerMessage::BlockRequestByHeight(_) => true,
             PeerMessage::BlockRequestByHash(_) => true,
+            PeerMessage::TipWithParentAccumulatorRequest => true,
             PeerMessage::BlockRequestBatch(_) => true,
             PeerMessage::BlockResponseBatch(_) => true,
             PeerMessage::UnableToSatisfyBatchRequest => true,
@@ -1163,6 +1270,7 @@ impl PeerStanding {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use bincode::Options;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
     use rand::RngExt;
@@ -1170,6 +1278,30 @@ mod tests {
     use test_strategy::proptest;
 
     use super::*;
+
+    #[test]
+    fn message_kinds_are_the_tags_on_the_wire() {
+        let messages = [
+            PeerMessage::Bye,
+            PeerMessage::BlockRequestByHeight(BlockHeight::genesis()),
+            PeerMessage::TipWithParentAccumulatorRequest,
+        ];
+        let expected = [
+            PeerMessageKind::Bye,
+            PeerMessageKind::BlockRequestByHeight,
+            PeerMessageKind::TipWithParentAccumulatorRequest,
+        ];
+        for (message, kind) in messages.into_iter().zip(expected) {
+            let bincode = bincode::DefaultOptions::new().serialize(&message).unwrap();
+            let tag = bincode::DefaultOptions::new()
+                .deserialize_from::<_, u32>(bincode.as_slice())
+                .unwrap();
+            assert_eq!(Some(kind), PeerMessageKind::from_bincode_tag(tag));
+
+            let json = serde_json::to_string(&message).unwrap();
+            assert!(json.contains(&format!("\"{kind}\"")), "{json}");
+        }
+    }
 
     /// Build a standing that was punished into the given value, `ago` in the
     /// past.

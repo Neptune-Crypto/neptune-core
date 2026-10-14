@@ -309,6 +309,12 @@ pub struct Args {
     #[clap(skip)]
     pub(crate) mining_address_cache: OnceLock<Option<ReceivingAddress>>,
 
+    /// Accept no transactions from peers, only blocks. Own transactions are
+    /// still sent. Saves most of the node's bandwidth, but lets peers know
+    /// that the transactions that are announced originate from this node.
+    #[clap(long, conflicts_with = "compose")]
+    pub(crate) blocks_only: bool,
+
     /// Whether to produce block proposals, which is the 2nd step of three-step
     /// mining. Note that composing block proposals involves the computationally
     /// expensive task of producing STARK proofs. You should have plenty of
@@ -1204,6 +1210,12 @@ mod tests {
         pub(crate) fn proof_job_options_primitive_witness(&self) -> TritonVmProofJobOptions {
             self.proof_job_options_prooftype(TransactionProofType::PrimitiveWitness)
         }
+    }
+
+    #[test]
+    fn blocks_only_conflicts_with_compose() {
+        assert!(Args::try_parse_from(["neptune-core", "--blocks-only"]).is_ok());
+        assert!(Args::try_parse_from(["neptune-core", "--blocks-only", "--compose"]).is_err());
     }
 
     #[test]

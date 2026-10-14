@@ -16,9 +16,15 @@ use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembership
 use triton_vm::prelude::Digest;
 
 use super::chunk::Chunk;
+use crate::shared::deserialize_bounded_vec;
 
 type AuthenticatedChunk = (MmrMembershipProof, Chunk);
 type ChunkIndex = u64;
+
+/// Upper bound on the number of entries a deserialized dictionary may have.
+/// The dictionary of a packed removal record list holds the chunks of all
+/// inputs; a block with 2^14 inputs of 45 chunks each needs about 740 000.
+const MAX_NUM_ENTRIES: usize = 1_000_000;
 
 #[derive(
     Clone, Debug, Serialize, Deserialize, GetSize, PartialEq, Eq, Default, BFieldCodec, TasmObject,
@@ -29,6 +35,7 @@ pub struct ChunkDictionary {
     /// This list is always sorted. It has max. NUM_TRIALS=45 elements, so we
     /// don't care about the cost of reallocation when `insert`ing or
     /// `remove`ing.
+    #[serde(deserialize_with = "deserialize_bounded_vec::<_, _, MAX_NUM_ENTRIES>")]
     pub(crate) dictionary: Vec<(u64, (MmrMembershipProof, Chunk))>,
 }
 
@@ -213,6 +220,31 @@ pub mod tests {
     use super::*;
     use crate::shared::CHUNK_SIZE;
     use crate::test_utils::shared_tokio_runtime;
+
+    #[test]
+    fn chunk_dictionaries_are_bounded_on_the_wire() {
+        use bincode::Options;
+
+        let announced = u32::try_from(MAX_NUM_ENTRIES + 1).unwrap();
+        let mut bytes = vec![252]; // bincode varint marker for a u32 length
+        bytes.extend(announced.to_le_bytes());
+        bytes.extend(std::iter::repeat_n(0u8, 1000)); // far fewer than announced
+
+        let error = bincode::DefaultOptions::new()
+            .deserialize::<ChunkDictionary>(&bytes)
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("at most"),
+            "refused for the length, not for running out of bytes: {error}"
+        );
+
+        let dictionary = ChunkDictionary::new(vec![(
+            7,
+            (MmrMembershipProof::new(vec![]), Chunk::empty_chunk()),
+        )]);
+        let json = serde_json::to_vec(&dictionary).unwrap();
+        assert_eq!(dictionary, serde_json::from_slice(&json).unwrap());
+    }
 
     #[apply(shared_tokio_runtime)]
     async fn hash_test() {

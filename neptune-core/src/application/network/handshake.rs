@@ -13,6 +13,40 @@ use libp2p::StreamProtocol;
 use neptune_p2p::peer::handshake_data::HandshakeData;
 use neptune_p2p::peer::handshake_data::HandshakeValidationError;
 
+/// The encoding of peer messages on a stream, agreed on when the stream is
+/// negotiated.
+///
+/// Each encoding is advertised as its own protocol name, so multistream-select
+/// settles on the first one both peers support, in the order of
+/// [`Self::SUPPORTED`]. A peer that knows only the older name gets that
+/// encoding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WireEncoding {
+    /// Length-delimited serde_json. The only encoding of versions up to 0.19.0.
+    Json,
+
+    /// Length-delimited bincode, as on legacy TCP connections.
+    Bincode,
+}
+
+impl WireEncoding {
+    /// All encodings, most preferred first.
+    pub(crate) const SUPPORTED: [Self; 2] = [Self::Bincode, Self::Json];
+
+    pub(crate) fn protocol(self) -> StreamProtocol {
+        match self {
+            Self::Json => StreamProtocol::new("/id/stream-gateway-handshake/1.0"),
+            Self::Bincode => StreamProtocol::new("/id/stream-gateway-handshake/2.0"),
+        }
+    }
+
+    pub(crate) fn from_protocol(protocol: &StreamProtocol) -> Option<Self> {
+        Self::SUPPORTED
+            .into_iter()
+            .find(|encoding| encoding.protocol() == *protocol)
+    }
+}
+
 /// The protocol negotiation and handshake logic for a stream.
 ///
 /// The [`HandshakeUpgrade`] is a blueprint for libp2p to "upgrade" a raw socket
@@ -117,24 +151,37 @@ impl HandshakeUpgrade {
 
 impl UpgradeInfo for HandshakeUpgrade {
     type Info = StreamProtocol;
-    type InfoIter = std::iter::Once<Self::Info>;
+    type InfoIter = std::array::IntoIter<Self::Info, 2>;
 
     fn protocol_info(&self) -> Self::InfoIter {
-        std::iter::once(StreamProtocol::new("/id/stream-gateway-handshake/1.0"))
+        WireEncoding::SUPPORTED
+            .map(WireEncoding::protocol)
+            .into_iter()
     }
+}
+
+/// The encoding that a negotiated protocol name stands for. Negotiation only
+/// ever settles on a name this node advertised.
+fn negotiated_encoding(info: &StreamProtocol) -> WireEncoding {
+    WireEncoding::from_protocol(info)
+        .expect("negotiated protocol must be one of the advertised ones")
 }
 
 impl<C> InboundUpgrade<C> for HandshakeUpgrade
 where
     C: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    type Output = (HandshakeData, C);
+    type Output = (HandshakeData, WireEncoding, C);
     type Error = HandshakeError;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Output, Self::Error>> + Send>>;
 
     /// Execute the handshake logic for an incoming substream.
-    fn upgrade_inbound(self, socket: C, _info: Self::Info) -> Self::Future {
-        Box::pin(async move { self.handshake(socket).await })
+    fn upgrade_inbound(self, socket: C, info: Self::Info) -> Self::Future {
+        let encoding = negotiated_encoding(&info);
+        Box::pin(async move {
+            let (handshake, socket) = self.handshake(socket).await?;
+            Ok((handshake, encoding, socket))
+        })
     }
 }
 
@@ -142,13 +189,17 @@ impl<C> OutboundUpgrade<C> for HandshakeUpgrade
 where
     C: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    type Output = (HandshakeData, C);
+    type Output = (HandshakeData, WireEncoding, C);
     type Error = HandshakeError;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Output, Self::Error>> + Send>>;
 
     /// Execute the handshake logic for an outgoing substream.
-    fn upgrade_outbound(self, socket: C, _info: Self::Info) -> Self::Future {
-        Box::pin(async move { self.handshake(socket).await })
+    fn upgrade_outbound(self, socket: C, info: Self::Info) -> Self::Future {
+        let encoding = negotiated_encoding(&info);
+        Box::pin(async move {
+            let (handshake, socket) = self.handshake(socket).await?;
+            Ok((handshake, encoding, socket))
+        })
     }
 }
 
@@ -166,6 +217,7 @@ pub(crate) enum HandshakeResult {
     /// channel itself, ensuring they are never separated.
     Success {
         remote_handshake: HandshakeData,
+        encoding: WireEncoding,
         stream: Stream,
     },
 }
@@ -177,8 +229,88 @@ mod tests {
     use proptest::prop_assert_eq;
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
+    use tokio_util::compat::TokioAsyncReadCompatExt;
 
     use super::*;
+
+    #[proptest(cases = 1)]
+    fn bincode_is_advertised_before_json(
+        #[strategy(HandshakeData::arbitrary())] local_handshake: HandshakeData,
+    ) {
+        let upgrade = HandshakeUpgrade { local_handshake };
+        let advertised = upgrade.protocol_info().collect::<Vec<_>>();
+        prop_assert_eq!(
+            vec![
+                WireEncoding::Bincode.protocol(),
+                WireEncoding::Json.protocol()
+            ],
+            advertised
+        );
+    }
+
+    #[test]
+    fn protocol_names_identify_their_encoding() {
+        for encoding in WireEncoding::SUPPORTED {
+            assert_eq!(
+                Some(encoding),
+                WireEncoding::from_protocol(&encoding.protocol())
+            );
+        }
+        assert_eq!(
+            None,
+            WireEncoding::from_protocol(&StreamProtocol::new("/id/stream-gateway-handshake/3.0"))
+        );
+    }
+
+    /// The protocol names a node up to version 0.19.0 advertises.
+    fn legacy_protocols() -> Vec<StreamProtocol> {
+        vec![WireEncoding::Json.protocol()]
+    }
+
+    fn current_protocols() -> Vec<StreamProtocol> {
+        WireEncoding::SUPPORTED.map(WireEncoding::protocol).to_vec()
+    }
+
+    /// Run multistream-select between an initiator and a responder, each with
+    /// its own list of protocol names, and return what each side agreed to.
+    async fn negotiate(
+        initiator: Vec<StreamProtocol>,
+        responder: Vec<StreamProtocol>,
+    ) -> (StreamProtocol, StreamProtocol) {
+        let (initiator_io, responder_io) = tokio::io::duplex(1 << 16);
+        let dial = multistream_select::dialer_select_proto(
+            initiator_io.compat(),
+            initiator,
+            multistream_select::Version::V1,
+        );
+        let listen = multistream_select::listener_select_proto(responder_io.compat(), responder);
+        let (dialed, listened) = futures::join!(dial, listen);
+        let (initiator_chose, _) = dialed.unwrap();
+        let (responder_chose, _) = listened.unwrap();
+        (initiator_chose, responder_chose)
+    }
+
+    #[tokio::test]
+    async fn current_nodes_negotiate_bincode() {
+        let bincode = WireEncoding::Bincode.protocol();
+        assert_eq!(
+            (bincode.clone(), bincode),
+            negotiate(current_protocols(), current_protocols()).await
+        );
+    }
+
+    #[tokio::test]
+    async fn legacy_nodes_fall_back_to_json_in_either_role() {
+        let json = WireEncoding::Json.protocol();
+        assert_eq!(
+            (json.clone(), json.clone()),
+            negotiate(current_protocols(), legacy_protocols()).await
+        );
+        assert_eq!(
+            (json.clone(), json),
+            negotiate(legacy_protocols(), current_protocols()).await
+        );
+    }
 
     #[proptest(cases = 10, async = "tokio")]
     async fn handshake_encoding_roundtrip(

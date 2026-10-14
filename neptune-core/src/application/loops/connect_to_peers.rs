@@ -32,7 +32,6 @@ use tokio::time::timeout;
 use tokio_serde::formats::Bincode;
 use tokio_serde::SymmetricallyFramed;
 use tokio_util::codec::Framed;
-use tokio_util::codec::LengthDelimitedCodec;
 use tracing::debug;
 use tracing::error;
 use tracing::info;
@@ -44,44 +43,41 @@ use crate::application::config::parser::multiaddr::socketaddr_to_multiaddr;
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
 use crate::application::loops::peer_loop::channel::PeerTaskToMain;
 use crate::application::loops::peer_loop::PeerLoopHandler;
+use crate::application::network::frame_codec::PeerFrameCodec;
+use crate::application::network::handshake::WireEncoding;
 use crate::application::network::observed_ips::attributable_ip;
 use crate::state::GlobalStateLock;
 use crate::HandshakeData;
 use crate::MAGIC_STRING_REQUEST;
 use crate::MAGIC_STRING_RESPONSE;
 
-// Max peer message size is 500MB. Should be enough to send 250 blocks in a
-// block batch-response.
-pub const MAX_PEER_FRAME_LENGTH_IN_BYTES: usize = 500 * 1024 * 1024;
+/// Largest peer message should be 22 blocks in a sync challenge response, with
+/// each block being maximum 8MB.
+pub const MAX_PEER_FRAME_LENGTH_IN_BYTES: usize = 300 * 1024 * 1024;
 
 /// Only accept connections where peer's reported timestamp deviates from our
 /// by less than this value.
 const PEER_TIME_DIFFERENCE_THRESHOLD_IN_SECONDS: u128 = 90;
 
-/// Use this function to ensure that the same rules apply for both
-/// ingoing and outgoing connections. This limits the size of messages
-/// peers can send.
-pub(crate) fn get_codec_rules() -> LengthDelimitedCodec {
-    let mut codec_rules = LengthDelimitedCodec::new();
-    codec_rules.set_max_frame_length(MAX_PEER_FRAME_LENGTH_IN_BYTES);
-    codec_rules
-}
-
-/// Returns a bincode codec with allocation limits to prevent OOM attacks.
+/// The bincode options for peer messages, with allocation limits to prevent
+/// OOM attacks.
 ///
 /// This prevents "length bomb" attacks where a malicious peer sends a tiny
 /// frame claiming to contain a Vec with billions of elements. Without limits,
 /// bincode would pre-allocate memory based on the claimed length, causing OOM.
 ///
-/// The limit is set to match MAX_PEER_FRAME_LENGTH_IN_BYTES (500MB).
+/// The limit is set to match [`MAX_PEER_FRAME_LENGTH_IN_BYTES`].
+pub(crate) fn bincode_options() -> impl Options + Copy {
+    bincode::DefaultOptions::new().with_limit(MAX_PEER_FRAME_LENGTH_IN_BYTES as u64)
+}
+
+/// Returns a bincode codec using [`bincode_options`].
 fn get_bincode_codec<Item, SinkItem>() -> Bincode<Item, SinkItem, impl Options + Copy>
 where
     Item: serde::de::DeserializeOwned,
     SinkItem: serde::Serialize,
 {
-    bincode::DefaultOptions::new()
-        .with_limit(MAX_PEER_FRAME_LENGTH_IN_BYTES as u64)
-        .into()
+    bincode_options().into()
 }
 
 /// Infallible absolute difference between two timestamps, in seconds.
@@ -348,7 +344,7 @@ where
     debug!("Established incoming TCP connection with {peer_address}");
 
     // Build the communication/serialization/frame handler
-    let length_delimited = Framed::new(stream, get_codec_rules());
+    let length_delimited = Framed::new(stream, PeerFrameCodec::new(WireEncoding::Bincode));
     let mut peer = SymmetricallyFramed::new(length_delimited, get_bincode_codec());
 
     // Complete Neptune handshake
@@ -556,6 +552,7 @@ mod tests {
     use super::*;
     use crate::application::config::cli_args;
     use crate::application::config::parser::multiaddr::socketaddr_to_multiaddr;
+    use crate::application::network::frame_codec::OversizedFrame;
     use crate::tests::shared::globalstate::get_dummy_handshake_data_for_genesis;
     use crate::tests::shared::globalstate::get_dummy_peer_connection_data_genesis;
     use crate::tests::shared::globalstate::get_dummy_peer_incoming;
@@ -565,6 +562,23 @@ mod tests {
     use crate::tests::shared_tokio_runtime;
     use crate::MAGIC_STRING_REQUEST;
     use crate::MAGIC_STRING_RESPONSE;
+
+    #[tokio::test]
+    async fn an_oversized_frame_is_reported_through_the_legacy_codec() {
+        use futures::TryStreamExt;
+        use neptune_p2p::peer::PeerMessageKind;
+
+        let mut frame = (100u32 * 1024 * 1024).to_be_bytes().to_vec();
+        frame.extend(bincode_options().serialize(&PeerMessage::Bye).unwrap());
+        let stream = Builder::new().read(&frame).build();
+
+        let framed = Framed::new(stream, PeerFrameCodec::new(WireEncoding::Bincode));
+        let mut peer: SymmetricallyFramed<_, PeerMessage, _> =
+            SymmetricallyFramed::new(framed, get_bincode_codec::<PeerMessage, PeerMessage>());
+        let error = peer.try_next().await.unwrap_err();
+        let oversized = OversizedFrame::behind(&error).unwrap();
+        assert_eq!(PeerMessageKind::Bye, oversized.kind);
+    }
 
     async fn standing_written_at_close(address: Multiaddr, ip: IpAddr) -> Option<PeerStanding> {
         use neptune_p2p::peer::peer_info::PeerConnectionInfo;

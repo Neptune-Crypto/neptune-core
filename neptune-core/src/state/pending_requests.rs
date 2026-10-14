@@ -17,7 +17,26 @@ use tasm_lib::prelude::Digest;
 pub(crate) const BLOCK_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// How long a request for a transaction counts as pending.
-pub(crate) const TRANSACTION_REQUEST_TIMEOUT: Duration = Duration::from_secs(35);
+pub(crate) const TRANSACTION_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// How long an object announced by a peer on an inbound connection waits
+/// before it is requested from that peer. A peer on an outbound connection
+/// that announces the object within this delay is asked instead, since
+/// outbound connections are harder for an attacker to monopolize.
+///
+/// Integration tests run nodes that only have each other, so they do not wait.
+#[cfg(not(all(not(test), feature = "test-helpers")))] // production and unit tests
+pub(crate) const INBOUND_REQUEST_DELAY: Duration = Duration::from_secs(2);
+#[cfg(all(not(test), feature = "test-helpers"))] // integration tests
+pub(crate) const INBOUND_REQUEST_DELAY: Duration = Duration::ZERO;
+
+/// How long a request for an object that is proven to exist may go unanswered
+/// before the object is requested from the next announcer as well.
+pub(crate) const HEDGE_DELAY: Duration = Duration::from_secs(2);
+
+/// How many peers an object that is proven to exist is requested from at a
+/// time, at most.
+const MAX_HEDGED_REQUESTS: usize = 2;
 
 /// How many requests may be in flight to one peer at a time. Further objects
 /// the peer announced wait until earlier requests are answered or go stale.
@@ -67,40 +86,80 @@ pub(crate) struct Announcer {
 
     /// Whether the peer initiated the connection to the node.
     pub(crate) inbound: bool,
+
+    /// Whether the announcement proved that the object exists, so that
+    /// requesting it is worthwhile without waiting for a preferred announcer.
+    pub(crate) verified: bool,
+}
+
+/// An announcement of an object by a peer that has not been asked for it.
+#[derive(Debug, Clone, Copy)]
+struct Announcement {
+    announcer: Announcer,
+
+    /// When the object was announced.
+    at: SystemTime,
+}
+
+impl Announcement {
+    /// Whether the announcer may be asked for the object at `now`. Unverified
+    /// announcements from inbound connections wait out
+    /// [`INBOUND_REQUEST_DELAY`].
+    fn is_due(&self, now: SystemTime) -> bool {
+        !self.announcer.inbound
+            || self.announcer.verified
+            || now
+                .duration_since(self.at)
+                .is_ok_and(|elapsed| elapsed >= INBOUND_REQUEST_DELAY)
+    }
 }
 
 #[derive(Debug, Clone)]
 struct PendingRequest {
-    /// The peer the object was last requested from, and when. `None` if the
-    /// peer disconnects without responding with the object, or if the object
-    /// has not been requested yet.
-    in_flight: Option<(PeerId, SystemTime)>,
+    /// The peers the object has been requested from and that have not
+    /// answered, and when each was asked. Oldest request first.
+    in_flight: Vec<(PeerId, SystemTime)>,
 
     /// Peers that announced the object and have not been asked for it, most
     /// preferred first.
-    announcers: VecDeque<Announcer>,
+    announcers: VecDeque<Announcement>,
+
+    /// Whether some announcement proved that the object exists.
+    verified: bool,
 }
 
 impl PendingRequest {
-    /// Whether a request is expected to not be delivered on by already sent
-    /// request.
-    ///
-    /// Returns true if no request is in flight, or one has not been delivered
-    /// on within the timeout.
+    /// Whether no request is in flight that is still expected to be answered.
     fn is_stale(&self, now: SystemTime, timeout: Duration) -> bool {
-        self.in_flight.is_none_or(|(_, since)| {
-            now.duration_since(since)
-                .is_ok_and(|elapsed| elapsed >= timeout)
-        })
+        self.in_flight
+            .iter()
+            .all(|(_, since)| Self::has_elapsed(now, *since, timeout))
+    }
+
+    /// Whether a verified object should be requested from one more peer, since
+    /// the oldest request in flight has gone unanswered for [`HEDGE_DELAY`].
+    fn is_hedgeable(&self, now: SystemTime) -> bool {
+        self.verified
+            && self.in_flight.len() < MAX_HEDGED_REQUESTS
+            && self
+                .in_flight
+                .first()
+                .is_some_and(|(_, since)| Self::has_elapsed(now, *since, HEDGE_DELAY))
+    }
+
+    fn has_elapsed(now: SystemTime, since: SystemTime, duration: Duration) -> bool {
+        now.duration_since(since)
+            .is_ok_and(|elapsed| elapsed >= duration)
     }
 
     fn involves(&self, peer: PeerId) -> bool {
         self.in_flight
-            .is_some_and(|(in_flight, _)| in_flight == peer)
+            .iter()
+            .any(|(in_flight, _)| *in_flight == peer)
             || self
                 .announcers
                 .iter()
-                .any(|announcer| announcer.peer == peer)
+                .any(|announcement| announcement.announcer.peer == peer)
     }
 }
 
@@ -121,6 +180,16 @@ struct PeerLoad {
 /// other reason. Later announcers are remembered as fallbacks and take over,
 /// one at a time, if the request is not answered within
 /// the object's [request timeout](AnnouncedObject::request_timeout).
+///
+/// Peers on outbound connections are preferred over peers on inbound
+/// connections. An object announced only by inbound peers is requested after
+/// [`INBOUND_REQUEST_DELAY`], and an outbound peer announcing it meanwhile is
+/// asked right away instead. Announcements that prove the object exists are
+/// requested right away regardless.
+///
+/// An object that is proven to exist is worth a duplicate download: if the
+/// peer asked for it has not answered within [`HEDGE_DELAY`], the next
+/// announcer is asked too, up to [`MAX_HEDGED_REQUESTS`] peers at a time.
 ///
 /// Per peer, at most [`MAX_IN_FLIGHT_PER_PEER`] requests are in flight and at
 /// most [`MAX_PENDING_PER_PEER`] objects are tracked, so that no peer can
@@ -163,8 +232,9 @@ impl PendingRequests {
         }
 
         let pending = requests.entry(object).or_insert_with(|| PendingRequest {
-            in_flight: None,
+            in_flight: vec![],
             announcers: VecDeque::new(),
+            verified: false,
         });
         if pending.involves(peer) {
             // Don't request or re-record on repeated announcements
@@ -172,6 +242,7 @@ impl PendingRequests {
         }
 
         loads.entry(peer).or_default().pending += 1;
+        pending.verified |= announcer.verified;
         let position = if announcer.inbound {
             // Goes to the back of the queue
             pending.announcers.len()
@@ -180,19 +251,25 @@ impl PendingRequests {
             pending
                 .announcers
                 .iter()
-                .position(|queued| queued.inbound)
+                .position(|queued| queued.announcer.inbound)
                 .unwrap_or(pending.announcers.len())
         };
-        pending.announcers.insert(position, announcer);
+        pending
+            .announcers
+            .insert(position, Announcement { announcer, at: now });
 
-        Self::request_now(pending, loads, stalled, peer, now, object.request_timeout())
+        let timeout = object.request_timeout();
+        Self::forget_stale(pending, loads, stalled, now, timeout);
+        Self::request_now(pending, loads, peer, now, timeout)
     }
 
     /// Every object that `peer` should request now: those it is the most
-    /// preferred announcer of, and that are not in flight to a peer that is
-    /// still expected to deliver, up to capacity.
+    /// preferred announcer of, that are not in flight to a peer that is
+    /// still expected to deliver or are worth a duplicate request, and that it
+    /// is not too early to request, up to capacity.
     ///
-    /// Stale requests without remaining announcers are forgotten.
+    /// Requests that went stale are counted against the peer they were sent
+    /// to. Stale objects without remaining announcers are forgotten.
     pub(crate) fn due_requests(&mut self, peer: PeerId, now: SystemTime) -> Vec<AnnouncedObject> {
         let Self {
             requests,
@@ -202,15 +279,12 @@ impl PendingRequests {
         let mut due = vec![];
         requests.retain(|object, pending| {
             let timeout = object.request_timeout();
-            if pending.is_stale(now, timeout) && pending.announcers.is_empty() {
-                if let Some((stale_peer, _)) = pending.in_flight {
-                    Self::release_in_flight(loads, stale_peer);
-                    *stalled.entry(stale_peer).or_default() += 1;
-                }
+            Self::forget_stale(pending, loads, stalled, now, timeout);
+            if pending.in_flight.is_empty() && pending.announcers.is_empty() {
                 return false;
             }
 
-            if Self::request_now(pending, loads, stalled, peer, now, timeout) {
+            if Self::request_now(pending, loads, peer, now, timeout) {
                 due.push(*object);
             }
             true
@@ -231,11 +305,11 @@ impl PendingRequests {
             return;
         };
 
-        if let Some((in_flight, _)) = pending.in_flight {
+        for (in_flight, _) in pending.in_flight {
             Self::release_in_flight(&mut self.loads, in_flight);
         }
-        for announcer in pending.announcers {
-            Self::release_pending(&mut self.loads, announcer.peer);
+        for announcement in pending.announcers {
+            Self::release_pending(&mut self.loads, announcement.announcer.peer);
         }
     }
 
@@ -247,37 +321,52 @@ impl PendingRequests {
         self.requests.retain(|_, pending| {
             pending
                 .announcers
-                .retain(|announcer| announcer.peer != peer);
-            if pending
+                .retain(|announcement| announcement.announcer.peer != peer);
+            pending
                 .in_flight
-                .is_some_and(|(requested_from, _)| requested_from == peer)
-            {
-                pending.in_flight = None;
-            }
-            pending.in_flight.is_some() || !pending.announcers.is_empty()
+                .retain(|(requested_from, _)| *requested_from != peer);
+            !pending.in_flight.is_empty() || !pending.announcers.is_empty()
         });
     }
 
-    /// Return whether the peer is the most preferred announcer, whether it
-    /// should request the object now. Marks the request for an object as in
-    /// flight to this peer if that's the case.
+    /// Drop the requests in flight that have not been answered within the
+    /// timeout, and count each against the peer it was sent to.
+    fn forget_stale(
+        pending: &mut PendingRequest,
+        loads: &mut HashMap<PeerId, PeerLoad>,
+        stalled: &mut HashMap<PeerId, usize>,
+        now: SystemTime,
+        timeout: Duration,
+    ) {
+        pending.in_flight.retain(|(stale_peer, since)| {
+            if !PendingRequest::has_elapsed(now, *since, timeout) {
+                return true;
+            }
+            Self::release_in_flight(loads, *stale_peer);
+            *stalled.entry(*stale_peer).or_default() += 1;
+            false
+        });
+    }
+
+    /// Return whether the peer is the most preferred announcer and its
+    /// announcement is due, whether it should request the object now. Marks
+    /// the request for an object as in flight to this peer if that's the case.
     ///
     /// Returns false otherwise.
     fn request_now(
         pending: &mut PendingRequest,
         loads: &mut HashMap<PeerId, PeerLoad>,
-        stalled: &mut HashMap<PeerId, usize>,
         peer: PeerId,
         now: SystemTime,
         timeout: Duration,
     ) -> bool {
-        if !pending.is_stale(now, timeout) {
+        if !pending.is_stale(now, timeout) && !pending.is_hedgeable(now) {
             return false;
         }
         let Some(next) = pending.announcers.front() else {
             return false;
         };
-        if next.peer != peer {
+        if next.announcer.peer != peer || !next.is_due(now) {
             return false;
         }
         if loads
@@ -287,12 +376,8 @@ impl PendingRequests {
             return false;
         }
 
-        if let Some((stale_peer, _)) = pending.in_flight.take() {
-            Self::release_in_flight(loads, stale_peer);
-            *stalled.entry(stale_peer).or_default() += 1;
-        }
         pending.announcers.pop_front();
-        pending.in_flight = Some((peer, now));
+        pending.in_flight.push((peer, now));
         loads.entry(peer).or_default().in_flight += 1;
 
         true
@@ -333,6 +418,7 @@ mod tests {
         Announcer {
             peer: PeerId::random(),
             inbound: false,
+            verified: false,
         }
     }
 
@@ -340,6 +426,7 @@ mod tests {
         Announcer {
             peer: PeerId::random(),
             inbound: true,
+            verified: false,
         }
     }
 
@@ -478,6 +565,137 @@ mod tests {
         let later = then + block.request_timeout();
         assert!(pending.due_requests(bob.peer, later).is_empty());
         assert_eq!(vec![block], pending.due_requests(carol.peer, later));
+    }
+
+    #[test]
+    fn inbound_announcer_is_asked_after_the_delay() {
+        let mut pending = PendingRequests::default();
+        let alice = inbound();
+        let block = block();
+        let then = SystemTime::now();
+
+        assert!(!pending.record_announcement(block, alice, then));
+        let soon = then + INBOUND_REQUEST_DELAY / 2;
+        assert!(pending.due_requests(alice.peer, soon).is_empty());
+        assert!(!pending.record_announcement(block, alice, soon));
+
+        let later = then + INBOUND_REQUEST_DELAY;
+        assert_eq!(vec![block], pending.due_requests(alice.peer, later));
+        assert!(pending.due_requests(alice.peer, later).is_empty());
+        assert_eq!(0, pending.take_stalls(alice.peer));
+    }
+
+    #[test]
+    fn verified_announcement_from_inbound_peer_is_requested_at_once() {
+        let mut pending = PendingRequests::default();
+        let alice = Announcer {
+            verified: true,
+            ..inbound()
+        };
+        let now = SystemTime::now();
+
+        assert!(pending.record_announcement(block(), alice, now));
+    }
+
+    fn verified() -> Announcer {
+        Announcer {
+            verified: true,
+            ..outbound()
+        }
+    }
+
+    #[test]
+    fn verified_object_is_requested_from_a_second_peer_after_the_hedge_delay() {
+        let mut pending = PendingRequests::default();
+        let (alice, bob, carol) = (verified(), outbound(), outbound());
+        let block = block();
+        let then = SystemTime::now();
+
+        assert!(pending.record_announcement(block, alice, then));
+        assert!(!pending.record_announcement(block, bob, then));
+        assert!(!pending.record_announcement(block, carol, then));
+
+        let soon = then + HEDGE_DELAY / 2;
+        assert!(pending.due_requests(bob.peer, soon).is_empty());
+
+        // Bob is asked too while alice's request is still in flight. Carol
+        // is not, since two requests are in flight.
+        let later = then + HEDGE_DELAY;
+        assert_eq!(vec![block], pending.due_requests(bob.peer, later));
+        assert_eq!(1, pending.loads[&alice.peer].in_flight);
+        assert!(pending
+            .due_requests(carol.peer, later + HEDGE_DELAY)
+            .is_empty());
+
+        // Whoever delivers, nobody stalled.
+        pending.resolve(&block);
+        assert!(pending.loads.is_empty());
+        assert_eq!(0, pending.take_stalls(alice.peer));
+        assert_eq!(0, pending.take_stalls(bob.peer));
+    }
+
+    #[test]
+    fn unverified_object_is_not_hedged() {
+        let mut pending = PendingRequests::default();
+        let (alice, bob) = (outbound(), outbound());
+        let block = block();
+        let then = SystemTime::now();
+
+        assert!(pending.record_announcement(block, alice, then));
+        assert!(!pending.record_announcement(block, bob, then));
+        assert!(pending
+            .due_requests(bob.peer, then + HEDGE_DELAY)
+            .is_empty());
+    }
+
+    #[test]
+    fn verified_announcement_hedges_an_unanswered_request() {
+        let mut pending = PendingRequests::default();
+        let (alice, bob) = (outbound(), verified());
+        let block = block();
+        let then = SystemTime::now();
+
+        assert!(pending.record_announcement(block, alice, then));
+        assert!(pending.record_announcement(block, bob, then + HEDGE_DELAY));
+    }
+
+    #[test]
+    fn hedged_requests_that_go_stale_count_against_both_peers() {
+        let mut pending = PendingRequests::default();
+        let (alice, bob) = (verified(), outbound());
+        let block = block();
+        let then = SystemTime::now();
+
+        assert!(pending.record_announcement(block, alice, then));
+        assert!(!pending.record_announcement(block, bob, then));
+        assert_eq!(
+            vec![block],
+            pending.due_requests(bob.peer, then + HEDGE_DELAY)
+        );
+
+        let end = then + HEDGE_DELAY + BLOCK_REQUEST_TIMEOUT;
+        assert!(pending.due_requests(alice.peer, end).is_empty());
+        assert!(pending.requests.is_empty());
+        assert_eq!(1, pending.take_stalls(alice.peer));
+        assert_eq!(1, pending.take_stalls(bob.peer));
+    }
+
+    #[test]
+    fn outbound_announcer_preempts_delayed_inbound_one() {
+        let mut pending = PendingRequests::default();
+        let (alice, bob) = (inbound(), outbound());
+        let block = block();
+        let then = SystemTime::now();
+
+        assert!(!pending.record_announcement(block, alice, then));
+        let soon = then + INBOUND_REQUEST_DELAY / 2;
+        assert!(pending.record_announcement(block, bob, soon));
+
+        // Alice is the fallback now, and waits for bob's request to go stale.
+        let later = then + INBOUND_REQUEST_DELAY;
+        assert!(pending.due_requests(alice.peer, later).is_empty());
+        let latest = soon + block.request_timeout();
+        assert_eq!(vec![block], pending.due_requests(alice.peer, latest));
     }
 
     #[test]

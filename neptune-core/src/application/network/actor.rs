@@ -37,6 +37,7 @@ use crate::application::network::channel::NetworkEvent;
 use crate::application::network::config::NetworkConfig;
 use crate::application::network::gateway::GatewayEvent;
 use crate::application::network::gateway::StreamGateway;
+use crate::application::network::handshake::WireEncoding;
 use crate::application::network::observed_ips::ip_of;
 use crate::application::network::observed_ips::ObservedIps;
 use crate::application::network::overview::NetworkOverview;
@@ -383,6 +384,12 @@ impl NetworkActor {
 
         // well above the peer limit, since it only matters under a flood.
         let max_pending_incoming = u32::try_from(max_num_peers * 2 + 4).unwrap_or(u32::MAX);
+
+        // Physical connections are bounded too, since a peer is only counter
+        // once in `active_connections` however many connections it holds.
+        // A peer legitimately has a relayed and a direct connection while a
+        // hole punch completes, so at least two per peer should be accepted.
+        let max_established_per_peer = 3;
         let source_limits = config.source_limits;
 
         // Configure autoNAT
@@ -426,6 +433,14 @@ impl NetworkActor {
             ..Default::default()
         };
 
+        let max_established_incoming = if relay_server_enabled {
+            let max_reservations =
+                u32::try_from(relay_server_config.max_reservations).unwrap_or(u32::MAX);
+            max_pending_incoming.saturating_add(max_reservations)
+        } else {
+            max_pending_incoming
+        };
+
         // Configure Kademlia
         let kad_config = libp2p::kad::Config::new(Self::kademlia_protocol(network));
 
@@ -465,7 +480,9 @@ impl NetworkActor {
                 NetworkStack {
                     connection_limits: libp2p::connection_limits::Behaviour::new(
                         libp2p::connection_limits::ConnectionLimits::default()
-                            .with_max_pending_incoming(Some(max_pending_incoming)),
+                            .with_max_pending_incoming(Some(max_pending_incoming))
+                            .with_max_established_incoming(Some(max_established_incoming))
+                            .with_max_established_per_peer(Some(max_established_per_peer)),
                     ),
                     source_limits: SourceLimits::new(source_limits),
                     ping: libp2p::ping::Behaviour::new(ping_config),
@@ -483,7 +500,9 @@ impl NetworkActor {
                     ),
                 }
             })?
-            .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(30)))
+            // A connection without a stream to the peer loop is closed after
+            // this long.
+            .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(120)))
             .build();
 
         for external_address in config.external_addresses() {
@@ -1233,7 +1252,7 @@ impl NetworkActor {
                     return;
                 }
 
-                // If the sets of supported subprotocols differ, log a warning
+                // If the sets of supported subprotocols differ, log a debug
                 // message.
                 if let Some(local_protocols) = &self.active_protocols {
                     let remote_protocols: HashSet<_> = info.protocols.iter().cloned().collect();
@@ -1243,7 +1262,7 @@ impl NetworkActor {
                         remote_protocols.difference(local_protocols).collect();
 
                     if !missing_in_remote.is_empty() || !extra_in_remote.is_empty() {
-                        tracing::warn!(
+                        tracing::debug!(
                             "Protocol mismatch with peer {peer_id}. Missing: [{}], Extra: [{}]",
                             missing_in_remote.iter().join(", "),
                             extra_in_remote.iter().join(", "),
@@ -1596,6 +1615,7 @@ impl NetworkActor {
         let GatewayEvent::HandshakeReceived {
             peer_id,
             remote_handshake,
+            encoding,
             stream,
         } = event;
 
@@ -1632,6 +1652,7 @@ impl NetworkActor {
                 .cloned()
                 .unwrap_or_else(|| Multiaddr::from(Ipv4Addr::new(127, 0, 0, 1))),
             remote_handshake,
+            encoding,
             stream,
             from_main_rx,
         ) {
@@ -2271,6 +2292,7 @@ impl NetworkActor {
         peer_id: PeerId,
         peer_address: Multiaddr,
         remote_handshake: HandshakeData,
+        encoding: WireEncoding,
         raw_stream: libp2p::Stream,
         from_main_rx: tokio::sync::broadcast::Receiver<MainToPeerTask>,
     ) -> Option<JoinHandle<()>> {
@@ -2294,7 +2316,7 @@ impl NetworkActor {
             self.swarm.behaviour_mut().kademlia.bootstrap().ok();
         }
 
-        tracing::debug!("Spawning peer loop from libp2p network actor");
+        tracing::info!(peer = %peer_id, ?encoding, "Spawning peer loop from libp2p network actor");
 
         // Create immutable (across the lifetime of the connection) peer state.
         // This variable needs to be mutable because of efficient pointer reuse
@@ -2308,7 +2330,7 @@ impl NetworkActor {
             rand::rng().random_bool(0.5f64),
         );
 
-        let peer_stream = bridge_libp2p_stream(raw_stream);
+        let peer_stream = bridge_libp2p_stream(raw_stream, encoding);
 
         let upgraded = self.upgraded_peers.clone();
         Some(tokio::spawn(async move {
@@ -2909,6 +2931,31 @@ mod tests {
 
         dialer.task.abort();
         reserved.task.abort();
+    }
+
+    /// Two nodes of this version agree on bincode for their peer loops.
+    #[tokio::test]
+    #[tracing_test::traced_test]
+    async fn current_nodes_run_their_peer_loops_over_bincode() {
+        let (dialer_keypair, listener_keypair) = ordered_keypairs();
+        let listener_address = free_localhost_tcp_address();
+        let mut listener =
+            TestNode::start(listener_keypair, vec![listener_address.clone()], false).await;
+        listener
+            .command(NetworkActorCommand::Listen(listener_address.clone()))
+            .await;
+
+        let mut dialer = TestNode::start(dialer_keypair, vec![], false).await;
+        dialer.dial_until_connected(listener_address, 1).await;
+        dialer.wait_for_peer_loops(1).await;
+        listener.wait_for_peer_loops(1).await;
+
+        assert!(logs_contain("Spawning peer loop"));
+        assert!(logs_contain("encoding=Bincode"));
+        assert!(!logs_contain("encoding=Json"));
+
+        dialer.task.abort();
+        listener.task.abort();
     }
 
     /// Without a direct address to punch towards, the connection stays

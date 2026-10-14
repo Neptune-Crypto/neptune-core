@@ -4,6 +4,7 @@ pub(crate) mod ban;
 pub(crate) mod bridge;
 pub(crate) mod channel;
 pub(crate) mod config;
+pub(crate) mod frame_codec;
 pub(crate) mod gateway;
 pub(crate) mod handshake;
 pub(crate) mod observed_ips;
