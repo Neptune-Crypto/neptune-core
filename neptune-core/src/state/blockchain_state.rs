@@ -106,6 +106,36 @@ impl BlockchainState {
         self.light_state().tip()
     }
 
+    /// Return the mutator set after the specified block has been applied.
+    pub async fn mutator_set_after_by_block_hash(
+        &self,
+        block_hash: Digest,
+    ) -> Option<MutatorSetAccumulator> {
+        // First look in light state.
+        if let Some(msa) = self
+            .light_state()
+            .recent_mutator_sets()
+            .mutator_set_by_block_digest(block_hash)
+        {
+            return Some(msa);
+        }
+
+        // Then look in archival state, if one such is maintained
+        if !self.is_archival_node() {
+            return None;
+        }
+
+        self.archival_state()
+            .get_block(block_hash)
+            .await
+            .expect("Reading from archival state must work")
+            .map(|block| {
+                block
+                    .mutator_set_accumulator_after()
+                    .expect("Stored block must have valid MS after")
+            })
+    }
+
     /// The reveal of the inactive SWBF that a block on this proposal needs
     /// from this guesser, read from the archival state synced to the tip.
     /// None if the proposal is not on the tip, or the rules require none.
