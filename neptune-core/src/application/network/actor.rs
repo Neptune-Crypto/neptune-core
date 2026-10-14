@@ -1644,13 +1644,16 @@ impl NetworkActor {
         }
 
         // Spawn the blockchain peer loop with the hijacked stream.
+        // Prefer a direct address: a relayed one names the relay.
+        let peer_address = address
+            .values()
+            .find(|address| Self::is_direct(address))
+            .or_else(|| address.values().next())
+            .cloned()
+            .unwrap_or_else(|| Multiaddr::from(Ipv4Addr::new(127, 0, 0, 1)));
         if let Some(loop_handle) = self.spawn_peer_loop(
             peer_id,
-            address
-                .values()
-                .next()
-                .cloned()
-                .unwrap_or_else(|| Multiaddr::from(Ipv4Addr::new(127, 0, 0, 1))),
+            peer_address,
             remote_handshake,
             encoding,
             stream,

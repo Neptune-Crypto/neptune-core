@@ -938,13 +938,9 @@ impl Args {
             return Ok(());
         }
 
-        let ip_address = address
-            .iter()
-            .find_map(|proto| match proto {
-                Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
-                Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
-                _ => None,
-            })
+        // A relayed address is that of the relay. Only use attributable IPs
+        // here.
+        let ip_address = crate::application::network::observed_ips::attributable_ip(address)
             .ok_or(BlockProposalRejectError::NotWhiteListed)?;
 
         let ip_address = match ip_address {
@@ -1195,6 +1191,35 @@ mod tests {
 
     use super::*;
     use crate::application::config::parser::multiaddr::parse_to_multiaddr;
+
+    #[test]
+    fn whitelisted_composer_is_matched_by_its_own_ip_only() {
+        let composer: IpAddr = "8.8.8.8".parse().unwrap();
+        let args = Args {
+            whitelisted_composers: vec![composer],
+            ..Default::default()
+        };
+        let accepts = |address: &str| {
+            args.accept_block_proposal_from(&address.parse::<Multiaddr>().unwrap())
+                .is_ok()
+        };
+
+        assert!(accepts("/ip4/8.8.8.8/tcp/9798"));
+        assert!(accepts("/ip6/::ffff:8.8.8.8/tcp/9798"));
+        assert!(!accepts("/ip4/8.8.4.4/tcp/9798"));
+        assert!(!accepts("/dns4/example.com/tcp/9798"));
+
+        // Relayed through the composer, or the composer relayed: the address
+        // names the relay, so neither is the composer.
+        let relayed_through_composer = "/ip4/8.8.8.8/tcp/9798/p2p/\
+            12D3KooWEyoppNCUx8Yx66oV9fJnriXwCcXwDDFYhYMzzJB8MVbz/p2p-circuit/p2p/\
+            12D3KooWPjceQrSwdWXPyLLeABRXmuqt69Rg3sBYbU1Nft9HyQ6X";
+        assert!(!accepts(relayed_through_composer));
+        let composer_relayed = "/ip4/8.8.4.4/tcp/9798/p2p/\
+            12D3KooWEyoppNCUx8Yx66oV9fJnriXwCcXwDDFYhYMzzJB8MVbz/p2p-circuit/p2p/\
+            12D3KooWPjceQrSwdWXPyLLeABRXmuqt69Rg3sBYbU1Nft9HyQ6X";
+        assert!(!accepts(composer_relayed));
+    }
 
     // extra methods for tests.
     impl Args {
