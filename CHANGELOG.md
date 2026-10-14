@@ -1,5 +1,51 @@
 Note: (!) indicates a breaking change.
 
+## [0.19.1](https://github.com/Neptune-Crypto/neptune-core/compare/v0.19.0..v0.19.1) - 2026-10-14
+
+### ✨ Features
+
+- *(network)* Prefer outbound peers for object requests ([85657fc0](https://github.com/Neptune-Crypto/neptune-core/commit/85657fc0))
+- *(network)* Notify of new blocks with proof-of-work witness ([fd6f352a](https://github.com/Neptune-Crypto/neptune-core/commit/fd6f352a))
+- *(network)* Hedge requests for verified blocks ([5afd2b72](https://github.com/Neptune-Crypto/neptune-core/commit/5afd2b72))
+- *(p2p)* Serve tip with parent mutator set acc ([12efc252](https://github.com/Neptune-Crypto/neptune-core/commit/12efc252))
+- *(p2p)* Prefer bincode over JSON ([eff2341c](https://github.com/Neptune-Crypto/neptune-core/commit/eff2341c))
+- *(network)* Add --blocks-only CLI flag ([f9793eb3](https://github.com/Neptune-Crypto/neptune-core/commit/f9793eb3))
+
+### 🐛 Bug Fixes
+
+- *(network)* Leave room for relay reservations in the connection cap ([8491e902](https://github.com/Neptune-Crypto/neptune-core/commit/8491e902))
+- *(network)* Let un-upgraded connections disconnect after timeout ([a4868dc2](https://github.com/Neptune-Crypto/neptune-core/commit/a4868dc2))
+- *(network)* Don't accept block proposals if relay is whitelisted ([ddddc33a](https://github.com/Neptune-Crypto/neptune-core/commit/ddddc33a))
+
+### 🔒️ Security
+
+- *(p2p)* Refuse oversized proof collections ([757578df](https://github.com/Neptune-Crypto/neptune-core/commit/757578df))
+- *(p2p)* Bound frame length per kind of peer message ([5c51e5d5](https://github.com/Neptune-Crypto/neptune-core/commit/5c51e5d5))
+- Bound the lists in kernels and chunk dictionaries on the wire ([aed51d77](https://github.com/Neptune-Crypto/neptune-core/commit/aed51d77))
+- *(p2p)* Sanction peers that send oversized frames ([82614cbd](https://github.com/Neptune-Crypto/neptune-core/commit/82614cbd))
+- Refuse kernel inputs with too many chunks ([63533acc](https://github.com/Neptune-Crypto/neptune-core/commit/63533acc))
+- *(p2p)* Recheck the per-IP cap when inserting into the peer map ([70ec72c7](https://github.com/Neptune-Crypto/neptune-core/commit/70ec72c7))
+- *(network)* Bound physical libp2p connections ([495b4c38](https://github.com/Neptune-Crypto/neptune-core/commit/495b4c38))
+
+### ♻️ Refactor
+
+- *(peer_loop)* Allow 60 seconds for txs to arrive ([c9e4c366](https://github.com/Neptune-Crypto/neptune-core/commit/c9e4c366))
+- *(p2p)* Lower max peer message size to 300 MB ([14a32023](https://github.com/Neptune-Crypto/neptune-core/commit/14a32023))
+
+### ✅ Testing
+
+- Avoid testing a tolerance of 1 ([3e60e129](https://github.com/Neptune-Crypto/neptune-core/commit/3e60e129))
+
+### 🪵 Log
+
+- *(network)* Log protocol mismatch with debug, not warn ([1ade62f5](https://github.com/Neptune-Crypto/neptune-core/commit/1ade62f5))
+- *(sync_loop)* Make sync loop less noisy ([49b6956e](https://github.com/Neptune-Crypto/neptune-core/commit/49b6956e))
+- Don't warn when same block is attempted to be stored twice ([1ba8069f](https://github.com/Neptune-Crypto/neptune-core/commit/1ba8069f))
+
+### 🪢 Merge
+
+- Merge([#981](https://github.com/Neptune-Crypto/neptune-core/issues/981)): Neptune-Crypto/thv/networking ([ed89a566](https://github.com/Neptune-Crypto/neptune-core/commit/ed89a566))
+
 ## [0.19.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.18.0..v0.19.0) - 2026-09-30
 
 ### ✨ Features
