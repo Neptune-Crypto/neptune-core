@@ -479,7 +479,7 @@ impl Mempool {
     /// The returned transaction is guaranteed to:
     /// 1. Not conflict with the input transaction
     /// 2. Be synced to the same mutator set
-    /// 3. Pay at least the specified fee
+    /// 3. Pay at least the specified fee, unless this node has an interest in it
     /// 4. Not exceed allowed sizes after being merged with the specified
     /// 5. Not retire within [`MERGE_RETIREMENT_MARGIN`]
     ///
@@ -531,7 +531,8 @@ impl Mempool {
 
             let candidate = &candidate.kernel;
 
-            if candidate.fee < minimum_fee {
+            // An unrelated transaction is only worth the work if it pays a fee.
+            if priority.is_irrelevant() && candidate.fee < minimum_fee {
                 continue;
             }
 
@@ -3231,6 +3232,45 @@ mod tests {
                 merge_partner(&txs[1].kernel).is_some(),
                 "and the same mempool must serve a partner to a transaction that does not retire"
             );
+        }
+
+        #[test]
+        fn unrelated_merge_partner_must_pay_the_minimum_fee() {
+            use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+
+            let network = Network::Main;
+            let genesis_block = Block::genesis(network);
+            let mutator_set_hash = genesis_block
+                .mutator_set_accumulator_after()
+                .unwrap()
+                .hash();
+            let mut mempool = Mempool::new(
+                ByteSize::gb(1),
+                TxProvingCapability::ProofCollection,
+                &genesis_block,
+            );
+
+            // The first transaction is the one seeking a partner, the other
+            // two pay less than the required minimum.
+            let txs = mock_txs_with_announcements(vec![vec![], vec![], vec![]], mutator_set_hash);
+            let merge_partner = |mempool: &Mempool| {
+                mempool.merge_partner(
+                    &txs[0].kernel,
+                    ConsensusRuleSet::default(),
+                    txs[1].kernel.fee + NativeCurrencyAmount::from_nau(1),
+                )
+            };
+
+            mempool.insert(txs[1].to_owned(), UpgradePriority::Irrelevant);
+            assert!(
+                merge_partner(&mempool).is_none(),
+                "an unrelated transaction paying too little is not worth merging"
+            );
+
+            mempool.insert(txs[2].to_owned(), UpgradePriority::Critical);
+            let (partner, _, _) =
+                merge_partner(&mempool).expect("but one this node has an interest in is");
+            assert_eq!(txs[2].kernel.txid(), partner.txid());
         }
 
         /// One single-proof transaction per announcement list, all synced to the

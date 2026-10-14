@@ -54,7 +54,7 @@ use crate::state::GlobalStateLock;
 
 pub(crate) const SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE: usize = 100;
 const MINIMUM_FEE_FOR_FREE_MERGE: NativeCurrencyAmount =
-    NativeCurrencyAmount::from_nau(NativeCurrencyAmount::coin_as_nau() / 200);
+    NativeCurrencyAmount::from_nau(NativeCurrencyAmount::coin_as_nau() / 2000);
 
 /// Enumerates the types of 'proof upgrades' that can be done.
 ///
@@ -443,19 +443,6 @@ impl UpgradeJob {
         }
     }
 
-    /// Return true if this upgrade job performs the expensive "raise" operation
-    /// which is how a single proof is first created.
-    fn performs_raise(&self) -> bool {
-        match self {
-            UpgradeJob::PrimitiveWitnessToSingleProof(_)
-            | UpgradeJob::ProofCollectionToSingleProof(_) => true,
-            UpgradeJob::PrimitiveWitnessToProofCollection(_)
-            | UpgradeJob::Merge { .. }
-            | UpgradeJob::UpdateMutatorSetData(_)
-            | UpgradeJob::Fix { .. } => false,
-        }
-    }
-
     pub(crate) fn upgrade_incentive(&self) -> UpgradeIncentive {
         match self {
             UpgradeJob::PrimitiveWitnessToProofCollection(_) => {
@@ -687,10 +674,10 @@ impl UpgradeJob {
 
                     info!("Successfully handled proof upgrade.");
 
-                    // Did we just perform a "raise" operation? If so, we see if
-                    // the transaction can be merged with anything favorable to
-                    // us.
-                    if upgrade_job.performs_raise() {
+                    // If the proof upgrade resulted in a single proof
+                    // transaction, this node should be capable of performing
+                    // a merge. Do that if it raises to total fee amount.
+                    if let TransactionProof::SingleProof(single_proof_left) = upgraded.proof {
                         let merge_tx = global_state_lock
                             .lock_guard()
                             .await
@@ -706,7 +693,6 @@ impl UpgradeJob {
                             let mut rng: StdRng =
                                 SeedableRng::from_seed(wallet_entropy.shuffle_seed(block_height));
                             let shuffle_seed: [u8; 32] = rng.random();
-                            let single_proof_left = upgraded.proof.into_single_proof();
                             let left_priority: UpgradePriority = upgrade_incentive.into();
                             let new_priority = left_priority + right_priority;
                             let gobbling_fee = NativeCurrencyAmount::zero();
@@ -1784,28 +1770,33 @@ mod tests {
             ..Default::default()
         };
 
-        // Give Bob multiple UTXOs such that at least two transactions can be
-        // created.
+        // Give Bob multiple UTXOs such that at least three transactions can
+        // be created.
         let mut bob =
-            state_with_premine_and_self_mined_blocks(cli, rng.random::<[Digest; 1]>()).await;
+            state_with_premine_and_self_mined_blocks(cli, rng.random::<[Digest; 2]>()).await;
         let (main_to_peer_tx, main_to_peer_rx) =
             broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);
 
-        // Insert a single proof transaction into the mempool, such that the
+        // Insert two single proof transactions into the mempool, such that the
         // later primitive witness -> single proof upgrade handler finds a
-        // single proof transaction in the mempool, that it can merge with.
+        // single proof transaction in the mempool that it can merge with, and
+        // then another one to merge the merged transaction with.
         let tx_fee = NativeCurrencyAmount::coins(2);
-        let first_tx = transaction_from_state(
-            bob.clone(),
-            rng.random(),
-            TxProvingCapability::SingleProof,
-            tx_fee,
-        )
-        .await;
-        bob.lock_guard_mut()
-            .await
-            .mempool_insert(first_tx.clone().into(), UpgradePriority::Critical)
+        let mut single_proof_txs = vec![];
+        for _ in 0..2 {
+            let single_proof_tx = transaction_from_state(
+                bob.clone(),
+                rng.random(),
+                TxProvingCapability::SingleProof,
+                tx_fee,
+            )
             .await;
+            bob.lock_guard_mut()
+                .await
+                .mempool_insert(single_proof_tx.clone().into(), UpgradePriority::Critical)
+                .await;
+            single_proof_txs.push(single_proof_tx);
+        }
 
         let second_tx = transaction_from_state(
             bob.clone(),
@@ -1833,9 +1824,9 @@ mod tests {
         );
 
         assert_eq!(
-            2,
+            3,
             main_to_peer_rx.len(),
-            "Must have received info about exactly two new transactions, one raise, and one merge"
+            "Must have received info about exactly three new transactions, one raise, and two merges"
         );
 
         let mempool_tx = bob
@@ -1849,28 +1840,26 @@ mod tests {
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
         assert!(mempool_tx.is_valid(network, consensus_rule_set).await);
 
-        // Verify that the two transactions got merged
+        // Verify that all three transactions got merged
         let mempool_inputs: HashSet<_> = mempool_tx
             .kernel
             .inputs
             .iter()
             .map(|x| x.absolute_indices)
             .collect();
-        let expected_inputs: HashSet<_> = first_tx
-            .kernel
-            .inputs
+        let expected_inputs: HashSet<_> = single_proof_txs
             .iter()
-            .chain(second_tx.kernel.inputs.iter())
+            .chain([&second_tx])
+            .flat_map(|tx| tx.kernel.inputs.iter())
             .map(|x| x.absolute_indices)
             .collect();
         assert_eq!(expected_inputs, mempool_inputs);
 
         let mempool_outputs: HashSet<_> = mempool_tx.kernel.outputs.iter().collect();
-        let expected_outputs: HashSet<_> = first_tx
-            .kernel
-            .outputs
+        let expected_outputs: HashSet<_> = single_proof_txs
             .iter()
-            .chain(second_tx.kernel.outputs.iter())
+            .chain([&second_tx])
+            .flat_map(|tx| tx.kernel.outputs.iter())
             .collect();
         assert_eq!(expected_outputs, mempool_outputs);
     }
