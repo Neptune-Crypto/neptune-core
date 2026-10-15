@@ -3096,12 +3096,11 @@ mod tests {
 
     #[traced_test]
     #[apply(shared_tokio_runtime)]
-    async fn should_switch_guessing_proposal_iff_sufficient_delta() {
+    async fn should_switch_guessing_proposal_iff_better() {
         let network = Network::Main;
         let cli = cli_args::Args {
             network,
             guess: true,
-            minimum_guesser_improvement_fraction: 0.2f64,
             ..Default::default()
         };
 
@@ -3114,7 +3113,6 @@ mod tests {
 
         let proposal_0_5 = invalid_empty_block1_with_guesser_fraction(network, 0.5).await;
         let proposal_0_55 = invalid_empty_block1_with_guesser_fraction(network, 0.55).await;
-        let proposal_0_61 = invalid_empty_block1_with_guesser_fraction(network, 0.61).await;
 
         // New proposal when none is known: must inform mine loop
         main_loop_handler
@@ -3153,7 +3151,7 @@ mod tests {
             .set_mining_status_to_guessing(&proposal_0_5)
             .await;
 
-        // Too small delta, don't inform mine loop.
+        // Any improvement, must inform mine loop.
         main_loop_handler
             .handle_peer_task_message(
                 PeerTaskToMain::BlockProposal(Box::new(proposal_0_55.clone())),
@@ -3161,10 +3159,12 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(
-            main_to_miner_rx.try_recv().is_err(),
-            "No message may be sent when delta is too small"
-        );
+        let MainToMiner::NewBlockProposal = main_to_miner_rx
+            .try_recv()
+            .expect("Block proposal warrants miner message")
+        else {
+            panic!("Expected new block proposal message bc proposal is better");
+        };
         let BlockProposal::ForeignComposition(best_known_proposal1) = main_loop_handler
             .global_state_lock
             .lock_guard()
@@ -3178,23 +3178,21 @@ mod tests {
         assert_eq!(
             proposal_0_55.pow_mast_paths(),
             best_known_proposal1.pow_mast_paths(),
-            "Best known proposal must be set despite mine loop not informed"
+            "Best known proposal must be set to best-known value"
         );
 
-        // Sufficient delta, must inform mine loop.
+        // Worse proposal, don't inform mine loop.
         main_loop_handler
             .handle_peer_task_message(
-                PeerTaskToMain::BlockProposal(Box::new(proposal_0_61.clone())),
+                PeerTaskToMain::BlockProposal(Box::new(proposal_0_5.clone())),
                 &mut mutable_main_loop_state,
             )
             .await
             .unwrap();
-        let MainToMiner::NewBlockProposal = main_to_miner_rx
-            .try_recv()
-            .expect("Block proposal warrants miner message")
-        else {
-            panic!("Expected new block proposal message bc delta is sufficient");
-        };
+        assert!(
+            main_to_miner_rx.try_recv().is_err(),
+            "No message may be sent for a worse proposal"
+        );
         let BlockProposal::ForeignComposition(best_known_proposal2) = main_loop_handler
             .global_state_lock
             .lock_guard()
@@ -3206,9 +3204,9 @@ mod tests {
             panic!("Block proposal must be known and foreign")
         };
         assert_eq!(
-            proposal_0_61.pow_mast_paths(),
+            proposal_0_55.pow_mast_paths(),
             best_known_proposal2.pow_mast_paths(),
-            "Best known proposal must be set to best-known value"
+            "Best known proposal must be kept"
         );
 
         drop(main_loop_handler);
