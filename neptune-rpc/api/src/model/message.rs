@@ -13,6 +13,7 @@ use crate::model::block::header::*;
 use crate::model::block::transaction_kernel::*;
 use crate::model::block::*;
 use crate::model::common::*;
+use crate::model::mining::RpcPrimitiveWitness;
 use crate::model::mining::template::RpcBlockTemplate;
 use crate::model::wallet::RpcAnnouncementFlag;
 use crate::model::wallet::block::*;
@@ -618,6 +619,16 @@ pub struct SubmitBlockRequest {
 pub struct SubmitBlockResponse {
     pub success: bool,
 }
+
+#[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct SetCoinbaseTxRequest {
+    pub tx: Option<RpcPrimitiveWitness>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetCoinbaseTxResponse {}
 
 #[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]

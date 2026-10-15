@@ -10,7 +10,7 @@ use crate::transaction::transaction_kernel::TransactionKernel;
 use crate::transaction::transaction_kernel::TransactionKernelField;
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct AuthenticateTxkField(pub(crate) TransactionKernelField);
+pub struct AuthenticateTxkField(pub TransactionKernelField);
 
 impl BasicSnippet for AuthenticateTxkField {
     fn parameters(&self) -> Vec<(DataType, String)> {

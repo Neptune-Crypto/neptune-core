@@ -1729,7 +1729,7 @@ pub(crate) mod tests {
 
     /// A link transaction with *no confirmed inputs at all* can be advanced.
     ///
-    /// This is the shape §Governing invariants commits to. An all-thruputs link
+    /// This shape has to be supported. An all-thruputs link
     /// -- one funded entirely by its predecessors -- has no removal records of
     /// its own to re-target, so `advance_branch`'s non-empty-input-set
     /// requirement would reject it outright. It still has to follow the mutator

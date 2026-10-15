@@ -179,6 +179,18 @@ impl ConsensusRuleSet {
         }
     }
 
+    /// Whether a coinbase transaction in the block at height `block_height`
+    /// of `network` may have inputs.
+    ///
+    /// No consensus rule set allows this yet. The answer is true if and only
+    /// if the network is RegTest, because RegTest blocks carry mock proofs,
+    /// so the rule that forbids coinbase inputs never runs there. Once a hard
+    /// fork lifts that rule, its activation height decides the answer on the
+    /// other networks.
+    pub fn allows_coinbase_inputs(network: Network, _block_height: BlockHeight) -> bool {
+        network == Network::RegTest
+    }
+
     pub fn memory_hard_pow(&self) -> bool {
         match self {
             ConsensusRuleSet::Reboot => true,
@@ -568,6 +580,30 @@ pub(crate) mod tests {
         assert!(!ConsensusRuleSet::HardforkBeta.use_parent_difficulty());
         assert!(!ConsensusRuleSet::HardforkGamma.use_parent_difficulty());
         assert!(!ConsensusRuleSet::HardforkDelta.use_parent_difficulty());
+    }
+
+    #[test]
+    fn coinbase_inputs_allowed_on_regtest_only() {
+        let heights = [
+            BlockHeight::genesis(),
+            BLOCK_HEIGHT_HARDFORK_DELTA_TESTNET,
+            BLOCK_HEIGHT_HARDFORK_DELTA_MAIN_NET,
+            BLOCK_HEIGHT_HARDFORK_DELTA_MAIN_NET.next(),
+        ];
+        for height in heights {
+            assert!(ConsensusRuleSet::allows_coinbase_inputs(
+                Network::RegTest,
+                height
+            ));
+            for network in [
+                Network::Main,
+                Network::Testnet(0),
+                Network::Testnet(1),
+                Network::TestnetMock,
+            ] {
+                assert!(!ConsensusRuleSet::allows_coinbase_inputs(network, height));
+            }
+        }
     }
 
     #[test]

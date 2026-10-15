@@ -207,6 +207,9 @@ pub enum RpcMethods {
     #[namespace(Namespace::Mining)]
     SubmitBlock,
 
+    #[namespace(Namespace::Mining)]
+    SetCoinbaseTx,
+
     #[namespace(Namespace::Utxoindex)]
     BlockHeightsByFlags,
 

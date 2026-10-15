@@ -5,6 +5,7 @@ use neptune_consensus::block::validity::block_proof_witness::BlockProofWitness;
 use neptune_consensus::block::Block;
 use neptune_consensus::block::BlockProof;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
 use neptune_consensus::transaction::validity::neptune_proof::Proof;
 use neptune_consensus::transaction::validity::tasm::single_proof::merge_branch::MergeWitness;
 use neptune_consensus::transaction::Transaction;
@@ -55,10 +56,13 @@ impl MockBlockGenerator {
     /// scenes, this method updates the true claims cache, such that the call to
     /// `triton_vm::verify` will be by-passed.
     fn mock_transaction_from_details(transaction_details: &TransactionDetails) -> Transaction {
-        let kernel = transaction_details.primitive_witness().kernel;
+        Self::mock_transaction_from_witness(transaction_details.primitive_witness())
+    }
 
+    /// Like [`Self::mock_transaction_from_details`], from a primitive witness.
+    pub(crate) fn mock_transaction_from_witness(witness: PrimitiveWitness) -> Transaction {
         Transaction {
-            kernel,
+            kernel: witness.kernel,
             proof: TransactionProof::SingleProof(Proof::valid_mock()),
         }
     }
@@ -98,7 +102,7 @@ impl MockBlockGenerator {
         composer_parameters: ComposerParameters,
         timestamp: Timestamp,
         shuffle_seed: [u8; 32],
-        mut selected_mempool_txs: Vec<Transaction>,
+        selected_mempool_txs: Vec<Transaction>,
     ) -> (BlockTransaction, TxOutputList) {
         let (composer_txos, transaction_details) = prepare_coinbase_transaction_stateless(
             predecessor_block,
@@ -108,7 +112,29 @@ impl MockBlockGenerator {
         );
 
         let coinbase_transaction = Self::mock_transaction_from_details(&transaction_details);
+        let block_transaction = Self::mock_block_transaction_from_coinbase_tx(
+            network,
+            predecessor_block,
+            coinbase_transaction,
+            timestamp,
+            shuffle_seed,
+            selected_mempool_txs,
+        );
 
+        (block_transaction, composer_txos)
+    }
+
+    /// Merge `coinbase_transaction` with `selected_mempool_txs`, or with a nop
+    /// if there are none, into a block transaction with a bogus proof but
+    /// such that `verify` passes.
+    fn mock_block_transaction_from_coinbase_tx(
+        network: Network,
+        predecessor_block: &Block,
+        coinbase_transaction: Transaction,
+        timestamp: Timestamp,
+        shuffle_seed: [u8; 32],
+        mut selected_mempool_txs: Vec<Transaction>,
+    ) -> BlockTransaction {
         if selected_mempool_txs.is_empty() {
             // create the nop-tx and merge into the coinbase transaction to set the
             // merge bit to allow the tx to be included in a block.
@@ -136,12 +162,9 @@ impl MockBlockGenerator {
             .into();
         }
 
-        (
-            block_transaction
-                .try_into()
-                .expect("Merged should be done at least once"),
-            composer_txos,
-        )
+        block_transaction
+            .try_into()
+            .expect("Merged should be done at least once")
     }
 
     /// Create a mock block with coinbase going to self.
@@ -186,5 +209,29 @@ impl MockBlockGenerator {
         assert_eq!(new_height, prev_height + 1);
 
         (block, composer_tx_outputs)
+    }
+
+    /// Like [`Self::mock_successor_no_pow`], but with `coinbase_transaction`
+    /// in place of a coinbase transaction built from composer parameters.
+    pub(crate) fn mock_successor_from_coinbase_tx_no_pow(
+        predecessor: Block,
+        coinbase_transaction: Transaction,
+        guesser_address: ReceivingAddress,
+        timestamp: Timestamp,
+        seed: [u8; 32],
+        mempool_tx: Vec<Transaction>,
+        network: Network,
+    ) -> Block {
+        let mut rng = StdRng::from_seed(seed);
+        let block_tx = Self::mock_block_transaction_from_coinbase_tx(
+            network,
+            &predecessor,
+            coinbase_transaction,
+            timestamp,
+            rng.random(),
+            mempool_tx,
+        );
+
+        Self::mock_block_from_tx_without_pow(predecessor, block_tx, guesser_address, network)
     }
 }
