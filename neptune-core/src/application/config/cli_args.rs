@@ -148,6 +148,12 @@ pub struct Args {
     #[clap(long, default_value = "6")]
     pub(crate) max_connection_attempts_per_ip_per_minute: Option<usize>,
 
+    /// Maximum number of blocks to serve to one peer per minute. A block is
+    /// read from disk and is up to 8 megabytes on the wire; a peer requesting
+    /// more is refused and sanctioned. Lower this to protect a slow uplink.
+    #[clap(long, default_value = "1000", value_name = "COUNT")]
+    pub(crate) max_blocks_served_per_minute: u32,
+
     /// Handshake timeout in seconds.
     ///
     /// The timeout used for all messages received and sent during the handshake

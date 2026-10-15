@@ -138,6 +138,9 @@ pub enum NegativePeerSanction {
     /// Peer announced an object, was asked for it, and did not deliver it in
     /// time.
     StalledRequest,
+
+    /// More block requests than the node serves one peer per minute.
+    ExcessiveBlockRequests,
 }
 
 /// The reason for improving a peer's standing
@@ -201,6 +204,7 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::LustrationsWouldMakeCounterNegative => -1,
             NegativePeerSanction::InvalidSyncCoverage => -100,
             NegativePeerSanction::StalledRequest => -1,
+            NegativePeerSanction::ExcessiveBlockRequests => -1,
         }
     }
 }
@@ -1206,6 +1210,7 @@ impl rand::distr::Distribution<NegativePeerSanction> for rand::distr::StandardUn
 
             41 => NegativePeerSanction::InvalidSyncCoverage,
             42 => NegativePeerSanction::StalledRequest,
+            43 => NegativePeerSanction::ExcessiveBlockRequests,
 
             _ => unreachable!(),
         }

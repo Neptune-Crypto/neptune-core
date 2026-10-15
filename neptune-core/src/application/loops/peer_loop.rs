@@ -3,6 +3,7 @@ pub(crate) mod channel;
 use std::cmp;
 use std::marker::Unpin;
 use std::net::SocketAddr;
+use std::time::Duration;
 use std::time::SystemTime;
 
 use anyhow::bail;
@@ -94,6 +95,9 @@ const MAX_PEER_LIST_LENGTH: usize = 10;
 /// A batch response and request must carry at least this many blocks.
 const MINIMUM_BLOCK_BATCH_SIZE: usize = 1;
 
+/// The window over which blocks served to one peer are counted.
+const BLOCK_SERVING_WINDOW: Duration = Duration::from_secs(60);
+
 /// Maximum size in bytes for a single block during fork reconciliation. Blocks
 /// larger than this are rejected to prevent RAM exhaustion attacks.
 ///
@@ -146,6 +150,12 @@ pub struct PeerLoopHandler {
     peer_tx_relay: bool,
 
     rng: StdRng,
+
+    /// Blocks served to this peer in the window starting at
+    /// `blocks_served_since`.
+    blocks_served: u32,
+    blocks_served_since: SystemTime,
+
     #[cfg(test)]
     mock_now: Option<Timestamp>,
 }
@@ -168,6 +178,8 @@ impl PeerLoopHandler {
             inbound_connection,
             peer_tx_relay: peer_handshake_data.relays_transactions(),
             rng: StdRng::from_rng(&mut rand::rng()),
+            blocks_served: 0,
+            blocks_served_since: SystemTime::UNIX_EPOCH,
             #[cfg(test)]
             mock_now: None,
         }
@@ -229,6 +241,27 @@ impl PeerLoopHandler {
     /// [`Self::now`] as a [`SystemTime`].
     fn system_time(&self) -> SystemTime {
         SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(self.now().to_millis())
+    }
+
+    /// Whether `count` more blocks may be served to this peer now. If the limit
+    /// is exceeded, the peer is punished.
+    async fn may_serve_blocks(&mut self, count: u32) -> Result<bool> {
+        let now = self.system_time();
+        if now
+            .duration_since(self.blocks_served_since)
+            .is_ok_and(|elapsed| elapsed >= BLOCK_SERVING_WINDOW)
+        {
+            self.blocks_served_since = now;
+            self.blocks_served = 0;
+        }
+        let budget = self.global_state_lock.cli().max_blocks_served_per_minute;
+        if self.blocks_served + count > budget {
+            self.punish(NegativePeerSanction::ExcessiveBlockRequests)
+                .await?;
+            return Ok(false);
+        }
+        self.blocks_served += count;
+        Ok(true)
     }
 
     /// Request all announced objects whose turn it is to be requested from this
@@ -1484,6 +1517,10 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockRequestByHash(block_digest) => {
+                if !self.may_serve_blocks(1).await? {
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
                 let block = self
                     .global_state_lock
                     .lock_guard()
@@ -1525,6 +1562,10 @@ impl PeerLoopHandler {
             }
             PeerMessage::BlockRequestByHeight(block_height) => {
                 log_slow_scope!(fn_name!() + "::PeerMessage::BlockRequestByHeight");
+
+                if !self.may_serve_blocks(1).await? {
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
 
                 debug!("Got BlockRequestByHeight of height {}", block_height);
 
@@ -1681,6 +1722,15 @@ impl PeerLoopHandler {
                 max_response_len,
                 anchor,
             }) => {
+                // Charged as a full batch; the count is fixed before the lock
+                // is taken.
+                if !self
+                    .may_serve_blocks(STANDARD_BLOCK_BATCH_SIZE as u32)
+                    .await?
+                {
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
                 debug!(
                     "Received BlockRequestBatch from peer {}, max_response_len: {max_response_len}",
                     self.peer_id
@@ -1919,6 +1969,10 @@ impl PeerLoopHandler {
             }
             PeerMessage::ValidatedBlockRequestByHeight(request) => {
                 log_slow_scope!(fn_name!() + "::PeerMessage::ValidatedBlockRequestByHeight");
+
+                if !self.may_serve_blocks(1).await? {
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
 
                 let ValidatedBlockRequestByHeight {
                     height: block_height,
@@ -3316,6 +3370,8 @@ mod tests {
                 peer_handshake_data,
                 inbound_connection,
                 peer_tx_relay: peer_handshake_data.relays_transactions(),
+                blocks_served: 0,
+                blocks_served_since: SystemTime::UNIX_EPOCH,
                 mock_now: Some(mocked_time),
                 rng: StdRng::from_rng(&mut rand::rng()),
             }
@@ -6094,6 +6150,88 @@ mod tests {
             );
 
             Ok(())
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn block_requests_beyond_the_budget_are_punished() {
+            use super::block_proposals::genesis_setup;
+            use super::block_proposals::TestSetup;
+
+            let TestSetup {
+                peer_broadcast_tx,
+                mut peer_loop_handler,
+                to_main_rx: _,
+                from_main_rx,
+                mut peer_state,
+                to_main_tx,
+                genesis_block: _,
+            } = genesis_setup(cli_args::Args::default_with_network(Network::Testnet(42))).await;
+            let block = fake_valid_block_for_tests(
+                &peer_loop_handler.global_state_lock,
+                StdRng::seed_from_u64(5550003).random(),
+            )
+            .await;
+            peer_loop_handler
+                .global_state_lock
+                .set_new_tip(block.clone())
+                .await
+                .unwrap();
+            let now = peer_loop_handler.now();
+            peer_loop_handler.mock_now = Some(now);
+            let latest_punishment = |handler: &PeerLoopHandler| {
+                handler
+                    .global_state_lock
+                    .peers()
+                    .with_connected(|connected| {
+                        connected[&handler.peer_id]
+                            .standing()
+                            .latest_punishment
+                            .map(|(sanction, _)| sanction)
+                    })
+            };
+
+            let request = || Action::Read(PeerMessage::BlockRequestByHash(block.hash()));
+            let served = || {
+                Action::Write(PeerMessage::Block(Box::new(
+                    block.clone().try_into().unwrap(),
+                )))
+            };
+            let mut actions = vec![];
+            let budget = peer_loop_handler
+                .global_state_lock
+                .cli()
+                .max_blocks_served_per_minute;
+            for _ in 0..budget {
+                actions.push(request());
+                actions.push(served());
+            }
+            actions.push(request());
+            actions.push(Action::Read(PeerMessage::Bye));
+            peer_loop_handler
+                .run(
+                    Mock::new(actions),
+                    from_main_rx.resubscribe(),
+                    &mut peer_state,
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                Some(NegativePeerSanction::ExcessiveBlockRequests),
+                latest_punishment(&peer_loop_handler),
+                "request beyond the budget must be punished, not served"
+            );
+
+            // The budget renews with the window.
+            peer_loop_handler.mock_now = Some(now + Timestamp::seconds(60));
+            let mock = Mock::new(vec![request(), served(), Action::Read(PeerMessage::Bye)]);
+            peer_loop_handler
+                .run(mock, from_main_rx, &mut peer_state)
+                .await
+                .unwrap();
+
+            drop(to_main_tx);
+            drop(peer_broadcast_tx);
         }
     }
 
