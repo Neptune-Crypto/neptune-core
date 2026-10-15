@@ -955,6 +955,13 @@ mod tests {
         }
 
         #[test]
+        fn shortest_long_form_length_is_not_a_valid_short_form() {
+            let chunk = Chunk::random_of_length(LONG_LENGTH_FLAG as usize);
+            let short_form = chunk.pack_with_length_encoding(&[LONG_LENGTH_FLAG]);
+            assert!(short_form.try_unpack(true).is_err());
+        }
+
+        #[test]
         fn length_indicator_is_read_verbatim_before_big_chunks() {
             for length in [1, 2047, 2048, 2049, 4095] {
                 let chunk = Chunk::random_of_length(length);
