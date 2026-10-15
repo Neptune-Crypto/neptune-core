@@ -305,7 +305,7 @@ fn new_tx_wins_by_quality(
         ContestTier::Intermediate => {
             conflicts
                 .values()
-                .any(|x| x.contest_tier() == ContestTier::Witness)
+                .all(|x| x.contest_tier() == ContestTier::Witness)
                 || conflicts.values().all(|existing_tx| {
                     existing_tx.contest_tier() == ContestTier::Intermediate
                         && existing_tx.kernel().mutator_set_hash != current_msa_hash
