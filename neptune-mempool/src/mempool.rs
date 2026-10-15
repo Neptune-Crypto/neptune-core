@@ -53,6 +53,7 @@ use neptune_primitives::timestamp::Timestamp;
 /// the set { TransactionA } while the optimal solution is { TransactionB,
 /// TransactionC }.
 use num_rational::BigRational as FeeDensity;
+use num_traits::CheckedSub;
 use num_traits::Zero;
 use priority_queue::DoublePriorityQueue;
 use priority_queue::PriorityQueue;
@@ -97,6 +98,10 @@ pub const MEMPOOL_RETIREMENT_MARGIN: Timestamp = Timestamp::minutes(100);
 pub const MERGE_RETIREMENT_MARGIN: Timestamp = Timestamp::minutes(150);
 
 pub const TRANSACTION_NOTIFICATION_AGE_LIMIT_IN_SECS: u64 = 60 * 60 * 24;
+
+/// What the value of saving one "merge" proof operation is to a composer.
+pub const COST_OF_MERGE: NativeCurrencyAmount =
+    NativeCurrencyAmount::from_nau(NativeCurrencyAmount::coin_as_nau() / 100);
 
 type LookupItem<'a> = (TransactionKernelId, &'a AnyTx);
 
@@ -258,8 +263,30 @@ impl AnyTx {
     }
 }
 
+/// Whether a new transaction should replace the transactions that it conflicts
+/// with, based on the fees that it pays.
+///
+/// This function is intended to match the incentives of the composer who needs
+/// to balance two considerations: maximize fees and minimize proving work.
+///
+/// The new transaction must pay at least what its cheapest conflict paid, never
+/// less than that. And it must pay at least the sum of its conflicts, with a
+/// discount for the reduced proof work that the composer will have to do. In
+/// other words: the composer's work is reduced when transactions are merged, so
+/// the fee of the new transaction is allowed to be less than the sum of its
+/// parts.
+fn outbids(new: NativeCurrencyAmount, conflicts: &HashMap<TransactionKernelId, &AnyTx>) -> bool {
+    let value = |fee: NativeCurrencyAmount| {
+        fee.checked_sub(&COST_OF_MERGE)
+            .unwrap_or(NativeCurrencyAmount::zero())
+    };
+    let existing = conflicts.values().map(|tx| tx.kernel().fee);
+    value(new) >= existing.clone().map(value).sum()
+        && new >= existing.min().unwrap_or(NativeCurrencyAmount::zero())
+}
+
 /// Whether an arrival replaces its conflicts on proof quality alone,
-/// irrespective of fee densities.
+/// irrespective of fees.
 ///
 /// Considers both the proofs proximity to block inclusion and sync status.
 fn new_tx_wins_by_quality(
@@ -1017,18 +1044,9 @@ impl Mempool {
     ///   n events: RemoveTx,AddTx. Tx replaces a list of older txs with lower
     ///             fee.
     ///   1 event:  AddTx. tx does not replace an older one.
-    ///   0 events: tx not added because an older conflicting tx has a higher
-    ///             fee.
+    ///   0 events: tx not added because it is worth less to a composer than
+    ///             the older conflicting txs.
     pub fn insert(&mut self, new_tx: Transaction, priority: UpgradePriority) -> Vec<MempoolEvent> {
-        // If transaction to be inserted conflicts with transactions already in
-        // the mempool, we replace them -- but only if the new transaction has a
-        // higher fee-density than the ones already in mempool, or if it has
-        // a higher proof-quality, meaning that it's in a state more likely to
-        // be picked up by a composer.
-        // Consequently, merged transactions always replace those transactions
-        // that were merged since the merged transaction is *very* likely to
-        // have a higher fee density that the lowest one of the ones that were
-        // merged.
         let conflicts: HashMap<TransactionKernelId, &AnyTx> = self
             .transactions_in_conflict_with(&new_tx.kernel)
             .map(|(txkid, mptx)| (*txkid, &mptx.transaction))
@@ -1084,7 +1102,8 @@ impl Mempool {
             self.tip_mutator_set_hash,
         );
         let new_tx_fee_density = new_tx.fee_density();
-        let min_fee_of_conflicts = conflicts.values().map(|tx| tx.fee_density()).min();
+        let has_conflicts = !conflicts.is_empty();
+        let outbids_conflicts = outbids(new_tx.kernel.fee, &conflicts);
         let conflicts = conflicts
             .into_iter()
             .map(|x| {
@@ -1094,9 +1113,8 @@ impl Mempool {
                 )
             })
             .collect_vec();
-        if let Some(min_fee_of_conflicting_tx) = min_fee_of_conflicts {
-            let better_fee_density = min_fee_of_conflicting_tx < new_tx_fee_density;
-            let should_replace_conflict = new_tx_has_higher_proof_quality || better_fee_density;
+        if has_conflicts {
+            let should_replace_conflict = new_tx_has_higher_proof_quality || outbids_conflicts;
             if should_replace_conflict {
                 for (conflicting_txid, single_proof) in conflicts {
                     let e = self.remove(conflicting_txid).unwrap_or_else(|| {
@@ -1127,11 +1145,9 @@ impl Mempool {
                     events.push(e);
                 }
             } else {
-                // If new transaction has a lower fee density than the one previous seen,
-                // ignore it. Stop execution here.
                 debug!(
-                    "Attempted to insert transaction into mempool but it's \
-                     fee density was eclipsed by another transaction."
+                    "Attempted to insert transaction into mempool but it does \
+                     not outbid the transactions it conflicts with."
                 );
                 return events;
             }
@@ -1270,7 +1286,8 @@ impl Mempool {
                 self.tip_mutator_set_hash,
             );
         let new_link_fee_density = new_link.fee_density();
-        let min_fee_of_conflicts = conflicts.values().map(|tx| tx.fee_density()).min();
+        let has_conflicts = !conflicts.is_empty();
+        let outbids_conflicts = outbids(new_link.kernel.kernel.fee, &conflicts);
         let victims = conflicts.keys().copied().collect_vec();
 
         // The inserted link must inherit at least the highest priority among
@@ -1282,12 +1299,11 @@ impl Mempool {
             .fold(priority, |acc, conflicting| acc.max(conflicting));
 
         let mut events = vec![];
-        if let Some(min_fee_of_conflicting_tx) = min_fee_of_conflicts {
-            let better_fee_density = min_fee_of_conflicting_tx < new_link_fee_density;
-            if !(quality_win || better_fee_density) {
+        if has_conflicts {
+            if !(quality_win || outbids_conflicts) {
                 debug!(
-                    "Attempted to insert link transaction into mempool but it's \
-                     fee density was eclipsed by another transaction."
+                    "Attempted to insert link transaction into mempool but it does \
+                     not outbid the transactions it conflicts with."
                 );
                 return events;
             }
@@ -2120,6 +2136,7 @@ mod tests {
     use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier;
     use neptune_consensus::transaction::transaction_proof::TransactionProofType;
     use neptune_consensus::transaction::validity::proof_collection::ProofCollection;
+    use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use neptune_mutator_set::addition_record::AdditionRecord;
     use neptune_mutator_set::msa_and_records::MsaAndRecords;
     use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
@@ -2128,6 +2145,7 @@ mod tests {
     use neptune_primitives::timestamp::Timestamp;
     use num_bigint::BigInt;
     use num_rational::BigRational as FeeDensity;
+    use num_traits::CheckedSub;
     use num_traits::Zero;
     use proptest::arbitrary::Arbitrary;
     use proptest::strategy::Strategy;
@@ -2139,6 +2157,7 @@ mod tests {
     use tasm_lib::twenty_first::prelude::BFieldCodec;
     use tracing_test::traced_test;
 
+    use crate::mempool::COST_OF_MERGE;
     use crate::mempool::MEMPOOL_RETIREMENT_MARGIN;
     use crate::mempool::MERGE_RETIREMENT_MARGIN;
     use crate::mempool::Mempool;
@@ -2214,6 +2233,93 @@ mod tests {
     }
 
     #[traced_test]
+    #[test]
+    fn replacement_pays_at_least_the_cheapest_conflict() {
+        let genesis_block = Block::genesis(Network::Main);
+        let mut mempool = Mempool::new(
+            ByteSize::gb(1),
+            TxProvingCapability::SingleProof,
+            &genesis_block,
+        );
+        let [tx_a, tx_b] = make_plenty_mock_transaction_supported_by_invalid_single_proofs(2)
+            .try_into()
+            .unwrap();
+        let with_fee = |tx: &Transaction, fee| Transaction {
+            kernel: TransactionKernelModifier::default()
+                .fee(fee)
+                .modify(tx.kernel.clone()),
+            proof: TransactionProof::invalid(),
+        };
+        let below_cost = COST_OF_MERGE
+            .checked_sub(&NativeCurrencyAmount::from_nau(1))
+            .unwrap();
+        mempool.insert(with_fee(&tx_a, below_cost), UpgradePriority::Irrelevant);
+        mempool.insert(with_fee(&tx_b, below_cost), UpgradePriority::Irrelevant);
+        assert_eq!(2, mempool.len());
+
+        let merged_with_fee = |fee| Transaction {
+            kernel: TransactionKernelModifier::default()
+                .inputs([tx_a.kernel.inputs.clone(), tx_b.kernel.inputs.clone()].concat())
+                .fee(fee)
+                .modify(tx_a.kernel.clone()),
+            proof: TransactionProof::invalid(),
+        };
+        let free = merged_with_fee(NativeCurrencyAmount::zero());
+        assert!(mempool.insert(free, UpgradePriority::Irrelevant).is_empty());
+        assert_eq!(2, mempool.len());
+
+        let keeps_the_smaller = merged_with_fee(below_cost);
+        let txid = keeps_the_smaller.txid();
+        mempool.insert(keeps_the_smaller, UpgradePriority::Irrelevant);
+        assert_eq!(1, mempool.len());
+        assert!(mempool.contains(txid));
+    }
+
+    #[test]
+    fn merger_may_gobble_the_cost_of_the_merge_it_saves() {
+        let genesis_block = Block::genesis(Network::Main);
+        let mut mempool = Mempool::new(
+            ByteSize::gb(1),
+            TxProvingCapability::SingleProof,
+            &genesis_block,
+        );
+        let [tx_a, tx_b] = make_plenty_mock_transaction_supported_by_invalid_single_proofs(2)
+            .try_into()
+            .unwrap();
+        mempool.insert(tx_a.clone(), UpgradePriority::Irrelevant);
+        mempool.insert(tx_b.clone(), UpgradePriority::Irrelevant);
+        assert_eq!(2, mempool.len());
+
+        // Spends both transactions' inputs, so it conflicts with both.
+        let merged_with_fee = |fee| Transaction {
+            kernel: TransactionKernelModifier::default()
+                .inputs([tx_a.kernel.inputs.clone(), tx_b.kernel.inputs.clone()].concat())
+                .fee(fee)
+                .modify(tx_a.kernel.clone()),
+            proof: TransactionProof::invalid(),
+        };
+        let summed_fee = tx_a.kernel.fee + tx_b.kernel.fee;
+
+        let fair_fee = summed_fee.checked_sub(&COST_OF_MERGE).unwrap();
+        let greedy = merged_with_fee(
+            fair_fee
+                .checked_sub(&NativeCurrencyAmount::from_nau(1))
+                .unwrap(),
+        );
+        assert!(
+            mempool
+                .insert(greedy, UpgradePriority::Irrelevant)
+                .is_empty()
+        );
+        assert_eq!(2, mempool.len());
+
+        let fair = merged_with_fee(fair_fee);
+        let fair_txid = fair.txid();
+        mempool.insert(fair, UpgradePriority::Irrelevant);
+        assert_eq!(1, mempool.len());
+        assert!(mempool.contains(fair_txid));
+    }
+
     #[test]
     fn failed_upgrade_lets_the_next_upgrade_candidate_through() {
         let network = Network::Main;
@@ -3801,7 +3907,7 @@ mod tests {
         }
 
         #[test]
-        fn cross_pipeline_conflict_is_decided_by_fee_density() {
+        fn cross_pipeline_conflict_is_decided_by_fee() {
             let (mut mempool, tip_msh) = genesis_mempool();
             let [tx, predecessor_base] =
                 make_plenty_mock_transaction_supported_by_invalid_single_proofs(2)
@@ -3983,6 +4089,87 @@ mod tests {
             assert!(!mempool.contains(first.txid()));
             assert!(mempool.contains(more_lavish.txid()));
             assert_eq!(2, mempool.len());
+        }
+
+        #[test]
+        fn link_must_outbid_every_conflict_it_displaces() {
+            let (mut mempool, _) = genesis_mempool();
+            let [tx_v, tx_j, predecessor_base] =
+                make_plenty_mock_transaction_supported_by_invalid_single_proofs(3)
+                    .try_into()
+                    .unwrap();
+            let [thruput_v, thruput_j] = arbitrary_addition_records(2).try_into().unwrap();
+            insert_predecessor_with_outputs(
+                &mut mempool,
+                predecessor_base,
+                vec![thruput_v, thruput_j],
+            );
+            let link = |tx: &Transaction, fee, thruputs| {
+                let kernel = TransactionKernelModifier::default()
+                    .fee(fee)
+                    .modify(tx.kernel.clone());
+                proof_backed_link(kernel, thruputs)
+            };
+            let victim = link(&tx_v, NativeCurrencyAmount::coins(100), vec![thruput_v]);
+            let junk = link(&tx_j, NativeCurrencyAmount::zero(), vec![thruput_j]);
+            mempool.insert_link(victim.clone(), UpgradePriority::Irrelevant);
+            mempool.insert_link(junk.clone(), UpgradePriority::Irrelevant);
+            assert_eq!(3, mempool.len());
+
+            // Conflicts with both, but only outbids the junk.
+            let chain = link(
+                &tx_v,
+                NativeCurrencyAmount::coins(99),
+                vec![thruput_v, thruput_j],
+            );
+            assert!(chain.fee_density() < victim.fee_density());
+            let events = mempool.insert_link(chain, UpgradePriority::Irrelevant);
+            assert!(events.is_empty(), "must not displace the victim");
+            assert!(mempool.contains(victim.txid()));
+            assert!(mempool.contains(junk.txid()));
+        }
+
+        #[test]
+        fn witness_backed_conflict_does_not_waive_the_fee_test() {
+            let (mut mempool, _) = genesis_mempool();
+            // The first mock shares its inputs with the witness-backed link
+            // below; the paying link must not conflict with that one.
+            let [_, tx_p, predecessor_base] =
+                make_plenty_mock_transaction_supported_by_invalid_single_proofs(3)
+                    .try_into()
+                    .unwrap();
+            let [thruput] = arbitrary_addition_records(1).try_into().unwrap();
+            insert_predecessor_with_outputs(&mut mempool, predecessor_base, vec![thruput]);
+            let paying_kernel = TransactionKernelModifier::default()
+                .fee(NativeCurrencyAmount::coins(100))
+                .modify(tx_p.kernel);
+            let paying = proof_backed_link(paying_kernel, vec![thruput]);
+
+            let [tx_w] = make_plenty_mock_transaction_supported_by_primitive_witness(1)
+                .try_into()
+                .unwrap();
+            let TransactionProof::Witness(pw) = tx_w.proof else {
+                panic!("mock transaction must be witness-backed");
+            };
+            let link_witness = LinkPrimitiveWitness::from_primitive_witness(pw, 0);
+            let witness_backed = LinkTx {
+                kernel: link_witness.kernel.clone(),
+                proof: LinkTxProof::Witness(Box::new(link_witness)),
+            };
+            mempool.insert_link(paying.clone(), UpgradePriority::Irrelevant);
+            mempool.insert_link(witness_backed.clone(), UpgradePriority::Critical);
+            assert!(mempool.contains(paying.txid()));
+            assert!(mempool.contains(witness_backed.txid()));
+
+            // Same inputs as the witness-backed link, same thruput as the
+            // paying one.
+            let cheap_kernel = TransactionKernelModifier::default()
+                .fee(NativeCurrencyAmount::coins(1))
+                .modify(witness_backed.kernel.kernel.clone());
+            let cheap = proof_backed_link(cheap_kernel, vec![thruput]);
+            let events = mempool.insert_link(cheap, UpgradePriority::Irrelevant);
+            assert!(events.is_empty(), "outranking one conflict is not enough");
+            assert!(mempool.contains(paying.txid()));
         }
 
         #[test]
