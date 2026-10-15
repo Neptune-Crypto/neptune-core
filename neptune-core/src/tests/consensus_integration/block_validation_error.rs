@@ -361,6 +361,39 @@ async fn block_with_mutator_set_update_integrity_error_fails_2e(
 }
 
 #[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
+async fn block_whose_transaction_names_another_mutator_set_fails_2t(
+    #[strategy(setup())] s: (Block, Timestamp, Randomness<2, 2>),
+    #[strategy(arb())] other_mutator_set_hash: Digest,
+) {
+    let network = Network::Main;
+    let (b_prev, ts, rness) = s;
+    let mut b_new = fake_valid_successor_for_tests(&b_prev, ts, rness, network).await;
+    prop_assume!(other_mutator_set_hash != b_prev.mutator_set_accumulator_after().unwrap().hash());
+
+    let new_kernel = TransactionKernelModifier::default()
+        .mutator_set_hash(other_mutator_set_hash)
+        .modify(b_new.kernel.body.transaction_kernel.clone());
+    b_new.kernel_mut().body.transaction_kernel = new_kernel;
+    let consensus_rule_set = ConsensusRuleSet::infer_from(network, b_new.header().height);
+    b_new.set_appendix(BlockAppendix::new(BlockAppendix::consensus_claims(
+        b_new.body(),
+        consensus_rule_set,
+    )));
+
+    cache_true_claims([BlockProgram::claim(
+        b_new.body(),
+        b_new.kernel.appendix(),
+        consensus_rule_set,
+    )])
+    .await;
+
+    prop_assert_eq!(
+        BlockValidationError::TransactionMutatorSetMismatch,
+        b_new.validate(&b_prev, ts, network).await.err().unwrap()
+    );
+}
+
+#[proptest(async = "tokio", cases = 1, rng_seed = RngSeed::Fixed(0))]
 async fn block_with_transaction_timestamp_too_large_fails_2f(
     #[strategy(setup())] s: (Block, Timestamp, Randomness<2, 2>),
     #[strategy(#s.1.0.value()..=BFieldElement::MAX)] ts_kernel: u64,
