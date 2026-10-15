@@ -16,6 +16,7 @@ use futures::stream::TryStreamExt;
 use futures::FutureExt;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
+use neptune_consensus::block::block_header::BlockHeader;
 use neptune_consensus::block::block_header::BlockHeaderWithBlockHashWitness;
 use neptune_consensus::block::block_header::HeaderToBlockHashWitness;
 use neptune_consensus::block::Block;
@@ -433,11 +434,12 @@ impl PeerLoopHandler {
     async fn receive_sync_block(
         &mut self,
         block: Box<Block>,
-        champion: (BlockHeight, Digest),
+        champion: (BlockHeader, Digest),
         auth_path: Option<MmrMembershipProof>,
     ) -> Result<()> {
         let network = self.global_state_lock.cli().network;
-        let (champion_height, champion_digest) = champion;
+        let (champion_header, champion_digest) = champion;
+        let champion_height = champion_header.height;
         let height = block.header().height;
         let digest = block.hash();
 
@@ -452,6 +454,18 @@ impl PeerLoopHandler {
                  extending it; ignoring without verifying its proof.",
                 height, digest, self.peer_id
             );
+            return Ok(());
+        }
+
+        // A block extending the champion has a known parent, so its header
+        // and proof-of-work can be checked.
+        if extends_champion
+            && BlockHeaderWithBlockHashWitness::new(*block.header(), block.as_ref().into())
+                .validate_against_parent(&champion_header, network)
+                .is_err()
+        {
+            self.punish(NegativePeerSanction::InvalidBlock((height, digest)))
+                .await?;
             return Ok(());
         }
 
@@ -492,7 +506,7 @@ impl PeerLoopHandler {
             if is_successor && is_new_champion {
                 // Keep sync anchor up to date, and inform main loop about a new
                 // tip-successor.
-                sync_anchor.catch_up(height, digest);
+                sync_anchor.catch_up(*block.header(), digest);
                 Some(PeerTaskToMain::NewSyncTarget(block))
             } else if is_new_champion {
                 // The incoming block is the new champion but is not the
@@ -1217,7 +1231,7 @@ impl PeerLoopHandler {
                             .net
                             .sync_anchor
                             .as_ref()
-                            .map(|sync_anchor| sync_anchor.champion.0),
+                            .map(|sync_anchor| sync_anchor.champion.0.height),
                     )
                 };
                 debug!(
@@ -1510,6 +1524,7 @@ impl PeerLoopHandler {
                         claimed_height: claimed_tip_height,
                         claimed_cumulative_pow: issued_challenge.accumulated_pow,
                         claimed_block_mmra: sync_mmra_anchor,
+                        claimed_tip_header: Box::new(challenge_response.tip.header),
                         claimed_block_digest: challenge_response_tip_hash,
                     })
                     .await?;
@@ -4552,10 +4567,12 @@ mod tests {
             {
                 let mut state = state_lock.lock_guard_mut().await;
                 let claimed_pow = state.chain.tip().header().cumulative_proof_of_work;
+                let mut claimed_tip_header = *state.chain.tip().header();
+                claimed_tip_header.height = BlockHeight::from(9u64);
                 let mut sync_anchor = crate::state::networking_state::SyncAnchor::new(
                     claimed_pow,
                     sync_anchor_mmra.clone(),
-                    BlockHeight::from(9u64),
+                    claimed_tip_header,
                     *anchor_leafs.last().unwrap(),
                 );
                 sync_anchor.tip_auth_path =
@@ -4722,10 +4739,12 @@ mod tests {
             {
                 let mut state = state_lock.lock_guard_mut().await;
                 let claimed_pow = state.chain.tip().header().cumulative_proof_of_work;
+                let mut claimed_tip_header = *state.chain.tip().header();
+                claimed_tip_header.height = claimed_height;
                 state.net.sync_anchor = Some(crate::state::networking_state::SyncAnchor::new(
                     claimed_pow,
                     anchor.clone(),
-                    claimed_height,
+                    claimed_tip_header,
                     *claimed_block_digests.last().unwrap(),
                 ));
             }
@@ -4803,7 +4822,7 @@ mod tests {
                 state.net.sync_anchor = Some(crate::state::networking_state::SyncAnchor::new(
                     block_2.header().cumulative_proof_of_work,
                     anchor,
-                    block_2.header().height,
+                    *block_2.header(),
                     block_2.hash(),
                 ));
             }
@@ -4818,7 +4837,7 @@ mod tests {
                 handshake,
                 false,
             );
-            let champion = (block_2.header().height, block_2.hash());
+            let champion = (*block_2.header(), block_2.hash());
             let peer_task = tokio::spawn(async move {
                 peer_loop_handler
                     .receive_sync_block(Box::new(block_3), champion, None)
@@ -4850,6 +4869,92 @@ mod tests {
             ));
             peer_task.await??;
 
+            Ok(())
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn replayed_body_under_a_forged_header_does_not_move_the_champion() -> Result<()> {
+            use neptune_primitives::difficulty_control::Difficulty;
+
+            use super::block_proposals::genesis_setup;
+            use super::block_proposals::TestSetup;
+
+            let network = Network::Testnet(42);
+            let TestSetup {
+                peer_broadcast_tx,
+                mut peer_loop_handler,
+                mut to_main_rx,
+                from_main_rx: _,
+                peer_state: _,
+                to_main_tx,
+                genesis_block,
+            } = genesis_setup(cli_args::Args::default_with_network(network)).await;
+            let [block_1, block_2, block_3] = fake_valid_sequence_of_blocks_for_tests(
+                &genesis_block,
+                Timestamp::hours(1),
+                StdRng::seed_from_u64(5550006).random(),
+                network,
+            )
+            .await;
+            let anchor = MmrAccumulator::new_from_leafs(vec![
+                genesis_block.hash(),
+                block_1.hash(),
+                block_2.hash(),
+            ]);
+            peer_loop_handler
+                .global_state_lock
+                .lock_guard_mut()
+                .await
+                .net
+                .sync_anchor = Some(crate::state::networking_state::SyncAnchor::new(
+                block_2.header().cumulative_proof_of_work,
+                anchor,
+                *block_2.header(),
+                block_2.hash(),
+            ));
+
+            // The genuine body and proof of block 3, under a header whose
+            // difficulty the parent does not dictate.
+            let mut forged = block_3;
+            forged.kernel_mut().header.difficulty = Difficulty::new([1, 1, 0, 0, 0]);
+            let champion = (*block_2.header(), block_2.hash());
+            peer_loop_handler
+                .receive_sync_block(Box::new(forged), champion, None)
+                .await?;
+
+            assert!(
+                to_main_rx.try_recv().is_err(),
+                "forged block must not reach the main loop"
+            );
+            let champion_after = peer_loop_handler
+                .global_state_lock
+                .lock_guard()
+                .await
+                .net
+                .sync_anchor
+                .as_ref()
+                .unwrap()
+                .champion
+                .1;
+            assert_eq!(block_2.hash(), champion_after, "champion must not move");
+            let latest_punishment =
+                peer_loop_handler
+                    .global_state_lock
+                    .peers()
+                    .with_connected(|connected| {
+                        connected[&peer_loop_handler.peer_id]
+                            .standing()
+                            .latest_punishment
+                            .map(|(sanction, _)| sanction)
+                    });
+            assert!(matches!(
+                latest_punishment,
+                Some(NegativePeerSanction::InvalidBlock(_))
+            ));
+
+            drop(to_main_tx);
+            drop(peer_broadcast_tx);
             Ok(())
         }
 
@@ -4911,7 +5016,7 @@ mod tests {
                     state.net.sync_anchor = Some(crate::state::networking_state::SyncAnchor::new(
                         block_2.header().cumulative_proof_of_work,
                         anchor.clone(),
-                        block_2.header().height,
+                        *block_2.header(),
                         block_2.hash(),
                     ));
                 }
@@ -8624,6 +8729,7 @@ mod tests {
                 claimed_height: bob_tip.header().height,
                 claimed_cumulative_pow: bob_tip.header().cumulative_proof_of_work,
                 claimed_block_mmra: expected_anchor_mmra,
+                claimed_tip_header: Box::new(*bob_tip.header()),
                 claimed_block_digest: bob_tip.hash(),
             };
             let observed_message_from_alice_peer_loop = alice_peer_to_main_rx.recv().await.unwrap();

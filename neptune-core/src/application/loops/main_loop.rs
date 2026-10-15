@@ -793,6 +793,7 @@ impl MainLoopHandler {
                 claimed_height,
                 claimed_cumulative_pow,
                 claimed_block_mmra,
+                claimed_tip_header,
                 claimed_block_digest,
             } => {
                 log_slow_scope!(fn_name!() + "::PeerTaskToMain::AddPeerMaxBlockHeight");
@@ -819,7 +820,7 @@ impl MainLoopHandler {
                     global_state_mut.net.sync_anchor = Some(SyncAnchor::new(
                         claimed_cumulative_pow,
                         claimed_block_mmra,
-                        claimed_height,
+                        *claimed_tip_header,
                         claimed_block_digest,
                     ));
 
@@ -1050,7 +1051,8 @@ impl MainLoopHandler {
             PeerTaskToMain::NewSyncTarget(new_target) => {
                 if let Some(sync_loop) = &mut main_loop_state.maybe_sync_loop {
                     // Double-check new leadership status. Race condition.
-                    let height = new_target.header().height;
+                    let header = *new_target.header();
+                    let height = header.height;
                     let block_hash = new_target.hash();
                     if sync_loop.target_height().next() == height {
                         sync_loop.send_new_target(new_target).await;
@@ -1062,7 +1064,7 @@ impl MainLoopHandler {
                             .sync_anchor
                             .as_mut()
                         {
-                            sync_anchor.catch_up(height, block_hash);
+                            sync_anchor.catch_up(header, block_hash);
                         } else {
                             error!("Sync mode active but sync anchor not set. The two should always be in sync.");
                         }

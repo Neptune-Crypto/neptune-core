@@ -1,5 +1,6 @@
 use libp2p::Multiaddr;
 use libp2p::PeerId;
+use neptune_consensus::block::block_header::BlockHeader;
 use neptune_consensus::block::Block;
 use neptune_consensus::chaintx::link_tx::LinkTx;
 use neptune_consensus::transaction::Transaction;
@@ -114,6 +115,7 @@ pub(crate) enum PeerTaskToMain {
         /// The MMR *after* adding the tip hash, so not the one contained in the
         /// tip, but in its child.
         claimed_block_mmra: MmrAccumulator,
+        claimed_tip_header: Box<BlockHeader>,
         claimed_block_digest: Digest,
     },
 
