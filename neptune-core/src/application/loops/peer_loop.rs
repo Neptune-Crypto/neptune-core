@@ -2615,49 +2615,49 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
+                // Answered once the delivery is a usable copy of what was
+                // announced.
+                let announced = AnnouncedObject::BlockProposal(new_proposal.body().mast_hash());
+
                 if new_proposal
                     .body()
                     .transaction_kernel
                     .retires_before(self.now())
                 {
                     debug!("Ignoring block proposal whose transaction has retired");
+                    self.global_state_lock
+                        .pending_requests()
+                        .resolve(&announced);
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                // Is the proposal valid?
-                // Lock needs to be held here because race conditions: otherwise
-                // the block proposal that was validated might not match with
-                // the one whose favorability is being computed.
-                let state = self.global_state_lock.lock_guard().await;
-                let tip = state.chain.tip();
-
-                let network = self.global_state_lock.cli().network;
-                let proposal_is_valid = new_proposal.is_valid(tip, self.now(), network).await;
-                if !proposal_is_valid {
-                    drop(state);
+                let Ok(guesser_reward) = new_proposal.body().total_guesser_reward() else {
                     self.punish(NegativePeerSanction::InvalidBlockProposal)
                         .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
-                }
+                };
 
-                // The peer delivered what it announced.
-                self.global_state_lock
-                    .pending_requests()
-                    .resolve(&AnnouncedObject::BlockProposal(
-                        new_proposal.body().mast_hash(),
-                    ));
-
-                // Is block proposal favorable?
-                let is_favorable = state.favor_incoming_block_proposal(
-                    new_proposal.header().prev_block_digest,
-                    new_proposal
-                        .body()
-                        .total_guesser_reward()
-                        .expect("Block was validated"),
-                );
-                drop(state);
+                // Is block proposal favorable? Decided before validity, so a
+                // proposal that would be discarded anyway costs no proof
+                // verification.
+                let (is_favorable, tip) = {
+                    let state = self.global_state_lock.lock_guard().await;
+                    let is_favorable = state.favor_incoming_block_proposal(
+                        new_proposal.header().prev_block_digest,
+                        guesser_reward,
+                    );
+                    (is_favorable, state.chain.tip().to_owned())
+                };
 
                 if let Err(rejection_reason) = is_favorable {
+                    if !matches!(
+                        rejection_reason,
+                        BlockProposalRejectError::WrongParent { .. }
+                    ) {
+                        self.global_state_lock
+                            .pending_requests()
+                            .resolve(&announced);
+                    }
                     match rejection_reason {
                         // no need to punish and log if the fees are equal.  we just ignore the incoming proposal.
                         BlockProposalRejectError::InsufficientFee { current, received }
@@ -2674,6 +2674,17 @@ impl PeerLoopHandler {
                         }
                     }
                 };
+
+                // Is the proposal valid?
+                let network = self.global_state_lock.cli().network;
+                if !new_proposal.is_valid(&tip, self.now(), network).await {
+                    self.punish(NegativePeerSanction::InvalidBlockProposal)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+                self.global_state_lock
+                    .pending_requests()
+                    .resolve(&announced);
 
                 self.send_to_main(PeerTaskToMain::BlockProposal(new_proposal), line!())
                     .await?;
