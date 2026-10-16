@@ -1,5 +1,35 @@
 Note: (!) indicates a breaking change.
 
+## [0.19.2](https://github.com/Neptune-Crypto/neptune-core/compare/v0.19.1..v0.19.2) - 2026-10-16
+
+### 🐛 Bug Fixes
+
+- *(mempool)* Change tx-quality check ([90dcdd3e](https://github.com/Neptune-Crypto/neptune-core/commit/90dcdd3e))
+- *(peer_loop)* Don't hold read lock while verifying block proposal ([a99027d3](https://github.com/Neptune-Crypto/neptune-core/commit/a99027d3))
+- *(mine_loop)* Delete delta-improvement requirement for changing guess-candidate ([d97738ee](https://github.com/Neptune-Crypto/neptune-core/commit/d97738ee))
+- *(network)* Relax redialing of CLI-defined peers ([63ab7607](https://github.com/Neptune-Crypto/neptune-core/commit/63ab7607))
+- *(network)* Make room for a requested peer only once its dial succeeds ([3840ee4a](https://github.com/Neptune-Crypto/neptune-core/commit/3840ee4a))
+- *(network)* Request relay reservations only from relay servers ([14a83085](https://github.com/Neptune-Crypto/neptune-core/commit/14a83085))
+- *(network)* Don't request more than five relays ([f35ae5a2](https://github.com/Neptune-Crypto/neptune-core/commit/f35ae5a2))
+- *(network)* Leave renewal of relay reservations to the relay client ([fdb87738](https://github.com/Neptune-Crypto/neptune-core/commit/fdb87738))
+- *(network)* Don't block direct connections with relayed connections ([c603a5af](https://github.com/Neptune-Crypto/neptune-core/commit/c603a5af))
+- *(network)* Close connections on hole-punch failure ([3370cf44](https://github.com/Neptune-Crypto/neptune-core/commit/3370cf44))
+- *(network)* Assign correct value for inbound/outbound connections ([5d6b0b3c](https://github.com/Neptune-Crypto/neptune-core/commit/5d6b0b3c))
+- *(network)* Close libp2p connection when peer loop ends ([0165a172](https://github.com/Neptune-Crypto/neptune-core/commit/0165a172))
+- *(network)* Timeout on libp2p connection upgrades ([e26c7360](https://github.com/Neptune-Crypto/neptune-core/commit/e26c7360))
+
+### 🔒️ Security
+
+- *(peer_loop)* Limit number of blocks served per minute ([c20cb7b1](https://github.com/Neptune-Crypto/neptune-core/commit/c20cb7b1))
+- *(sync)* Check a champion-extending block's header against the champion before verifying its proof ([49fa15c6](https://github.com/Neptune-Crypto/neptune-core/commit/49fa15c6))
+
+### ♻️ Refactor
+
+- *(proof_upgrade)* More eager merging ([0a759c3e](https://github.com/Neptune-Crypto/neptune-core/commit/0a759c3e))
+- *(mempool)* Update the fee-replacement calculation on conflicts ([51b67a6d](https://github.com/Neptune-Crypto/neptune-core/commit/51b67a6d))
+- *(mutator_set)* Panic on out-of-bound indices ([82497dc4](https://github.com/Neptune-Crypto/neptune-core/commit/82497dc4))
+- *(network)* Let libp2p handle reconnect of CLI-configured peers ([d8cd1c4f](https://github.com/Neptune-Crypto/neptune-core/commit/d8cd1c4f))
+
 ## [0.19.1](https://github.com/Neptune-Crypto/neptune-core/compare/v0.19.0..v0.19.1) - 2026-10-14
 
 ### ✨ Features
