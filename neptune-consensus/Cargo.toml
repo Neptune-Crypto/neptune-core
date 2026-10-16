@@ -50,7 +50,6 @@ bincode = "1.3"
 clap = { version = "4.5", features = ["derive"] }
 clienter = { version = "0.1.1", optional = true }
 field_count = "0.1"
-futures = "0.3"
 get-size2 = { version = "0.9", features = ["derive"] }
 itertools = "0.14"
 num-bigint = { version = "0.4", features = ["serde"] }
