@@ -88,13 +88,16 @@ fn is_relayed(address: &Multiaddr) -> bool {
         .any(|proto| matches!(proto, libp2p::multiaddr::Protocol::P2pCircuit))
 }
 
-/// The first IP address named by a multiaddress, if any.
+/// The first IP address in a multiaddress, if any.
 pub(crate) fn ip_of(address: &Multiaddr) -> Option<IpAddr> {
-    address.iter().find_map(|protocol| match protocol {
-        libp2p::multiaddr::Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
-        libp2p::multiaddr::Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
-        _ => None,
-    })
+    address
+        .iter()
+        .find_map(|protocol| match protocol {
+            libp2p::multiaddr::Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
+            libp2p::multiaddr::Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
+            _ => None,
+        })
+        .map(|ip| ip.to_canonical())
 }
 
 #[cfg(test)]
@@ -150,6 +153,14 @@ mod tests {
         assert_eq!(
             Some(IpAddr::V4(Ipv4Addr::new(9, 9, 9, 9))),
             attributable_ip(&"/ip4/9.9.9.9/tcp/9798".parse().unwrap())
+        );
+    }
+
+    #[test]
+    fn an_ipv4_mapped_ipv6_address_is_attributable_to_its_ipv4() {
+        assert_eq!(
+            Some(IpAddr::V4(Ipv4Addr::new(9, 9, 9, 9))),
+            attributable_ip(&"/ip6/::ffff:9.9.9.9/tcp/9798".parse().unwrap())
         );
     }
 

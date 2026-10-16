@@ -60,14 +60,17 @@ impl BlackList {
     }
 
     pub(crate) fn with_ephemeral_bans(mut self, ephemeral_bans: Vec<IpAddr>) -> Self {
-        self.ephemeral_bans = ephemeral_bans.into_iter().collect();
+        self.ephemeral_bans = ephemeral_bans
+            .into_iter()
+            .map(|ip| ip.to_canonical())
+            .collect();
         self
     }
 
     /// Insert the IP into the black list.
     pub(crate) fn ban(&mut self, ip_address: IpAddr) {
         let now = SystemTime::now();
-        self.list.insert(ip_address, now);
+        self.list.insert(ip_address.to_canonical(), now);
     }
 
     /// Remove the IP from the black list.
@@ -77,7 +80,7 @@ impl BlackList {
     ///  - `true` if the IP address was on the black list.
     ///  - `false` otherwise.
     pub(crate) fn unban(&mut self, ip_address: &IpAddr) -> bool {
-        self.list.remove(ip_address).is_some()
+        self.list.remove(&ip_address.to_canonical()).is_some()
     }
 
     /// Determine whether the given IP is on the black list.
@@ -87,6 +90,7 @@ impl BlackList {
     /// network for the lifetime of the blacklist file. Bans given on the
     /// command line never expire.
     pub(crate) fn is_banned(&self, ip_address: &IpAddr) -> bool {
+        let ip_address = &ip_address.to_canonical();
         if self.ephemeral_bans.contains(ip_address) {
             return true;
         }
@@ -346,6 +350,18 @@ mod tests {
         black_list.ephemeral_bans.insert(ip);
 
         prop_assert!(black_list.is_banned(&ip));
+    }
+
+    #[test]
+    fn a_ban_matches_the_ipv4_mapped_form_of_the_address() {
+        let mut black_list = BlackList::new(std::path::PathBuf::new());
+        let ip = IpAddr::V4(std::net::Ipv4Addr::new(9, 9, 9, 9));
+        let mapped = IpAddr::V6(std::net::Ipv4Addr::new(9, 9, 9, 9).to_ipv6_mapped());
+
+        black_list.ban(ip);
+        assert!(black_list.is_banned(&mapped));
+        assert!(black_list.unban(&mapped));
+        assert!(!black_list.is_banned(&ip));
     }
 
     #[proptest]
