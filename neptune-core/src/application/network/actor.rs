@@ -1540,13 +1540,20 @@ impl NetworkActor {
                 );
             }
             Err(e) => {
-                //  In many environments, hole punching is expected to fail
-                // (e.g., Symmetric NATs), in which case the node simply
-                // continues using the relay.
-                tracing::trace!(
+                // Hole punching is expected to fail in many environments,
+                // e.g. behind symmetric NATs. The relayed connection carries
+                // no peer loop, so without the upgrade it only holds a slot.
+                tracing::debug!(
                     peer_id = %remote_peer_id,
-                    "Hole punch failed: {e}. Remaining on relayed connection."
+                    "Hole punch failed: {e}. Closing relayed connection."
                 );
+                let relayed_only = self
+                    .active_connections
+                    .get(&remote_peer_id)
+                    .is_some_and(|(_, addresses)| addresses.values().all(Self::is_relayed));
+                if relayed_only {
+                    self.swarm.disconnect_peer_id(remote_peer_id).ok();
+                }
             }
         }
     }
@@ -2982,8 +2989,9 @@ mod tests {
         listener.task.abort();
     }
 
-    /// Without a direct address to punch towards, the connection stays
-    /// relayed, and a relayed connection must never carry a peer loop.
+    /// Without a direct address to punch towards, the hole punch fails and
+    /// the relayed connection is closed. A relayed connection must never
+    /// carry a peer loop.
     #[tokio::test]
     async fn relayed_connection_alone_admits_no_peer_loop() {
         let (dialer_keypair, reserved_keypair) = ordered_keypairs();
@@ -2991,7 +2999,7 @@ mod tests {
             relay_and_reserved_node(reserved_keypair, None).await;
 
         let mut dialer = TestNode::start(dialer_keypair, vec![], false).await;
-        dialer.dial_until_connected(circuit, 2).await;
+        dialer.command(NetworkActorCommand::Dial(circuit)).await;
 
         // Both have a peer loop with the relay, and must get no other.
         reserved.wait_for_peer_loops(1).await;
@@ -3000,6 +3008,13 @@ mod tests {
             .assert_no_peer_loop_for(Duration::from_secs(5))
             .await;
         dialer.assert_no_peer_loop_for(Duration::from_secs(1)).await;
+
+        // The failed punch left only the connection to the relay.
+        dialer
+            .wait_until("the relayed connection is closed", |overview| {
+                overview.connection_count == 1
+            })
+            .await;
 
         dialer.task.abort();
         reserved.task.abort();
