@@ -1178,44 +1178,6 @@ impl MainLoopHandler {
         }
     }
 
-    /// If necessary, reconnect to the peers listed as CLI arguments.
-    async fn reconnect(&self) -> Result<()> {
-        let connected_peers = self
-            .global_state_lock
-            .peers()
-            .snapshot()
-            .into_iter()
-            .collect_vec();
-        let connected_peers_addresses = connected_peers
-            .iter()
-            .map(|(_peer_id, peer_info)| peer_info.address().clone())
-            .collect_vec();
-        let peers_with_lost_connection = self
-            .global_state_lock
-            .cli()
-            .peers
-            .iter()
-            .filter(|peer| !connected_peers_addresses.contains(peer));
-
-        // If no connection was lost, there's nothing to do.
-        if peers_with_lost_connection.clone().count() == 0 {
-            return Ok(());
-        }
-
-        // Else, try to reconnect.
-        for peer_with_lost_connection in peers_with_lost_connection {
-            if let Err(e) = self
-                .network_command_tx
-                .send(NetworkActorCommand::Dial(peer_with_lost_connection.clone()))
-                .await
-            {
-                warn!("Failed to reconnect to peer {peer_with_lost_connection}: {e}.");
-            }
-        }
-
-        Ok(())
-    }
-
     /// Scheduled task for upgrading the proofs of transactions in the mempool.
     ///
     /// Will either perform a merge of two transactions supported with single
@@ -1572,14 +1534,13 @@ impl MainLoopHandler {
                     main_loop_state.maybe_sync_loop = self.handle_sync_loop_message(sync_loop_msg, sync_loop).await;
                 }
 
-                // Keep the set of peers as configured. Discovery of new
-                // peers is the libp2p network actor's job, through the DHT.
+                // Keep the number of peers as configured. Connecting to peers
+                // is handled by the libp2p actor.
                 _ = peer_maintenance_interval.tick() => {
                     log_slow_scope!(fn_name!() + "::select::peer_maintenance_interval");
 
                     debug!("Timer: peer maintenance job");
                     self.prune_peers();
-                    self.reconnect().await?;
                 }
 
                 // Clean up mempool: remove stale / too old transactions

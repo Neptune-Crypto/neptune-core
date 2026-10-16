@@ -615,8 +615,7 @@ pub struct Args {
     #[clap(long, default_value = "1800", value_parser = duration_from_seconds_str)]
     pub reconnect_cooldown: Duration,
 
-    /// How often, in seconds, to reconnect to peers given as CLI arguments
-    /// whose connection was lost, and to disconnect from excess peers.
+    /// How often, in seconds, to disconnect from excess peers.
     #[clap(long, default_value = "120", value_parser = duration_from_seconds_str)]
     pub peer_maintenance_interval: Duration,
 
