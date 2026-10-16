@@ -280,6 +280,8 @@ pub(crate) enum GatewayEvent {
     HandshakeReceived {
         /// The unique identity of the remote peer.
         peer_id: PeerId,
+        /// The connection the stream runs on.
+        connection_id: ConnectionId,
         /// The verified handshake sent by the peer.
         remote_handshake: HandshakeData,
         /// The encoding of peer messages on the stream.
@@ -510,7 +512,7 @@ impl NetworkBehaviour for StreamGateway {
     fn on_connection_handler_event(
         &mut self,
         peer_id: PeerId,
-        _connection_id: ConnectionId,
+        connection_id: ConnectionId,
         event: THandlerOutEvent<Self>,
     ) {
         // Use match statement for future-proofing. Right now the enum has one
@@ -527,6 +529,7 @@ impl NetworkBehaviour for StreamGateway {
                 self.events
                     .push_back(ToSwarm::GenerateEvent(GatewayEvent::HandshakeReceived {
                         peer_id,
+                        connection_id,
                         remote_handshake,
                         encoding,
                         stream,

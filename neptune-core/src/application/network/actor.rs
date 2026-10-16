@@ -132,6 +132,7 @@ pub(crate) struct NetworkActor {
 
     // Channels for the Actor's own life
     command_rx: mpsc::Receiver<NetworkActorCommand>,
+    command_tx: mpsc::Sender<NetworkActorCommand>,
     event_tx: mpsc::UnboundedSender<NetworkEvent>,
 
     /// Lookup table to find the current address of connected peers or how long
@@ -218,6 +219,7 @@ pub(crate) struct NetworkActorChannels {
     peer_to_main_loop_tx: mpsc::Sender<PeerTaskToMain>,
     main_to_peer_broadcast: tokio::sync::broadcast::Sender<MainToPeerTask>,
     command_rx: mpsc::Receiver<NetworkActorCommand>,
+    command_tx: mpsc::Sender<NetworkActorCommand>,
     event_tx: mpsc::UnboundedSender<NetworkEvent>,
 }
 
@@ -297,6 +299,7 @@ impl NetworkActorChannels {
             peer_to_main_loop_tx,
             main_to_peer_broadcast,
             command_rx: network_command_rx,
+            command_tx: network_command_tx.clone(),
             event_tx: network_event_tx,
         };
 
@@ -373,6 +376,7 @@ impl NetworkActor {
             peer_to_main_loop_tx,
             main_to_peer_broadcast,
             command_rx,
+            command_tx,
             event_tx,
         } = channels;
 
@@ -565,6 +569,7 @@ impl NetworkActor {
             peer_to_main_loop_tx,
             main_to_peer_broadcast,
             command_rx,
+            command_tx,
             event_tx,
             global_state_lock,
             active_connections: HashMap::new(),
@@ -1667,6 +1672,7 @@ impl NetworkActor {
     fn handle_stream_gateway_event(&mut self, event: GatewayEvent) {
         let GatewayEvent::HandshakeReceived {
             peer_id,
+            connection_id,
             remote_handshake,
             encoding,
             stream,
@@ -1707,6 +1713,7 @@ impl NetworkActor {
             .unwrap_or_else(|| Multiaddr::from(Ipv4Addr::new(127, 0, 0, 1)));
         if let Some(loop_handle) = self.spawn_peer_loop(
             peer_id,
+            connection_id,
             peer_address,
             remote_handshake,
             encoding,
@@ -1954,6 +1961,10 @@ impl NetworkActor {
                 } else {
                     tracing::debug!(%addr, "Successfully bound to address");
                 }
+            }
+
+            NetworkActorCommand::CloseConnection(connection_id) => {
+                self.swarm.close_connection(connection_id);
             }
 
             NetworkActorCommand::Ban(malicious_peer) => {
@@ -2313,6 +2324,7 @@ impl NetworkActor {
     fn spawn_peer_loop(
         &mut self,
         peer_id: PeerId,
+        connection_id: libp2p::swarm::ConnectionId,
         peer_address: Multiaddr,
         remote_handshake: HandshakeData,
         encoding: WireEncoding,
@@ -2357,6 +2369,7 @@ impl NetworkActor {
         let peer_stream = bridge_libp2p_stream(raw_stream, encoding);
 
         let upgraded = self.upgraded_peers.clone();
+        let command_tx = self.command_tx.clone();
         Some(tokio::spawn(async move {
             // Because 'peer_stream' implements Sink + Stream + Unpin,
             // and we have the broadcast receiver, this just works.
@@ -2375,6 +2388,11 @@ impl NetworkActor {
                 let was_present = upgraded_peers.remove(&peer_id);
                 assert!(was_present, "Peer ID must be present in upgraded set.");
             }
+
+            // The connection cannot carry another peer loop; free its slot.
+            let _ = command_tx
+                .send(NetworkActorCommand::CloseConnection(connection_id))
+                .await;
         }))
     }
 
@@ -2760,6 +2778,7 @@ mod tests {
         peer_id: PeerId,
         command_tx: mpsc::Sender<NetworkActorCommand>,
         event_rx: mpsc::UnboundedReceiver<NetworkEvent>,
+        main_to_peer: broadcast::Sender<MainToPeerTask>,
         _peer_to_main_rx: mpsc::Receiver<PeerTaskToMain>,
         task: JoinHandle<Result<(), ActorError>>,
     }
@@ -2779,6 +2798,7 @@ mod tests {
                 mock_genesis_global_state(0, WalletEntropy::new_random(), cli).await;
             let (peer_to_main_tx, peer_to_main_rx) = mpsc::channel(16);
             let (main_to_peer_broadcast_tx, _) = broadcast::channel(16);
+            let main_to_peer = main_to_peer_broadcast_tx.clone();
             let (channels, command_tx, event_rx) =
                 NetworkActorChannels::setup(peer_to_main_tx, main_to_peer_broadcast_tx);
             let config = NetworkConfig::default()
@@ -2794,6 +2814,7 @@ mod tests {
                 peer_id,
                 command_tx,
                 event_rx,
+                main_to_peer,
                 _peer_to_main_rx: peer_to_main_rx,
                 task: tokio::spawn(actor.run()),
             }
@@ -2988,6 +3009,42 @@ mod tests {
         assert!(logs_contain("Spawning peer loop"));
         assert!(logs_contain("encoding=Bincode"));
         assert!(!logs_contain("encoding=Json"));
+
+        dialer.task.abort();
+        listener.task.abort();
+    }
+
+    #[tokio::test]
+    async fn ended_peer_loop_closes_its_connection() {
+        let listener_address = free_localhost_tcp_address();
+        let mut listener = TestNode::start(
+            Keypair::generate_ed25519(),
+            vec![listener_address.clone()],
+            false,
+        )
+        .await;
+        listener
+            .command(NetworkActorCommand::Listen(listener_address.clone()))
+            .await;
+        let mut dialer = TestNode::start(Keypair::generate_ed25519(), vec![], false).await;
+        dialer.dial_until_connected(listener_address, 1).await;
+        dialer.wait_for_peer_loops(1).await;
+        listener.wait_for_peer_loops(1).await;
+
+        listener
+            .main_to_peer
+            .send(MainToPeerTask::Disconnect(dialer.peer_id))
+            .unwrap();
+        listener
+            .wait_until("the connection is closed", |overview| {
+                overview.connection_count == 0
+            })
+            .await;
+        dialer
+            .wait_until("the connection is closed", |overview| {
+                overview.connection_count == 0
+            })
+            .await;
 
         dialer.task.abort();
         listener.task.abort();
