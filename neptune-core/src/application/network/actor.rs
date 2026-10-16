@@ -164,7 +164,7 @@ pub(crate) struct NetworkActor {
     ///
     /// This dictionary maps addresses (specified in CLI arguments) to
     ///  - `StickyPeer::None` by default;
-    ///  - `StickyPeer::Dialing(since_simestamp)` when a connection attempt is
+    ///  - `StickyPeer::Dialing { since, attempt }` when a connection attempt is
     ///    on-going and has been since `since_timestamp`;
     ///  - `StickyPeer::Connected(peer_id)` when a connection was established.
     sticky_peers: HashMap<Multiaddr, StickyPeer>,
@@ -300,7 +300,10 @@ impl NetworkActorChannels {
 #[derive(Debug, Clone)]
 enum StickyPeer {
     None,
-    Dialing(SystemTime),
+    Dialing {
+        since: SystemTime,
+        num_attempts: u32,
+    },
     Connected(PeerId),
 }
 
@@ -715,22 +718,24 @@ impl NetworkActor {
                     self.swarm.behaviour_mut().source_limits.prune();
 
 
-                    // Determine which sticky peers to re-dial.
+                    // Determine which sticky peers to re-dial. A peer that
+                    // keeps failing is retried with exponential back-off,
+                    // up to one hour.
                     let mut dials = vec![];
                     for (multiaddr, sticky_peer) in &mut self.sticky_peers {
                         let now = SystemTime::now();
                         match sticky_peer.clone() {
                             StickyPeer::None => {
-                                *sticky_peer = StickyPeer::Dialing(now);
+                                *sticky_peer = StickyPeer::Dialing { since: now, num_attempts: 0 };
                                 dials.push(multiaddr.clone());
                             }
-                            StickyPeer::Dialing(since_timestamp) => {
-                                // If time since dialing started is too big,
-                                // try again.
-                                if now.duration_since(since_timestamp).ok().is_some_and(|duration| duration > Duration::from_mins(2)) {
-                                    tracing::warn!(%multiaddr, "Sticky peer seems stuck in dialing phase; trying again.");
-                                    *sticky_peer = StickyPeer::Dialing(now);
-                                dials.push(multiaddr.clone());
+                            StickyPeer::Dialing { since, num_attempts } => {
+                                let wait = (Duration::from_mins(2) * 2u32.pow(std::cmp::min(num_attempts, 5)))
+                                    .min(Duration::from_hours(1));
+                                if now.duration_since(since).ok().is_some_and(|duration| duration > wait) {
+                                    tracing::debug!(%multiaddr, num_attempts, "Sticky peer not connected; dialing again.");
+                                    *sticky_peer = StickyPeer::Dialing { since: now, num_attempts: num_attempts + 1 };
+                                    dials.push(multiaddr.clone());
                                 }
                             }
                             StickyPeer::Connected(peer_id) => {
@@ -738,8 +743,8 @@ impl NetworkActor {
                                 // not, re-dial.
                                 if !self.active_connections.contains_key(&peer_id) {
                                     tracing::warn!(%peer_id, %multiaddr, "Sticky peer disconnected; attempting to re-establish connection..");
-                                    *sticky_peer = StickyPeer::Dialing(now);
-                                dials.push(multiaddr.clone());
+                                    *sticky_peer = StickyPeer::Dialing { since: now, num_attempts: 0 };
+                                    dials.push(multiaddr.clone());
                                 }
                             }
                         }
@@ -1150,7 +1155,7 @@ impl NetworkActor {
                 if self.sticky_peers.contains_key(&address) {
                     self.sticky_peers.entry(address.clone()).and_modify(|p| {
                         match p {
-                            StickyPeer::None | StickyPeer::Dialing(_) => {
+                            StickyPeer::None | StickyPeer::Dialing { .. } => {
                                 tracing::debug!(%peer_id, "Found peer id of sticky peer {address}.");
                                 *p = StickyPeer::Connected(peer_id);
                             },
