@@ -169,6 +169,10 @@ pub(crate) struct NetworkActor {
     ///  - `StickyPeer::Connected(peer_id)` when a connection was established.
     sticky_peers: HashMap<Multiaddr, StickyPeer>,
 
+    /// Addresses dialed on request of the operator, until the dial succeeds
+    /// or fails.
+    pending_manual_dials: HashSet<Multiaddr>,
+
     /// Limits the total number of connections.
     max_num_peers: usize,
 
@@ -564,6 +568,7 @@ impl NetworkActor {
             active_listeners: vec![],
             black_list,
             sticky_peers,
+            pending_manual_dials: HashSet::new(),
             max_num_peers,
             upgraded_peers,
             reachability_state,
@@ -761,14 +766,6 @@ impl NetworkActor {
                         );
                     }
 
-                    // Disconnect if necessary to free up enough slots.
-                    let num_free_slots = self.max_num_peers.saturating_sub(self.active_connections.len());
-                    if num_free_slots < dials.len() {
-                        for _ in num_free_slots..dials.len() {
-                            self.disconnect_from_longest_lived_peer();
-                        }
-                    }
-
                     // Issue dial commands.
                     for dial in dials {
                         if let Err(e) = self.dial(dial.clone()) {
@@ -961,6 +958,22 @@ impl NetworkActor {
                 }
             }
 
+            SwarmEvent::OutgoingConnectionError {
+                peer_id: None,
+                error: libp2p::swarm::DialError::Transport(failures),
+                ..
+            } => {
+                for (address, error) in failures {
+                    self.pending_manual_dials.remove(&address);
+                    if matches!(
+                        self.sticky_peers.get(&address),
+                        Some(StickyPeer::Dialing { .. })
+                    ) {
+                        tracing::debug!(%address, "Dial to sticky peer failed: {error}");
+                    }
+                }
+            }
+
             // Failed incoming connections.
             //
             // We specifically watch for `ListenError::Denied`. This isn't a
@@ -1123,6 +1136,14 @@ impl NetworkActor {
                         "Established duplicate {connection_id} to peer {peer_id}; tracking address.",
                     );
                     return;
+                }
+
+                // Make room for a user-defined peer.
+                let is_wanted = self.sticky_peers.contains_key(&address)
+                    || self.pending_manual_dials.remove(&address);
+                if is_wanted && self.active_connections.len() >= self.max_num_peers {
+                    tracing::info!(%address, "At connection capacity; evicting a peer for a requested one.");
+                    self.disconnect_from_longest_lived_peer();
                 }
 
                 // Check for banned IPs again. The catch above in
@@ -1885,17 +1906,9 @@ impl NetworkActor {
                     }
                 }
 
-                // If we are already at max capacity in terms of number of
-                // peers, then we disconnect from the peer whose connection is
-                // oldest.
-                if self.active_connections.len() >= self.max_num_peers {
-                    tracing::info!(
-                        "At connection capacity ({}). Evicting a peer for manual dial.",
-                        self.max_num_peers
-                    );
-
-                    self.disconnect_from_longest_lived_peer();
-                }
+                // A full node makes room for this peer once the dial
+                // succeeds; see `ConnectionEstablished`.
+                self.pending_manual_dials.insert(addr.clone());
 
                 // We use the swarm's dial method. libp2p handles the underlying
                 // TCP/transport logic.
