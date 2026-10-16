@@ -346,6 +346,9 @@ impl NetworkActor {
     /// failed one.
     const RELAY_COOLDOWN_PERIOD: Duration = Duration::from_secs(10);
 
+    /// Number of relay reservations a NATted node holds at most.
+    const MAX_RELAYS: usize = 5;
+
     /// The Kademlia protocol for the given network, e.g.
     /// `/neptune/main/kad/1.0.0`. Naming the network keeps the DHTs of
     /// different networks apart, so that nodes only discover peers on their
@@ -2208,6 +2211,11 @@ impl NetworkActor {
     /// instance if there are not enough active connections without on-going
     /// relay commitments.
     fn request_peer_relays(&mut self, num_relays: usize) {
+        let num_relays = num_relays.min(Self::MAX_RELAYS.saturating_sub(self.relays.len()));
+        if num_relays == 0 {
+            return;
+        }
+
         let current_relays = self.relays.keys().collect::<HashSet<_>>();
         let mut available_peers = self
             .active_connections
