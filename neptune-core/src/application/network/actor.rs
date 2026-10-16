@@ -1219,7 +1219,21 @@ impl NetworkActor {
     /// Return Some(reason) with reason: BounceReason if the connection should
     /// be bounced; and None otherwise.
     fn should_bounce(&self, address: &Multiaddr) -> Option<BounceReason> {
-        if self.active_connections.len() >= self.max_num_peers {
+        let num_relayed_only = self
+            .active_connections
+            .values()
+            .filter(|(_, addresses)| addresses.values().all(Self::is_relayed))
+            .count();
+        let num_direct = self.active_connections.len() - num_relayed_only;
+        let at_capacity = if Self::is_relayed(address) {
+            // New connection is relayed: Don't exceed cap in total connections.
+            self.active_connections.len() >= self.max_num_peers
+        } else {
+            // New connection is direct: Don't let relayed connections that were
+            // not upgraded block it.
+            num_direct >= self.max_num_peers
+        };
+        if at_capacity {
             tracing::debug!("Max active connections reached");
             return Some(BounceReason::MaxReached);
         }
@@ -2385,6 +2399,17 @@ impl NetworkActor {
         !address
             .iter()
             .any(|p| matches!(p, libp2p::multiaddr::Protocol::P2pCircuit))
+    }
+
+    /// Whether a remote address, as tracked in `active_connections`, belongs
+    /// to a relayed connection. An outbound circuit is tracked by its circuit
+    /// address; an inbound one is reported by the source peer id alone, with
+    /// the circuit marker on the local address.
+    fn is_relayed(address: &Multiaddr) -> bool {
+        !Self::is_direct(address)
+            || address
+                .iter()
+                .all(|p| matches!(p, libp2p::multiaddr::Protocol::P2p(_)))
     }
 
     /// Disconnect from the longest-lived peer in the network.
