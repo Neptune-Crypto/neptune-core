@@ -121,10 +121,8 @@ impl BlockAppendix {
         claims
     }
 
-    /// The required claims a block on this parent carries where the network
-    /// mocks proofs: the transaction's, and from hard fork epsilon on the
-    /// predecessor claim and the SWBF update claim with their outputs
-    /// computed, nothing proven.
+    /// The required claims a block on this parent must have. Without
+    /// constructing any proofs.
     pub fn mock_consensus_claims(
         block_body: &BlockBody,
         parent: &Block,
@@ -145,10 +143,17 @@ impl BlockAppendix {
                 block_body.mast_hash(),
                 network,
             ));
+            if consensus_rule_set.miners_must_prove_ams_knowledge(network) {
+                claims.push(KnowsMutatorSet::claim(
+                    parent.hash(),
+                    &mutator_set,
+                    consensus_rule_set,
+                ));
+            }
             claims.push(SwbfUpdateAggregation::root_claim_without_proofs(
                 &block_body.transaction_kernel.inputs,
                 &mutator_set,
-                0,
+                consensus_rule_set.min_swbf_padded_rows(network),
             ));
         }
         claims
@@ -195,6 +200,37 @@ impl rand::distr::Distribution<BlockAppendix> for rand::distr::StandardUniform {
                         .with_output((0..10).map(|_| rng.random()).collect_vec())
                 })
                 .collect_vec(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::block::test_helpers::invalid_empty_block;
+
+    #[test]
+    fn mock_consensus_claims_have_the_shapes_the_rules_require() {
+        for network in [Network::Main, Network::RegTest] {
+            let genesis = Block::genesis(network);
+            let block1 = invalid_empty_block(&genesis, network);
+            let mutator_set = genesis.mutator_set_accumulator_after().unwrap();
+            let required = BlockAppendix::consensus_claims(
+                block1.body(),
+                block1.header().height,
+                genesis.hash(),
+                &mutator_set,
+                network,
+            );
+            let mocked = BlockAppendix::new(BlockAppendix::mock_consensus_claims(
+                block1.body(),
+                &genesis,
+                network,
+            ));
+            for claim in &required {
+                assert!(mocked.find(claim).is_some(), "{network:?}: {claim:?}");
+            }
+            assert_eq!(required.len(), mocked.len(), "{network:?}");
         }
     }
 }
