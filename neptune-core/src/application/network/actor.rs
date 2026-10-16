@@ -1486,17 +1486,11 @@ impl NetworkActor {
     fn handle_relay_client_event(&mut self, event: libp2p::relay::client::Event) {
         match event {
             libp2p::relay::client::Event::ReservationReqAccepted { relay_peer_id, .. } => {
-                let eighty_percent = Self::RELAY_RESERVATION_DURATION * 8 / 10;
-                let eighty_percent_in = SystemTime::now() + eighty_percent;
                 self.relays.entry(relay_peer_id).and_modify(|status| {
                     status.activate();
                 });
 
-                tracing::trace!(
-                    peer = %relay_peer_id,
-                    "Relay reservation accepted; renewal scheduled in {:?}",
-                    eighty_percent_in
-                );
+                tracing::trace!(peer = %relay_peer_id, "Relay reservation accepted.");
             }
             libp2p::relay::client::Event::OutboundCircuitEstablished { relay_peer_id, .. } => {
                 tracing::trace!(relay = %relay_peer_id, "Outbound relayed connection established.");
@@ -2131,48 +2125,16 @@ impl NetworkActor {
 
     /// Monitors active relay reservations.
     ///
-    /// Triggers renewals for those relays nearing expiration, and re-launches
-    /// relays to replace those that were closed abruptly.
-    ///
-    /// "Nearing expiration" means beyond 80% of their lifetime.
-    ///
-    /// [Self::request_peer_relays] is called to secure replacement reservation
-    /// for all orderly and abruptly closed reservations.
-    ///
-    /// By refreshing slightly before the actual expiration, the node remains
-    /// reachable throughout (under normal conditions).
+    /// Re-launches relays to replace those that were closed abruptly, once
+    /// their cool-down period has passed. Renewal of live reservations is the
+    /// relay client's own job.
     fn check_relays_reservations(&mut self) {
         if self.relays.is_empty() {
             return;
         }
 
-        // Collect and remove about-to-expire relays.
-        let now = SystemTime::now();
-        let expired_relays = self
-            .relays
-            .iter()
-            .filter_map(|(peer_id, status)| match status {
-                RelayStatus::Active(timestamp, _listener_id) => {
-                    let eighty_percent = Self::RELAY_RESERVATION_DURATION * 8 / 10;
-                    let eighty_percent_mark = *timestamp + eighty_percent;
-                    if now.duration_since(eighty_percent_mark).is_ok() {
-                        Some(*peer_id)
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            })
-            .collect_vec();
-        let num_expired_relays = expired_relays.len();
-        for expiry in expired_relays {
-            // If the relay is about to expire, we remove it from the map
-            // pro-actively. As a result, when it does expire, no match is
-            // found, and no substitute is produced.
-            self.relays.remove(&expiry);
-        }
-
         // Collect and remove (abruptly) closed relays.
+        let now = SystemTime::now();
         let closed_relays = self
             .relays
             .iter()
@@ -2193,15 +2155,13 @@ impl NetworkActor {
             self.relays.remove(&closure);
         }
 
-        // Request new relays to replace about-to-expire and closed relays.
-        let num_requested = num_expired_relays + num_closed_relays;
+        // Request new relays to replace closed relays.
         tracing::debug!(
-            "Requesting {num_requested} relays to replace {num_expired_relays} \
-            expired relays and {num_closed_relays} abruptly closed ones, out \
-            of {} total relays.",
+            "Requesting {num_closed_relays} relays to replace abruptly closed \
+            ones, out of {} total relays.",
             self.relays.len()
         );
-        self.request_peer_relays(num_requested);
+        self.request_peer_relays(num_closed_relays);
     }
 
     /// Make a random selection of k peers from the set of active connections
