@@ -1242,11 +1242,7 @@ impl NetworkActor {
             tracing::debug!("Max active connections reached");
             return Some(BounceReason::MaxReached);
         }
-        if let Some(ip) = address.iter().find_map(|protocol| match protocol {
-            libp2p::multiaddr::Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
-            libp2p::multiaddr::Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
-            _ => None,
-        }) {
+        if let Some(ip) = ip_of(address) {
             if self.black_list.is_banned(&ip) {
                 tracing::debug!("IP is banned");
                 return Some(BounceReason::Banned);

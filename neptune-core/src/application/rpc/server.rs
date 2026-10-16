@@ -59,7 +59,6 @@ use std::time::Duration;
 use anyhow::Result;
 use get_size2::GetSize;
 use itertools::Itertools;
-use libp2p::multiaddr::Protocol;
 use libp2p::Multiaddr;
 use neptune_consensus::block::block_header::BlockHeader;
 use neptune_consensus::block::block_header::BlockPow;
@@ -118,6 +117,7 @@ use crate::api::tx_initiation::builder::input_selector::InputSelectionPolicy;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::application::loops::channel::RPCServerToMain;
 use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
+use crate::application::network::observed_ips::ip_of;
 use crate::application::network::overview::NetworkOverview;
 use crate::application::rpc::block_info::BlockInfo;
 use crate::application::rpc::server::coinbase_output_readable::CoinbaseOutputReadable;
@@ -2747,15 +2747,7 @@ impl RPC for NeptuneRPCServer {
             .with_connected(|connected| connected.values().cloned().collect());
         for peer_info in &connected_peers {
             if peer_info.standing().is_negative() {
-                let maybe_ip = peer_info
-                    .address()
-                    .iter()
-                    .find_map(|component| match component {
-                        Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
-                        Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
-                        _ => None,
-                    });
-                if let Some(ip) = maybe_ip {
+                if let Some(ip) = ip_of(&peer_info.address()) {
                     sanctions_in_memory.insert(ip, peer_info.standing());
                 }
             }
@@ -3215,17 +3207,10 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
+        let ip = ip.to_canonical();
         self.state.peers().with_connected_mut(|connected| {
             for peerinfo in connected.values_mut() {
-                let maybe_ip = peerinfo
-                    .address()
-                    .iter()
-                    .find_map(|component| match component {
-                        libp2p::multiaddr::Protocol::Ip4(ipv4_addr) => Some(IpAddr::V4(ipv4_addr)),
-                        libp2p::multiaddr::Protocol::Ip6(ipv6_addr) => Some(IpAddr::V6(ipv6_addr)),
-                        _ => None,
-                    });
-                if maybe_ip.is_some_and(|peer_ip| ip == peer_ip) {
+                if ip_of(&peerinfo.address()).is_some_and(|peer_ip| ip == peer_ip) {
                     peerinfo.standing.clear_standing();
                 }
             }
@@ -4728,6 +4713,7 @@ pub mod error {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use anyhow::Result;
+    use libp2p::multiaddr::Protocol;
     use macro_rules_attr::apply;
     use neptune_consensus::block::test_helpers::invalid_block_with_transaction;
     use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
