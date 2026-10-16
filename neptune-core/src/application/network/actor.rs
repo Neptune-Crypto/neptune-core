@@ -173,6 +173,9 @@ pub(crate) struct NetworkActor {
     /// or fails.
     pending_manual_dials: HashSet<Multiaddr>,
 
+    /// Connected peers that run a relay server, as reported through Identify.
+    relay_servers: HashSet<PeerId>,
+
     /// Limits the total number of connections.
     max_num_peers: usize,
 
@@ -569,6 +572,7 @@ impl NetworkActor {
             black_list,
             sticky_peers,
             pending_manual_dials: HashSet::new(),
+            relay_servers: HashSet::new(),
             max_num_peers,
             upgraded_peers,
             reachability_state,
@@ -1048,7 +1052,7 @@ impl NetworkActor {
                             if is_resource_limit {
                                 tracing::trace!("Relay reservation with {peer_id} failed due to resource limit exceeded error, specifically {e:?}.");
                             } else {
-                                tracing::warn!(%peer_id, "Relay reservation failed or closed with error: {:?}", e)
+                                tracing::debug!(%peer_id, "Relay reservation failed or closed with error: {:?}", e)
                             }
                         }
                     }
@@ -1102,6 +1106,7 @@ impl NetworkActor {
                 {
                     // Book-keep.
                     self.active_connections.remove(&peer_id);
+                    self.relay_servers.remove(&peer_id);
                     tracing::debug!("Connection to peer {peer_id} closed.",);
                 } else {
                     // A bounced connection because of max number of peers being
@@ -1200,11 +1205,6 @@ impl NetworkActor {
 
                 // Note: Identify and Kademlia will now automatically start
                 // their handshakes over this new "open line."
-
-                #[cfg(test)]
-                if self.force_relay_reservation && self.relays.is_empty() {
-                    self.request_peer_relays(1);
-                }
             }
 
             _ => {}
@@ -1305,6 +1305,10 @@ impl NetworkActor {
                     "Remote peer observed us at a specific address."
                 );
 
+                if info.protocols.contains(&libp2p::relay::HOP_PROTOCOL_NAME) {
+                    self.relay_servers.insert(peer_id);
+                }
+
                 // Keep a record of this peer in our address book, or update it.
                 self.address_book.insert_or_update(
                     peer_id,
@@ -1316,6 +1320,11 @@ impl NetworkActor {
 
                 // Prune if necessary, to avoid state bloat.
                 self.address_book.prune_to_length(ADDRESS_BOOK_MAX_SIZE);
+
+                #[cfg(test)]
+                if self.force_relay_reservation && self.relays.is_empty() {
+                    self.request_peer_relays(1);
+                }
 
                 // Activate the Kademlia "Bridge": feed the addresses to
                 // Kademlia. Filter out local addresses.
@@ -2204,6 +2213,7 @@ impl NetworkActor {
             .active_connections
             .keys()
             .filter(|p| !current_relays.contains(p))
+            .filter(|p| self.relay_servers.contains(p))
             .collect_vec();
         let mut rng = rand::rng().clone();
         available_peers.shuffle(&mut rng);
