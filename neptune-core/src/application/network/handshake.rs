@@ -216,12 +216,15 @@ pub(crate) enum HandshakeResult {
     /// This variant carries both the peer's handshake and the communication
     /// channel itself, ensuring they are never separated.
     Success {
-        remote_handshake: HandshakeData,
+        remote_handshake: Box<HandshakeData>,
         encoding: WireEncoding,
         stream: Stream,
         /// Whether the remote opened the connection.
         inbound: bool,
     },
+
+    /// The handshake failed, or did not complete in time.
+    Failed,
 }
 
 #[cfg(test)]

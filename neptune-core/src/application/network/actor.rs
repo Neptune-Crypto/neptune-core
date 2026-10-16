@@ -1670,14 +1670,31 @@ impl NetworkActor {
     /// If the peer is not present in the address map, the stream is dropped,
     /// which closes the connection to that peer. The actor keeps running.
     fn handle_stream_gateway_event(&mut self, event: GatewayEvent) {
-        let GatewayEvent::HandshakeReceived {
-            peer_id,
-            connection_id,
-            remote_handshake,
-            encoding,
-            stream,
-            inbound,
-        } = event;
+        let (peer_id, connection_id, remote_handshake, encoding, stream, inbound) = match event {
+            GatewayEvent::HandshakeReceived {
+                peer_id,
+                connection_id,
+                remote_handshake,
+                encoding,
+                stream,
+                inbound,
+            } => (
+                peer_id,
+                connection_id,
+                remote_handshake,
+                encoding,
+                stream,
+                inbound,
+            ),
+            GatewayEvent::HandshakeFailed {
+                peer_id,
+                connection_id,
+            } => {
+                tracing::debug!(peer = %peer_id, "Closing connection without a completed handshake.");
+                self.swarm.close_connection(connection_id);
+                return;
+            }
+        };
 
         tracing::trace!(peer = %peer_id, "New peer stream hijacked via StreamGateway");
 
@@ -1715,7 +1732,7 @@ impl NetworkActor {
             peer_id,
             connection_id,
             peer_address,
-            remote_handshake,
+            *remote_handshake,
             encoding,
             stream,
             inbound,

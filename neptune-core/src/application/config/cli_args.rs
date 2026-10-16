@@ -157,9 +157,9 @@ pub struct Args {
     /// Handshake timeout in seconds.
     ///
     /// The timeout used for all messages received and sent during the handshake
-    /// protocol for incoming connections. Can be lowered if the client is
-    /// attacked by many connection attempts. Can be raised if client is running
-    /// on a machine with a bad internet connection.
+    /// protocol for incoming connections, and outgoing connections. Can be
+    /// lowered if the client is attacked by many connection attempts. Can be
+    /// raised if client is running on a machine with a bad internet connection.
     #[clap(long, default_value = "4", value_name = "SECONDS")]
     pub(crate) handshake_timeout: u8,
 
