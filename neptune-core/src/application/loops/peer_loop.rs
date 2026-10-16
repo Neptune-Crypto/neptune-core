@@ -481,7 +481,8 @@ impl PeerLoopHandler {
         // being synced.
         //
         // No locks may be held here, since proof validation takes
-        // milliseconds.
+        // milliseconds. If this block extends champion, the pow is checked
+        // twice. And that is fine.
         let is_valid = block.has_own_proof_of_work(network)
             && block.solo_validate(self.now(), network).await.is_ok();
         if !is_valid {
@@ -4838,6 +4839,7 @@ mod tests {
                 false,
             );
             let champion = (*block_2.header(), block_2.hash());
+            let block_3_hash = block_3.hash();
             let peer_task = tokio::spawn(async move {
                 peer_loop_handler
                     .receive_sync_block(Box::new(block_3), champion, None)
@@ -4868,6 +4870,20 @@ mod tests {
                 Some(PeerTaskToMain::NewSyncTarget(_))
             ));
             peer_task.await??;
+
+            let champion_after = state_lock
+                .lock_guard()
+                .await
+                .net
+                .sync_anchor
+                .as_ref()
+                .unwrap()
+                .champion;
+            assert_eq!(
+                (block_3_hash, BlockHeight::from(3u64)),
+                (champion_after.1, champion_after.0.height),
+                "champion must move to the successor"
+            );
 
             Ok(())
         }

@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use common::logging;
 use itertools::Itertools;
 use neptune_archive::archival_state::ArchivalState;
+use neptune_consensus::block::block_header::BlockHeaderWithBlockHashWitness;
 use neptune_consensus::block::validity::block_program::BlockProgram;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -150,6 +151,9 @@ async fn assert_hardfork_boundary_blocks_are_valid(
         println!("Checking validity of {network} block of height {height}; hash: {hash:x}");
         block.validate(&latest, now, network).await.unwrap();
         assert!(block.has_proof_of_work(network, latest.header()));
+        BlockHeaderWithBlockHashWitness::new(*block.header(), (&block).into())
+            .validate_against_parent(latest.header(), network)
+            .unwrap();
         latest = block;
     }
 }
