@@ -132,6 +132,7 @@ pub(crate) struct NetworkActor {
 
     // Channels for the Actor's own life
     command_rx: mpsc::Receiver<NetworkActorCommand>,
+    command_tx: mpsc::Sender<NetworkActorCommand>,
     event_tx: mpsc::UnboundedSender<NetworkEvent>,
 
     /// Lookup table to find the current address of connected peers or how long
@@ -164,10 +165,17 @@ pub(crate) struct NetworkActor {
     ///
     /// This dictionary maps addresses (specified in CLI arguments) to
     ///  - `StickyPeer::None` by default;
-    ///  - `StickyPeer::Dialing(since_simestamp)` when a connection attempt is
+    ///  - `StickyPeer::Dialing { since, attempt }` when a connection attempt is
     ///    on-going and has been since `since_timestamp`;
     ///  - `StickyPeer::Connected(peer_id)` when a connection was established.
     sticky_peers: HashMap<Multiaddr, StickyPeer>,
+
+    /// Addresses dialed on request of the operator, until the dial succeeds
+    /// or fails.
+    pending_manual_dials: HashSet<Multiaddr>,
+
+    /// Connected peers that run a relay server, as reported through Identify.
+    relay_servers: HashSet<PeerId>,
 
     /// Limits the total number of connections.
     max_num_peers: usize,
@@ -211,6 +219,7 @@ pub(crate) struct NetworkActorChannels {
     peer_to_main_loop_tx: mpsc::Sender<PeerTaskToMain>,
     main_to_peer_broadcast: tokio::sync::broadcast::Sender<MainToPeerTask>,
     command_rx: mpsc::Receiver<NetworkActorCommand>,
+    command_tx: mpsc::Sender<NetworkActorCommand>,
     event_tx: mpsc::UnboundedSender<NetworkEvent>,
 }
 
@@ -290,6 +299,7 @@ impl NetworkActorChannels {
             peer_to_main_loop_tx,
             main_to_peer_broadcast,
             command_rx: network_command_rx,
+            command_tx: network_command_tx.clone(),
             event_tx: network_event_tx,
         };
 
@@ -300,7 +310,10 @@ impl NetworkActorChannels {
 #[derive(Debug, Clone)]
 enum StickyPeer {
     None,
-    Dialing(SystemTime),
+    Dialing {
+        since: SystemTime,
+        num_attempts: u32,
+    },
     Connected(PeerId),
 }
 
@@ -336,6 +349,9 @@ impl NetworkActor {
     /// failed one.
     const RELAY_COOLDOWN_PERIOD: Duration = Duration::from_secs(10);
 
+    /// Number of relay reservations a NATted node holds at most.
+    const MAX_RELAYS: usize = 5;
+
     /// The Kademlia protocol for the given network, e.g.
     /// `/neptune/main/kad/1.0.0`. Naming the network keeps the DHTs of
     /// different networks apart, so that nodes only discover peers on their
@@ -360,6 +376,7 @@ impl NetworkActor {
             peer_to_main_loop_tx,
             main_to_peer_broadcast,
             command_rx,
+            command_tx,
             event_tx,
         } = channels;
 
@@ -552,6 +569,7 @@ impl NetworkActor {
             peer_to_main_loop_tx,
             main_to_peer_broadcast,
             command_rx,
+            command_tx,
             event_tx,
             global_state_lock,
             active_connections: HashMap::new(),
@@ -561,6 +579,8 @@ impl NetworkActor {
             active_listeners: vec![],
             black_list,
             sticky_peers,
+            pending_manual_dials: HashSet::new(),
+            relay_servers: HashSet::new(),
             max_num_peers,
             upgraded_peers,
             reachability_state,
@@ -715,22 +735,24 @@ impl NetworkActor {
                     self.swarm.behaviour_mut().source_limits.prune();
 
 
-                    // Determine which sticky peers to re-dial.
+                    // Determine which sticky peers to re-dial. A peer that
+                    // keeps failing is retried with exponential back-off,
+                    // up to one hour.
                     let mut dials = vec![];
                     for (multiaddr, sticky_peer) in &mut self.sticky_peers {
                         let now = SystemTime::now();
                         match sticky_peer.clone() {
                             StickyPeer::None => {
-                                *sticky_peer = StickyPeer::Dialing(now);
+                                *sticky_peer = StickyPeer::Dialing { since: now, num_attempts: 0 };
                                 dials.push(multiaddr.clone());
                             }
-                            StickyPeer::Dialing(since_timestamp) => {
-                                // If time since dialing started is too big,
-                                // try again.
-                                if now.duration_since(since_timestamp).ok().is_some_and(|duration| duration > Duration::from_mins(2)) {
-                                    tracing::warn!(%multiaddr, "Sticky peer seems stuck in dialing phase; trying again.");
-                                    *sticky_peer = StickyPeer::Dialing(now);
-                                dials.push(multiaddr.clone());
+                            StickyPeer::Dialing { since, num_attempts } => {
+                                let wait = (Duration::from_mins(2) * 2u32.pow(std::cmp::min(num_attempts, 5)))
+                                    .min(Duration::from_hours(1));
+                                if now.duration_since(since).ok().is_some_and(|duration| duration > wait) {
+                                    tracing::debug!(%multiaddr, num_attempts, "Sticky peer not connected; dialing again.");
+                                    *sticky_peer = StickyPeer::Dialing { since: now, num_attempts: num_attempts + 1 };
+                                    dials.push(multiaddr.clone());
                                 }
                             }
                             StickyPeer::Connected(peer_id) => {
@@ -738,8 +760,8 @@ impl NetworkActor {
                                 // not, re-dial.
                                 if !self.active_connections.contains_key(&peer_id) {
                                     tracing::warn!(%peer_id, %multiaddr, "Sticky peer disconnected; attempting to re-establish connection..");
-                                    *sticky_peer = StickyPeer::Dialing(now);
-                                dials.push(multiaddr.clone());
+                                    *sticky_peer = StickyPeer::Dialing { since: now, num_attempts: 0 };
+                                    dials.push(multiaddr.clone());
                                 }
                             }
                         }
@@ -754,14 +776,6 @@ impl NetworkActor {
                                 .into_iter()
                                 .filter(|address| self.accepts_local_addresses || !Self::is_local_address(address)),
                         );
-                    }
-
-                    // Disconnect if necessary to free up enough slots.
-                    let num_free_slots = self.max_num_peers.saturating_sub(self.active_connections.len());
-                    if num_free_slots < dials.len() {
-                        for _ in num_free_slots..dials.len() {
-                            self.disconnect_from_longest_lived_peer();
-                        }
                     }
 
                     // Issue dial commands.
@@ -956,6 +970,22 @@ impl NetworkActor {
                 }
             }
 
+            SwarmEvent::OutgoingConnectionError {
+                peer_id: None,
+                error: libp2p::swarm::DialError::Transport(failures),
+                ..
+            } => {
+                for (address, error) in failures {
+                    self.pending_manual_dials.remove(&address);
+                    if matches!(
+                        self.sticky_peers.get(&address),
+                        Some(StickyPeer::Dialing { .. })
+                    ) {
+                        tracing::debug!(%address, "Dial to sticky peer failed: {error}");
+                    }
+                }
+            }
+
             // Failed incoming connections.
             //
             // We specifically watch for `ListenError::Denied`. This isn't a
@@ -1030,7 +1060,7 @@ impl NetworkActor {
                             if is_resource_limit {
                                 tracing::trace!("Relay reservation with {peer_id} failed due to resource limit exceeded error, specifically {e:?}.");
                             } else {
-                                tracing::warn!(%peer_id, "Relay reservation failed or closed with error: {:?}", e)
+                                tracing::debug!(%peer_id, "Relay reservation failed or closed with error: {:?}", e)
                             }
                         }
                     }
@@ -1084,6 +1114,7 @@ impl NetworkActor {
                 {
                     // Book-keep.
                     self.active_connections.remove(&peer_id);
+                    self.relay_servers.remove(&peer_id);
                     tracing::debug!("Connection to peer {peer_id} closed.",);
                 } else {
                     // A bounced connection because of max number of peers being
@@ -1120,6 +1151,14 @@ impl NetworkActor {
                     return;
                 }
 
+                // Make room for a user-defined peer.
+                let is_wanted = self.sticky_peers.contains_key(&address)
+                    || self.pending_manual_dials.remove(&address);
+                if is_wanted && self.active_connections.len() >= self.max_num_peers {
+                    tracing::info!(%address, "At connection capacity; evicting a peer for a requested one.");
+                    self.disconnect_from_longest_lived_peer();
+                }
+
                 // Check for banned IPs again. The catch above in
                 // `IncomingConnection` is a good first filter but because of
                 // race conditions, masked addresses, and automatic outgoing
@@ -1150,7 +1189,7 @@ impl NetworkActor {
                 if self.sticky_peers.contains_key(&address) {
                     self.sticky_peers.entry(address.clone()).and_modify(|p| {
                         match p {
-                            StickyPeer::None | StickyPeer::Dialing(_) => {
+                            StickyPeer::None | StickyPeer::Dialing { .. } => {
                                 tracing::debug!(%peer_id, "Found peer id of sticky peer {address}.");
                                 *p = StickyPeer::Connected(peer_id);
                             },
@@ -1174,11 +1213,6 @@ impl NetworkActor {
 
                 // Note: Identify and Kademlia will now automatically start
                 // their handshakes over this new "open line."
-
-                #[cfg(test)]
-                if self.force_relay_reservation && self.relays.is_empty() {
-                    self.request_peer_relays(1);
-                }
             }
 
             _ => {}
@@ -1190,7 +1224,21 @@ impl NetworkActor {
     /// Return Some(reason) with reason: BounceReason if the connection should
     /// be bounced; and None otherwise.
     fn should_bounce(&self, address: &Multiaddr) -> Option<BounceReason> {
-        if self.active_connections.len() >= self.max_num_peers {
+        let num_relayed_only = self
+            .active_connections
+            .values()
+            .filter(|(_, addresses)| addresses.values().all(Self::is_relayed))
+            .count();
+        let num_direct = self.active_connections.len() - num_relayed_only;
+        let at_capacity = if Self::is_relayed(address) {
+            // New connection is relayed: Don't exceed cap in total connections.
+            self.active_connections.len() >= self.max_num_peers
+        } else {
+            // New connection is direct: Don't let relayed connections that were
+            // not upgraded block it.
+            num_direct >= self.max_num_peers
+        };
+        if at_capacity {
             tracing::debug!("Max active connections reached");
             return Some(BounceReason::MaxReached);
         }
@@ -1279,6 +1327,10 @@ impl NetworkActor {
                     "Remote peer observed us at a specific address."
                 );
 
+                if info.protocols.contains(&libp2p::relay::HOP_PROTOCOL_NAME) {
+                    self.relay_servers.insert(peer_id);
+                }
+
                 // Keep a record of this peer in our address book, or update it.
                 self.address_book.insert_or_update(
                     peer_id,
@@ -1290,6 +1342,11 @@ impl NetworkActor {
 
                 // Prune if necessary, to avoid state bloat.
                 self.address_book.prune_to_length(ADDRESS_BOOK_MAX_SIZE);
+
+                #[cfg(test)]
+                if self.force_relay_reservation && self.relays.is_empty() {
+                    self.request_peer_relays(1);
+                }
 
                 // Activate the Kademlia "Bridge": feed the addresses to
                 // Kademlia. Filter out local addresses.
@@ -1448,17 +1505,11 @@ impl NetworkActor {
     fn handle_relay_client_event(&mut self, event: libp2p::relay::client::Event) {
         match event {
             libp2p::relay::client::Event::ReservationReqAccepted { relay_peer_id, .. } => {
-                let eighty_percent = Self::RELAY_RESERVATION_DURATION * 8 / 10;
-                let eighty_percent_in = SystemTime::now() + eighty_percent;
                 self.relays.entry(relay_peer_id).and_modify(|status| {
                     status.activate();
                 });
 
-                tracing::trace!(
-                    peer = %relay_peer_id,
-                    "Relay reservation accepted; renewal scheduled in {:?}",
-                    eighty_percent_in
-                );
+                tracing::trace!(peer = %relay_peer_id, "Relay reservation accepted.");
             }
             libp2p::relay::client::Event::OutboundCircuitEstablished { relay_peer_id, .. } => {
                 tracing::trace!(relay = %relay_peer_id, "Outbound relayed connection established.");
@@ -1494,13 +1545,20 @@ impl NetworkActor {
                 );
             }
             Err(e) => {
-                //  In many environments, hole punching is expected to fail
-                // (e.g., Symmetric NATs), in which case the node simply
-                // continues using the relay.
-                tracing::trace!(
+                // Hole punching is expected to fail in many environments,
+                // e.g. behind symmetric NATs. The relayed connection carries
+                // no peer loop, so without the upgrade it only holds a slot.
+                tracing::debug!(
                     peer_id = %remote_peer_id,
-                    "Hole punch failed: {e}. Remaining on relayed connection."
+                    "Hole punch failed: {e}. Closing relayed connection."
                 );
+                let relayed_only = self
+                    .active_connections
+                    .get(&remote_peer_id)
+                    .is_some_and(|(_, addresses)| addresses.values().all(Self::is_relayed));
+                if relayed_only {
+                    self.swarm.disconnect_peer_id(remote_peer_id).ok();
+                }
             }
         }
     }
@@ -1612,12 +1670,31 @@ impl NetworkActor {
     /// If the peer is not present in the address map, the stream is dropped,
     /// which closes the connection to that peer. The actor keeps running.
     fn handle_stream_gateway_event(&mut self, event: GatewayEvent) {
-        let GatewayEvent::HandshakeReceived {
-            peer_id,
-            remote_handshake,
-            encoding,
-            stream,
-        } = event;
+        let (peer_id, connection_id, remote_handshake, encoding, stream, inbound) = match event {
+            GatewayEvent::HandshakeReceived {
+                peer_id,
+                connection_id,
+                remote_handshake,
+                encoding,
+                stream,
+                inbound,
+            } => (
+                peer_id,
+                connection_id,
+                remote_handshake,
+                encoding,
+                stream,
+                inbound,
+            ),
+            GatewayEvent::HandshakeFailed {
+                peer_id,
+                connection_id,
+            } => {
+                tracing::debug!(peer = %peer_id, "Closing connection without a completed handshake.");
+                self.swarm.close_connection(connection_id);
+                return;
+            }
+        };
 
         tracing::trace!(peer = %peer_id, "New peer stream hijacked via StreamGateway");
 
@@ -1653,10 +1730,12 @@ impl NetworkActor {
             .unwrap_or_else(|| Multiaddr::from(Ipv4Addr::new(127, 0, 0, 1)));
         if let Some(loop_handle) = self.spawn_peer_loop(
             peer_id,
+            connection_id,
             peer_address,
-            remote_handshake,
+            *remote_handshake,
             encoding,
             stream,
+            inbound,
             from_main_rx,
         ) {
             // Notify the rest of the application that a peer is ready.
@@ -1880,17 +1959,9 @@ impl NetworkActor {
                     }
                 }
 
-                // If we are already at max capacity in terms of number of
-                // peers, then we disconnect from the peer whose connection is
-                // oldest.
-                if self.active_connections.len() >= self.max_num_peers {
-                    tracing::info!(
-                        "At connection capacity ({}). Evicting a peer for manual dial.",
-                        self.max_num_peers
-                    );
-
-                    self.disconnect_from_longest_lived_peer();
-                }
+                // A full node makes room for this peer once the dial
+                // succeeds; see `ConnectionEstablished`.
+                self.pending_manual_dials.insert(addr.clone());
 
                 // We use the swarm's dial method. libp2p handles the underlying
                 // TCP/transport logic.
@@ -1907,6 +1978,10 @@ impl NetworkActor {
                 } else {
                     tracing::debug!(%addr, "Successfully bound to address");
                 }
+            }
+
+            NetworkActorCommand::CloseConnection(connection_id) => {
+                self.swarm.close_connection(connection_id);
             }
 
             NetworkActorCommand::Ban(malicious_peer) => {
@@ -2101,48 +2176,16 @@ impl NetworkActor {
 
     /// Monitors active relay reservations.
     ///
-    /// Triggers renewals for those relays nearing expiration, and re-launches
-    /// relays to replace those that were closed abruptly.
-    ///
-    /// "Nearing expiration" means beyond 80% of their lifetime.
-    ///
-    /// [Self::request_peer_relays] is called to secure replacement reservation
-    /// for all orderly and abruptly closed reservations.
-    ///
-    /// By refreshing slightly before the actual expiration, the node remains
-    /// reachable throughout (under normal conditions).
+    /// Re-launches relays to replace those that were closed abruptly, once
+    /// their cool-down period has passed. Renewal of live reservations is the
+    /// relay client's own job.
     fn check_relays_reservations(&mut self) {
         if self.relays.is_empty() {
             return;
         }
 
-        // Collect and remove about-to-expire relays.
-        let now = SystemTime::now();
-        let expired_relays = self
-            .relays
-            .iter()
-            .filter_map(|(peer_id, status)| match status {
-                RelayStatus::Active(timestamp, _listener_id) => {
-                    let eighty_percent = Self::RELAY_RESERVATION_DURATION * 8 / 10;
-                    let eighty_percent_mark = *timestamp + eighty_percent;
-                    if now.duration_since(eighty_percent_mark).is_ok() {
-                        Some(*peer_id)
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            })
-            .collect_vec();
-        let num_expired_relays = expired_relays.len();
-        for expiry in expired_relays {
-            // If the relay is about to expire, we remove it from the map
-            // pro-actively. As a result, when it does expire, no match is
-            // found, and no substitute is produced.
-            self.relays.remove(&expiry);
-        }
-
         // Collect and remove (abruptly) closed relays.
+        let now = SystemTime::now();
         let closed_relays = self
             .relays
             .iter()
@@ -2163,15 +2206,13 @@ impl NetworkActor {
             self.relays.remove(&closure);
         }
 
-        // Request new relays to replace about-to-expire and closed relays.
-        let num_requested = num_expired_relays + num_closed_relays;
+        // Request new relays to replace closed relays.
         tracing::debug!(
-            "Requesting {num_requested} relays to replace {num_expired_relays} \
-            expired relays and {num_closed_relays} abruptly closed ones, out \
-            of {} total relays.",
+            "Requesting {num_closed_relays} relays to replace abruptly closed \
+            ones, out of {} total relays.",
             self.relays.len()
         );
-        self.request_peer_relays(num_requested);
+        self.request_peer_relays(num_closed_relays);
     }
 
     /// Make a random selection of k peers from the set of active connections
@@ -2181,11 +2222,17 @@ impl NetworkActor {
     /// instance if there are not enough active connections without on-going
     /// relay commitments.
     fn request_peer_relays(&mut self, num_relays: usize) {
+        let num_relays = num_relays.min(Self::MAX_RELAYS.saturating_sub(self.relays.len()));
+        if num_relays == 0 {
+            return;
+        }
+
         let current_relays = self.relays.keys().collect::<HashSet<_>>();
         let mut available_peers = self
             .active_connections
             .keys()
             .filter(|p| !current_relays.contains(p))
+            .filter(|p| self.relay_servers.contains(p))
             .collect_vec();
         let mut rng = rand::rng().clone();
         available_peers.shuffle(&mut rng);
@@ -2290,13 +2337,16 @@ impl NetworkActor {
     ///
     /// The task terminates automatically if the stream is closed or a shutdown
     /// signal is received from the main loop.
+    #[expect(clippy::too_many_arguments)]
     fn spawn_peer_loop(
         &mut self,
         peer_id: PeerId,
+        connection_id: libp2p::swarm::ConnectionId,
         peer_address: Multiaddr,
         remote_handshake: HandshakeData,
         encoding: WireEncoding,
         raw_stream: libp2p::Stream,
+        inbound: bool,
         from_main_rx: tokio::sync::broadcast::Receiver<MainToPeerTask>,
     ) -> Option<JoinHandle<()>> {
         // Keep track of which peers get upgraded connections. Prevent same
@@ -2330,12 +2380,13 @@ impl NetworkActor {
             peer_id,
             peer_address,
             remote_handshake,
-            rand::rng().random_bool(0.5f64),
+            inbound,
         );
 
         let peer_stream = bridge_libp2p_stream(raw_stream, encoding);
 
         let upgraded = self.upgraded_peers.clone();
+        let command_tx = self.command_tx.clone();
         Some(tokio::spawn(async move {
             // Because 'peer_stream' implements Sink + Stream + Unpin,
             // and we have the broadcast receiver, this just works.
@@ -2354,6 +2405,11 @@ impl NetworkActor {
                 let was_present = upgraded_peers.remove(&peer_id);
                 assert!(was_present, "Peer ID must be present in upgraded set.");
             }
+
+            // The connection cannot carry another peer loop; free its slot.
+            let _ = command_tx
+                .send(NetworkActorCommand::CloseConnection(connection_id))
+                .await;
         }))
     }
 
@@ -2389,6 +2445,17 @@ impl NetworkActor {
         !address
             .iter()
             .any(|p| matches!(p, libp2p::multiaddr::Protocol::P2pCircuit))
+    }
+
+    /// Whether a remote address, as tracked in `active_connections`, belongs
+    /// to a relayed connection. An outbound circuit is tracked by its circuit
+    /// address; an inbound one is reported by the source peer id alone, with
+    /// the circuit marker on the local address.
+    fn is_relayed(address: &Multiaddr) -> bool {
+        !Self::is_direct(address)
+            || address
+                .iter()
+                .all(|p| matches!(p, libp2p::multiaddr::Protocol::P2p(_)))
     }
 
     /// Disconnect from the longest-lived peer in the network.
@@ -2728,6 +2795,7 @@ mod tests {
         peer_id: PeerId,
         command_tx: mpsc::Sender<NetworkActorCommand>,
         event_rx: mpsc::UnboundedReceiver<NetworkEvent>,
+        main_to_peer: broadcast::Sender<MainToPeerTask>,
         _peer_to_main_rx: mpsc::Receiver<PeerTaskToMain>,
         task: JoinHandle<Result<(), ActorError>>,
     }
@@ -2747,6 +2815,7 @@ mod tests {
                 mock_genesis_global_state(0, WalletEntropy::new_random(), cli).await;
             let (peer_to_main_tx, peer_to_main_rx) = mpsc::channel(16);
             let (main_to_peer_broadcast_tx, _) = broadcast::channel(16);
+            let main_to_peer = main_to_peer_broadcast_tx.clone();
             let (channels, command_tx, event_rx) =
                 NetworkActorChannels::setup(peer_to_main_tx, main_to_peer_broadcast_tx);
             let config = NetworkConfig::default()
@@ -2762,6 +2831,7 @@ mod tests {
                 peer_id,
                 command_tx,
                 event_rx,
+                main_to_peer,
                 _peer_to_main_rx: peer_to_main_rx,
                 task: tokio::spawn(actor.run()),
             }
@@ -2961,8 +3031,45 @@ mod tests {
         listener.task.abort();
     }
 
-    /// Without a direct address to punch towards, the connection stays
-    /// relayed, and a relayed connection must never carry a peer loop.
+    #[tokio::test]
+    async fn ended_peer_loop_closes_its_connection() {
+        let listener_address = free_localhost_tcp_address();
+        let mut listener = TestNode::start(
+            Keypair::generate_ed25519(),
+            vec![listener_address.clone()],
+            false,
+        )
+        .await;
+        listener
+            .command(NetworkActorCommand::Listen(listener_address.clone()))
+            .await;
+        let mut dialer = TestNode::start(Keypair::generate_ed25519(), vec![], false).await;
+        dialer.dial_until_connected(listener_address, 1).await;
+        dialer.wait_for_peer_loops(1).await;
+        listener.wait_for_peer_loops(1).await;
+
+        listener
+            .main_to_peer
+            .send(MainToPeerTask::Disconnect(dialer.peer_id))
+            .unwrap();
+        listener
+            .wait_until("the connection is closed", |overview| {
+                overview.connection_count == 0
+            })
+            .await;
+        dialer
+            .wait_until("the connection is closed", |overview| {
+                overview.connection_count == 0
+            })
+            .await;
+
+        dialer.task.abort();
+        listener.task.abort();
+    }
+
+    /// Without a direct address to punch towards, the hole punch fails and
+    /// the relayed connection is closed. A relayed connection must never
+    /// carry a peer loop.
     #[tokio::test]
     async fn relayed_connection_alone_admits_no_peer_loop() {
         let (dialer_keypair, reserved_keypair) = ordered_keypairs();
@@ -2970,7 +3077,7 @@ mod tests {
             relay_and_reserved_node(reserved_keypair, None).await;
 
         let mut dialer = TestNode::start(dialer_keypair, vec![], false).await;
-        dialer.dial_until_connected(circuit, 2).await;
+        dialer.command(NetworkActorCommand::Dial(circuit)).await;
 
         // Both have a peer loop with the relay, and must get no other.
         reserved.wait_for_peer_loops(1).await;
@@ -2979,6 +3086,13 @@ mod tests {
             .assert_no_peer_loop_for(Duration::from_secs(5))
             .await;
         dialer.assert_no_peer_loop_for(Duration::from_secs(1)).await;
+
+        // The failed punch left only the connection to the relay.
+        dialer
+            .wait_until("the relayed connection is closed", |overview| {
+                overview.connection_count == 1
+            })
+            .await;
 
         dialer.task.abort();
         reserved.task.abort();

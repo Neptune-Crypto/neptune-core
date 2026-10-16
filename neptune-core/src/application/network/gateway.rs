@@ -1,9 +1,12 @@
 use std::collections::HashSet;
 use std::collections::VecDeque;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::task::Context;
 use std::task::Poll;
+use std::time::Duration;
 
 use libp2p::core::transport::PortUse;
 use libp2p::swarm::handler::ConnectionEvent;
@@ -69,6 +72,17 @@ pub(crate) struct GatewayHandler {
     /// Whether we requested a handshake.
     outbound_requested_already: bool,
 
+    /// How long an active handler waits for the handshake to complete.
+    handshake_timeout: Duration,
+
+    /// Deadline for the handshake, set while the handler is active and the
+    /// handshake is pending.
+    deadline: Option<Pin<Box<tokio::time::Sleep>>>,
+
+    /// Whether the other peer, the remote, opened the connection. For
+    /// hole-punched connections libp2p assigns one of them the listerner role.
+    inbound: bool,
+
     local_peer_id: libp2p::PeerId,
     remote_peer_id: libp2p::PeerId,
 }
@@ -81,6 +95,16 @@ impl GatewayHandler {
         // address and reports the remote as a bare `/p2p/<peer>`, so checking the
         // remote address alone would let relayed connections through.
         !(NetworkActor::is_direct(local_addr) && NetworkActor::is_direct(remote_addr))
+    }
+
+    /// Report the handshake as failed, once.
+    fn fail(&mut self) {
+        if self.deadline.take().is_some() {
+            self.pending_events
+                .push_back(ConnectionHandlerEvent::NotifyBehaviour(
+                    HandshakeResult::Failed,
+                ));
+        }
     }
 
     /// Queue a completed handshake, unless the handler is paused.
@@ -99,12 +123,14 @@ impl GatewayHandler {
             return;
         }
 
+        self.deadline = None;
         self.pending_events
             .push_back(ConnectionHandlerEvent::NotifyBehaviour(
                 HandshakeResult::Success {
-                    remote_handshake,
+                    remote_handshake: Box::new(remote_handshake),
                     encoding,
                     stream,
+                    inbound: self.inbound,
                 },
             ));
     }
@@ -160,6 +186,7 @@ impl ConnectionHandler for GatewayHandler {
                 if self.pause {
                     tracing::debug!("GatewayHandler activated. Unpausing handshake logic. Proceeding with stream hijack.");
                     self.pause = false;
+                    self.deadline = Some(Box::pin(tokio::time::sleep(self.handshake_timeout)));
                 }
             }
         }
@@ -200,6 +227,12 @@ impl ConnectionHandler for GatewayHandler {
 
             ConnectionEvent::DialUpgradeError(error) => {
                 tracing::debug!("Outbound handshake failed: {:?}", error.error);
+                self.fail();
+            }
+
+            ConnectionEvent::ListenUpgradeError(error) => {
+                tracing::debug!("Inbound handshake failed: {:?}", error.error);
+                self.fail();
             }
 
             _ => {}
@@ -222,7 +255,7 @@ impl ConnectionHandler for GatewayHandler {
     ///    Behaviour's `on_connection_handler_event`.
     fn poll(
         &mut self,
-        _cx: &mut Context<'_>,
+        cx: &mut Context<'_>,
     ) -> Poll<
         ConnectionHandlerEvent<Self::OutboundProtocol, Self::OutboundOpenInfo, Self::ToBehaviour>,
     > {
@@ -230,10 +263,19 @@ impl ConnectionHandler for GatewayHandler {
             return Poll::Pending;
         }
 
+        if self
+            .deadline
+            .as_mut()
+            .is_some_and(|deadline| deadline.as_mut().poll(cx).is_ready())
+        {
+            tracing::debug!("Handshake not completed in time.");
+            self.fail();
+        }
+
         // If we haven't asked for a handshake yet, and we are the initiator,
         // request it now.
-        let we_are_initiator = self.local_peer_id < self.remote_peer_id;
-        if !self.outbound_requested_already && we_are_initiator {
+        let we_are_handshake_initiator = self.local_peer_id < self.remote_peer_id;
+        if !self.outbound_requested_already && we_are_handshake_initiator {
             self.outbound_requested_already = true;
             return Poll::Ready(ConnectionHandlerEvent::OutboundSubstreamRequest {
                 protocol: SubstreamProtocol::new(
@@ -275,12 +317,22 @@ pub(crate) enum GatewayEvent {
     HandshakeReceived {
         /// The unique identity of the remote peer.
         peer_id: PeerId,
+        /// The connection the stream runs on.
+        connection_id: ConnectionId,
         /// The verified handshake sent by the peer.
-        remote_handshake: HandshakeData,
+        remote_handshake: Box<HandshakeData>,
         /// The encoding of peer messages on the stream.
         encoding: WireEncoding,
         /// The live, bidirectional stream ready for inner protocol messages.
         stream: libp2p::Stream,
+        /// Whether the remote opened the connection.
+        inbound: bool,
+    },
+
+    /// The handshake failed or timed out. The connection is of no use.
+    HandshakeFailed {
+        peer_id: PeerId,
+        connection_id: ConnectionId,
     },
 }
 
@@ -377,6 +429,10 @@ impl StreamGateway {
     fn handshake_data(&self) -> HandshakeData {
         self.global_state.get_own_handshakedata_sync()
     }
+
+    fn handshake_timeout(&self) -> Duration {
+        Duration::from_secs(self.global_state.cli().handshake_timeout.into())
+    }
 }
 
 impl NetworkBehaviour for StreamGateway {
@@ -404,11 +460,15 @@ impl NetworkBehaviour for StreamGateway {
             }
         }
 
+        let pause = GatewayHandler::starts_paused(local_addr, remote_addr);
         Ok(GatewayHandler {
             local_handshake: self.handshake_data(),
             pending_events: VecDeque::new(),
-            pause: GatewayHandler::starts_paused(local_addr, remote_addr),
+            pause,
             outbound_requested_already: false,
+            handshake_timeout: self.handshake_timeout(),
+            deadline: (!pause).then(|| Box::pin(tokio::time::sleep(self.handshake_timeout()))),
+            inbound: true,
             local_peer_id: self.local_peer_id,
             remote_peer_id: peer,
         })
@@ -424,7 +484,7 @@ impl NetworkBehaviour for StreamGateway {
         _connection_id: ConnectionId,
         peer: PeerId,
         addr: &Multiaddr,
-        _endpoint: libp2p::core::Endpoint,
+        endpoint: libp2p::core::Endpoint,
         _port_use: PortUse,
     ) -> Result<THandler<Self>, libp2p::swarm::ConnectionDenied> {
         {
@@ -435,11 +495,17 @@ impl NetworkBehaviour for StreamGateway {
             }
         }
 
+        let pause = !NetworkActor::is_direct(addr);
         Ok(GatewayHandler {
             local_handshake: self.handshake_data(),
             pending_events: VecDeque::new(),
-            pause: !NetworkActor::is_direct(addr),
+            pause,
             outbound_requested_already: false,
+            handshake_timeout: self.handshake_timeout(),
+            deadline: (!pause).then(|| Box::pin(tokio::time::sleep(self.handshake_timeout()))),
+            // in case of hole punch, both sides make an outbound connection,
+            // so the libp2p-provided endpoint value must be used here.
+            inbound: endpoint == libp2p::core::Endpoint::Listener,
             local_peer_id: self.local_peer_id,
             remote_peer_id: peer,
         })
@@ -499,7 +565,7 @@ impl NetworkBehaviour for StreamGateway {
     fn on_connection_handler_event(
         &mut self,
         peer_id: PeerId,
-        _connection_id: ConnectionId,
+        connection_id: ConnectionId,
         event: THandlerOutEvent<Self>,
     ) {
         // Use match statement for future-proofing. Right now the enum has one
@@ -510,16 +576,26 @@ impl NetworkBehaviour for StreamGateway {
                 remote_handshake,
                 encoding,
                 stream,
+                inbound,
             } => {
                 // This is the "Hijack" point.
                 self.events
                     .push_back(ToSwarm::GenerateEvent(GatewayEvent::HandshakeReceived {
                         peer_id,
+                        connection_id,
                         remote_handshake,
                         encoding,
                         stream,
+                        inbound,
                     }));
-            } // If we later add a HandshakeResult::Failure, we handle it here
+            }
+            HandshakeResult::Failed => {
+                self.events
+                    .push_back(ToSwarm::GenerateEvent(GatewayEvent::HandshakeFailed {
+                        peer_id,
+                        connection_id,
+                    }));
+            }
         }
     }
 
@@ -617,5 +693,104 @@ mod tests {
             )
             .unwrap();
         assert!(handler.pause);
+    }
+
+    #[tokio::test]
+    async fn direction_follows_the_role_libp2p_assigns() {
+        let mut gateway = gateway().await;
+        let inbound = gateway
+            .handle_established_inbound_connection(
+                ConnectionId::new_unchecked(0),
+                PeerId::random(),
+                &direct("10.0.0.1", 9798),
+                &direct("198.51.100.2", 40000),
+            )
+            .unwrap();
+        assert!(inbound.inbound);
+        for (endpoint, expected) in [(Endpoint::Dialer, false), (Endpoint::Listener, true)] {
+            let dialed = gateway
+                .handle_established_outbound_connection(
+                    ConnectionId::new_unchecked(0),
+                    PeerId::random(),
+                    &direct("198.51.100.2", 40000),
+                    endpoint,
+                    PortUse::Reuse,
+                )
+                .unwrap();
+            assert_eq!(expected, dialed.inbound, "{endpoint:?}");
+        }
+    }
+
+    fn noop_context() -> Context<'static> {
+        Context::from_waker(futures::task::noop_waker_ref())
+    }
+
+    /// A handler whose remote has the handshake-initiator role, so that
+    /// polling it only drives the deadline.
+    fn waiting_handler(gateway: &mut StreamGateway) -> GatewayHandler {
+        let remote = std::iter::repeat_with(PeerId::random)
+            .find(|remote| *remote < gateway.local_peer_id)
+            .unwrap();
+        gateway
+            .handle_established_inbound_connection(
+                ConnectionId::new_unchecked(0),
+                remote,
+                &direct("10.0.0.1", 9798),
+                &direct("198.51.100.2", 40000),
+            )
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn handshake_not_completed_by_the_deadline_is_reported_as_failed() {
+        let mut handler = waiting_handler(&mut gateway().await);
+        handler.deadline = Some(Box::pin(tokio::time::sleep(Duration::from_millis(10))));
+        assert!(handler.poll(&mut noop_context()).is_pending());
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(matches!(
+            handler.poll(&mut noop_context()),
+            Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(
+                HandshakeResult::Failed
+            ))
+        ));
+        assert!(handler.poll(&mut noop_context()).is_pending());
+    }
+
+    #[tokio::test]
+    async fn failed_handshake_upgrade_is_reported_as_failed_once() {
+        let mut handler = waiting_handler(&mut gateway().await);
+        for _ in 0..2 {
+            handler.on_connection_event(ConnectionEvent::DialUpgradeError(
+                libp2p::swarm::handler::DialUpgradeError {
+                    info: (),
+                    error: libp2p::swarm::StreamUpgradeError::Timeout,
+                },
+            ));
+        }
+        assert!(matches!(
+            handler.poll(&mut noop_context()),
+            Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(
+                HandshakeResult::Failed
+            ))
+        ));
+        assert!(handler.poll(&mut noop_context()).is_pending());
+    }
+
+    #[tokio::test]
+    async fn paused_handler_has_no_deadline_until_activated() {
+        let (local, remote) = inbound_circuit();
+        let mut handler = gateway()
+            .await
+            .handle_established_inbound_connection(
+                ConnectionId::new_unchecked(0),
+                PeerId::random(),
+                &local,
+                &remote,
+            )
+            .unwrap();
+        assert!(handler.deadline.is_none());
+        handler.on_behaviour_event(Command::Activate);
+        assert!(handler.deadline.is_some());
     }
 }

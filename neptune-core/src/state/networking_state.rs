@@ -1,5 +1,6 @@
 use std::time::SystemTime;
 
+use neptune_consensus::block::block_header::BlockHeader;
 use neptune_p2p::peer::InstanceId;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::difficulty_control::ProofOfWork;
@@ -25,7 +26,7 @@ pub(crate) struct SyncAnchor {
     pub(crate) block_mmr: MmrAccumulator,
 
     /// Indicates the block that we have currently synced to under this anchor.
-    pub(crate) champion: (BlockHeight, Digest),
+    pub(crate) champion: (BlockHeader, Digest),
 
     /// Authentication path of the node's tip, relative to `block_mmr`, if that
     /// block arrived with one. Processed blocks are deleted from the sync
@@ -49,9 +50,10 @@ impl SyncAnchor {
     pub(crate) fn new(
         claimed_cumulative_pow: ProofOfWork,
         claimed_block_mmra: MmrAccumulator,
-        claimed_height: BlockHeight,
+        claimed_tip_header: BlockHeader,
         claimed_block_digest: Digest,
     ) -> Self {
+        let claimed_height = claimed_tip_header.height;
         assert_eq!(
             claimed_height.next().value(),
             claimed_block_mmra.num_leafs(),
@@ -63,7 +65,7 @@ impl SyncAnchor {
         Self {
             cumulative_proof_of_work: claimed_cumulative_pow,
             block_mmr: claimed_block_mmra,
-            champion: (claimed_height, claimed_block_digest),
+            champion: (claimed_tip_header, claimed_block_digest),
             tip_auth_path: None,
             updated: SystemTime::now(),
             status,
@@ -78,16 +80,16 @@ impl SyncAnchor {
         &self,
         incoming_block_height: BlockHeight,
     ) -> bool {
-        self.champion.0 < incoming_block_height
+        self.champion.0.height < incoming_block_height
     }
 
     /// Modify the sync anchor to point to the new incoming block, if its height
     /// is larger.
-    pub(crate) fn catch_up(&mut self, height: BlockHeight, block_hash: Digest) {
-        let new_champion = (height, block_hash);
+    pub(crate) fn catch_up(&mut self, header: BlockHeader, block_hash: Digest) {
+        let new_champion = (header, block_hash);
         let now = SystemTime::now();
 
-        if self.champion.0 <= new_champion.0 {
+        if self.champion.0.height <= new_champion.0.height {
             self.champion = new_champion;
             self.updated = now;
         }

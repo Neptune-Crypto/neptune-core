@@ -93,7 +93,6 @@ use neptune_wallet::unlocked_utxo::UnlockedUtxo;
 use neptune_wallet::wallet_entropy::WalletEntropy;
 use neptune_wallet::wallet_file::WALLET_INCOMING_SECRETS_FILE_NAME;
 use networking_state::NetworkingState;
-use num_traits::CheckedSub;
 use num_traits::Zero;
 use peers::Peers;
 use pending_requests::PendingRequests;
@@ -1750,9 +1749,8 @@ impl GlobalState {
         }
     }
 
-    /// Returns true iff the block proposal exceeds the previous proposal with
-    /// enough guesser reward to warrant a restart of the guesser with the
-    /// overhead that that brings.
+    /// Returns true iff the block proposal pays more guesser reward than the
+    /// one being guessed on, if any.
     ///
     /// Caller must have validated the new block proposal before calling this
     /// function.
@@ -1762,20 +1760,12 @@ impl GlobalState {
     /// - If the new block proposal has a negative fee.
     pub(crate) fn block_proposal_warrants_guess_restart(&self, new_proposal: &Block) -> bool {
         match self.mining_state.mining_status {
-            // If a proposal is already being worked on, check if a
-            // re-calculation of the preprocess-data is worth it.
             MiningStatus::Guessing(guessing_work_info) => {
-                let old_guesser_reward = guessing_work_info.total_guesser_fee;
                 let new_guesser_reward = new_proposal
                     .body()
                     .total_guesser_reward()
                     .expect("New proposal must be valid");
-                let Some(delta) = new_guesser_reward.checked_sub(&old_guesser_reward) else {
-                    return false;
-                };
-
-                let relative_delta = delta.to_nau_f64() / old_guesser_reward.to_nau_f64();
-                relative_delta >= self.cli.minimum_guesser_improvement_fraction
+                new_guesser_reward > guessing_work_info.total_guesser_fee
             }
 
             // If currently composing, don't interrupt this process

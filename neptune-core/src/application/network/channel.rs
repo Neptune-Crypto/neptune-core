@@ -1,6 +1,7 @@
 use std::net::IpAddr;
 
 use itertools::Either;
+use libp2p::swarm::ConnectionId;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
 use tokio::task::JoinHandle;
@@ -27,6 +28,10 @@ pub enum NetworkActorCommand {
     /// Instructs the [`NetworkActor`](super::actor::NetworkActor) to remove all
     /// IP addresses from the black list, thereby revoking all bans.
     UnbanAll,
+
+    /// Closes the connection whose peer loop has ended. A connection cannot
+    /// carry another peer loop, so it would only hold a slot.
+    CloseConnection(ConnectionId),
 
     /// Forces a re-evaluation of the local NAT status.
     ///

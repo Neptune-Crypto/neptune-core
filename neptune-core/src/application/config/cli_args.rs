@@ -148,12 +148,18 @@ pub struct Args {
     #[clap(long, default_value = "6")]
     pub(crate) max_connection_attempts_per_ip_per_minute: Option<usize>,
 
+    /// Maximum number of blocks to serve to one peer per minute. A block is
+    /// read from disk and is up to 8 megabytes on the wire; a peer requesting
+    /// more is refused and sanctioned. Lower this to protect a slow uplink.
+    #[clap(long, default_value = "1000", value_name = "COUNT")]
+    pub(crate) max_blocks_served_per_minute: u32,
+
     /// Handshake timeout in seconds.
     ///
     /// The timeout used for all messages received and sent during the handshake
-    /// protocol for incoming connections. Can be lowered if the client is
-    /// attacked by many connection attempts. Can be raised if client is running
-    /// on a machine with a bad internet connection.
+    /// protocol for incoming connections, and outgoing connections. Can be
+    /// lowered if the client is attacked by many connection attempts. Can be
+    /// raised if client is running on a machine with a bad internet connection.
     #[clap(long, default_value = "4", value_name = "SECONDS")]
     pub(crate) handshake_timeout: u8,
 
@@ -370,16 +376,6 @@ pub struct Args {
     /// always be guessed on if both composition and guessing is set.
     #[clap(long, default_value = "0.5", value_parser = fraction_validator)]
     pub(crate) minimum_guesser_fraction: f64,
-
-    /// If guessing has already started, and a new proposal comes in, the new
-    /// proposal will be guessed on only if it exceeds the previous proposal
-    /// with this fraction. Ideally this fraction should be set to the value of
-    /// 1 - BTI' / (BTI' - PPT), where BTI' is block target interval minus
-    /// proving time minus preprocessing time, and PPT is preprocessing time.
-    /// This value will optimize guesser rewards. On a Threadrippper 7995wx this
-    /// value is 16.7 %. On weaker CPUs, this value should be set higher.
-    #[clap(long, default_value = "0.17", value_parser = fraction_validator)]
-    pub(crate) minimum_guesser_improvement_fraction: f64,
 
     /// Whether to engage in guess-nonce-and-hash, which is the 3rd step in
     /// three-step mining. If this flag is set and the `compose` flag is not
@@ -619,8 +615,7 @@ pub struct Args {
     #[clap(long, default_value = "1800", value_parser = duration_from_seconds_str)]
     pub reconnect_cooldown: Duration,
 
-    /// How often, in seconds, to reconnect to peers given as CLI arguments
-    /// whose connection was lost, and to disconnect from excess peers.
+    /// How often, in seconds, to disconnect from excess peers.
     #[clap(long, default_value = "120", value_parser = duration_from_seconds_str)]
     pub peer_maintenance_interval: Duration,
 

@@ -109,7 +109,8 @@ where
         let mut chunkidx_to_chunk_difference_dict: HashMap<u64, Chunk> = HashMap::new();
         for index in all_removal_records_indices {
             if index >= active_window_start {
-                let relative_index = (index - active_window_start) as u32;
+                let relative_index = u32::try_from(index - active_window_start)
+                    .expect("Relative index for active window must be valid u32");
                 self.swbf_active.insert(relative_index);
             } else {
                 chunkidx_to_chunk_difference_dict
@@ -366,7 +367,8 @@ where
         // part. Otherwise, remove the index from the active window.
         for rr_index in removal_record_indices {
             if rr_index >= active_window_start {
-                let relative_index = (rr_index - active_window_start) as u32;
+                let relative_index = u32::try_from(rr_index - active_window_start)
+                    .expect("Relative index for active window must be valid u32");
                 self.swbf_active.remove(relative_index);
             } else {
                 let chunkidx = (rr_index / u128::from(CHUNK_SIZE)) as u64;
@@ -572,7 +574,8 @@ where
             if chunk_index >= batch_index as u64 {
                 // index is in the active part, so insert it in the active part of the Bloom filter
                 for index in indices {
-                    let relative_index = (index - active_window_start) as u32;
+                    let relative_index = u32::try_from(index - active_window_start)
+                        .expect("Relative index for active window must be valid u32");
                     self.swbf_active.insert(relative_index);
                 }
 

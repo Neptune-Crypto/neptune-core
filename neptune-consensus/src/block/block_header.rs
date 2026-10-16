@@ -321,9 +321,7 @@ impl BlockHeaderWithBlockHashWitness {
     /// about the block's body or proof.
     ///
     /// `parent` must be the header of the block that `prev_block_digest`
-    /// refers to; this is not checked here. Only blocks whose own difficulty
-    /// dictates the target, as all blocks since
-    /// [`ConsensusRuleSet::HardforkBeta`] do, are handled.
+    /// refers to; this is not checked here.
     pub fn validate_against_parent(
         &self,
         parent: &BlockHeader,
@@ -351,7 +349,14 @@ impl BlockHeaderWithBlockHashWitness {
             return Err(BlockHeaderValidationError::Difficulty);
         }
 
-        if header.cumulative_proof_of_work != parent.cumulative_proof_of_work + header.difficulty {
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, header.height);
+        let difficulty = if consensus_rule_set.use_parent_difficulty() {
+            parent.difficulty
+        } else {
+            header.difficulty
+        };
+
+        if header.cumulative_proof_of_work != parent.cumulative_proof_of_work + difficulty {
             return Err(BlockHeaderValidationError::CumulativeProofOfWork);
         }
 
@@ -360,8 +365,7 @@ impl BlockHeaderWithBlockHashWitness {
         if difficulty_is_reset {
             return Ok(());
         }
-        let target = header.difficulty.target();
-        let consensus_rule_set = ConsensusRuleSet::infer_from(network, header.height);
+        let target = difficulty.target();
         let has_proof_of_work = if network.allows_mock_pow() {
             self.hash() <= target
         } else {

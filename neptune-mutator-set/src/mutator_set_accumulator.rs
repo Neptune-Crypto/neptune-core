@@ -247,7 +247,8 @@ impl MutatorSetAccumulator {
                     !chunk.contains(relative_index)
                 } else {
                     // Index lives in the active window
-                    let relative_index = (inserted_index - active_window_start) as u32;
+                    let relative_index = u32::try_from(inserted_index - active_window_start)
+                        .expect("Relative index for active window must be valid u32");
                     !self.swbf_active.contains(relative_index)
                 }
             })
@@ -433,7 +434,8 @@ impl MutatorSetAccumulator {
             let mut chunkidx_to_chunk_difference_dict: HashMap<u64, Chunk> = HashMap::new();
             for index in all_removal_records_indices {
                 if index >= active_window_start {
-                    let relative_index = (index - active_window_start) as u32;
+                    let relative_index = u32::try_from(index - active_window_start)
+                        .expect("Relative index for active window must be valid u32");
                     self.swbf_active.insert(relative_index);
                 } else {
                     chunkidx_to_chunk_difference_dict

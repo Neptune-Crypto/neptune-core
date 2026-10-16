@@ -68,15 +68,6 @@ impl AnyTx {
         }
     }
 
-    /// The fee density, on whichever pipeline. See
-    /// [`Transaction::fee_density`] and [`LinkTx::fee_density`].
-    pub(crate) fn fee_density(&self) -> num_rational::BigRational {
-        match self {
-            AnyTx::Standard(transaction) => transaction.fee_density(),
-            AnyTx::Link(link_tx) => link_tx.fee_density(),
-        }
-    }
-
     /// The single-proof pipeline transaction, if that is what this is.
     pub(crate) fn as_standard(&self) -> Option<&Transaction> {
         match self {

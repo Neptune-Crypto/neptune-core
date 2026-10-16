@@ -793,6 +793,7 @@ impl MainLoopHandler {
                 claimed_height,
                 claimed_cumulative_pow,
                 claimed_block_mmra,
+                claimed_tip_header,
                 claimed_block_digest,
             } => {
                 log_slow_scope!(fn_name!() + "::PeerTaskToMain::AddPeerMaxBlockHeight");
@@ -819,7 +820,7 @@ impl MainLoopHandler {
                     global_state_mut.net.sync_anchor = Some(SyncAnchor::new(
                         claimed_cumulative_pow,
                         claimed_block_mmra,
-                        claimed_height,
+                        *claimed_tip_header,
                         claimed_block_digest,
                     ));
 
@@ -1050,7 +1051,8 @@ impl MainLoopHandler {
             PeerTaskToMain::NewSyncTarget(new_target) => {
                 if let Some(sync_loop) = &mut main_loop_state.maybe_sync_loop {
                     // Double-check new leadership status. Race condition.
-                    let height = new_target.header().height;
+                    let header = *new_target.header();
+                    let height = header.height;
                     let block_hash = new_target.hash();
                     if sync_loop.target_height().next() == height {
                         sync_loop.send_new_target(new_target).await;
@@ -1062,7 +1064,7 @@ impl MainLoopHandler {
                             .sync_anchor
                             .as_mut()
                         {
-                            sync_anchor.catch_up(height, block_hash);
+                            sync_anchor.catch_up(header, block_hash);
                         } else {
                             error!("Sync mode active but sync anchor not set. The two should always be in sync.");
                         }
@@ -1174,44 +1176,6 @@ impl MainLoopHandler {
             let pmsg = MainToPeerTask::Disconnect(peer_id);
             self.main_to_peer_broadcast(pmsg);
         }
-    }
-
-    /// If necessary, reconnect to the peers listed as CLI arguments.
-    async fn reconnect(&self) -> Result<()> {
-        let connected_peers = self
-            .global_state_lock
-            .peers()
-            .snapshot()
-            .into_iter()
-            .collect_vec();
-        let connected_peers_addresses = connected_peers
-            .iter()
-            .map(|(_peer_id, peer_info)| peer_info.address().clone())
-            .collect_vec();
-        let peers_with_lost_connection = self
-            .global_state_lock
-            .cli()
-            .peers
-            .iter()
-            .filter(|peer| !connected_peers_addresses.contains(peer));
-
-        // If no connection was lost, there's nothing to do.
-        if peers_with_lost_connection.clone().count() == 0 {
-            return Ok(());
-        }
-
-        // Else, try to reconnect.
-        for peer_with_lost_connection in peers_with_lost_connection {
-            if let Err(e) = self
-                .network_command_tx
-                .send(NetworkActorCommand::Dial(peer_with_lost_connection.clone()))
-                .await
-            {
-                warn!("Failed to reconnect to peer {peer_with_lost_connection}: {e}.");
-            }
-        }
-
-        Ok(())
     }
 
     /// Scheduled task for upgrading the proofs of transactions in the mempool.
@@ -1570,14 +1534,13 @@ impl MainLoopHandler {
                     main_loop_state.maybe_sync_loop = self.handle_sync_loop_message(sync_loop_msg, sync_loop).await;
                 }
 
-                // Keep the set of peers as configured. Discovery of new
-                // peers is the libp2p network actor's job, through the DHT.
+                // Keep the number of peers as configured. Connecting to peers
+                // is handled by the libp2p actor.
                 _ = peer_maintenance_interval.tick() => {
                     log_slow_scope!(fn_name!() + "::select::peer_maintenance_interval");
 
                     debug!("Timer: peer maintenance job");
                     self.prune_peers();
-                    self.reconnect().await?;
                 }
 
                 // Clean up mempool: remove stale / too old transactions
@@ -3096,12 +3059,11 @@ mod tests {
 
     #[traced_test]
     #[apply(shared_tokio_runtime)]
-    async fn should_switch_guessing_proposal_iff_sufficient_delta() {
+    async fn should_switch_guessing_proposal_iff_better() {
         let network = Network::Main;
         let cli = cli_args::Args {
             network,
             guess: true,
-            minimum_guesser_improvement_fraction: 0.2f64,
             ..Default::default()
         };
 
@@ -3114,7 +3076,6 @@ mod tests {
 
         let proposal_0_5 = invalid_empty_block1_with_guesser_fraction(network, 0.5).await;
         let proposal_0_55 = invalid_empty_block1_with_guesser_fraction(network, 0.55).await;
-        let proposal_0_61 = invalid_empty_block1_with_guesser_fraction(network, 0.61).await;
 
         // New proposal when none is known: must inform mine loop
         main_loop_handler
@@ -3153,7 +3114,7 @@ mod tests {
             .set_mining_status_to_guessing(&proposal_0_5)
             .await;
 
-        // Too small delta, don't inform mine loop.
+        // Any improvement, must inform mine loop.
         main_loop_handler
             .handle_peer_task_message(
                 PeerTaskToMain::BlockProposal(Box::new(proposal_0_55.clone())),
@@ -3161,10 +3122,12 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(
-            main_to_miner_rx.try_recv().is_err(),
-            "No message may be sent when delta is too small"
-        );
+        let MainToMiner::NewBlockProposal = main_to_miner_rx
+            .try_recv()
+            .expect("Block proposal warrants miner message")
+        else {
+            panic!("Expected new block proposal message bc proposal is better");
+        };
         let BlockProposal::ForeignComposition(best_known_proposal1) = main_loop_handler
             .global_state_lock
             .lock_guard()
@@ -3178,23 +3141,21 @@ mod tests {
         assert_eq!(
             proposal_0_55.pow_mast_paths(),
             best_known_proposal1.pow_mast_paths(),
-            "Best known proposal must be set despite mine loop not informed"
+            "Best known proposal must be set to best-known value"
         );
 
-        // Sufficient delta, must inform mine loop.
+        // Worse proposal, don't inform mine loop.
         main_loop_handler
             .handle_peer_task_message(
-                PeerTaskToMain::BlockProposal(Box::new(proposal_0_61.clone())),
+                PeerTaskToMain::BlockProposal(Box::new(proposal_0_5.clone())),
                 &mut mutable_main_loop_state,
             )
             .await
             .unwrap();
-        let MainToMiner::NewBlockProposal = main_to_miner_rx
-            .try_recv()
-            .expect("Block proposal warrants miner message")
-        else {
-            panic!("Expected new block proposal message bc delta is sufficient");
-        };
+        assert!(
+            main_to_miner_rx.try_recv().is_err(),
+            "No message may be sent for a worse proposal"
+        );
         let BlockProposal::ForeignComposition(best_known_proposal2) = main_loop_handler
             .global_state_lock
             .lock_guard()
@@ -3206,9 +3167,9 @@ mod tests {
             panic!("Block proposal must be known and foreign")
         };
         assert_eq!(
-            proposal_0_61.pow_mast_paths(),
+            proposal_0_55.pow_mast_paths(),
             best_known_proposal2.pow_mast_paths(),
-            "Best known proposal must be set to best-known value"
+            "Best known proposal must be kept"
         );
 
         drop(main_loop_handler);

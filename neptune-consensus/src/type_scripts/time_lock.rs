@@ -57,6 +57,20 @@ impl TritonProgram for TimeLock {
     fn library_and_code(&self) -> (Library, Vec<LabelledInstruction>) {
         let (library, audit_preloaded_data, audit_subroutine) = {
             let mut library = Library::new();
+
+            // The compiled code below occupies the first 16 words of
+            // statically-allocated memory, -17..=-2. Claim them so no import
+            // can be handed the same region, and such that no caller conflicts
+            // with the memory used here.
+            // Only relevant if this program is used as a subroutine elsewhere.
+            let scratch = library.kmalloc(16);
+            assert_eq!(
+                -BFieldElement::new(17),
+                scratch.write_address(),
+                "The TimeLock program must own the first part of static memory \
+                 since it uses hardcoded memory addresses."
+            );
+
             let audit_preloaded_data = library.import(Box::new(VerifyNdSiIntegrity::<
                 TimeLockWitnessMemory,
             >::default()));

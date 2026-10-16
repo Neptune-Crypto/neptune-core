@@ -3,6 +3,7 @@ pub(crate) mod channel;
 use std::cmp;
 use std::marker::Unpin;
 use std::net::SocketAddr;
+use std::time::Duration;
 use std::time::SystemTime;
 
 use anyhow::bail;
@@ -15,6 +16,7 @@ use futures::stream::TryStreamExt;
 use futures::FutureExt;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
+use neptune_consensus::block::block_header::BlockHeader;
 use neptune_consensus::block::block_header::BlockHeaderWithBlockHashWitness;
 use neptune_consensus::block::block_header::HeaderToBlockHashWitness;
 use neptune_consensus::block::Block;
@@ -94,6 +96,9 @@ const MAX_PEER_LIST_LENGTH: usize = 10;
 /// A batch response and request must carry at least this many blocks.
 const MINIMUM_BLOCK_BATCH_SIZE: usize = 1;
 
+/// The window over which blocks served to one peer are counted.
+const BLOCK_SERVING_WINDOW: Duration = Duration::from_secs(60);
+
 /// Maximum size in bytes for a single block during fork reconciliation. Blocks
 /// larger than this are rejected to prevent RAM exhaustion attacks.
 ///
@@ -146,6 +151,12 @@ pub struct PeerLoopHandler {
     peer_tx_relay: bool,
 
     rng: StdRng,
+
+    /// Blocks served to this peer in the window starting at
+    /// `blocks_served_since`.
+    blocks_served: u32,
+    blocks_served_since: SystemTime,
+
     #[cfg(test)]
     mock_now: Option<Timestamp>,
 }
@@ -168,6 +179,8 @@ impl PeerLoopHandler {
             inbound_connection,
             peer_tx_relay: peer_handshake_data.relays_transactions(),
             rng: StdRng::from_rng(&mut rand::rng()),
+            blocks_served: 0,
+            blocks_served_since: SystemTime::UNIX_EPOCH,
             #[cfg(test)]
             mock_now: None,
         }
@@ -229,6 +242,27 @@ impl PeerLoopHandler {
     /// [`Self::now`] as a [`SystemTime`].
     fn system_time(&self) -> SystemTime {
         SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(self.now().to_millis())
+    }
+
+    /// Whether `count` more blocks may be served to this peer now. If the limit
+    /// is exceeded, the peer is punished.
+    async fn may_serve_blocks(&mut self, count: u32) -> Result<bool> {
+        let now = self.system_time();
+        if now
+            .duration_since(self.blocks_served_since)
+            .is_ok_and(|elapsed| elapsed >= BLOCK_SERVING_WINDOW)
+        {
+            self.blocks_served_since = now;
+            self.blocks_served = 0;
+        }
+        let budget = self.global_state_lock.cli().max_blocks_served_per_minute;
+        if self.blocks_served + count > budget {
+            self.punish(NegativePeerSanction::ExcessiveBlockRequests)
+                .await?;
+            return Ok(false);
+        }
+        self.blocks_served += count;
+        Ok(true)
     }
 
     /// Request all announced objects whose turn it is to be requested from this
@@ -400,11 +434,12 @@ impl PeerLoopHandler {
     async fn receive_sync_block(
         &mut self,
         block: Box<Block>,
-        champion: (BlockHeight, Digest),
+        champion: (BlockHeader, Digest),
         auth_path: Option<MmrMembershipProof>,
     ) -> Result<()> {
         let network = self.global_state_lock.cli().network;
-        let (champion_height, champion_digest) = champion;
+        let (champion_header, champion_digest) = champion;
+        let champion_height = champion_header.height;
         let height = block.header().height;
         let digest = block.hash();
 
@@ -422,6 +457,18 @@ impl PeerLoopHandler {
             return Ok(());
         }
 
+        // A block extending the champion has a known parent, so its header
+        // and proof-of-work can be checked.
+        if extends_champion
+            && BlockHeaderWithBlockHashWitness::new(*block.header(), block.as_ref().into())
+                .validate_against_parent(&champion_header, network)
+                .is_err()
+        {
+            self.punish(NegativePeerSanction::InvalidBlock((height, digest)))
+                .await?;
+            return Ok(());
+        }
+
         // Establish everything about the block that can be
         // established without its predecessor, before storing it.
         // Otherwise this path is open to a DOS attack. Validation
@@ -434,7 +481,8 @@ impl PeerLoopHandler {
         // being synced.
         //
         // No locks may be held here, since proof validation takes
-        // milliseconds.
+        // milliseconds. If this block extends champion, the pow is checked
+        // twice. And that is fine.
         let is_valid = block.has_own_proof_of_work(network)
             && block.solo_validate(self.now(), network).await.is_ok();
         if !is_valid {
@@ -459,7 +507,7 @@ impl PeerLoopHandler {
             if is_successor && is_new_champion {
                 // Keep sync anchor up to date, and inform main loop about a new
                 // tip-successor.
-                sync_anchor.catch_up(height, digest);
+                sync_anchor.catch_up(*block.header(), digest);
                 Some(PeerTaskToMain::NewSyncTarget(block))
             } else if is_new_champion {
                 // The incoming block is the new champion but is not the
@@ -1184,7 +1232,7 @@ impl PeerLoopHandler {
                             .net
                             .sync_anchor
                             .as_ref()
-                            .map(|sync_anchor| sync_anchor.champion.0),
+                            .map(|sync_anchor| sync_anchor.champion.0.height),
                     )
                 };
                 debug!(
@@ -1477,6 +1525,7 @@ impl PeerLoopHandler {
                         claimed_height: claimed_tip_height,
                         claimed_cumulative_pow: issued_challenge.accumulated_pow,
                         claimed_block_mmra: sync_mmra_anchor,
+                        claimed_tip_header: Box::new(challenge_response.tip.header),
                         claimed_block_digest: challenge_response_tip_hash,
                     })
                     .await?;
@@ -1484,6 +1533,10 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockRequestByHash(block_digest) => {
+                if !self.may_serve_blocks(1).await? {
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
                 let block = self
                     .global_state_lock
                     .lock_guard()
@@ -1525,6 +1578,10 @@ impl PeerLoopHandler {
             }
             PeerMessage::BlockRequestByHeight(block_height) => {
                 log_slow_scope!(fn_name!() + "::PeerMessage::BlockRequestByHeight");
+
+                if !self.may_serve_blocks(1).await? {
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
 
                 debug!("Got BlockRequestByHeight of height {}", block_height);
 
@@ -1681,6 +1738,15 @@ impl PeerLoopHandler {
                 max_response_len,
                 anchor,
             }) => {
+                // Charged as a full batch; the count is fixed before the lock
+                // is taken.
+                if !self
+                    .may_serve_blocks(STANDARD_BLOCK_BATCH_SIZE as u32)
+                    .await?
+                {
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
                 debug!(
                     "Received BlockRequestBatch from peer {}, max_response_len: {max_response_len}",
                     self.peer_id
@@ -1919,6 +1985,10 @@ impl PeerLoopHandler {
             }
             PeerMessage::ValidatedBlockRequestByHeight(request) => {
                 log_slow_scope!(fn_name!() + "::PeerMessage::ValidatedBlockRequestByHeight");
+
+                if !self.may_serve_blocks(1).await? {
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
 
                 let ValidatedBlockRequestByHeight {
                     height: block_height,
@@ -2615,49 +2685,49 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
+                // Answered once the delivery is a usable copy of what was
+                // announced.
+                let announced = AnnouncedObject::BlockProposal(new_proposal.body().mast_hash());
+
                 if new_proposal
                     .body()
                     .transaction_kernel
                     .retires_before(self.now())
                 {
                     debug!("Ignoring block proposal whose transaction has retired");
+                    self.global_state_lock
+                        .pending_requests()
+                        .resolve(&announced);
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                // Is the proposal valid?
-                // Lock needs to be held here because race conditions: otherwise
-                // the block proposal that was validated might not match with
-                // the one whose favorability is being computed.
-                let state = self.global_state_lock.lock_guard().await;
-                let tip = state.chain.tip();
-
-                let network = self.global_state_lock.cli().network;
-                let proposal_is_valid = new_proposal.is_valid(tip, self.now(), network).await;
-                if !proposal_is_valid {
-                    drop(state);
+                let Ok(guesser_reward) = new_proposal.body().total_guesser_reward() else {
                     self.punish(NegativePeerSanction::InvalidBlockProposal)
                         .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
-                }
+                };
 
-                // The peer delivered what it announced.
-                self.global_state_lock
-                    .pending_requests()
-                    .resolve(&AnnouncedObject::BlockProposal(
-                        new_proposal.body().mast_hash(),
-                    ));
-
-                // Is block proposal favorable?
-                let is_favorable = state.favor_incoming_block_proposal(
-                    new_proposal.header().prev_block_digest,
-                    new_proposal
-                        .body()
-                        .total_guesser_reward()
-                        .expect("Block was validated"),
-                );
-                drop(state);
+                // Is block proposal favorable? Decided before validity, so a
+                // proposal that would be discarded anyway costs no proof
+                // verification.
+                let (is_favorable, tip) = {
+                    let state = self.global_state_lock.lock_guard().await;
+                    let is_favorable = state.favor_incoming_block_proposal(
+                        new_proposal.header().prev_block_digest,
+                        guesser_reward,
+                    );
+                    (is_favorable, state.chain.tip().to_owned())
+                };
 
                 if let Err(rejection_reason) = is_favorable {
+                    if !matches!(
+                        rejection_reason,
+                        BlockProposalRejectError::WrongParent { .. }
+                    ) {
+                        self.global_state_lock
+                            .pending_requests()
+                            .resolve(&announced);
+                    }
                     match rejection_reason {
                         // no need to punish and log if the fees are equal.  we just ignore the incoming proposal.
                         BlockProposalRejectError::InsufficientFee { current, received }
@@ -2674,6 +2744,17 @@ impl PeerLoopHandler {
                         }
                     }
                 };
+
+                // Is the proposal valid?
+                let network = self.global_state_lock.cli().network;
+                if !new_proposal.is_valid(&tip, self.now(), network).await {
+                    self.punish(NegativePeerSanction::InvalidBlockProposal)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+                self.global_state_lock
+                    .pending_requests()
+                    .resolve(&announced);
 
                 self.send_to_main(PeerTaskToMain::BlockProposal(new_proposal), line!())
                     .await?;
@@ -3305,6 +3386,8 @@ mod tests {
                 peer_handshake_data,
                 inbound_connection,
                 peer_tx_relay: peer_handshake_data.relays_transactions(),
+                blocks_served: 0,
+                blocks_served_since: SystemTime::UNIX_EPOCH,
                 mock_now: Some(mocked_time),
                 rng: StdRng::from_rng(&mut rand::rng()),
             }
@@ -4485,10 +4568,12 @@ mod tests {
             {
                 let mut state = state_lock.lock_guard_mut().await;
                 let claimed_pow = state.chain.tip().header().cumulative_proof_of_work;
+                let mut claimed_tip_header = *state.chain.tip().header();
+                claimed_tip_header.height = BlockHeight::from(9u64);
                 let mut sync_anchor = crate::state::networking_state::SyncAnchor::new(
                     claimed_pow,
                     sync_anchor_mmra.clone(),
-                    BlockHeight::from(9u64),
+                    claimed_tip_header,
                     *anchor_leafs.last().unwrap(),
                 );
                 sync_anchor.tip_auth_path =
@@ -4655,10 +4740,12 @@ mod tests {
             {
                 let mut state = state_lock.lock_guard_mut().await;
                 let claimed_pow = state.chain.tip().header().cumulative_proof_of_work;
+                let mut claimed_tip_header = *state.chain.tip().header();
+                claimed_tip_header.height = claimed_height;
                 state.net.sync_anchor = Some(crate::state::networking_state::SyncAnchor::new(
                     claimed_pow,
                     anchor.clone(),
-                    claimed_height,
+                    claimed_tip_header,
                     *claimed_block_digests.last().unwrap(),
                 ));
             }
@@ -4736,7 +4823,7 @@ mod tests {
                 state.net.sync_anchor = Some(crate::state::networking_state::SyncAnchor::new(
                     block_2.header().cumulative_proof_of_work,
                     anchor,
-                    block_2.header().height,
+                    *block_2.header(),
                     block_2.hash(),
                 ));
             }
@@ -4751,7 +4838,8 @@ mod tests {
                 handshake,
                 false,
             );
-            let champion = (block_2.header().height, block_2.hash());
+            let champion = (*block_2.header(), block_2.hash());
+            let block_3_hash = block_3.hash();
             let peer_task = tokio::spawn(async move {
                 peer_loop_handler
                     .receive_sync_block(Box::new(block_3), champion, None)
@@ -4783,6 +4871,106 @@ mod tests {
             ));
             peer_task.await??;
 
+            let champion_after = state_lock
+                .lock_guard()
+                .await
+                .net
+                .sync_anchor
+                .as_ref()
+                .unwrap()
+                .champion;
+            assert_eq!(
+                (block_3_hash, BlockHeight::from(3u64)),
+                (champion_after.1, champion_after.0.height),
+                "champion must move to the successor"
+            );
+
+            Ok(())
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn replayed_body_under_a_forged_header_does_not_move_the_champion() -> Result<()> {
+            use neptune_primitives::difficulty_control::Difficulty;
+
+            use super::block_proposals::genesis_setup;
+            use super::block_proposals::TestSetup;
+
+            let network = Network::Testnet(42);
+            let TestSetup {
+                peer_broadcast_tx,
+                mut peer_loop_handler,
+                mut to_main_rx,
+                from_main_rx: _,
+                peer_state: _,
+                to_main_tx,
+                genesis_block,
+            } = genesis_setup(cli_args::Args::default_with_network(network)).await;
+            let [block_1, block_2, block_3] = fake_valid_sequence_of_blocks_for_tests(
+                &genesis_block,
+                Timestamp::hours(1),
+                StdRng::seed_from_u64(5550006).random(),
+                network,
+            )
+            .await;
+            let anchor = MmrAccumulator::new_from_leafs(vec![
+                genesis_block.hash(),
+                block_1.hash(),
+                block_2.hash(),
+            ]);
+            peer_loop_handler
+                .global_state_lock
+                .lock_guard_mut()
+                .await
+                .net
+                .sync_anchor = Some(crate::state::networking_state::SyncAnchor::new(
+                block_2.header().cumulative_proof_of_work,
+                anchor,
+                *block_2.header(),
+                block_2.hash(),
+            ));
+
+            // The genuine body and proof of block 3, under a header whose
+            // difficulty the parent does not dictate.
+            let mut forged = block_3;
+            forged.kernel_mut().header.difficulty = Difficulty::new([1, 1, 0, 0, 0]);
+            let champion = (*block_2.header(), block_2.hash());
+            peer_loop_handler
+                .receive_sync_block(Box::new(forged), champion, None)
+                .await?;
+
+            assert!(
+                to_main_rx.try_recv().is_err(),
+                "forged block must not reach the main loop"
+            );
+            let champion_after = peer_loop_handler
+                .global_state_lock
+                .lock_guard()
+                .await
+                .net
+                .sync_anchor
+                .as_ref()
+                .unwrap()
+                .champion
+                .1;
+            assert_eq!(block_2.hash(), champion_after, "champion must not move");
+            let latest_punishment =
+                peer_loop_handler
+                    .global_state_lock
+                    .peers()
+                    .with_connected(|connected| {
+                        connected[&peer_loop_handler.peer_id]
+                            .standing()
+                            .latest_punishment
+                            .map(|(sanction, _)| sanction)
+                    });
+            assert!(matches!(
+                latest_punishment,
+                Some(NegativePeerSanction::InvalidBlock(_))
+            ));
+
+            drop(to_main_tx);
+            drop(peer_broadcast_tx);
             Ok(())
         }
 
@@ -4844,7 +5032,7 @@ mod tests {
                     state.net.sync_anchor = Some(crate::state::networking_state::SyncAnchor::new(
                         block_2.header().cumulative_proof_of_work,
                         anchor.clone(),
-                        block_2.header().height,
+                        *block_2.header(),
                         block_2.hash(),
                     ));
                 }
@@ -6083,6 +6271,88 @@ mod tests {
             );
 
             Ok(())
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn block_requests_beyond_the_budget_are_punished() {
+            use super::block_proposals::genesis_setup;
+            use super::block_proposals::TestSetup;
+
+            let TestSetup {
+                peer_broadcast_tx,
+                mut peer_loop_handler,
+                to_main_rx: _,
+                from_main_rx,
+                mut peer_state,
+                to_main_tx,
+                genesis_block: _,
+            } = genesis_setup(cli_args::Args::default_with_network(Network::Testnet(42))).await;
+            let block = fake_valid_block_for_tests(
+                &peer_loop_handler.global_state_lock,
+                StdRng::seed_from_u64(5550003).random(),
+            )
+            .await;
+            peer_loop_handler
+                .global_state_lock
+                .set_new_tip(block.clone())
+                .await
+                .unwrap();
+            let now = peer_loop_handler.now();
+            peer_loop_handler.mock_now = Some(now);
+            let latest_punishment = |handler: &PeerLoopHandler| {
+                handler
+                    .global_state_lock
+                    .peers()
+                    .with_connected(|connected| {
+                        connected[&handler.peer_id]
+                            .standing()
+                            .latest_punishment
+                            .map(|(sanction, _)| sanction)
+                    })
+            };
+
+            let request = || Action::Read(PeerMessage::BlockRequestByHash(block.hash()));
+            let served = || {
+                Action::Write(PeerMessage::Block(Box::new(
+                    block.clone().try_into().unwrap(),
+                )))
+            };
+            let mut actions = vec![];
+            let budget = peer_loop_handler
+                .global_state_lock
+                .cli()
+                .max_blocks_served_per_minute;
+            for _ in 0..budget {
+                actions.push(request());
+                actions.push(served());
+            }
+            actions.push(request());
+            actions.push(Action::Read(PeerMessage::Bye));
+            peer_loop_handler
+                .run(
+                    Mock::new(actions),
+                    from_main_rx.resubscribe(),
+                    &mut peer_state,
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                Some(NegativePeerSanction::ExcessiveBlockRequests),
+                latest_punishment(&peer_loop_handler),
+                "request beyond the budget must be punished, not served"
+            );
+
+            // The budget renews with the window.
+            peer_loop_handler.mock_now = Some(now + Timestamp::seconds(60));
+            let mock = Mock::new(vec![request(), served(), Action::Read(PeerMessage::Bye)]);
+            peer_loop_handler
+                .run(mock, from_main_rx, &mut peer_state)
+                .await
+                .unwrap();
+
+            drop(to_main_tx);
+            drop(peer_broadcast_tx);
         }
     }
 
@@ -8475,6 +8745,7 @@ mod tests {
                 claimed_height: bob_tip.header().height,
                 claimed_cumulative_pow: bob_tip.header().cumulative_proof_of_work,
                 claimed_block_mmra: expected_anchor_mmra,
+                claimed_tip_header: Box::new(*bob_tip.header()),
                 claimed_block_digest: bob_tip.hash(),
             };
             let observed_message_from_alice_peer_loop = alice_peer_to_main_rx.recv().await.unwrap();
