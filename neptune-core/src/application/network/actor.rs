@@ -1670,6 +1670,7 @@ impl NetworkActor {
             remote_handshake,
             encoding,
             stream,
+            inbound,
         } = event;
 
         tracing::trace!(peer = %peer_id, "New peer stream hijacked via StreamGateway");
@@ -1710,6 +1711,7 @@ impl NetworkActor {
             remote_handshake,
             encoding,
             stream,
+            inbound,
             from_main_rx,
         ) {
             // Notify the rest of the application that a peer is ready.
@@ -2307,6 +2309,7 @@ impl NetworkActor {
     ///
     /// The task terminates automatically if the stream is closed or a shutdown
     /// signal is received from the main loop.
+    #[expect(clippy::too_many_arguments)]
     fn spawn_peer_loop(
         &mut self,
         peer_id: PeerId,
@@ -2314,6 +2317,7 @@ impl NetworkActor {
         remote_handshake: HandshakeData,
         encoding: WireEncoding,
         raw_stream: libp2p::Stream,
+        inbound: bool,
         from_main_rx: tokio::sync::broadcast::Receiver<MainToPeerTask>,
     ) -> Option<JoinHandle<()>> {
         // Keep track of which peers get upgraded connections. Prevent same
@@ -2347,7 +2351,7 @@ impl NetworkActor {
             peer_id,
             peer_address,
             remote_handshake,
-            rand::rng().random_bool(0.5f64),
+            inbound,
         );
 
         let peer_stream = bridge_libp2p_stream(raw_stream, encoding);

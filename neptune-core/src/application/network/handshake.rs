@@ -219,6 +219,8 @@ pub(crate) enum HandshakeResult {
         remote_handshake: HandshakeData,
         encoding: WireEncoding,
         stream: Stream,
+        /// Whether the remote opened the connection.
+        inbound: bool,
     },
 }
 

@@ -69,6 +69,10 @@ pub(crate) struct GatewayHandler {
     /// Whether we requested a handshake.
     outbound_requested_already: bool,
 
+    /// Whether the other peer, the remote, opened the connection. For
+    /// hole-punched connections libp2p assigns one of them the listerner role.
+    inbound: bool,
+
     local_peer_id: libp2p::PeerId,
     remote_peer_id: libp2p::PeerId,
 }
@@ -105,6 +109,7 @@ impl GatewayHandler {
                     remote_handshake,
                     encoding,
                     stream,
+                    inbound: self.inbound,
                 },
             ));
     }
@@ -232,8 +237,8 @@ impl ConnectionHandler for GatewayHandler {
 
         // If we haven't asked for a handshake yet, and we are the initiator,
         // request it now.
-        let we_are_initiator = self.local_peer_id < self.remote_peer_id;
-        if !self.outbound_requested_already && we_are_initiator {
+        let we_are_handshake_initiator = self.local_peer_id < self.remote_peer_id;
+        if !self.outbound_requested_already && we_are_handshake_initiator {
             self.outbound_requested_already = true;
             return Poll::Ready(ConnectionHandlerEvent::OutboundSubstreamRequest {
                 protocol: SubstreamProtocol::new(
@@ -281,6 +286,8 @@ pub(crate) enum GatewayEvent {
         encoding: WireEncoding,
         /// The live, bidirectional stream ready for inner protocol messages.
         stream: libp2p::Stream,
+        /// Whether the remote opened the connection.
+        inbound: bool,
     },
 }
 
@@ -409,6 +416,7 @@ impl NetworkBehaviour for StreamGateway {
             pending_events: VecDeque::new(),
             pause: GatewayHandler::starts_paused(local_addr, remote_addr),
             outbound_requested_already: false,
+            inbound: true,
             local_peer_id: self.local_peer_id,
             remote_peer_id: peer,
         })
@@ -424,7 +432,7 @@ impl NetworkBehaviour for StreamGateway {
         _connection_id: ConnectionId,
         peer: PeerId,
         addr: &Multiaddr,
-        _endpoint: libp2p::core::Endpoint,
+        endpoint: libp2p::core::Endpoint,
         _port_use: PortUse,
     ) -> Result<THandler<Self>, libp2p::swarm::ConnectionDenied> {
         {
@@ -440,6 +448,9 @@ impl NetworkBehaviour for StreamGateway {
             pending_events: VecDeque::new(),
             pause: !NetworkActor::is_direct(addr),
             outbound_requested_already: false,
+            // in case of hole punch, both sides make an outbound connection,
+            // so the libp2p-provided endpoint value must be used here.
+            inbound: endpoint == libp2p::core::Endpoint::Listener,
             local_peer_id: self.local_peer_id,
             remote_peer_id: peer,
         })
@@ -510,6 +521,7 @@ impl NetworkBehaviour for StreamGateway {
                 remote_handshake,
                 encoding,
                 stream,
+                inbound,
             } => {
                 // This is the "Hijack" point.
                 self.events
@@ -518,6 +530,7 @@ impl NetworkBehaviour for StreamGateway {
                         remote_handshake,
                         encoding,
                         stream,
+                        inbound,
                     }));
             } // If we later add a HandshakeResult::Failure, we handle it here
         }
@@ -617,5 +630,31 @@ mod tests {
             )
             .unwrap();
         assert!(handler.pause);
+    }
+
+    #[tokio::test]
+    async fn direction_follows_the_role_libp2p_assigns() {
+        let mut gateway = gateway().await;
+        let inbound = gateway
+            .handle_established_inbound_connection(
+                ConnectionId::new_unchecked(0),
+                PeerId::random(),
+                &direct("10.0.0.1", 9798),
+                &direct("198.51.100.2", 40000),
+            )
+            .unwrap();
+        assert!(inbound.inbound);
+        for (endpoint, expected) in [(Endpoint::Dialer, false), (Endpoint::Listener, true)] {
+            let dialed = gateway
+                .handle_established_outbound_connection(
+                    ConnectionId::new_unchecked(0),
+                    PeerId::random(),
+                    &direct("198.51.100.2", 40000),
+                    endpoint,
+                    PortUse::Reuse,
+                )
+                .unwrap();
+            assert_eq!(expected, dialed.inbound, "{endpoint:?}");
+        }
     }
 }
