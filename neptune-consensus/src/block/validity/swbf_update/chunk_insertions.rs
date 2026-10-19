@@ -1,7 +1,7 @@
-//! Rule 2.a and the insertion lists of rule 2.e in one pass over the
-//! records' indices: each index of each record that lies in the inactive
-//! SWBF resolves to its chunk in the witness's list, and takes its place in
-//! the chunk's sorted list of insertions.
+//! Rule 2.b's chunks and the insertion lists of rule 2.e in one pass over
+//! the records' indices: each index of each record that lies in the
+//! inactive SWBF resolves to its chunk in the witness's list, and takes its
+//! place in the chunk's sorted list of insertions.
 
 use std::collections::HashMap;
 
@@ -23,40 +23,31 @@ use tasm_lib::triton_vm::prelude::*;
 use crate::block::block_validation_error::BlockValidationRule;
 
 /// Resolves every absolute index of every removal record that lies in the
-/// inactive part of the sliding-window Bloom filter to its chunk, checks
-/// that the chunks are exactly those such indices need, and collects, for
-/// each chunk, the indices the records set in it, relative to the chunk's
-/// start, as a sorted list.
-///
-/// Two window starts are given: the one of the true mutator set, below
-/// which every index must have its chunk and is inserted into it, as the
-/// archival validity check demands; and the one of the inactive SWBF the
-/// witness describes, below which the indices must use every chunk, so
-/// that the witness holds no chunk nothing needs. For an honest witness
-/// the two agree.
+/// inactive part of the sliding-window Bloom filter to its chunk, as the
+/// archival validity check demands, and collects, for each chunk, the
+/// indices the records set in it, relative to the chunk's start, as a
+/// sorted list.
 ///
 /// ```text
-/// BEFORE: _ *removal_records *chunk_indices [swbfi_leaf_count_estimate: u64] [swbfi_leaf_count: u64]
+/// BEFORE: _ *removal_records *chunk_indices [swbfi_leaf_count: u64]
 /// AFTER:  _ *insertions
 /// ```
 ///
 /// `*chunk_indices` lists the chunks' indices in ascending order, and
 /// `*insertions` lists a pointer to the sorted list for each of them in the
-/// same order. The lists hold exactly the records' indices below the true
-/// window start, each in the chunk it lies in, with repetitions.
+/// same order. The lists hold exactly the records' indices below the
+/// window start, each in the chunk it lies in, with repetitions. A chunk
+/// no index lies in gets an empty list.
 ///
 /// The prover supplies each list's length and entries, then for every index
-/// below either window start, in the order of the records and of their
-/// indices, the position of its chunk among the chunk indices, and, if the
-/// index lies below the true window start, its position in that chunk's
-/// list. Each list position must hold that index and may be pointed at
-/// once, and every position must be pointed at.
+/// below the window start, in the order of the records and of their
+/// indices, the position of its chunk among the chunk indices and its
+/// position in that chunk's list. Each list position must hold that index
+/// and may be pointed at once, and every position must be pointed at.
 ///
 /// Crashes with the error ID of rule 2.b if an index has no chunk at the
-/// divined position, with the error ID of rule 2.a if a chunk is used by
-/// no index below the estimate's window start, and with the error ID of
-/// rule 2.e if the prover's lists are not the sorted lists of the indices
-/// per chunk.
+/// divined position, and with the error ID of rule 2.e if the prover's
+/// lists are not the sorted lists of the indices per chunk.
 #[derive(Debug, Copy, Clone)]
 pub(super) struct ChunkInsertions;
 
@@ -65,10 +56,6 @@ impl ChunkInsertions {
 
     fn no_chunk_error_id() -> i128 {
         BlockValidationRule::RemovalRecordsValidity.error_id()
-    }
-
-    fn unused_chunk_error_id() -> i128 {
-        BlockValidationRule::RemovalRecordsUnpackFailure.error_id()
     }
 
     fn lists_error_id() -> i128 {
@@ -139,18 +126,15 @@ impl ChunkInsertions {
     }
 
     /// The tokens the prover supplies: each chunk's list, then for each
-    /// index below either window start the position of its chunk and, if
-    /// it lies below the true window start, its list position. An index
-    /// whose chunk is missing gets the position where the chunk would be,
-    /// which the snippet then rejects.
+    /// index below the window start the position of its chunk and its list
+    /// position. An index whose chunk is missing gets the position where
+    /// the chunk would be, which the snippet then rejects.
     pub(crate) fn divined_tokens(
         removal_records: &[RemovalRecord],
         chunk_indices: &[u64],
-        swbfi_leaf_count_estimate: u64,
         swbfi_leaf_count: u64,
     ) -> Vec<BFieldElement> {
         let window_start = Self::window_start(swbfi_leaf_count);
-        let resolve_start = window_start.max(Self::window_start(swbfi_leaf_count_estimate));
         let insertions = Self::insertions(removal_records, chunk_indices, window_start);
         let lists: Vec<_> = insertions
             .iter()
@@ -161,27 +145,23 @@ impl ChunkInsertions {
             })
             .collect();
         let mut next_slot_of: HashMap<(usize, u32), usize> = HashMap::new();
-        let positions: Vec<_> = Self::indices_below(removal_records, resolve_start)
+        let positions: Vec<_> = Self::indices_below(removal_records, window_start)
             .into_iter()
             .flat_map(|index| {
                 let chunk_index = Self::chunk_index_of(index);
                 let chunk_position = chunk_indices
                     .binary_search(&chunk_index)
                     .unwrap_or_else(|insertion_point| insertion_point);
-                let mut tokens = vec![bfe!(chunk_position as u64)];
-                if index < window_start {
-                    let relative_index = Self::relative_index_of(index);
-                    let slot = next_slot_of
-                        .entry((chunk_position, relative_index))
-                        .or_insert_with(|| {
-                            insertions.get(chunk_position).map_or(0, |list| {
-                                list.partition_point(|&entry| entry < relative_index)
-                            })
-                        });
-                    *slot += 1;
-                    tokens.push(bfe!(*slot as u64 - 1));
-                }
-                tokens
+                let relative_index = Self::relative_index_of(index);
+                let slot = next_slot_of
+                    .entry((chunk_position, relative_index))
+                    .or_insert_with(|| {
+                        insertions.get(chunk_position).map_or(0, |list| {
+                            list.partition_point(|&entry| entry < relative_index)
+                        })
+                    });
+                *slot += 1;
+                [bfe!(chunk_position as u64), bfe!(*slot as u64 - 1)]
             })
             .collect();
         [lists, positions].concat()
@@ -196,7 +176,6 @@ impl BasicSnippet for ChunkInsertions {
                 DataType::List(Box::new(DataType::U64)),
                 "*chunk_indices".to_string(),
             ),
-            (DataType::U64, "swbfi_leaf_count_estimate".to_string()),
             (DataType::U64, "swbfi_leaf_count".to_string()),
         ]
     }
@@ -221,46 +200,34 @@ impl BasicSnippet for ChunkInsertions {
         let to_window_start =
             library.import(Box::new(ShiftLeftStatic::<{ Self::LOG2_CHUNK_SIZE }>));
 
-        // The chunk indices and their number, the chunks' use flags, the
-        // insertion lists and the number of their entries.
+        // The chunk indices and their number, the insertion lists and the
+        // number of their entries.
         let chunk_indices_alloc = library.kmalloc(1);
         let num_chunks_alloc = library.kmalloc(1);
-        let uses_alloc = library.kmalloc(1);
         let insertions_alloc = library.kmalloc(1);
         let total_alloc = library.kmalloc(1);
-        // The three window starts: below which an index resolves, uses its
-        // chunk, and is inserted.
-        let resolve_start_alloc = library.kmalloc(4);
-        let use_start_alloc = library.kmalloc(4);
-        let insert_start_alloc = library.kmalloc(4);
-        // The record at hand: for each window start, whether all of its
-        // indices lie below, none do, or those at a distance to the minimum
+        let window_start_alloc = library.kmalloc(4);
+        // The record at hand: whether all of its indices lie below the
+        // window start, none do, or those at a distance to the minimum
         // below a bound do; and the minimum's chunk index and offset in its
         // chunk, which locate the others.
-        let resolve_mode_alloc = library.kmalloc(2);
-        let use_mode_alloc = library.kmalloc(2);
-        let insert_mode_alloc = library.kmalloc(2);
+        let mode_alloc = library.kmalloc(2);
         // The minimum's chunk index, low limb then high, and its offset in
         // its chunk.
         let base_alloc = library.kmalloc(3);
 
         let entrypoint = self.entrypoint();
-        let raise_resolve_start = format!("{entrypoint}_raise_resolve_start");
         let chunks_loop = format!("{entrypoint}_chunks_loop");
         let read_loop = format!("{entrypoint}_read_loop");
         let records_loop = format!("{entrypoint}_records_loop");
         let indices_loop = format!("{entrypoint}_indices_loop");
         let resolve = format!("{entrypoint}_resolve");
-        let count_use = format!("{entrypoint}_count_use");
-        let insert = format!("{entrypoint}_insert");
-        let every_chunk_used = format!("{entrypoint}_every_chunk_used");
         let mode_below = format!("{entrypoint}_mode_below");
         let mode_not_below = format!("{entrypoint}_mode_not_below");
 
         let chunk_size = CHUNK_SIZE;
         let chunks_per_limb = 1_u64 << (32 - Self::LOG2_CHUNK_SIZE);
         let no_chunk = Self::no_chunk_error_id();
-        let unused_chunk = Self::unused_chunk_error_id();
         let lists_error = Self::lists_error_id();
 
         let read_word = |alloc: &Alloc| triton_asm!(push {alloc.read_address()} read_mem 1 pop 1);
@@ -271,64 +238,47 @@ impl BasicSnippet for ChunkInsertions {
             |alloc: &Alloc| triton_asm!(push {alloc.write_address()} write_mem 4 pop 1);
 
         // Whether an index of the record, given by its distance to the
-        // record's minimum, lies below a window start, by the record's mode
-        // for it.
+        // record's minimum, lies below the window start, by the record's
+        // mode.
         // BEFORE: _ ... distance
         // AFTER:  _ ... distance is_below
-        let is_below = |mode: &Alloc| {
-            triton_asm!(
-                push {mode.write_address()} read_mem 1 pop 1
-                dup 1 lt
-                push {mode.read_address()} read_mem 1 pop 1
-                add
-            )
-        };
+        let is_below = triton_asm!(
+            push {mode_alloc.write_address()} read_mem 1 pop 1
+            dup 1 lt
+            push {mode_alloc.read_address()} read_mem 1 pop 1
+            add
+        );
 
-        // The record's mode for a window start, from the window start and
-        // the record's minimum, written to the mode.
+        // The record's mode, from the window start and the record's
+        // minimum, written to the mode.
         // BEFORE: _ *minimum
         // AFTER:  _ *minimum
-        let record_mode = |start: &Alloc, mode: &Alloc| {
-            triton_asm!(
-                dup 0 addi 3 read_mem 4 pop 1
-                {&read_u128(start)}
-                dup 3 dup 3 dup 3 dup 3
-                dup 11 dup 11 dup 11 dup 11
-                call {u128_lt}
-                // _ *minimum [minimum] [window_start] (minimum < window_start)
+        let record_mode = triton_asm!(
+            dup 0 addi 3 read_mem 4 pop 1
+            {&read_u128(&window_start_alloc)}
+            dup 3 dup 3 dup 3 dup 3
+            dup 11 dup 11 dup 11 dup 11
+            call {u128_lt}
+            // _ *minimum [minimum] [window_start] (minimum < window_start)
 
-                dup 0 skiz call {mode_below}
-                push 0 eq skiz call {mode_not_below}
-                // _ *minimum bound all
+            dup 0 skiz call {mode_below}
+            push 0 eq skiz call {mode_not_below}
+            // _ *minimum bound all
 
-                swap 1 push {mode.write_address()} write_mem 2 pop 1
-            )
-        };
+            swap 1 push {mode_alloc.write_address()} write_mem 2 pop 1
+        );
 
         triton_asm!(
             {entrypoint}:
-                // _ *removal_records *chunk_indices [estimate] [leaf_count]
-                dup 1 dup 1 push 0 push 0 pick 3 pick 3 call {to_window_start}
-                {&write_u128(&insert_start_alloc)}
+                // _ *removal_records *chunk_indices [leaf_count]
                 push 0 push 0 pick 3 pick 3 call {to_window_start}
-                {&write_u128(&resolve_start_alloc)}
-                push 0 push 0 pick 3 pick 3 call {to_window_start}
-                {&write_u128(&use_start_alloc)}
+                {&write_u128(&window_start_alloc)}
                 // _ *removal_records *chunk_indices
-
-                // Indices below the larger of the two window starts must
-                // resolve.
-                {&read_u128(&use_start_alloc)}
-                {&read_u128(&resolve_start_alloc)}
-                call {u128_lt}
-                skiz call {raise_resolve_start}
 
                 dup 0 {&write_word(&chunk_indices_alloc)}
                 read_mem 1 pop 1
                 dup 0 {&write_word(&num_chunks_alloc)}
                 // _ *removal_records num_chunks
-
-                call {dyn_malloc} {&write_word(&uses_alloc)}
 
                 // One page holds the pointer list and, after it, every
                 // chunk's sorted list with its taken flags.
@@ -356,30 +306,10 @@ impl BasicSnippet for ChunkInsertions {
 
                 {&read_word(&total_alloc)}
                 eq assert error_id {lists_error}
-                {&read_word(&num_chunks_alloc)} {&read_word(&uses_alloc)} push 0
-                // _ num_chunks *uses 0
-
-                call {every_chunk_used}
-                pop 3
                 {&read_word(&insertions_alloc)}
                 // _ *insertions
 
                 return
-
-            // BEFORE: _
-            // AFTER:  _
-            {raise_resolve_start}:
-                {&read_u128(&use_start_alloc)}
-                {&write_u128(&resolve_start_alloc)}
-                return
-
-            // INVARIANT: _ num_chunks *uses i
-            {every_chunk_used}:
-                dup 2 dup 1 eq skiz return
-                dup 1 dup 1 add read_mem 1 pop 1
-                assert error_id {unused_chunk}
-                addi 1
-                recurse
 
             // Reads each chunk's sorted list into the page's free words, and
             // reserves as many words again after it for its taken flags,
@@ -439,9 +369,7 @@ impl BasicSnippet for ChunkInsertions {
                 {&field!(AbsoluteIndexSet::minimum)}
                 // _ consumed *record[i]_si num_records i *minimum
 
-                {&record_mode(&resolve_start_alloc, &resolve_mode_alloc)}
-                {&record_mode(&use_start_alloc, &use_mode_alloc)}
-                {&record_mode(&insert_start_alloc, &insert_mode_alloc)}
+                {&record_mode}
 
                 // The chunk index of the minimum and the minimum's offset
                 // in its chunk. Only meaningful for a minimum below a window
@@ -530,7 +458,7 @@ impl BasicSnippet for ChunkInsertions {
                 dup 1 read_mem 1 pop 1
                 // _ consumed *record_si num_records i *distance[k] k distance
 
-                {&is_below(&resolve_mode_alloc)}
+                {&is_below}
                 skiz call {resolve}
                 pop 1
                 // _ consumed *record_si num_records i *distance[k] k
@@ -540,10 +468,9 @@ impl BasicSnippet for ChunkInsertions {
 
                 recurse
 
-            // Resolves the index to its chunk at the divined position,
-            // counts the chunk's use if the index lies below the window
-            // start of the estimate, and inserts the index into the chunk's
-            // list if it lies below the true window start.
+            // Resolves the index to its chunk at the divined position and
+            // inserts it at its divined slot in the chunk's list: the slot
+            // must hold it and must be free. Counts it.
             // BEFORE: _ consumed *record_si num_records i *distance[k] k distance
             // AFTER:  _ consumed *record_si num_records i *distance[k] k distance
             {resolve}:
@@ -577,30 +504,6 @@ impl BasicSnippet for ChunkInsertions {
                 swap 1 place 2 mul assert error_id {no_chunk}
                 // _ ... distance relative_index position
 
-                dup 2 {&is_below(&use_mode_alloc)}
-                place 1 pop 1
-                skiz call {count_use}
-                dup 2 {&is_below(&insert_mode_alloc)}
-                place 1 pop 1
-                skiz call {insert}
-                pop 2
-                // _ ... distance
-
-                return
-
-            // Marks the chunk at the position used.
-            // BEFORE: _ ... relative_index position
-            // AFTER:  _ ... relative_index position
-            {count_use}:
-                {&read_word(&uses_alloc)} dup 1 add
-                push 1 swap 1 write_mem 1 pop 1
-                return
-
-            // The index at its divined slot in its chunk's list: the slot
-            // must hold it and must be free. Counts it.
-            // BEFORE: _ consumed *record_si num_records i *distance[k] k distance relative_index position
-            // AFTER:  _ (consumed + 1) *record_si num_records i *distance[k] k distance relative_index position
-            {insert}:
                 divine 1
                 {&read_word(&insertions_alloc)} dup 2 add addi 1 read_mem 1 pop 1
                 // _ ... relative_index position slot *sorted
@@ -615,10 +518,10 @@ impl BasicSnippet for ChunkInsertions {
 
                 dup 0 read_mem 1 pop 1 push 0 eq assert error_id {lists_error}
                 push 1 swap 1 write_mem 1 pop 1
-                pop 1
-                // _ ... relative_index position
+                pop 3
+                // _ ... distance
 
-                pick 8 addi 1 place 8
+                pick 6 addi 1 place 6
                 return
         )
     }
@@ -673,7 +576,6 @@ mod tests {
     fn run(
         records: &[RemovalRecord],
         chunk_indices: &[u64],
-        estimate: u64,
         leaf_count: u64,
         tokens: Vec<BFieldElement>,
     ) -> Result<Vec<Vec<u32>>, InstructionError> {
@@ -690,7 +592,6 @@ mod tests {
         let program = Program::new(&triton_asm!(
             push {RECORDS_POINTER}
             push {CHUNK_INDICES_POINTER}
-            {&push_u64(estimate)}
             {&push_u64(leaf_count)}
             call {snippet}
             halt
@@ -722,29 +623,27 @@ mod tests {
             .collect())
     }
 
-    /// Both window starts at the index: the estimate is the leaf count.
+    /// The window start at the index.
     fn assert_agrees(records: &[RemovalRecord], window_start: u128) {
         let chunk_indices = chunk_indices(records, window_start);
         let leaf_count = leaf_count_of(window_start);
-        let tokens =
-            ChunkInsertions::divined_tokens(records, &chunk_indices, leaf_count, leaf_count);
+        let tokens = ChunkInsertions::divined_tokens(records, &chunk_indices, leaf_count);
         let expected = ChunkInsertions::insertions(records, &chunk_indices, window_start);
         assert_eq!(
             expected,
-            run(records, &chunk_indices, leaf_count, leaf_count, tokens).unwrap()
+            run(records, &chunk_indices, leaf_count, tokens).unwrap()
         );
     }
 
     fn assert_rejects_with(
         records: &[RemovalRecord],
         chunk_indices: &[u64],
-        estimate: u64,
         leaf_count: u64,
         tokens: Vec<BFieldElement>,
         error_id: i128,
     ) {
         let Err(InstructionError::AssertionFailed(AssertionError { id, .. })) =
-            run(records, chunk_indices, estimate, leaf_count, tokens)
+            run(records, chunk_indices, leaf_count, tokens)
         else {
             panic!("must fail");
         };
@@ -761,7 +660,6 @@ mod tests {
         assert_rejects_with(
             records,
             chunk_indices,
-            leaf_count,
             leaf_count,
             tokens,
             ChunkInsertions::lists_error_id(),
@@ -953,7 +851,6 @@ mod tests {
                 &records,
                 &chunk_indices,
                 leaf_count,
-                leaf_count,
                 tampered,
                 ChunkInsertions::no_chunk_error_id(),
             );
@@ -985,12 +882,8 @@ mod tests {
         let records = vec![record(&mut rng, window_start - 2 * u128::from(WINDOW_SIZE))];
         let chunk_indices = chunk_indices(&records, window_start);
         assert!(chunk_indices.len() > 1);
-        let tokens = ChunkInsertions::divined_tokens(
-            &records,
-            &chunk_indices,
-            leaf_count_of(window_start),
-            leaf_count_of(window_start),
-        );
+        let tokens =
+            ChunkInsertions::divined_tokens(&records, &chunk_indices, leaf_count_of(window_start));
         (records, chunk_indices, tokens)
     }
 
@@ -1017,7 +910,6 @@ mod tests {
         assert_rejects_with(
             &records,
             &chunk_indices[1..],
-            leaf_count,
             leaf_count,
             tokens,
             ChunkInsertions::no_chunk_error_id(),
@@ -1049,12 +941,8 @@ mod tests {
         let shared = record(&mut rng, window_start - u128::from(WINDOW_SIZE));
         let records = vec![shared.clone(), shared];
         let chunk_indices = chunk_indices(&records, window_start);
-        let mut tokens = ChunkInsertions::divined_tokens(
-            &records,
-            &chunk_indices,
-            leaf_count_of(window_start),
-            leaf_count_of(window_start),
-        );
+        let mut tokens =
+            ChunkInsertions::divined_tokens(&records, &chunk_indices, leaf_count_of(window_start));
         let first_pair = num_list_tokens(&records, &chunk_indices);
         let same_index_again = first_pair + 2 * NUM_TRIALS as usize;
         assert_eq!(tokens[first_pair], tokens[same_index_again]);
@@ -1082,12 +970,8 @@ mod tests {
         let shared = record(&mut rng, window_start - u128::from(WINDOW_SIZE));
         let records = vec![shared.clone(), shared];
         let chunk_indices = chunk_indices(&records, window_start);
-        let mut tokens = ChunkInsertions::divined_tokens(
-            &records,
-            &chunk_indices,
-            leaf_count_of(window_start),
-            leaf_count_of(window_start),
-        );
+        let mut tokens =
+            ChunkInsertions::divined_tokens(&records, &chunk_indices, leaf_count_of(window_start));
         assert_eq!(tokens[1], tokens[2]);
         assert_ne!(bfe!(CHUNK_SIZE - 1), tokens[1]);
         tokens[1] += bfe!(1);
@@ -1100,12 +984,12 @@ mod tests {
         let first_pair = num_list_tokens(&records, &chunk_indices);
         tokens.truncate(first_pair);
         let leaf_count = leaf_count_of(1 << 40);
-        assert!(run(&records, &chunk_indices, leaf_count, leaf_count, tokens).is_err());
+        assert!(run(&records, &chunk_indices, leaf_count, tokens).is_err());
     }
 
     /// Records with chunks in the inactive part, their chunk indices, and
-    /// the estimate and leaf count of the inactive SWBF they lie in.
-    fn fixture_with_chunks(seed: u64) -> (Vec<RemovalRecord>, Vec<u64>, u64, u64) {
+    /// the leaf count of the inactive SWBF they lie in.
+    fn fixture_with_chunks(seed: u64) -> (Vec<RemovalRecord>, Vec<u64>, u64) {
         let mut rng = StdRng::seed_from_u64(seed);
         let leaf_count = 1 << 28;
         let window_start = ChunkInsertions::window_start(leaf_count);
@@ -1119,16 +1003,11 @@ mod tests {
         records.push(record(&mut rng, window_start - 1000));
         let chunk_indices = chunk_indices(&records, window_start);
         assert!(!chunk_indices.is_empty(), "fixture must have chunks");
-        (records, chunk_indices, leaf_count, leaf_count)
+        (records, chunk_indices, leaf_count)
     }
 
-    fn assert_accepts(
-        records: &[RemovalRecord],
-        chunk_indices: &[u64],
-        estimate: u64,
-        leaf_count: u64,
-    ) {
-        let tokens = ChunkInsertions::divined_tokens(records, chunk_indices, estimate, leaf_count);
+    fn assert_accepts(records: &[RemovalRecord], chunk_indices: &[u64], leaf_count: u64) {
+        let tokens = ChunkInsertions::divined_tokens(records, chunk_indices, leaf_count);
         let expected = ChunkInsertions::insertions(
             records,
             chunk_indices,
@@ -1136,38 +1015,29 @@ mod tests {
         );
         assert_eq!(
             expected,
-            run(records, chunk_indices, estimate, leaf_count, tokens).unwrap()
+            run(records, chunk_indices, leaf_count, tokens).unwrap()
         );
     }
 
     fn assert_rejects_rule(
         records: &[RemovalRecord],
         chunk_indices: &[u64],
-        estimate: u64,
         leaf_count: u64,
         error_id: i128,
     ) {
-        let tokens = ChunkInsertions::divined_tokens(records, chunk_indices, estimate, leaf_count);
-        assert_rejects_with(
-            records,
-            chunk_indices,
-            estimate,
-            leaf_count,
-            tokens,
-            error_id,
-        );
+        let tokens = ChunkInsertions::divined_tokens(records, chunk_indices, leaf_count);
+        assert_rejects_with(records, chunk_indices, leaf_count, tokens, error_id);
     }
 
     #[test]
     fn missing_chunk_is_rejected_by_the_resolution() {
-        let (records, chunk_indices, estimate, leaf_count) = fixture_with_chunks(1);
+        let (records, chunk_indices, leaf_count) = fixture_with_chunks(1);
         for position in [0, chunk_indices.len() / 2, chunk_indices.len() - 1] {
             let mut fewer = chunk_indices.clone();
             fewer.remove(position);
             assert_rejects_rule(
                 &records,
                 &fewer,
-                estimate,
                 leaf_count,
                 ChunkInsertions::no_chunk_error_id(),
             );
@@ -1175,30 +1045,23 @@ mod tests {
         assert_rejects_rule(
             &records,
             &[],
-            estimate,
             leaf_count,
             ChunkInsertions::no_chunk_error_id(),
         );
     }
 
     #[test]
-    fn unused_chunk_is_rejected() {
-        let (records, chunk_indices, estimate, leaf_count) = fixture_with_chunks(2);
+    fn chunk_no_index_lies_in_gets_an_empty_list() {
+        let (records, chunk_indices, leaf_count) = fixture_with_chunks(2);
         let unused = chunk_indices.iter().max().unwrap() + 1;
         let mut more = chunk_indices.clone();
         more.push(unused);
-        assert_rejects_rule(
-            &records,
-            &more,
-            estimate,
-            leaf_count,
-            ChunkInsertions::unused_chunk_error_id(),
-        );
+        assert_accepts(&records, &more, leaf_count);
     }
 
     #[test]
     fn chunk_index_off_by_one_is_rejected() {
-        let (records, chunk_indices, estimate, leaf_count) = fixture_with_chunks(3);
+        let (records, chunk_indices, leaf_count) = fixture_with_chunks(3);
         let mut shifted = chunk_indices.clone();
         shifted[0] += 1;
         if shifted.len() > 1 && shifted[0] == shifted[1] {
@@ -1207,69 +1070,22 @@ mod tests {
         assert_rejects_rule(
             &records,
             &shifted,
-            estimate,
             leaf_count,
             ChunkInsertions::no_chunk_error_id(),
         );
-    }
-
-    #[test]
-    fn indices_in_the_gap_between_window_starts_need_chunks_but_do_not_use_them() {
-        let (records, chunk_indices, _, leaf_count) = fixture_with_chunks(4);
-        // A smaller estimate: chunks beyond its window start count as unused.
-        let smaller = leaf_count - (1 << 20);
-        let used = ChunkInsertions::chunk_indices_below(&records, smaller);
-        assert!(
-            used.len() < chunk_indices.len(),
-            "the fixture must reach past the estimate"
-        );
-        assert_rejects_rule(
-            &records,
-            &chunk_indices,
-            smaller,
-            leaf_count,
-            ChunkInsertions::unused_chunk_error_id(),
-        );
-        // A larger estimate: indices beyond the true window start need
-        // chunks too, and are not inserted.
-        let larger = leaf_count * 2;
-        let needed = ChunkInsertions::chunk_indices_below(&records, larger);
-        assert!(
-            needed.len() > chunk_indices.len(),
-            "the fixture must reach past the window start"
-        );
-        assert_rejects_rule(
-            &records,
-            &chunk_indices,
-            larger,
-            leaf_count,
-            ChunkInsertions::no_chunk_error_id(),
-        );
-        assert_accepts(&records, &needed, larger, leaf_count);
     }
 
     #[test]
     fn empty_list_with_no_chunks_is_accepted() {
-        for (estimate, leaf_count) in [(0, 0), (0, 1 << 40), (5, 5)] {
-            assert_accepts(&[], &[], estimate, leaf_count);
+        for leaf_count in [0, 1 << 40, 5] {
+            assert_accepts(&[], &[], leaf_count);
         }
-    }
-
-    #[test]
-    fn empty_list_with_chunks_is_rejected() {
-        assert_rejects_rule(
-            &[],
-            &[3],
-            1 << 10,
-            1 << 10,
-            ChunkInsertions::unused_chunk_error_id(),
-        );
     }
 
     #[test]
     fn records_entirely_in_the_active_window_need_no_chunks() {
         let mut rng = StdRng::seed_from_u64(5);
         let records = (0..3).map(|_| record(&mut rng, 0)).collect::<Vec<_>>();
-        assert_accepts(&records, &[], 0, 0);
+        assert_accepts(&records, &[], 0);
     }
 }

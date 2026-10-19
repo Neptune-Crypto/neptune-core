@@ -2164,6 +2164,60 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn swbf_root_claim_over_a_duplicated_input_is_refused() {
+        let network = Network::Testnet(42);
+        let genesis = Block::genesis(network);
+        let mut rng = StdRng::seed_from_u64(0);
+        let mut record = || RemovalRecord {
+            absolute_indices: AbsoluteIndexSet::new(std::array::from_fn(|_| {
+                rng.random_range(0..u128::from(neptune_mutator_set::shared::WINDOW_SIZE))
+            })),
+            target_chunks: ChunkDictionary::empty(),
+        };
+        let (a, b) = (record(), record());
+        let mut block1 = invalid_empty_block(&genesis, network);
+        block1.set_transaction_kernel(
+            TransactionKernelModifier::default()
+                .inputs(RemovalRecordList::pack(vec![a.clone(), b.clone()], true))
+                .modify(block1.body().transaction_kernel.clone()),
+        );
+        let height = block1.header().height;
+        let floor = ConsensusRuleSet::infer_from(network, height).min_swbf_padded_rows(network);
+        let mutator_set = genesis.mutator_set_accumulator_after().unwrap();
+        let required = BlockAppendix::consensus_claims(
+            block1.body(),
+            height,
+            genesis.hash(),
+            &mutator_set,
+            network,
+        );
+        let shape = required.last().unwrap();
+        let claim_over = |inputs: &[RemovalRecord]| {
+            let mut claim = shape.clone();
+            claim.output = ClaimOutput {
+                padded_rows: bfe!(floor),
+                count: inputs.len(),
+                mutator_set_hash: Digest::default(),
+                last_leaf_index: bfe!(0),
+                peaks: RemovalIndexCommitment::peaks(inputs),
+            }
+            .encode();
+            claim
+        };
+        let check = |claim: Claim| {
+            let mut block = block1.clone();
+            block.set_appendix(BlockAppendix::new(vec![claim]));
+            block.validate_swbf_update_claim(shape, Some(Digest::default()), floor)
+        };
+
+        assert_eq!(Ok(()), check(claim_over(&[a.clone(), b])));
+        assert_eq!(
+            Err(BlockValidationError::RemovalIndexCommitmentMismatch),
+            check(claim_over(&[a.clone(), a]))
+        );
+    }
+
     #[apply(shared_tokio_runtime)]
     async fn solo_validate_rejects_height_disagreeing_with_block_mmr() {
         let network = Network::Testnet(42);

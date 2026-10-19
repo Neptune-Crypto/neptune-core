@@ -452,10 +452,10 @@ impl CorrectSwbfUpdate {
 
     /// The most inputs a composer puts in one leaf: a leaf of that many
     /// stays within [`Self::LEAF_LOG2_PADDED_HEIGHT`] without idling. The
-    /// processor table is the tallest, at 1.89M rows for 36 inputs with
+    /// processor table is the tallest, at 1.90M rows for 38 inputs with
     /// 410 indices per chunk and an inactive SWBF of 2^27 chunks; 40 inputs
-    /// exceed the height there.
-    pub const MAX_INPUTS_PER_LEAF: usize = 36;
+    /// reach 2.00M there, with no room for denser chunks.
+    pub const MAX_INPUTS_PER_LEAF: usize = 38;
 
     /// The most idle iterations a leaf takes: idling alone then stays under
     /// 2^29 processor rows, the tallest trace the verifier accepts. The
@@ -603,7 +603,9 @@ impl TritonProgram for CorrectSwbfUpdate {
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) mod tests {
     use neptune_mutator_set::active_window::ActiveWindow;
+    use neptune_mutator_set::addition_record::AdditionRecord;
     use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+    use neptune_mutator_set::shared::BATCH_SIZE;
     use neptune_mutator_set::shared::WINDOW_SIZE;
     use rand::rngs::StdRng;
     use rand::RngExt;
@@ -612,6 +614,7 @@ pub(super) mod tests {
     use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
     use super::super::chunk_witness::tests::random_msa_and_records;
+    use super::super::sorted_window_indices::SortedWindowIndices;
     use super::super::window_after_removals::WindowAfterRemovals;
     use super::*;
     use crate::proof_abstractions::tasm::builtins as tasm;
@@ -980,26 +983,7 @@ pub(super) mod tests {
     #[test]
     fn every_word_of_every_peak_with_chunks_is_rejected() {
         let honest = witness_with_chunks();
-        let inputs = &honest.inputs;
-        let mutator_set = &honest.mutator_set;
-        let swbfi_leaf_count = mutator_set.swbf_inactive.num_leafs();
-        let chunk_indices = ChunkInsertions::chunk_indices_below(inputs, swbfi_leaf_count);
-        let insertions = ChunkInsertions::insertions(
-            inputs,
-            &chunk_indices,
-            SwbfiPeaksAfterRemovals::window_start(mutator_set),
-        );
-        let peaks_with_chunks = MutateSwbfiPeaks::runs(
-            swbfi_leaf_count,
-            &chunk_indices,
-            &honest.chunks(),
-            &insertions,
-        )
-        .into_iter()
-        .enumerate()
-        .filter(|(_, (_, old_leafs, _))| !old_leafs.is_empty())
-        .map(|(peak, _)| peak)
-        .collect::<Vec<_>>();
+        let peaks_with_chunks = peaks_with_chunks(&honest);
         assert!(
             !peaks_with_chunks.is_empty(),
             "the test data must hold chunks"
@@ -1086,12 +1070,12 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn input_carrying_a_superfluous_chunk_is_rejected() {
+    fn input_carrying_a_chunk_without_its_path_is_rejected() {
         let mut witness = witness_with_chunks();
         witness.chunks.push(HashBlocks::chunk_storage(&[]));
         assert_rejects(
             &witness,
-            BlockValidationRule::RemovalRecordsUnpackFailure.error_id(),
+            BlockValidationRule::RemovalRecordsValidity.error_id(),
         );
     }
 
@@ -1482,6 +1466,281 @@ pub(super) mod tests {
         );
     }
 
+    /// The witness's mutator set with its inputs at these positions removed,
+    /// and all of its records synced to the result, the removed ones too.
+    fn spend(
+        witness: &CorrectSwbfUpdateWitness,
+        positions: &[usize],
+    ) -> (MutatorSetAccumulator, Vec<RemovalRecord>) {
+        let mut records = unpacked(witness);
+        let removals = positions
+            .iter()
+            .map(|&position| records[position].clone())
+            .collect();
+        let mut mutator_set = witness.mutator_set.clone();
+        MutatorSetUpdate::new(removals, vec![])
+            .apply_to_accumulator_and_records(
+                &mut mutator_set,
+                &mut records.iter_mut().collect::<Vec<_>>(),
+                &mut [],
+            )
+            .unwrap();
+        (mutator_set, records)
+    }
+
+    fn unpacked(witness: &CorrectSwbfUpdateWitness) -> Vec<RemovalRecord> {
+        let allow_big_chunks = ConsensusRuleSet::HardforkDelta.allow_big_chunks();
+        RemovalRecordList::try_unpack(witness.packed_inputs(), allow_big_chunks).unwrap()
+    }
+
+    /// The witness of these unpacked records on the mutator set.
+    fn witness_of(
+        records: Vec<RemovalRecord>,
+        mutator_set: MutatorSetAccumulator,
+    ) -> CorrectSwbfUpdateWitness {
+        let allow_big_chunks = ConsensusRuleSet::HardforkDelta.allow_big_chunks();
+        CorrectSwbfUpdateWitness::new(
+            RemovalRecordList::pack(records, allow_big_chunks),
+            mutator_set,
+        )
+    }
+
+    fn accepted_output(witness: &CorrectSwbfUpdateWitness) -> Vec<BFieldElement> {
+        CorrectSwbfUpdate
+            .run_tasm(&witness.standard_input(), witness.nondeterminism())
+            .unwrap()
+    }
+
+    #[test]
+    fn input_spent_in_the_mutator_set_it_is_built_on_is_rejected() {
+        let honest = witness_with_chunks();
+        let (spent_set, records) = spend(&honest, &[0]);
+        assert_ne!(honest.mutator_set, spent_set);
+        assert_rejects(
+            &witness_of(vec![records[0].clone()], spent_set),
+            BlockValidationRule::RemovalRecordsValidity.error_id(),
+        );
+    }
+
+    #[test]
+    fn second_leaf_respending_the_first_leafs_input_is_rejected() {
+        let all = witness_with_chunks();
+        let first = witness_of(vec![unpacked(&all)[0].clone()], all.mutator_set.clone());
+        let first_output = accepted_output(&first);
+        let (after_first, records) = spend(&all, &[0]);
+        assert_eq!(after_first.hash().values(), first_output[2..7]);
+
+        let second = witness_of(records, after_first);
+        assert_rejects(
+            &second,
+            BlockValidationRule::RemovalRecordsValidity.error_id(),
+        );
+    }
+
+    #[test]
+    fn repeated_record_is_accepted_and_removed_twice() {
+        let honest = witness(2, 7);
+        let mut records = unpacked(&honest);
+        records.push(records[0].clone());
+        let witness = witness_of(records, honest.mutator_set.clone());
+        assert_eq!(witness.output(), accepted_output(&witness));
+
+        let once =
+            SwbfiPeaksAfterRemovals::apply_removals(&honest.packed_inputs(), &honest.mutator_set);
+        let twice =
+            SwbfiPeaksAfterRemovals::apply_removals(&witness.packed_inputs(), &witness.mutator_set);
+        assert_ne!(once.hash(), twice.hash());
+        assert_eq!(twice.hash().values(), witness.output()[2..7]);
+    }
+
+    /// The positions of the peaks of the trees the witness's chunks lie in.
+    fn peaks_with_chunks(witness: &CorrectSwbfUpdateWitness) -> Vec<usize> {
+        let inputs = &witness.inputs;
+        let mutator_set = &witness.mutator_set;
+        let swbfi_leaf_count = mutator_set.swbf_inactive.num_leafs();
+        let chunk_indices = ChunkInsertions::chunk_indices_below(inputs, swbfi_leaf_count);
+        let insertions = ChunkInsertions::insertions(
+            inputs,
+            &chunk_indices,
+            SwbfiPeaksAfterRemovals::window_start(mutator_set),
+        );
+        MutateSwbfiPeaks::runs(
+            swbfi_leaf_count,
+            &chunk_indices,
+            &witness.chunks(),
+            &insertions,
+        )
+        .into_iter()
+        .enumerate()
+        .filter(|(_, (_, old_leafs, _))| !old_leafs.is_empty())
+        .map(|(peak, _)| peak)
+        .collect()
+    }
+
+    /// The witness with another mutator set: refused against the honest
+    /// claim, and accepted against its own, whose output is the host's.
+    fn assert_other_set_binds(honest: &CorrectSwbfUpdateWitness, other: &CorrectSwbfUpdateWitness) {
+        CorrectSwbfUpdate
+            .test_assertion_failure(
+                honest.standard_input(),
+                other.nondeterminism(),
+                &[BlockValidationRule::TransactionMutatorSetMismatch.error_id()],
+            )
+            .unwrap();
+        let output = accepted_output(other);
+        assert_eq!(other.output(), output);
+        assert_ne!(honest.output(), output);
+    }
+
+    #[test]
+    fn tampered_peak_of_a_tree_without_chunks_is_bound_by_the_hash() {
+        let (honest, peak) = (0..32)
+            .map(|seed| witness_on_aocl(3, seed, 4_000))
+            .find_map(|witness| {
+                let with_chunks = peaks_with_chunks(&witness);
+                let num_peaks = witness.mutator_set.swbf_inactive.peaks().len();
+                let without = (0..num_peaks).find(|peak| !with_chunks.contains(peak))?;
+                (!with_chunks.is_empty()).then_some((witness, without))
+            })
+            .expect("some fixture must have trees with and without chunks");
+        let mut other = honest.clone();
+        let swbfi = &other.mutator_set.swbf_inactive;
+        let mut peaks = swbfi.peaks();
+        peaks[peak] = StdRng::seed_from_u64(1).random();
+        other.mutator_set.swbf_inactive = MmrAccumulator::init(peaks, swbfi.num_leafs());
+        assert_other_set_binds(&honest, &other);
+    }
+
+    #[test]
+    fn tampered_active_window_is_bound_by_the_hash() {
+        let honest = witness_with_chunks();
+        let mut other = honest.clone();
+        let mut sbf = other.mutator_set.swbf_active.sbf.clone();
+        let extra = (0..WINDOW_SIZE).find(|index| !sbf.contains(index)).unwrap();
+        sbf.insert(sbf.partition_point(|&set| set < extra), extra);
+        other.mutator_set.swbf_active = ActiveWindow::from_vec_u32(sbf);
+        assert_other_set_binds(&honest, &other);
+    }
+
+    #[test]
+    fn leaves_over_many_states_agree_with_the_archival_update() {
+        for aocl_size in [64, 4_000, 1 << 20] {
+            for num_inputs in [1, 9, CorrectSwbfUpdate::MAX_INPUTS_PER_LEAF] {
+                for seed in 0..3 {
+                    let witness = witness_on_aocl(num_inputs, seed, aocl_size);
+                    let output = accepted_output(&witness);
+                    let label = format!("{num_inputs} inputs, seed {seed}, AOCL size {aocl_size}");
+                    assert_eq!(witness.output(), output, "{label}");
+                    assert_eq!(
+                        archival_mutator_set_after(&witness).hash().values(),
+                        output[2..7],
+                        "{label}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn leaf_on_a_mutator_set_without_inactive_leaves_is_accepted() {
+        for (aocl_size, seed) in [(3, 0), (8, 1), (8, 2)] {
+            let witness = witness_on_aocl(3, seed, aocl_size);
+            assert_eq!(0, witness.mutator_set.swbf_inactive.num_leafs());
+            assert!(witness.chunks.is_empty());
+            assert!(witness.tree_heights.is_empty());
+            let output = accepted_output(&witness);
+            assert_eq!(witness.output(), output);
+            assert_eq!(
+                archival_mutator_set_after(&witness).hash().values(),
+                output[2..7]
+            );
+        }
+    }
+
+    #[test]
+    fn removals_proved_on_the_parent_commute_with_additions_that_slide_the_window() {
+        let witness = (0..32)
+            .map(|seed| witness_on_aocl(3, seed, 4_000))
+            .find(|witness| {
+                let window_start = SwbfiPeaksAfterRemovals::window_start(&witness.mutator_set);
+                let first_chunk = window_start..window_start + u128::from(CHUNK_SIZE);
+                witness
+                    .inputs
+                    .iter()
+                    .flat_map(|input| input.absolute_indices.to_array())
+                    .any(|index| first_chunk.contains(&index))
+            })
+            .expect("some fixture must set an index in the window's first chunk");
+        let parent = &witness.mutator_set;
+        let mut rng = StdRng::seed_from_u64(0);
+        let additions = (0..BATCH_SIZE)
+            .map(|_| AdditionRecord::new(rng.random()))
+            .collect::<Vec<_>>();
+
+        // The proof: the removals on the parent set, then the additions.
+        let mut proved = SwbfiPeaksAfterRemovals::apply_removals(&witness.packed_inputs(), parent);
+        assert_eq!(proved.hash().values(), accepted_output(&witness)[2..7]);
+        for addition in &additions {
+            proved.add(addition);
+        }
+        assert_eq!(
+            parent.swbf_inactive.num_leafs() + 1,
+            proved.swbf_inactive.num_leafs(),
+            "the additions must slide the window"
+        );
+
+        // The block: the additions, with the records synced across the
+        // slide, then the removals.
+        let mut applied = parent.clone();
+        MutatorSetUpdate::new(unpacked(&witness), additions)
+            .apply_to_accumulator(&mut applied)
+            .unwrap();
+        assert_eq!(applied.hash(), proved.hash());
+    }
+
+    #[test]
+    fn window_index_left_out_of_the_sorted_list_is_rejected() {
+        let witness = (0..32)
+            .map(|seed| witness_on_aocl(3, seed, 4_000))
+            .find(|witness| {
+                let window_start = SwbfiPeaksAfterRemovals::window_start(&witness.mutator_set);
+                !SortedWindowIndices::sorted_window_indices(&witness.inputs, window_start)
+                    .is_empty()
+            })
+            .expect("some fixture must set an index in the window");
+        let honest = witness.nondeterminism();
+        let (window, _) = window_and_mutation_token_counts(&witness);
+        let start = honest.individual_tokens.len() - window;
+        let length = honest.individual_tokens[start].value() as usize;
+        let window_start = SwbfiPeaksAfterRemovals::window_start(&witness.mutator_set);
+        assert_eq!(
+            1 + 2 * length,
+            SortedWindowIndices::divined_tokens(&witness.inputs, window_start).len()
+        );
+        let last = (start + 1 + length..start + 1 + 2 * length)
+            .find(|&at| honest.individual_tokens[at].value() as usize == length - 1)
+            .unwrap();
+
+        // The largest index dropped from the list: its position lies beyond
+        // the list, or, pointed at the first entry, finds another index
+        // there or an entry pointed at twice.
+        for repointed in [None, Some(0)] {
+            let mut nondeterminism = honest.clone();
+            nondeterminism.individual_tokens[start] = bfe!(length as u64 - 1);
+            if let Some(position) = repointed {
+                nondeterminism.individual_tokens[last] = bfe!(position);
+            }
+            nondeterminism.individual_tokens.remove(start + length);
+            CorrectSwbfUpdate
+                .test_assertion_failure(
+                    witness.standard_input(),
+                    nondeterminism,
+                    &[BlockValidationRule::MutatorSetUpdateIntegrity.error_id()],
+                )
+                .unwrap();
+        }
+    }
+
     /// Prints how the program's cycles and table rows distribute over its
     /// subroutines, at the input counts a leaf of the aggregation tree is
     /// sized for.
@@ -1595,6 +1854,17 @@ pub(super) mod tests {
         let (_, natural) = processor_rows_and_padded_height(&witness);
         let unchanged = witness.clone().with_padded_height(natural.ilog2() - 1);
         assert_eq!(witness, unchanged);
+    }
+
+    #[test]
+    #[ignore = "prints row counts"]
+    fn profile_leaf_at_the_input_cap() {
+        let cap = CorrectSwbfUpdate::MAX_INPUTS_PER_LEAF;
+        for num_inputs in [cap - 2, cap, cap + 2] {
+            let witness = witness_on_aocl(num_inputs, 6, 1 << 30);
+            let (rows, padded_height) = processor_rows_and_padded_height(&witness);
+            println!("{num_inputs} inputs: {rows} processor rows, padded height {padded_height}");
+        }
     }
 
     #[test]
