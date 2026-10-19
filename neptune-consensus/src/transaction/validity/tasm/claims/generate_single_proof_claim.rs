@@ -30,7 +30,10 @@ impl BasicSnippet for GenerateSingleProofClaim {
     }
 
     fn entrypoint(&self) -> String {
-        "neptune_transaction_generate_single_proof_claim".to_string()
+        format!(
+            "neptune_transaction_generate_single_proof_claim_v{}",
+            self.consensus_rule_set.triton_proof_version().version()
+        )
     }
 
     fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
@@ -160,5 +163,20 @@ mod tests {
             ConsensusRuleSet::HardforkDelta,
         ))
         .test();
+    }
+
+    #[test]
+    fn entrypoints_differ_exactly_when_proof_versions_do() {
+        use strum::IntoEnumIterator;
+        for a in ConsensusRuleSet::iter() {
+            for b in ConsensusRuleSet::iter() {
+                assert_eq!(
+                    a.triton_proof_version() == b.triton_proof_version(),
+                    GenerateSingleProofClaim::new(a).entrypoint()
+                        == GenerateSingleProofClaim::new(b).entrypoint(),
+                    "{a} vs {b}"
+                );
+            }
+        }
     }
 }
