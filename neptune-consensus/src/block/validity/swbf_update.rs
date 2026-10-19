@@ -101,7 +101,10 @@ impl ClaimOutput {
     /// The output taken apart, if it has the layout.
     pub(in crate::block) fn try_parse(output: &[BFieldElement]) -> Option<Self> {
         let num_peaks = usize::try_from(output.get(OUTPUT_NUM_PEAKS)?.value()).ok()?;
-        if OUTPUT_PEAKS + Digest::LEN * num_peaks != output.len() {
+        let expected_len = Digest::LEN
+            .checked_mul(num_peaks)
+            .and_then(|num_words| num_words.checked_add(OUTPUT_PEAKS))?;
+        if output.len() != expected_len {
             return None;
         }
         Some(Self {
@@ -141,5 +144,33 @@ impl ClaimOutput {
             self.peaks.iter().flat_map(|peak| peak.values()).collect(),
         ]
         .concat()
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn disallow_wrap_on_length_check() {
+        let honest = ClaimOutput {
+            padded_rows: bfe!(0),
+            count: 3,
+            mutator_set_hash: Digest::default(),
+            last_leaf_index: bfe!(7),
+            peaks: vec![],
+        };
+        assert_eq!(
+            Some(honest.clone()),
+            ClaimOutput::try_parse(&honest.encode())
+        );
+
+        // 5 * num_peaks == 1 mod 2^64, so a one-word tail passes an
+        // unchecked length check.
+        let mut output = honest.encode();
+        output[OUTPUT_NUM_PEAKS] = bfe!(0xCCCC_CCCC_CCCC_CCCD_u64);
+        output.push(bfe!(0));
+        assert_eq!(None, ClaimOutput::try_parse(&output));
     }
 }
