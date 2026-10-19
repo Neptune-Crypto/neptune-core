@@ -23,7 +23,7 @@ use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 pub(super) struct BagPeaksFromList;
 
 impl BagPeaksFromList {
-    const INCONSISTENT_NUM_PEAKS_ERROR_ID: i128 = 1_000_600;
+    pub(super) const INCONSISTENT_NUM_PEAKS_ERROR_ID: i128 = 1_000_600;
 }
 
 impl BasicSnippet for BagPeaksFromList {

@@ -601,7 +601,7 @@ impl TritonProgram for CorrectSwbfUpdate {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-pub(super) mod tests {
+pub(in crate::block::validity) mod tests {
     use neptune_mutator_set::active_window::ActiveWindow;
     use neptune_mutator_set::addition_record::AdditionRecord;
     use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;

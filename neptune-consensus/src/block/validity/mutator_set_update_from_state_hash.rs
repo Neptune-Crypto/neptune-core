@@ -248,11 +248,217 @@ impl MutatorSetUpdateFromStateHash {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) mod tests {
+    use std::collections::HashMap;
+
     use neptune_mutator_set::addition_record::AdditionRecord;
+    use rand::rngs::StdRng;
+    use rand::RngExt;
+    use rand::SeedableRng;
+    use tasm_lib::memory::encode_to_memory;
+    use tasm_lib::triton_vm::isa::instruction::AssertionError;
+    use tasm_lib::triton_vm::isa::instruction::InstructionError;
+    use tasm_lib::triton_vm::isa::op_stack::OpStackError;
+    use tasm_lib::triton_vm::vm::VMState;
     use tasm_lib::twenty_first::prelude::Mmr;
 
     use super::*;
+    use crate::block::validity::mutator_set_hash::BagPeaksFromList;
+    use crate::block::validity::swbf_update::leaf::tests::witness;
+    use crate::block::validity::swbf_update::swbfi_peaks_after_removals::SwbfiPeaksAfterRemovals;
     use crate::proof_abstractions::tasm::builtins as tasm;
+
+    const INPUTS: BFieldElement = BFieldElement::new(1 << 20);
+    const OUTPUTS: BFieldElement = BFieldElement::new(1 << 22);
+    const MUTATOR_SET: BFieldElement = BFieldElement::new(1 << 24);
+    const EXPECTED: BFieldElement = BFieldElement::new(1 << 26);
+
+    /// A transaction on a mutator set: the set after its removals, and the
+    /// one its outputs then produce.
+    struct Fixture {
+        inputs: Vec<RemovalRecord>,
+        outputs: Vec<AdditionRecord>,
+        before_removals: MutatorSetAccumulator,
+        after_removals: MutatorSetAccumulator,
+        expected: MutatorSetAccumulator,
+    }
+
+    fn fixture(seed: u64) -> Fixture {
+        let witness = witness(3, seed);
+        let inputs = witness.packed_inputs();
+        let before_removals = witness.mutator_set().clone();
+        let after_removals = SwbfiPeaksAfterRemovals::apply_removals(&inputs, &before_removals);
+        let mut rng = StdRng::seed_from_u64(seed);
+        let outputs = (0..3)
+            .map(|_| AdditionRecord::new(rng.random()))
+            .collect::<Vec<_>>();
+        let mut expected = after_removals.clone();
+        for output in &outputs {
+            expected.add(output);
+        }
+        Fixture {
+            inputs,
+            outputs,
+            before_removals,
+            after_removals,
+            expected,
+        }
+    }
+
+    impl Fixture {
+        fn tokens(&self) -> Vec<BFieldElement> {
+            MutatorSetUpdateFromStateHash::divined_tokens(
+                &self.inputs,
+                &self.before_removals,
+                &self.after_removals.swbf_inactive.peaks(),
+            )
+        }
+
+        /// The position of the peak count among the tokens.
+        fn num_peaks_token(&self) -> usize {
+            WindowAfterRemovals::divined_tokens(&self.inputs, &self.before_removals).len()
+        }
+
+        fn run(
+            &self,
+            hash_after_removals: Digest,
+            expected: &MutatorSetAccumulator,
+            tokens: Vec<BFieldElement>,
+        ) -> Result<(), InstructionError> {
+            let mut library = Library::new();
+            let snippet = library.import(Box::new(MutatorSetUpdateFromStateHash));
+            let push_hash = hash_after_removals
+                .reversed()
+                .values()
+                .into_iter()
+                .flat_map(|word| triton_asm!(push { word }))
+                .collect::<Vec<_>>();
+            let program = Program::new(&triton_asm!(
+                push {INPUTS} push {OUTPUTS} push {MUTATOR_SET} push {EXPECTED}
+                {&push_hash}
+                call {snippet}
+                halt
+                {&library.all_imports()}
+            ));
+            let mut ram = HashMap::new();
+            encode_to_memory(&mut ram, INPUTS, &self.inputs);
+            encode_to_memory(&mut ram, OUTPUTS, &self.outputs);
+            encode_to_memory(&mut ram, MUTATOR_SET, &self.before_removals);
+            encode_to_memory(&mut ram, EXPECTED, expected);
+            let nondeterminism = NonDeterminism::new(tokens).with_ram(ram);
+            VMState::new(program, PublicInput::default(), nondeterminism).run()
+        }
+
+        fn assert_accepts(&self) {
+            self.run(self.after_removals.hash(), &self.expected, self.tokens())
+                .unwrap();
+        }
+
+        fn assert_rejects(
+            &self,
+            hash_after_removals: Digest,
+            expected: &MutatorSetAccumulator,
+            tokens: Vec<BFieldElement>,
+            error_id: i128,
+        ) {
+            let id = match self.run(hash_after_removals, expected, tokens) {
+                Err(
+                    InstructionError::AssertionFailed(AssertionError { id, .. })
+                    | InstructionError::VectorAssertionFailed(_, AssertionError { id, .. }),
+                ) => id,
+                other => panic!("must fail an assertion, got {other:?}"),
+            };
+            assert_eq!(Some(error_id), id);
+        }
+    }
+
+    #[test]
+    fn honest_tokens_are_accepted() {
+        for seed in 0..3 {
+            fixture(seed).assert_accepts();
+        }
+    }
+
+    #[test]
+    fn peaks_are_bound_by_the_hash_after_removals() {
+        let fixture = fixture(7);
+        let at = fixture.num_peaks_token();
+        let tokens = fixture.tokens();
+        assert!(tokens[at].value() >= 1, "the fixture must have peaks");
+        let hash = fixture.after_removals.hash();
+        let integrity = BlockValidationRule::MutatorSetUpdateIntegrity.error_id();
+
+        // One peak too few or too many: the count disagrees with the leaf
+        // count before the hash is compared.
+        let count = BagPeaksFromList::INCONSISTENT_NUM_PEAKS_ERROR_ID;
+        let mut fewer = tokens.clone();
+        fewer[at] -= bfe!(1);
+        fixture.assert_rejects(hash, &fixture.expected, fewer, count);
+
+        let mut more = tokens.clone();
+        more[at] += bfe!(1);
+        more.extend([bfe!(0); Digest::LEN]);
+        fixture.assert_rejects(hash, &fixture.expected, more, count);
+
+        for word in 0..Digest::LEN {
+            let mut tampered = tokens.clone();
+            tampered[at + 1 + word] += bfe!(1);
+            fixture.assert_rejects(hash, &fixture.expected, tampered, integrity);
+        }
+    }
+
+    #[test]
+    fn peak_count_must_be_a_u32() {
+        let fixture = fixture(7);
+        let mut tokens = fixture.tokens();
+        tokens[fixture.num_peaks_token()] = bfe!(1_u64 << 32);
+        assert!(matches!(
+            fixture.run(fixture.after_removals.hash(), &fixture.expected, tokens),
+            Err(InstructionError::OpStackError(
+                OpStackError::FailedU32Conversion(_)
+            ))
+        ));
+    }
+
+    #[test]
+    fn other_hash_after_removals_is_rejected() {
+        let fixture = fixture(7);
+        fixture.assert_rejects(
+            fixture.before_removals.hash(),
+            &fixture.expected,
+            fixture.tokens(),
+            BlockValidationRule::MutatorSetUpdateIntegrity.error_id(),
+        );
+    }
+
+    #[test]
+    fn expected_set_differing_in_any_component_is_rejected() {
+        let fixture = fixture(7);
+        let honest = &fixture.expected;
+        let rejects = |expected: &MutatorSetAccumulator| {
+            fixture.assert_rejects(
+                fixture.after_removals.hash(),
+                expected,
+                fixture.tokens(),
+                BlockValidationRule::MutatorSetUpdateIntegrity.error_id(),
+            );
+        };
+
+        let mut one_more_output = honest.clone();
+        one_more_output.add(&AdditionRecord::new(Digest::default()));
+        rejects(&one_more_output);
+
+        let mut other_peak = honest.clone();
+        let mut peaks = other_peak.swbf_inactive.peaks();
+        peaks[0] = Digest::default();
+        other_peak.swbf_inactive = MmrAccumulator::init(peaks, honest.swbf_inactive.num_leafs());
+        rejects(&other_peak);
+
+        let mut other_window = honest.clone();
+        other_window.swbf_active.insert(0);
+        rejects(&other_window);
+
+        rejects(&fixture.after_removals);
+    }
 
     impl MutatorSetUpdateFromStateHash {
         /// The host shadow: asserts what the snippet asserts, reading the
