@@ -88,7 +88,6 @@ use crate::transaction::announcement::RETIREMENT_FLAG;
 use crate::transaction::transaction_kernel::TransactionKernel;
 use crate::transaction::transaction_kernel::LUSTRATION_FLAG;
 use crate::transaction::validity::single_proof::single_proof_claim;
-use crate::transaction::validity::single_proof::SingleProof;
 use crate::transaction::validity::tasm::claims::generate_single_proof_claim::GenerateSingleProofClaim;
 use crate::transaction::validity::tasm::claims::new_claim::NewClaim;
 use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -583,13 +582,6 @@ impl TritonProgram for PredecessorIsValid {
         let generate_single_proof_claim = library.import(Box::new(GenerateSingleProofClaim::new(
             ConsensusRuleSet::HardforkDelta,
         )));
-        let push_single_proof_digest = SingleProof::new(ConsensusRuleSet::HardforkDelta)
-            .hash()
-            .values()
-            .into_iter()
-            .rev()
-            .flat_map(|word| triton_asm!(push { word }))
-            .collect::<Vec<_>>();
         let transaction_claim_size =
             single_proof_claim(Digest::default(), ConsensusRuleSet::HardforkDelta)
                 .encode()
@@ -597,13 +589,6 @@ impl TritonProgram for PredecessorIsValid {
         let stark_verify = library.import(Box::new(StarkVerify::new_with_dynamic_layout(
             Stark::default(),
         )));
-        let push_block_program_digest = BlockProgram
-            .hash()
-            .values()
-            .into_iter()
-            .rev()
-            .flat_map(|word| triton_asm!(push { word }))
-            .collect::<Vec<_>>();
         // The `BlockProof`'s encoding lies inside the `Vec` field, after the
         // `Vec`'s own length word.
         let prev_block_proof_encoding = triton_asm!(
@@ -615,6 +600,19 @@ impl TritonProgram for PredecessorIsValid {
         let meets_threshold = library.import(Box::new(MeetsThreshold));
 
         let read_digest = triton_asm!(addi {Digest::LEN - 1} read_mem {Digest::LEN} pop 1);
+
+        // The digests of the programs the previous block's proof and
+        // transaction claim are about, from the epoch in force at its height.
+        // BEFORE: _
+        // AFTER:  _ [digest]
+        let read_prev_epoch_block_program_digest = triton_asm!(
+            push {prev_epoch_alloc.read_address()} read_mem 1 pop 1
+            {&field!(Epoch::block_program_digest)} {&read_digest}
+        );
+        let read_prev_epoch_single_proof_digest = triton_asm!(
+            push {prev_epoch_alloc.read_address()} read_mem 1 pop 1
+            {&field!(Epoch::single_proof_digest)} {&read_digest}
+        );
         let read_u64 = triton_asm!(addi 1 read_mem 2 pop 1);
         let read_difficulty =
             triton_asm!(addi {Difficulty::NUM_LIMBS - 1} read_mem {Difficulty::NUM_LIMBS} pop 1);
@@ -2098,14 +2096,7 @@ impl TritonProgram for PredecessorIsValid {
             // BEFORE: _ *w [prev_block_hash]
             // AFTER:  _ *w [prev_block_hash]
             {prev_block_epoch_rules}:
-                dup 5 {&read_prev_block_height}
-
-                /* Get pointer to the epoch in force for previous block,
-                   dictated by epoch from std-in, not by previous block. */
-                call {epoch_in_force}
-                // _ *w [prev_block_hash] *epoch
-
-                dup 0 push {prev_epoch_alloc.write_address()} write_mem 1 pop 1
+                push {prev_epoch_alloc.read_address()} read_mem 1 pop 1
                 // _ *w [prev_block_hash] *epoch
 
                 dup 0 {&field!(Epoch::target_block_interval)} read_mem 1 pop 1
@@ -2199,11 +2190,7 @@ impl TritonProgram for PredecessorIsValid {
 
         // BEFORE: _ *w [prev_block_hash]
         // AFTER:  _ *w [prev_block_hash]
-        // STDIN:  [epoch_table]
         let prev_block_epoch_rules_if_activated = triton_asm!(
-            call {read_epoch_table}
-            // _ *w [prev_block_hash]
-
             push {epochs_alloc.write_address()} {&field!(Epoch::height)} read_mem 1 pop 1 split
             // _ *w [prev_block_hash] [activation_height: u64]
 
@@ -2398,7 +2385,7 @@ impl TritonProgram for PredecessorIsValid {
             call {new_claim}
             // _ *w [prev_block_hash] *claim[0]_si num_claims *claim *output *input *program_digest
 
-            {&push_block_program_digest}
+            {&read_prev_epoch_block_program_digest}
             pick 5 write_mem {Digest::LEN} pop 1
             // _ *w [prev_block_hash] *claim[0]_si num_claims *claim *output *input
 
@@ -2473,7 +2460,7 @@ impl TritonProgram for PredecessorIsValid {
         // AFTER:  _ *w [prev_block_hash]
         let rule_1a_txproof_prev = triton_asm!(
             push {prev_block_txk_mh_alloc.read_address()} read_mem {Digest::LEN} pop 1
-            {&push_single_proof_digest}
+            {&read_prev_epoch_single_proof_digest}
             call {generate_single_proof_claim}
             // _ *w [prev_block_hash] *transaction_claim
 
@@ -2650,6 +2637,18 @@ impl TritonProgram for PredecessorIsValid {
             call {rule_0c}
             // _ [next_block_body_mh] *w [prev_block_hash]
 
+            // STDIN: [epoch_table]
+            call {read_epoch_table}
+            // _ [next_block_body_mh] *w [prev_block_hash]
+
+            /* The epoch in force at the previous block's height, dictated by
+               the table from std-in: the first epoch for a previous block
+               before activation, whose program digests apply to it. */
+            dup 5 {&read_prev_block_height}
+            call {epoch_in_force}
+            push {prev_epoch_alloc.write_address()} write_mem 1 pop 1
+            // _ [next_block_body_mh] *w [prev_block_hash]
+
             {&prev_block_is_genesis}
             dup 0 skiz call {rule_1g_prev}
             push 0 eq skiz call {rules_for_mined_parent}
@@ -2804,6 +2803,7 @@ mod tests {
     use crate::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::transaction::transparent_input::TransparentInput;
     use crate::transaction::validity::neptune_proof::Proof as NeptuneProof;
+    use crate::transaction::validity::single_proof::SingleProof;
 
     #[test]
     fn sign_test_refuses_non_canonical_limbs() {
@@ -2898,6 +2898,13 @@ mod tests {
                 witness.next_block_mmr_accumulator.peaks()
             );
 
+            let epoch_table_words = (0..EpochTable::static_length().unwrap())
+                .map(|_| tasm::tasmlib_io_read_stdin___bfe())
+                .collect::<Vec<_>>();
+            let epochs = *EpochTable::decode(&epoch_table_words).unwrap();
+            let prev_block_height = witness.prev_block_header.height;
+            let prev_epoch = epochs.in_force_at(prev_block_height);
+
             let prev_transaction_kernel = &witness.prev_block_body.transaction_kernel;
             if witness.prev_block_header.height.is_genesis() {
                 // 1.g) The parent at height zero is the named genesis block;
@@ -2926,7 +2933,7 @@ mod tests {
                     };
 
                     // 1.d)
-                    let prev_block_claim = Claim::new(BlockProgram.hash())
+                    let prev_block_claim = Claim::new(prev_epoch.block_program_digest)
                         .with_input(prev_block_body_mh.reversed().values().to_vec())
                         .with_output(witness.prev_block_appendix.claims_as_output())
                         .about_version(
@@ -2939,8 +2946,9 @@ mod tests {
 
                 // 1.a) The transaction claim; this program's own claim is found
                 // under the header rules.
-                let transaction_claim =
-                    single_proof_claim(prev_block_txk_mh, ConsensusRuleSet::HardforkDelta);
+                let transaction_claim = Claim::new(prev_epoch.single_proof_digest)
+                    .with_input(prev_block_txk_mh.reversed().values().to_vec())
+                    .about_version(version);
                 assert!(witness.prev_block_appendix.contains(&transaction_claim));
 
                 // 2.g)
@@ -2989,14 +2997,8 @@ mod tests {
             // The header rules, for the previous block. Its predecessor's
             // values come from the previous block's copy of the claim for this
             // program execution.
-            let epoch_table_words = (0..EpochTable::static_length().unwrap())
-                .map(|_| tasm::tasmlib_io_read_stdin___bfe())
-                .collect::<Vec<_>>();
-            let epochs = *EpochTable::decode(&epoch_table_words).unwrap();
             let cumulative_pow_size = ProofOfWork::static_length().unwrap();
-            let prev_block_height = witness.prev_block_header.height;
             if prev_block_height >= epochs.activation_height() {
-                let prev_epoch = epochs.in_force_at(prev_block_height);
                 let prev_minimum_block_time = prev_epoch.minimum_block_time;
                 let prev_target_block_interval = prev_epoch.target_block_interval;
 
@@ -3288,6 +3290,8 @@ mod tests {
             resets_lustration_status: bfe!(0),
             min_swbf_padded_rows: bfe!(2 << FIXTURE_LEAF_LOG2_PADDED_HEIGHT),
             requires_mutator_set_reveals: bfe!(0),
+            block_program_digest: BlockProgram.hash(),
+            single_proof_digest: SingleProof::new(consensus_rule_set).hash(),
         }
     }
 
@@ -5485,6 +5489,25 @@ ones):
                 &next_header,
                 &epochs,
                 BlockValidationRule::MaxSize.error_id(),
+            );
+        }
+
+        #[test]
+        fn transaction_claim_is_about_the_epochs_single_proof_program() {
+            let transaction_kernel = transaction_kernel_and_proof().0.clone();
+            let epochs = EpochTable::new(&[Epoch {
+                single_proof_digest: Digest::default(),
+                ..activation_epoch()
+            }]);
+            let (prev_block, next_body, next_header) =
+                prev_block_with_transaction_kernel(transaction_kernel, &epochs);
+            assert_rejects_with_epochs(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                &epochs,
+                BlockValidationRule::AppendixMissingClaim.error_id(),
             );
         }
 

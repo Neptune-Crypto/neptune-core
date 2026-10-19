@@ -43,6 +43,13 @@ pub struct Epoch {
     /// proof-of-work field, the composer two chunks and an AOCL leaf through
     /// a claim in the appendix. 1 if so, 0 otherwise.
     pub requires_mutator_set_reveals: BFieldElement,
+
+    /// The digest of the program a block's proof attests.
+    pub block_program_digest: Digest,
+
+    /// The digest of the program the transaction claim in a block's appendix
+    /// is about.
+    pub single_proof_digest: Digest,
 }
 
 /// Number of entries in an [`EpochTable`], used or not.
@@ -97,22 +104,16 @@ impl EpochTable {
         !epoch.height.is_zero() && epoch.height.value() <= height.value()
     }
 
-    /// The epoch in force at this height.
-    ///
-    /// The epoch in force at this height is the last entry that has already
-    /// started. So the last entry with a height less than or equal to current
-    /// block height.
-    ///
-    /// # Panics
-    ///
-    /// If the height precedes activation.
+    /// The epoch in force at this height: the last entry that has started,
+    /// or the first entry for a height before activation, whose program
+    /// digests apply to the block before the first one with this claim.
     pub fn in_force_at(&self, height: BlockHeight) -> Epoch {
         *self
             .0
             .iter()
             .rev()
             .find(|epoch| Self::has_started(epoch, height))
-            .expect("height must not precede activation")
+            .unwrap_or(&self.0[0])
     }
 }
 
@@ -153,9 +154,10 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "height must not precede activation")]
-    fn no_epoch_is_in_force_before_activation() {
-        EpochTable::new(&[epoch(10, 1)]).in_force_at(9.into());
+    fn first_epoch_is_in_force_before_activation() {
+        let table = EpochTable::new(&[epoch(10, 1), epoch(20, 2)]);
+        assert_eq!(epoch(10, 1), table.in_force_at(9.into()));
+        assert_eq!(epoch(10, 1), table.in_force_at(0.into()));
     }
 
     #[test]

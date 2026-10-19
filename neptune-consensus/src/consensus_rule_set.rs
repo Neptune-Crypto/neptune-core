@@ -7,11 +7,14 @@ use tasm_lib::twenty_first::bfe;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 
 use crate::block::pow::LustrationStatus;
+use crate::block::validity::block_program::BlockProgram;
 use crate::block::validity::epoch_table::Epoch;
 use crate::block::validity::epoch_table::EpochTable;
 use crate::block::INITIAL_BLOCK_SUBSIDY;
 use crate::block::MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS;
 use crate::block::PREMINE_MAX_SIZE;
+use crate::proof_abstractions::tasm::program::TritonProgram;
+use crate::transaction::validity::single_proof::SingleProof;
 use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
 /// Height of 1st block that follows the alpha consensus ruleset, for main net.
@@ -289,6 +292,8 @@ impl ConsensusRuleSet {
             requires_mutator_set_reveals: bfe!(u64::from(
                 rule_set.miners_must_prove_ams_knowledge(network)
             )),
+            block_program_digest: BlockProgram.hash(),
+            single_proof_digest: SingleProof::new(rule_set).hash(),
         }])
     }
 
@@ -735,6 +740,8 @@ pub(crate) mod tests {
             resets_lustration_status: bfe!(0),
             min_swbf_padded_rows: bfe!(1u64 << 23),
             requires_mutator_set_reveals: bfe!(1),
+            block_program_digest: BlockProgram.hash(),
+            single_proof_digest: SingleProof::new(ConsensusRuleSet::SoftforkEpsilon).hash(),
         };
         assert_eq!(EpochTable::new(&[expected]), table);
         assert_eq!(
