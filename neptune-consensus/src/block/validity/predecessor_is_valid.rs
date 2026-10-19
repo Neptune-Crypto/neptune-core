@@ -332,6 +332,20 @@ impl PredecessorIsValid {
         }
     }
 
+    /// The sign bit is the top bit of the most significant limb. Crashes
+    /// unless every limb is a u32.
+    ///
+    /// ```text
+    /// BEFORE: _ [amount: i128]
+    /// AFTER:  _ (amount >= 0)
+    /// ```
+    fn is_non_negative() -> Vec<LabelledInstruction> {
+        triton_asm!(
+            pop_count pop 1 pop_count pop 1 pop_count pop 1
+            push {1_u64 << 31} swap 1 lt
+        )
+    }
+
     /// The claim a block at this height with this body must carry, by
     /// program, version and input, under the network's genesis block and
     /// table. The output is unbound in this context.
@@ -1509,10 +1523,7 @@ impl TritonProgram for PredecessorIsValid {
             // _ *w [prev_block_hash] *prev_claim_output
         );
 
-        // The sign bit is the top bit of the most significant limb.
-        // BEFORE: _ [amount: i128]
-        // AFTER:  _ (amount >= 0)
-        let is_non_negative = triton_asm!(pop 3 push {1_u64 << 31} swap 1 lt);
+        let is_non_negative = Self::is_non_negative();
 
         // BEFORE: _ *w [prev_block_hash]
         // AFTER:  _ *w [prev_block_hash]
@@ -2793,6 +2804,41 @@ mod tests {
     use crate::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::transaction::transparent_input::TransparentInput;
     use crate::transaction::validity::neptune_proof::Proof as NeptuneProof;
+
+    #[test]
+    fn sign_test_refuses_non_canonical_limbs() {
+        use tasm_lib::triton_vm::isa::instruction::InstructionError;
+        use tasm_lib::triton_vm::isa::op_stack::OpStackError;
+        use tasm_lib::triton_vm::vm::VMState;
+
+        let sign = |limbs: [u64; 4]| {
+            let program = Program::new(&triton_asm!(
+                push {limbs[3]} push {limbs[2]} push {limbs[1]} push {limbs[0]}
+                {&PredecessorIsValid::is_non_negative()}
+                halt
+            ));
+            let mut state =
+                VMState::new(program, PublicInput::default(), NonDeterminism::default());
+            state.run().map(|()| *state.op_stack.stack.last().unwrap())
+        };
+        let max = u64::from(u32::MAX);
+        assert_eq!(bfe!(1), sign([5, 0, 0, 0]).unwrap());
+        assert_eq!(bfe!(1), sign([max, max, max, (1 << 31) - 1]).unwrap());
+        assert_eq!(bfe!(0), sign([0, 0, 0, 1 << 31]).unwrap());
+        for limbs in [
+            [1 << 32, 0, 0, 0],
+            [0, 1 << 40, 0, 0],
+            [0, 0, 1 << 32, 0],
+            [0, 0, 0, 1 << 32],
+        ] {
+            assert!(matches!(
+                sign(limbs),
+                Err(InstructionError::OpStackError(
+                    OpStackError::FailedU32Conversion(_)
+                ))
+            ));
+        }
+    }
 
     impl PredecessorIsValidWitnessMemory {
         /// The previous block's size, as [Block::size] computes it.
