@@ -22,8 +22,9 @@ pub const NUM_TRIALS: u32 = 45;
 
 /// Deserialize a list of at most `MAX` elements, for use with
 /// `#[serde(deserialize_with = "...")]`. An announced length above `MAX` is
-/// refused before any element is read, so that a short encoding cannot make
-/// the receiver allocate a long list.
+/// refused before any element is read, and one within `MAX` reserves at most
+/// a megabyte up front, so that a short encoding cannot make the receiver
+/// allocate a long list.
 pub fn deserialize_bounded_vec<'de, D, T, const MAX: usize>(
     deserializer: D,
 ) -> Result<Vec<T>, D::Error>
@@ -59,12 +60,20 @@ where
         }
 
         fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+            // 1 MiB matches serde's "cautious" budget.
+            const PREALLOC_BUDGET_BYTES: usize = 1 << 20;
+
             let announced = seq.size_hint().unwrap_or(0);
             if announced > MAX {
                 return Err(serde::de::Error::invalid_length(announced, &self));
             }
 
-            let mut elements = Vec::with_capacity(announced);
+            // Reserve for what was realistically sent, not for the size claimed.
+            let element_size = std::cmp::max(1, std::mem::size_of::<T>());
+            let mut elements = Vec::with_capacity(std::cmp::min(
+                PREALLOC_BUDGET_BYTES / element_size,
+                announced,
+            ));
             while let Some(element) = seq.next_element()? {
                 if elements.len() == MAX {
                     return Err(serde::de::Error::invalid_length(elements.len() + 1, &self));
@@ -488,5 +497,27 @@ mod tests {
             error.to_string().contains("at most"),
             "refused for the length, not for running out of bytes: {error}"
         );
+    }
+
+    #[test]
+    fn announced_length_within_the_bound_reserves_at_most_a_megabyte() {
+        struct Announces(usize);
+        impl Iterator for Announces {
+            type Item = u64;
+            fn next(&mut self) -> Option<u64> {
+                None
+            }
+            fn size_hint(&self) -> (usize, Option<usize>) {
+                (self.0, Some(self.0))
+            }
+        }
+
+        let announced = 1_000_000;
+        let deserializer = serde::de::value::SeqDeserializer::<_, serde::de::value::Error>::new(
+            Announces(announced),
+        );
+        let elements = deserialize_bounded_vec::<_, u64, 1_000_000>(deserializer).unwrap();
+        assert!(elements.is_empty());
+        assert!(elements.capacity() * std::mem::size_of::<u64>() <= 1 << 20);
     }
 }
