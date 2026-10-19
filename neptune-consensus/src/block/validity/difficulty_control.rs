@@ -179,9 +179,15 @@ impl BasicSnippet for DifficultyControl {
                 {&write(&delta)} {&write(&target)}
                 // _ [old_difficulty]
 
-                {&push_u64(Self::ONE)} {&read(&target)} call {divide}
+                {&push_u64(Self::ONE)} {&read(&target)}
+                // _ [old_difficulty] [1] [target]
+
+                call {divide}
+                // _ [old_difficulty] [1 / target]
+
                 {&write(&scale)}
                 // scale = 2^32 / target
+                // _ [old_difficulty]
 
                 {&read(&target)} {&read(&delta)} call {u64_lt}
                 {&write(&sign)}
@@ -261,14 +267,25 @@ impl BasicSnippet for DifficultyControl {
             // AFTER:  _ [quotient]
             // SECIN:  [quotient] [remainder]
             {divide}:
-                divine 2 divine 2
+                divine 2
+                divine 2
+                // _ [numerator] [denominator] [quotient] [remainder]
+
+                /* Ensure both divined values are valid u64 representations */
+                dup 3 pop_count pop 1
+                dup 2 pop_count pop 1
+                dup 1 pop_count pop 1
+                dup 0 pop_count pop 1
                 // _ [numerator] [denominator] [quotient] [remainder]
 
                 dup 5 dup 5 dup 3 dup 3 call {u64_lt}
                 assert error_id {Self::REMAINDER_NOT_BELOW_DIVISOR_ERROR}
                 // _ [numerator] [denominator] [quotient] [remainder]
 
-                dup 3 dup 3 dup 7 dup 7 call {u64_safe_mul}
+                dup 3 dup 3 dup 7 dup 7
+                // _ [numerator] [denominator] [quotient] [remainder] [quotient] [denominator]
+
+                call {u64_safe_mul}
                 dup 3 dup 3 call {u64_add}
                 // _ [numerator] [denominator] [quotient] [remainder] [quotient * denominator + remainder]
 
@@ -298,6 +315,38 @@ pub fn difficulty_control_in_vm(
     previous_block_height: BlockHeight,
 ) -> neptune_primitives::difficulty_control::Difficulty {
     use num_bigint::BigUint;
+
+    let nondeterminism = NonDeterminism::new(DifficultyControl::divined_tokens(
+        target_block_interval,
+        previous_block_height,
+    ));
+    let output = run_in_vm(
+        old_difficulty,
+        target_block_interval,
+        old_timestamp,
+        new_timestamp,
+        previous_block_height,
+        nondeterminism,
+    )
+    .unwrap();
+
+    let limbs = output
+        .iter()
+        .map(|word| u32::try_from(word.value()).unwrap())
+        .collect::<Vec<_>>();
+    neptune_primitives::difficulty_control::Difficulty::from_biguint(BigUint::new(limbs)).unwrap()
+}
+
+#[cfg(any(test, feature = "test-helpers"))]
+fn run_in_vm(
+    old_difficulty: neptune_primitives::difficulty_control::Difficulty,
+    target_block_interval: Timestamp,
+    old_timestamp: Timestamp,
+    new_timestamp: Timestamp,
+    previous_block_height: BlockHeight,
+    nondeterminism: NonDeterminism,
+) -> Result<Vec<BFieldElement>, tasm_lib::triton_vm::error::VMError> {
+    use num_bigint::BigUint;
     use tasm_lib::triton_vm::vm::VM;
 
     let mut library = Library::new();
@@ -322,17 +371,7 @@ pub fn difficulty_control_in_vm(
         .chain(u64_words(new_timestamp.to_millis()))
         .chain([previous_block_height.into()])
         .collect::<Vec<_>>();
-    let nondeterminism = NonDeterminism::new(DifficultyControl::divined_tokens(
-        target_block_interval,
-        previous_block_height,
-    ));
-    let output = VM::run(program, PublicInput::new(input), nondeterminism).unwrap();
-
-    let limbs = output
-        .iter()
-        .map(|word| u32::try_from(word.value()).unwrap())
-        .collect::<Vec<_>>();
-    neptune_primitives::difficulty_control::Difficulty::from_biguint(BigUint::new(limbs)).unwrap()
+    VM::run(program, PublicInput::new(input), nondeterminism)
 }
 
 #[cfg(test)]
@@ -471,6 +510,41 @@ mod tests {
             Timestamp::millis(old_timestamp + delta),
             BlockHeight::from(height),
         );
+    }
+
+    #[test]
+    fn invalid_encodings_are_rejected() {
+        use tasm_lib::triton_vm::error::InstructionError;
+        use tasm_lib::triton_vm::error::OpStackError;
+
+        let target = 588_000u64;
+        for remainder in [0u64, 1, 4_000, target - 1] {
+            // target * quotient + remainder == 2^32 in the field, with the
+            // quotient's low word far outside u32.
+            let quotient_lo =
+                (bfe!(DifficultyControl::ONE) - bfe!(remainder)) * bfe!(target).inverse();
+            assert!(quotient_lo.value() > u64::from(u32::MAX));
+            let forged = vec![bfe!(0), quotient_lo, bfe!(0), bfe!(remainder)];
+
+            let error = run_in_vm(
+                Difficulty::new([100_000_000, 0, 0, 0, 0]),
+                Timestamp::millis(target),
+                Timestamp::millis(1_000_000),
+                Timestamp::millis(1_000_000 + target + 1),
+                BlockHeight::from(100u64),
+                NonDeterminism::new(forged),
+            )
+            .unwrap_err();
+            assert!(
+                matches!(
+                    error.source,
+                    InstructionError::OpStackError(OpStackError::FailedU32Conversion(word))
+                        if word == quotient_lo
+                ),
+                "remainder {remainder}: {}",
+                error.source
+            );
+        }
     }
 
     #[test]
