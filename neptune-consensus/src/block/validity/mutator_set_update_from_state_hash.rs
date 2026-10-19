@@ -136,7 +136,14 @@ impl BasicSnippet for MutatorSetUpdateFromStateHash {
 
                 // The peaks after the removals are the prover's; the hash
                 // check below binds them.
-                divine 1 call {new_list} swap 1
+                divine 1
+                // _ [base] *window' num_peaks
+
+                /* Verify valid u32 */
+                dup 0 pop_count pop 1
+                // _ [base] *window' num_peaks
+
+                call {new_list} swap 1
                 call {divine_peaks}
                 pop 1
                 // _ [base] *window' *swbfi_peaks'
