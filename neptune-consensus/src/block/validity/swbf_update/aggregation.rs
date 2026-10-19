@@ -430,6 +430,14 @@ impl TritonProgram for SwbfUpdateAggregation {
             call {audit_claim_output}
             // _ *w *left_output
 
+            /* Assert the left claim's leaf range is not empty */
+            dup 0 addi {1 + OUTPUT_LAST_LEAF_INDEX} read_mem 1 pop 1
+            push {first_leaf_index_alloc.read_address()} read_mem 1 pop 1
+            // _ *w *left_output left_last_leaf_index left_first_leaf_index
+
+            swap 1 lt push 0 eq assert error_id {chaining}
+            // _ *w *left_output
+
             /* Assert that right claim started where left claim ended */
             dup 1 {&field!(SwbfUpdateAggregationWitness::right_claim)}
             call {check_child}
@@ -461,6 +469,14 @@ impl TritonProgram for SwbfUpdateAggregation {
             // _ *w *left_output *right
 
             call {audit_claim_output}
+            // _ *w *left_output *right_output
+
+            /* Assert the right claim's leaf range is not empty */
+            dup 0 addi {1 + OUTPUT_LAST_LEAF_INDEX} read_mem 1 pop 1
+            dup 2 addi {1 + OUTPUT_LAST_LEAF_INDEX} read_mem 1 pop 1 addi 1
+            // _ *w *left_output *right_output right_last_leaf_index right_first_leaf_index
+
+            swap 1 lt push 0 eq assert error_id {chaining}
             // _ *w *left_output *right_output
 
             dup 2 {&field!(SwbfUpdateAggregationWitness::index_set_digests)}
@@ -703,6 +719,7 @@ pub(in crate::block::validity) mod tests {
                 verify_stark(Stark::default(), &witness.left_claim, &witness.left_proof);
             }
             let left = ClaimOutput::parse(&witness.left_claim.output);
+            assert!(first_leaf_index.value() <= left.last_leaf_index.value());
 
             assert_eq!(
                 (left.mutator_set_hash, left.last_leaf_index + bfe!(1)),
@@ -712,6 +729,7 @@ pub(in crate::block::validity) mod tests {
                 verify_stark(Stark::default(), &witness.right_claim, &witness.right_proof);
             }
             let right = ClaimOutput::parse(&witness.right_claim.output);
+            assert!(left.last_leaf_index.value() < right.last_leaf_index.value());
 
             let digests = &witness.index_set_digests;
             assert_eq!(left.count + right.count, digests.len());
@@ -1019,6 +1037,29 @@ pub(in crate::block::validity) mod tests {
     fn index_set_digests_not_covering_the_children_are_rejected() {
         let (mut witness, _) = witness_over_leaves(2, 2, 5);
         witness.index_set_digests.pop();
+        assert_rejects(&witness, None);
+    }
+
+    #[test]
+    fn child_whose_leaf_range_is_empty_is_rejected_in_both_positions() {
+        let leaves = chained_witnesses(&[1, 1], 5);
+        let leaf = &leaves[0];
+        let mut claim = leaf.versioned_claim();
+        let mut output = ClaimOutput::parse(&claim.output);
+        // Ends one leaf before it starts and leaves the mutator set as it
+        // found it: it chains with itself.
+        output.last_leaf_index = bfe!(CorrectSwbfUpdate::FIRST_LEAF_INDEX - 1);
+        output.mutator_set_hash = leaf.mutator_set().hash();
+        claim.output = output.encode();
+        let (left, left_proof) = child(claim.clone());
+        let (right, right_proof) = child(claim);
+        let digests = [
+            index_set_digests(&leaves[..1]),
+            index_set_digests(&leaves[..1]),
+        ]
+        .concat();
+        let witness =
+            SwbfUpdateAggregationWitness::new(left, left_proof, right, right_proof, digests);
         assert_rejects(&witness, None);
     }
 
