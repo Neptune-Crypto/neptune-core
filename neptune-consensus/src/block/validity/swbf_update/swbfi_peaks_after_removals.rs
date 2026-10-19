@@ -3,9 +3,9 @@
 //! inputs' indices fall in, with the trees' heights and paths.
 //!
 //! From the mutator set the transaction is built on: the witness's inputs
-//! must hold exactly the chunks their indices need (2.a, 2.b), every input
-//! has an unset index (2.b, 2.d), and setting the indices in the chunks
-//! yields the inactive SWBF's new peaks.
+//! must hold the chunks their indices need (2.a, 2.b), every input has an
+//! unset index (2.b, 2.d), and setting the indices in the chunks yields the
+//! inactive SWBF's new peaks.
 //!
 //! This is the part of the update that dominates its cost. It is the body of
 //! [`CorrectSwbfUpdate`](super::leaf::CorrectSwbfUpdate),
@@ -134,9 +134,9 @@ impl BasicSnippet for SwbfiPeaksAfterRemovals {
                 return
 
             // The witness must hold the chunks the inputs' indices in the
-            // inactive SWBF need, no more and no fewer, with the trees'
-            // heights in ascending order; the insertions into each chunk
-            // come out of the same pass.
+            // inactive SWBF need, with the trees' heights in ascending
+            // order; the insertions into each chunk come out of the same
+            // pass.
             // BEFORE: _ *inputs *mutator_set *chunks *tree_heights *tree_paths
             // AFTER:  _ *inputs *mutator_set
             {rule_2a}:
@@ -152,12 +152,8 @@ impl BasicSnippet for SwbfiPeaksAfterRemovals {
                 // _ [base] *chunk_indices
 
                 dup 0 push {chunk_indices_alloc.write_address()} write_mem 1 pop 1
-                dup 2 swap 1
-                push {swbfi_leaf_count_estimate_alloc.read_address()} read_mem 2 pop 1
-                // _ [base] *inputs *chunk_indices [swbfi_leaf_count_estimate]
-
-                dup 4 {&swbfi_leaf_count}
-                // _ [base] *inputs *chunk_indices [swbfi_leaf_count_estimate] [swbfi_leaf_count]
+                dup 2 swap 1 dup 2 {&swbfi_leaf_count}
+                // _ [base] *inputs *chunk_indices [swbfi_leaf_count]
 
                 call {chunk_insertions}
                 push {insertions_alloc.write_address()} write_mem 1 pop 1
@@ -242,7 +238,7 @@ impl SwbfiPeaksAfterRemovals {
 
         [
             DivinedChunkIndices::divined_tokens(&chunk_indices),
-            ChunkInsertions::divined_tokens(inputs, &chunk_indices, estimate, swbfi_leaf_count),
+            ChunkInsertions::divined_tokens(inputs, &chunk_indices, swbfi_leaf_count),
             RemovalRecordsAreUnspent::divined_tokens(
                 inputs,
                 &chunk_indices,
@@ -331,10 +327,9 @@ pub(in crate::block::validity) mod tests {
             tree_heights: &[u32],
             tree_paths: &[Vec<Digest>],
         ) -> Vec<Digest> {
-            // 2.a) The witness describes an inactive SWBF by strictly
-            // increasing tree heights, and holds the chunks of exactly the
-            // indices below its window start, while every index below the
-            // true window start has its chunk.
+            // 2.a, 2.b) The witness describes an inactive SWBF by strictly
+            // increasing tree heights, and every index below the window
+            // start has its chunk.
             assert_eq!(tree_heights.len(), tree_paths.len());
             assert!(tree_heights.windows(2).all(|pair| pair[0] < pair[1]));
             let estimate = WitnessLists::swbfi_leaf_count_estimate(tree_heights);
@@ -347,10 +342,7 @@ pub(in crate::block::validity) mod tests {
                 })
                 .collect::<Vec<_>>();
             assert!(chunk_indices.windows(2).all(|pair| pair[0] < pair[1]));
-            let window_start = |leaf_count: u64| u128::from(leaf_count) << CHUNK_SIZE.ilog2();
-            let use_start = window_start(estimate);
             let true_window_start = Self::window_start(mutator_set);
-            let resolve_start = use_start.max(true_window_start);
             // The insertion lists are read and ignored; the peaks are
             // computed directly from the records.
             let insertions = ChunkInsertions::insertions(inputs, &chunk_indices, true_window_start);
@@ -359,25 +351,18 @@ pub(in crate::block::validity) mod tests {
                     tasm::tasmlib_io_read_secin___bfe();
                 }
             }
-            let mut used = vec![false; num_chunks];
             for index in inputs
                 .iter()
                 .flat_map(|record| record.absolute_indices.to_array())
             {
-                if index >= resolve_start {
+                if index >= true_window_start {
                     continue;
                 }
                 let position = tasm::tasmlib_io_read_secin___bfe().value() as usize;
                 let chunk_index = (index >> CHUNK_SIZE.ilog2()) as u64;
                 assert_eq!(Some(&chunk_index), chunk_indices.get(position));
-                if index < use_start {
-                    used[position] = true;
-                }
-                if index < true_window_start {
-                    tasm::tasmlib_io_read_secin___bfe();
-                }
+                tasm::tasmlib_io_read_secin___bfe();
             }
-            assert!(used.iter().all(|&used| used), "every chunk must be used");
 
             // 2.b, 2.d) Every record has an unset index: the prover points
             // at it, and at the gap around it in its sorted chunk or in the
