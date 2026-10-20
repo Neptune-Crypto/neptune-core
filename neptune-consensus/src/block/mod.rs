@@ -1922,15 +1922,15 @@ pub(crate) mod tests {
     use crate::type_scripts::TypeScript;
 
     impl Block {
-        /// Every rule of [`Block::validate`] except the block's proof, for
-        /// tests on blocks without valid proofs.
-        pub(crate) fn validate_without_proof(
+        /// Every rule of [`Block::validate`] except the block's proof and the
+        /// guesser's reveal, for tests on blocks with neither.
+        pub(crate) fn validate_without_proof_or_reveal(
             &self,
             previous_block: &Block,
             now: Timestamp,
             network: Network,
         ) -> Result<(), BlockValidationError> {
-            self.validate_except_proof(previous_block, now, network, true)
+            self.validate_except_proof(previous_block, now, network, false)
         }
     }
 

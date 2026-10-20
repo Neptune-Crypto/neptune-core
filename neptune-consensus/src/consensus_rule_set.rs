@@ -247,7 +247,14 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::HardforkBeta
             | ConsensusRuleSet::HardforkGamma
             | ConsensusRuleSet::HardforkDelta => false,
-            ConsensusRuleSet::SoftforkEpsilon => !network.use_mock_proof(),
+            ConsensusRuleSet::SoftforkEpsilon => {
+                // Testnet(1) is excluded from this rule to allow for the
+                // construction of "genesis blocks" with another block height
+                // than 0. Without this exclusion, all tests would have to start
+                // from height 0 since that's the only way to know the archival
+                // mutator set.
+                !network.use_mock_proof() && network != Network::Testnet(1)
+            }
         }
     }
 
@@ -720,9 +727,12 @@ pub(crate) mod tests {
         assert_eq!(1 << 23, epsilon.min_swbf_padded_rows(Network::Testnet(0)));
         assert_eq!(1 << 22, epsilon.min_swbf_padded_rows(Network::Testnet(1)));
         assert_eq!(1 << 21, epsilon.min_swbf_padded_rows(Network::Testnet(42)));
+        assert!(epsilon.miners_must_prove_ams_knowledge(Network::Testnet(0)));
+        assert!(epsilon.miners_must_prove_ams_knowledge(Network::Testnet(42)));
+        assert!(!epsilon.miners_must_prove_ams_knowledge(Network::Testnet(1)));
         for network in Network::all_networks() {
             assert_eq!(
-                network.use_mock_proof(),
+                network.use_mock_proof() || network == Network::Testnet(1),
                 !epsilon.miners_must_prove_ams_knowledge(network)
             );
             assert_eq!(
