@@ -2575,7 +2575,7 @@ impl ArchivalState {
             None => (Digest::default(), vec![]),
         };
         KnowsMutatorSetWitness::new(
-            &current_tip,
+            current_tip,
             &msa,
             ConsensusRuleSet::knows_mutator_set_activation_height(self.network),
             chunks,
