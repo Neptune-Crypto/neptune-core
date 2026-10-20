@@ -1795,10 +1795,13 @@ pub(crate) mod tests {
     #[apply(shared_tokio_runtime)]
     async fn composer_absorbs_a_new_fee_paying_transaction_into_its_proposal() {
         let network = Network::Testnet(42);
-        let mut cli = cli_args::Args::default_with_network(network);
-        cli.second_parse().unwrap();
-        let mut alice =
-            mock_genesis_global_state(2, WalletEntropy::devnet_wallet(), cli.clone()).await;
+        let mut alice = mock_genesis_global_state(
+            2,
+            WalletEntropy::devnet_wallet(),
+            cli_args::Args::default_with_network(network),
+        )
+        .await;
+        let cli = alice.cli().clone();
         let genesis_block = Block::genesis(network);
         let now = genesis_block.header().timestamp + Timestamp::months(7);
         let job_options = TritonVmProofJobOptions::default_with_network(network);
