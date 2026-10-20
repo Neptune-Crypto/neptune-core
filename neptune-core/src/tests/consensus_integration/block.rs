@@ -346,7 +346,10 @@ mod block_is_valid {
     #[apply(shared_tokio_runtime)]
     async fn block_with_valid_proof_passes() {
         let (predecesor, time, network, block) = deterministic_empty_block1_proposal().await;
-        assert!(block.validate(&predecesor, time, network,).await.is_ok());
+        assert!(block
+            .validate_proposal(&predecesor, time, network,)
+            .await
+            .is_ok());
     }
 
     #[traced_test]
@@ -375,7 +378,7 @@ mod block_is_valid {
         assert_eq!(
             BlockValidationError::ProofValidity,
             block
-                .validate(&predecesor, time, network,)
+                .validate_proposal(&predecesor, time, network,)
                 .await
                 .unwrap_err()
         );
@@ -393,7 +396,7 @@ mod block_is_valid {
         assert_eq!(
             BlockValidationError::ProofValidity,
             block
-                .validate(&predecesor, time, network,)
+                .validate_proposal(&predecesor, time, network,)
                 .await
                 .unwrap_err()
         );
@@ -517,7 +520,7 @@ mod block_is_valid {
 
             assert!(
                 block2_without_valid_pow
-                    .is_valid(&block1, plus_eight_months, network)
+                    .is_valid_proposal(&block1, plus_eight_months, network)
                     .await,
                 "Block with {i} inputs must be valid"
             );
@@ -578,7 +581,7 @@ mod block_is_valid {
 
             assert!(
                 block3_without_valid_pow
-                    .is_valid(&block2_without_valid_pow, plus_nine_months, network)
+                    .is_valid_proposal(&block2_without_valid_pow, plus_nine_months, network)
                     .await,
                 "Block of height 3 after block 2 with {i} inputs must be valid"
             );

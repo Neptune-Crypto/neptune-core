@@ -3493,7 +3493,11 @@ pub(crate) mod tests {
             .await
             .unwrap();
             let block2 = fake_valid_block_proposal_from_tx(&block1, block2_tx, network).await;
-            assert!(block2.is_valid(&block1, block2_timestamp, network).await);
+            assert!(
+                block2
+                    .is_valid_proposal(&block1, block2_timestamp, network)
+                    .await
+            );
 
             bob.set_new_self_composed_tip(block2.clone(), vec![])
                 .await

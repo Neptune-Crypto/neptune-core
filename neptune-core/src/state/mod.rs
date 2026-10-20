@@ -3782,7 +3782,7 @@ mod tests {
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::wallet::wallet_status::WalletStatusExportFormat;
-    use crate::tests::shared::blocks::fake_valid_successor_for_tests;
+    use crate::tests::shared::blocks::fake_valid_block_proposal_successor_for_test;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::globalstate::state_with_premine_and_self_mined_blocks;
     use crate::tests::shared::mock_tx::send_coins;
@@ -6078,7 +6078,7 @@ mod tests {
 
         assert!(
             block_1
-                .is_valid(&genesis_block, in_seven_months, network)
+                .is_valid_proposal(&genesis_block, in_seven_months, network)
                 .await
         );
 
@@ -6317,7 +6317,11 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(block_2.is_valid(&block_1, in_eight_months, network).await);
+        assert!(
+            block_2
+                .is_valid_proposal(&block_1, in_eight_months, network)
+                .await
+        );
 
         assert_eq!(4, block_2.kernel.body.transaction_kernel.inputs.len());
         assert_eq!(7, block_2.kernel.body.transaction_kernel.outputs.len());
@@ -6338,8 +6342,13 @@ mod tests {
         let genesis_block = Block::genesis(network);
         let now = genesis_block.kernel.header.timestamp + Timestamp::hours(1);
 
-        let block1 =
-            fake_valid_successor_for_tests(&genesis_block, now, Default::default(), network).await;
+        let block1 = fake_valid_block_proposal_successor_for_test(
+            &genesis_block,
+            now,
+            Default::default(),
+            network,
+        )
+        .await;
 
         global_state_lock.set_new_tip(block1).await.unwrap();
 
@@ -6349,7 +6358,7 @@ mod tests {
                 .await
                 .chain
                 .tip()
-                .is_valid(&genesis_block, now, network)
+                .is_valid_proposal(&genesis_block, now, network)
                 .await,
             "light state tip must be a valid block"
         );
@@ -6361,7 +6370,7 @@ mod tests {
                 .archival_state()
                 .get_tip()
                 .await
-                .is_valid(&genesis_block, now, network)
+                .is_valid_proposal(&genesis_block, now, network)
                 .await,
             "archival state tip must be a valid block"
         );
