@@ -2647,6 +2647,7 @@ mod tests {
     use super::super::extension_claim::ExtensionClaim;
     use super::super::extension_claim::ExtensionClaimWitness;
     use super::super::extension_claim::ParentForExtension;
+    use super::super::knows_mutator_set::KnowsMutatorSet;
     use super::super::swbf_update::aggregation::tests::claim_over_halves;
     use super::super::swbf_update::aggregation::SwbfUpdateAggregation;
     use super::super::swbf_update::chunk_witness::ChunkWitness;
@@ -3161,7 +3162,7 @@ mod tests {
     /// The padded height of each of the two leaf proofs beneath a fixture
     /// block's SWBF update claim, which together reach the fixture epoch's
     /// floor exactly.
-    const FIXTURE_LEAF_LOG2_PADDED_HEIGHT: u32 = 19;
+    const FIXTURE_LEAF_LOG2_PADDED_HEIGHT: u32 = 22;
 
     /// The initial lustration counter of the latest lustration rule.
     fn lustration_counter_initial() -> NativeCurrencyAmount {
@@ -3508,6 +3509,32 @@ mod tests {
         ))
     }
 
+    /// The claims Main requires from its activation on that the fixtures
+    /// cannot otherwise carry, the verifying program's and the composer's
+    /// reveal claim, as data: the host must accept a fixture block the
+    /// program accepts. None below activation or on a block the fixtures
+    /// did not build on a known predecessor.
+    fn main_host_claims(header: &BlockHeader, body: &BlockBody) -> Vec<Claim> {
+        let network = Network::Main;
+        let activation = ConsensusRuleSet::epsilon_activation_block_height(network);
+        let Some(parent) = predecessor_by_hash(header.prev_block_digest) else {
+            return vec![];
+        };
+        if header.height < activation {
+            return vec![];
+        }
+        let mutator_set = parent.mutator_set_accumulator_after().unwrap();
+        vec![
+            PredecessorIsValid::claim_about(&parent, body.mast_hash(), network),
+            KnowsMutatorSet::claim(
+                parent.hash(),
+                &mutator_set,
+                ConsensusRuleSet::knows_mutator_set_activation_height(network),
+                ConsensusRuleSet::infer_from(network, header.height),
+            ),
+        ]
+    }
+
     /// As [unproven_block], with this SWBF update claim, or none.
     fn unproven_block_with_swbf_claim(
         header: BlockHeader,
@@ -3523,6 +3550,7 @@ mod tests {
             vec![transaction_claim],
             swbf_claim.into_iter().collect(),
             claims,
+            main_host_claims(&header, &body),
         ]
         .concat();
 
@@ -3796,7 +3824,11 @@ mod tests {
             let predecessor =
                 predecessor_of(prev_block).expect("test case must be built on a block");
             prev_block
-                .validate_without_proof(&predecessor, prev_block.header().timestamp, Network::Main)
+                .validate_without_proof_or_reveal(
+                    &predecessor,
+                    prev_block.header().timestamp,
+                    Network::Main,
+                )
                 .expect("host must accept a previous block the program accepts");
         }
     }
@@ -5923,6 +5955,7 @@ ones):
                 vec![transaction_claim],
                 swbf_claim.into_iter().collect(),
                 vec![own_claim],
+                main_host_claims(&header, &body),
             ]
             .concat();
             let prev_block = block_solved_by_nonce_search(

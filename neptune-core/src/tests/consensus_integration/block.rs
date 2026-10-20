@@ -155,7 +155,7 @@ async fn test_difficulty_control_matches() {
 
 #[apply(shared_tokio_runtime)]
 async fn block_with_wrong_mmra_is_invalid() {
-    let network = Network::Testnet(42);
+    let network = Network::Testnet(1);
     let genesis_block = Block::genesis(network);
     let now = genesis_block.kernel.header.timestamp + Timestamp::hours(2);
     let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
@@ -578,7 +578,7 @@ mod block_is_valid {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn block_with_far_future_timestamp_is_invalid() {
-        let network = Network::Testnet(42);
+        let network = Network::Testnet(1);
         let genesis_block = Block::genesis(network);
         let mut now = genesis_block.kernel.header.timestamp + Timestamp::hours(2);
         let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);

@@ -695,21 +695,21 @@ async fn bad_lustration_status_counter_2p(
 
 #[tokio::test]
 async fn bad_lustration_status_counter_exceeds_initial_value_2p() {
-    let network = Network::Testnet(42);
+    let network = Network::Testnet(1);
     let rness = Default::default();
     let b_prev = Block::genesis(network);
     let ts = b_prev.header().timestamp + Timestamp::hours(1);
 
     let mut b_new = fake_valid_successor_for_tests(&b_prev, ts, rness, network).await;
     let consensus_rule_set = ConsensusRuleSet::infer_from(network, b_new.header().height);
-    assert_eq!(ConsensusRuleSet::HardforkDelta, consensus_rule_set);
+    assert_eq!(ConsensusRuleSet::SoftforkEpsilon, consensus_rule_set);
     cache_true_claims([BlockProgram::claim(
         b_new.body(),
         b_new.kernel.appendix(),
         consensus_rule_set,
     )])
     .await;
-    assert!(b_new.validate(&b_prev, ts, network).await.is_ok());
+    b_new.validate(&b_prev, ts, network).await.unwrap();
 
     let good_lustration_status = b_new.header().pow.lustration_status().unwrap();
     let one_nau = NativeCurrencyAmount::one_nau();
@@ -737,7 +737,7 @@ async fn bad_lustration_status_counter_exceeds_initial_value_2p() {
 
 #[tokio::test]
 async fn bad_lustration_status_counter_bad_initial_threshold_2q() {
-    let network = Network::Testnet(42);
+    let network = Network::Testnet(1);
     let rness = Default::default();
     let b_prev = Block::genesis(network);
     let ts = b_prev.header().timestamp + Timestamp::hours(1);
@@ -839,7 +839,7 @@ async fn lustration_counter_exceeds_initial_value_2s(
 
 #[tokio::test]
 async fn missing_lustration_announcement_2o() {
-    let network = Network::Testnet(42);
+    let network = Network::Testnet(1);
     let (parent, block, now) = block_spending_lustration_bound_inputs(
         NativeCurrencyAmount::coins(600),
         &[NativeCurrencyAmount::coins(1)],
@@ -857,7 +857,7 @@ async fn missing_lustration_announcement_2o() {
 
 #[tokio::test]
 async fn lustrating_more_than_the_counter_holds_2r() {
-    let network = Network::Testnet(42);
+    let network = Network::Testnet(1);
     let (parent, block, now) = block_spending_lustration_bound_inputs(
         NativeCurrencyAmount::coins(1),
         &[NativeCurrencyAmount::coins(2)],
@@ -877,7 +877,7 @@ async fn lustrating_more_than_the_counter_holds_2r() {
 async fn lustrated_amount_out_of_range_is_an_unknown_lustration_problem() {
     // Two lustrations of the entire coin supply each; their sum does not fit
     // in the amount type.
-    let network = Network::Testnet(42);
+    let network = Network::Testnet(1);
     let whole_supply = NativeCurrencyAmount::coins(42_000_000);
     let (parent, block, now) = block_spending_lustration_bound_inputs(
         NativeCurrencyAmount::coins(1),
