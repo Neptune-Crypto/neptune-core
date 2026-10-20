@@ -1282,6 +1282,7 @@ pub(crate) mod tests {
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::GlobalState;
     use crate::tests::shared::blocks::fake_valid_deterministic_successor;
+    use crate::tests::shared::blocks::guess_for_tests;
     use crate::tests::shared::dummy_expected_utxo;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_tx::make_mock_block_transaction_with_mutator_set_hash_and_proof_size;
@@ -1682,7 +1683,12 @@ pub(crate) mod tests {
                 genesis_block.clone(),
                 transaction_empty_mempool,
                 now,
-                None,
+                alice
+                    .lock_guard()
+                    .await
+                    .composer_witness(&genesis_block)
+                    .await
+                    .unwrap(),
                 TritonVmJobQueue::get_instance(),
                 TritonVmProofJobOptions::default_with_network(network),
             )
@@ -1733,7 +1739,12 @@ pub(crate) mod tests {
                 genesis_block.clone(),
                 transaction_non_empty_mempool,
                 now,
-                None,
+                alice
+                    .lock_guard()
+                    .await
+                    .composer_witness(&genesis_block)
+                    .await
+                    .unwrap(),
                 TritonVmJobQueue::get_instance(),
                 TritonVmProofJobOptions::default_with_network(network),
             )
@@ -1782,7 +1793,7 @@ pub(crate) mod tests {
         )
         .await
         .unwrap();
-        let (block_1, _) = receiver_1.await.unwrap().unwrap();
+        let (mut block_1, _) = receiver_1.await.unwrap().unwrap();
         let validation_result = block_1
             .validate_proposal(&genesis_block, mocked_now, network)
             .await;
@@ -1793,6 +1804,7 @@ pub(crate) mod tests {
             "Mempool must be non-empty after insertion of nop-transaction, and prior to update of tip"
         );
 
+        guess_for_tests(&mut block_1, &alice).await;
         alice.set_new_tip(block_1.clone()).await.unwrap();
 
         let (sender_2, receiver_2) = oneshot::channel();

@@ -38,6 +38,7 @@ pub(super) mod tests {
     use crate::application::config::cli_args::Args;
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
+    use crate::tests::shared::blocks::guess_for_tests;
     use crate::tests::shared::files::unit_test_data_directory;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
@@ -615,16 +616,22 @@ pub(super) mod tests {
         .unwrap();
         println!("Generated block transaction");
 
-        let (block_1, _) = Block::compose(
+        let (mut block_1, _) = Block::compose(
             genesis_block.clone(),
             block_tx,
             in_seven_months,
-            None,
+            alice
+                .lock_guard()
+                .await
+                .composer_witness(&genesis_block)
+                .await
+                .unwrap(),
             TritonVmJobQueue::get_instance(),
             TritonVmProofJobOptions::default_with_network(network),
         )
         .await
         .unwrap();
+        guess_for_tests(&mut block_1, &alice).await;
         println!("Generated block");
 
         // Verify validity, without requiring valid PoW.
@@ -885,7 +892,12 @@ pub(super) mod tests {
             block_1.clone(),
             block_tx2,
             in_seven_months + network.minimum_block_time(),
-            None,
+            alice
+                .lock_guard()
+                .await
+                .composer_witness(&block_1)
+                .await
+                .unwrap(),
             TritonVmJobQueue::get_instance(),
             TritonVmProofJobOptions::default_with_network(network),
         )
@@ -897,7 +909,11 @@ pub(super) mod tests {
         // Sanity checks
         assert_eq!(4, block_2.kernel.body.transaction_kernel.inputs.len());
         assert_eq!(7, block_2.kernel.body.transaction_kernel.outputs.len());
-        assert!(block_2.is_valid(&block_1, in_seven_months, network).await);
+        assert!(
+            block_2
+                .is_valid_proposal(&block_1, in_seven_months, network)
+                .await
+        );
 
         // Expect incoming UTXOs
         {

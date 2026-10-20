@@ -21,6 +21,7 @@ use crate::application::config::cli_args;
 use crate::application::loops::mine_loop::create_block_transaction_from;
 use crate::application::loops::mine_loop::TxMergeOrigin;
 use crate::state::transaction::tx_creation_config::TxCreationConfig;
+use crate::tests::shared::blocks::guess_for_tests;
 use crate::tests::shared::globalstate::mock_genesis_global_state;
 use crate::tests::shared_tokio_runtime;
 use crate::GlobalStateLock;
@@ -45,17 +46,24 @@ async fn disallow_double_spends_across_blocks() {
         .await
         .unwrap();
 
-        Block::compose(
+        let witness = state
+            .lock_guard()
+            .await
+            .composer_witness(&predecessor)
+            .await
+            .unwrap();
+        let (mut block, _) = Block::compose(
             predecessor,
             block_tx,
             timestamp,
-            None,
+            witness,
             TritonVmJobQueue::get_instance(),
             job_options.clone(),
         )
         .await
-        .unwrap()
-        .0
+        .unwrap();
+        guess_for_tests(&mut block, state).await;
+        block
     }
 
     let network = Network::Testnet(42);
