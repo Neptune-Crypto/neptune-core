@@ -2037,6 +2037,7 @@ pub(crate) mod tests {
             let sample_claim = KnowsMutatorSet::claim(
                 genesis.hash(),
                 &mutator_set,
+                ConsensusRuleSet::knows_mutator_set_activation_height(network),
                 ConsensusRuleSet::infer_from(network, height),
             );
             let required = BlockAppendix::consensus_claims(
