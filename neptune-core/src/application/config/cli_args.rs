@@ -344,6 +344,12 @@ pub struct Args {
     #[clap(long, default_value = "0.2", value_parser = NativeCurrencyAmount::coins_from_str)]
     pub(crate) min_fee_per_swbf_leaf: NativeCurrencyAmount,
 
+    /// When composing, the fee the transactions a new proposal adds to the
+    /// composer's earlier proposal on the same tip must pay together, for
+    /// the new proposal to be built.
+    #[clap(long, default_value = "0.1", value_parser = NativeCurrencyAmount::coins_from_str)]
+    pub(crate) min_fee_per_recomposition: NativeCurrencyAmount,
+
     /// By default, a composer will share block proposals with all peers. If
     /// this flag is set, the composer will *not* share their block proposals.
     #[clap(long)]
@@ -1262,6 +1268,10 @@ mod tests {
         assert_eq!(
             NativeCurrencyAmount::coins_from_str("0.2").unwrap(),
             default_args.min_fee_per_swbf_leaf
+        );
+        assert_eq!(
+            NativeCurrencyAmount::coins_from_str("0.1").unwrap(),
+            default_args.min_fee_per_recomposition
         );
         assert_eq!(TxUpgradeFilter::match_all(), default_args.tx_upgrade_filter);
     }

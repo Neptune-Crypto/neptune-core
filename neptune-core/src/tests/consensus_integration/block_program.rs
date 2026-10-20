@@ -55,6 +55,7 @@ async fn disallow_double_spends_across_blocks() {
         )
         .await
         .unwrap()
+        .0
     }
 
     let network = Network::Testnet(42);

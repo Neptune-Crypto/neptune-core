@@ -3141,10 +3141,11 @@ impl GlobalState {
             .handle_mempool_events(mempool_events)
             .await;
 
-        // Reset block proposal, as that field pertains to the block that
-        // was just set as new tip. Also reset set of exported block proposals.
+        // Reset block proposal-related data as it pertains to the previous tip,
+        // not the new tip.
         self.mining_state.block_proposal = BlockProposal::none();
         self.mining_state.exported_block_proposals.clear();
+        self.mining_state.composer_work = None;
 
         debug!("Done setting new tip.");
         Ok(update_jobs)
@@ -6009,7 +6010,7 @@ mod tests {
         .await
         .unwrap();
 
-        let block_1 = Block::compose(
+        let (block_1, _) = Block::compose(
             genesis_block.clone(),
             block_transaction,
             in_seven_months,
@@ -6251,7 +6252,7 @@ mod tests {
 
         // We can't check confirmability of transaction since its records are now packed.
         // So we produce a block instead and validate it.
-        let block_2 = Block::compose(
+        let (block_2, _) = Block::compose(
             block_1.clone(),
             block_transaction2,
             in_eight_months,
@@ -7349,7 +7350,7 @@ mod tests {
                 )
                 .await
                 .unwrap();
-                let block_1 = Block::compose(
+                let (block_1, _) = Block::compose(
                     genesis_block,
                     block_1_tx,
                     seven_months_post_launch,

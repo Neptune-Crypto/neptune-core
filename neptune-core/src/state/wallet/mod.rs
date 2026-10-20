@@ -1016,7 +1016,7 @@ mod tests {
         .await
         .unwrap();
         let timestamp = merged_tx.kernel().timestamp;
-        let block_3_b = Block::compose(
+        let (block_3_b, _) = Block::compose(
             block_2_b.clone(),
             merged_tx,
             timestamp,
@@ -1183,7 +1183,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let block_1 = Block::compose(
+        let (block_1, _) = Block::compose(
             genesis_block.clone(),
             tx_for_block,
             in_seven_months,

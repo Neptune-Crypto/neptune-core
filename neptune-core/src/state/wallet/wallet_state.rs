@@ -5390,7 +5390,7 @@ pub(crate) mod tests {
             )
             .await
             .unwrap();
-            let block1 = Block::compose(
+            let (block1, _) = Block::compose(
                 genesis_block.clone(),
                 block1_tx,
                 block1_timestamp,
@@ -5487,7 +5487,7 @@ pub(crate) mod tests {
                 create_block_transaction(&block1, alice.clone(), now, job_options.clone())
                     .await
                     .unwrap();
-            let block2 = Block::compose(
+            let (block2, _) = Block::compose(
                 block1.clone(),
                 block_transaction,
                 now,
@@ -5580,7 +5580,7 @@ pub(crate) mod tests {
             .unwrap();
 
             // create block with that transaction
-            let block3 = Block::compose(
+            let (block3, _) = Block::compose(
                 block2,
                 block3_transaction,
                 now + Timestamp::minutes(10),

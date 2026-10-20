@@ -615,7 +615,7 @@ pub(super) mod tests {
         .unwrap();
         println!("Generated block transaction");
 
-        let block_1 = Block::compose(
+        let (block_1, _) = Block::compose(
             genesis_block.clone(),
             block_tx,
             in_seven_months,
@@ -881,7 +881,7 @@ pub(super) mod tests {
         )
         .await
         .unwrap();
-        let block_2 = Block::compose(
+        let (block_2, _) = Block::compose(
             block_1.clone(),
             block_tx2,
             in_seven_months + network.minimum_block_time(),
