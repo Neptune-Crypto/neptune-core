@@ -17,7 +17,6 @@ use tasm_lib::arithmetic::u160::lt::Lt as U160Lt;
 use tasm_lib::arithmetic::u192::safe_add::SafeAdd as U192SafeAdd;
 use tasm_lib::arithmetic::u64::add::Add as U64Add;
 use tasm_lib::arithmetic::u64::lt::Lt as U64Lt;
-use tasm_lib::data_type::Literal;
 use tasm_lib::field;
 use tasm_lib::field_with_size;
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
@@ -54,7 +53,6 @@ use super::mutator_set_hash::MutatorSetHash;
 use super::mutator_set_hash::MutatorSetHashFromComponents;
 use super::mutator_set_update_from_state_hash::MutatorSetUpdateFromStateHash;
 use super::removal_records_are_unique::RemovalRecordsAreUnique;
-use super::swbf_update::aggregation::SwbfUpdateAggregation;
 use super::swbf_update::leaf::CorrectSwbfUpdate;
 use super::swbf_update::removal_index_commitment::RemovalIndexCommitment;
 use super::swbf_update::swbfi_peaks_after_removals::SwbfiPeaksAfterRemovals;
@@ -565,8 +563,6 @@ impl TritonProgram for PredecessorIsValid {
         // bind: the mutator set after the previous block's predecessor, and
         // the previous block's inputs.
         let swbf_claim_mutator_set_alloc = library.kmalloc(Digest::LEN as u32);
-        let push_swbf_aggregation_program_digest =
-            Literal::Digest(SwbfUpdateAggregation::new().hash()).push_to_stack_code();
         // The messages of the previous block's lustration announcements.
         let lustrations_alloc = library.kmalloc(1);
         // The hash of the mutator set after the previous block, for the
@@ -606,6 +602,10 @@ impl TritonProgram for PredecessorIsValid {
         let read_prev_epoch_single_proof_digest = triton_asm!(
             push {prev_epoch_alloc.read_address()} read_mem 1 pop 1
             {&field!(Epoch::single_proof_digest)} {&read_digest}
+        );
+        let read_prev_epoch_swbf_aggregation_digest = triton_asm!(
+            push {prev_epoch_alloc.read_address()} read_mem 1 pop 1
+            {&field!(Epoch::swbf_aggregation_digest)} {&read_digest}
         );
         let read_u64 = triton_asm!(addi 1 read_mem 2 pop 1);
         let read_difficulty =
@@ -897,35 +897,20 @@ impl TritonProgram for PredecessorIsValid {
             .version();
 
         let epoch_size = Epoch::static_length().unwrap();
-        // An epoch is too wide to compare on the stack in one go, so it is
-        // compared in two halves.
-        let epoch_half_size = epoch_size.div_ceil(2);
-        let epoch_rest_size = epoch_size - epoch_half_size;
-        let epoch_half = DataType::Tuple(vec![DataType::Bfe; epoch_half_size]);
-        let epoch_rest = DataType::Tuple(vec![DataType::Bfe; epoch_rest_size]);
         // Never written, so all zeros: what an unused epoch looks like.
         let unused_epoch_alloc = library.kmalloc(epoch_size as u32);
 
+        // An epoch is too wide to compare on the stack, so compare the hashes instead.
         let epochs_are_equal = "predecessor_is_valid_epochs_are_equal".to_string();
         let epochs_are_equal_code = triton_asm!(
             // BEFORE: _ *a *b
             // AFTER:  _ (a == b)
             {epochs_are_equal}:
-                dup 1 addi {epoch_half_size - 1}
-                {&epoch_half.read_value_from_memory_pop_pointer()}
-                dup {epoch_half_size} addi {epoch_half_size - 1}
-                {&epoch_half.read_value_from_memory_pop_pointer()}
-                {&epoch_half.compare()}
-                // _ *a *b first_halves_agree
+                push {epoch_size} call {hash_varlen}
+                pick 5 push {epoch_size} call {hash_varlen}
+                // _ [hash_b] [hash_a]
 
-                place 2 addi {epoch_size - 1}
-                {&epoch_rest.read_value_from_memory_pop_pointer()}
-                pick {epoch_rest_size} addi {epoch_size - 1}
-                {&epoch_rest.read_value_from_memory_pop_pointer()}
-                {&epoch_rest.compare()}
-                // _ first_halves_agree second_halves_agree
-
-                mul
+                {&digests_are_equal}
                 return
         );
 
@@ -1323,7 +1308,7 @@ impl TritonProgram for PredecessorIsValid {
                 // _ *claim[i]_si num_claims i
 
                 dup 2 addi 1 {&field!(Claim::program_digest)} {&read_digest}
-                {&push_swbf_aggregation_program_digest}
+                {&read_prev_epoch_swbf_aggregation_digest}
                 {&digests_are_equal}
                 dup 3 addi 1 {&field!(Claim::version)} read_mem 1 pop 1
                 push {version} eq mul
@@ -2663,6 +2648,7 @@ mod tests {
     use super::super::extension_claim::ExtensionClaimWitness;
     use super::super::extension_claim::ParentForExtension;
     use super::super::swbf_update::aggregation::tests::claim_over_halves;
+    use super::super::swbf_update::aggregation::SwbfUpdateAggregation;
     use super::super::swbf_update::chunk_witness::ChunkWitness;
     use super::super::swbf_update::leaf::CorrectSwbfUpdateWitness;
     use super::super::swbf_update::ClaimOutput;
@@ -2991,7 +2977,7 @@ mod tests {
                     .claims()
                     .iter()
                     .find(|claim| {
-                        claim.program_digest == SwbfUpdateAggregation::new().hash()
+                        claim.program_digest == prev_epoch.swbf_aggregation_digest
                             && claim.version == version
                             && claim.input == claim_input
                     })
@@ -3168,6 +3154,7 @@ mod tests {
             requires_mutator_set_reveals: bfe!(0),
             block_program_digest: BlockProgram.hash(),
             single_proof_digest: SingleProof::new(consensus_rule_set).hash(),
+            swbf_aggregation_digest: SwbfUpdateAggregation::new().hash(),
         }
     }
 
@@ -5373,6 +5360,25 @@ ones):
             let transaction_kernel = transaction_kernel_and_proof().0.clone();
             let epochs = EpochTable::new(&[Epoch {
                 single_proof_digest: Digest::default(),
+                ..activation_epoch()
+            }]);
+            let (prev_block, next_body, next_header) =
+                prev_block_with_transaction_kernel(transaction_kernel, &epochs);
+            assert_rejects_with_epochs(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                &epochs,
+                BlockValidationRule::AppendixMissingClaim.error_id(),
+            );
+        }
+
+        #[test]
+        fn swbf_update_claim_is_about_the_right_aggregation_program() {
+            let transaction_kernel = transaction_kernel_and_proof().0.clone();
+            let epochs = EpochTable::new(&[Epoch {
+                swbf_aggregation_digest: Digest::default(),
                 ..activation_epoch()
             }]);
             let (prev_block, next_body, next_header) =
