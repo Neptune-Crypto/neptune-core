@@ -193,6 +193,7 @@ async fn block_with_n_outputs(
     )
     .await
     .unwrap()
+    .0
 }
 
 async fn mine_to_own_wallet(
@@ -207,6 +208,7 @@ async fn mine_to_own_wallet(
         TritonVmProofJobOptions::default(),
     )
     .await
+    .unwrap()
     .unwrap()
 }
 

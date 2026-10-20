@@ -324,7 +324,7 @@ mod block_is_valid {
         )
         .await
         .unwrap();
-        let block1_proposal = Block::compose(
+        let (block1_proposal, _) = Block::compose(
             genesis.clone(),
             transaction,
             plus_one_hour,
@@ -494,7 +494,7 @@ mod block_is_valid {
             )
             .await
             .unwrap();
-            let block2_without_valid_pow = Block::compose(
+            let (block2_without_valid_pow, _) = Block::compose(
                 block1.clone(),
                 block2_tx,
                 plus_eight_months,
@@ -555,7 +555,7 @@ mod block_is_valid {
                 !block3_tx.kernel().inputs.len().is_zero(),
                 "block transaction 3 must have inputs"
             );
-            let block3_without_valid_pow = Block::compose(
+            let (block3_without_valid_pow, _) = Block::compose(
                 block2_without_valid_pow.clone(),
                 block3_tx,
                 plus_nine_months,
@@ -944,7 +944,7 @@ async fn avoid_reselecting_same_input_utxos() {
         }
 
         // compose block
-        let block = Block::compose(
+        let (block, _) = Block::compose(
             blocks.last().unwrap().to_owned(),
             transaction.try_into().expect(
                 "went through at least one iteration of above loop, so merge bit must be set",

@@ -146,6 +146,23 @@ pub struct ComposerWitness {
     /// Peaks of the inactive SWBF after the predecessor's removals, before
     /// its additions.
     pub prev_block_swbfi_peaks_after_removals: Vec<Digest>,
+
+    /// What the composer proved for an earlier proposal on the same
+    /// predecessor, to build on.
+    pub previous: Option<ComposerProofs>,
+}
+
+/// The claims a composer proved for a proposal, with their proofs, for the
+/// next proposal on the same predecessor to build on.
+#[derive(Debug, Clone)]
+pub struct ComposerProofs {
+    /// The composer's claim to know the mutator set after the predecessor.
+    /// None where the rules do not ask for it.
+    pub knows_mutator_set: Option<(Claim, Proof)>,
+
+    /// The root of the SWBF update tree over the block transaction's first
+    /// inputs, as many as the root's output counts.
+    pub swbf_update: (Claim, Proof),
 }
 
 /// Public fields of `Block` are read-only, enforced by #[readonly::make].
@@ -250,19 +267,22 @@ impl Eq for Block {}
 
 impl Block {
     /// The composer's witness is required from hard fork epsilon on where
-    /// the network proves.
+    /// the network proves. Returns the block along with proofs built for it
+    /// such that later proposals built on the same block can reuse expensive
+    /// to produce proofs.
     pub async fn block_template_from_block_primitive_witness(
         primitive_witness: BlockPrimitiveWitness,
         timestamp: Timestamp,
         composer_witness: Option<ComposerWitness>,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
-    ) -> anyhow::Result<Block> {
+    ) -> anyhow::Result<(Block, Option<ComposerProofs>)> {
         let network = proof_job_options.job_settings.network;
         let body = primitive_witness.body().to_owned();
         let header = primitive_witness.header(timestamp, network.target_block_interval());
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, header.height);
         let mut proven = vec![];
+        let mut composer_proofs = None;
         if consensus_rule_set.requires_predecessor_claim() && !network.use_mock_proof() {
             let composer_witness = composer_witness.ok_or_else(|| {
                 anyhow::anyhow!(
@@ -270,17 +290,27 @@ impl Block {
                     header.height
                 )
             })?;
-            if consensus_rule_set.miners_must_prove_ams_knowledge(network) {
-                proven.push(
-                    Self::prove_knows_mutator_set(
-                        composer_witness.knows_ams,
-                        consensus_rule_set,
-                        triton_vm_job_queue.clone(),
-                        proof_job_options.clone(),
-                    )
-                    .await?,
-                );
-            }
+            let (previous_knows_mutator_set, previous_swbf_update) = composer_witness
+                .previous
+                .map(|previous| (previous.knows_mutator_set, Some(previous.swbf_update)))
+                .unwrap_or_default();
+            let knows_mutator_set = if consensus_rule_set.miners_must_prove_ams_knowledge(network) {
+                Some(match previous_knows_mutator_set {
+                    Some(proven) => proven,
+                    None => {
+                        Self::prove_knows_mutator_set(
+                            composer_witness.knows_ams,
+                            consensus_rule_set,
+                            triton_vm_job_queue.clone(),
+                            proof_job_options.clone(),
+                        )
+                        .await?
+                    }
+                })
+            } else {
+                None
+            };
+            proven.extend(knows_mutator_set.clone());
             proven.push(
                 Self::prove_predecessor_is_valid(
                     &primitive_witness.predecessor_block,
@@ -292,16 +322,20 @@ impl Block {
                 )
                 .await?,
             );
-            proven.push(
-                Self::prove_swbf_update(
-                    &body,
-                    &primitive_witness.predecessor_block,
-                    header.height,
-                    triton_vm_job_queue.clone(),
-                    proof_job_options.clone(),
-                )
-                .await?,
-            );
+            let swbf_update = Self::prove_swbf_update(
+                &body,
+                &primitive_witness.predecessor_block,
+                header.height,
+                previous_swbf_update,
+                triton_vm_job_queue.clone(),
+                proof_job_options.clone(),
+            )
+            .await?;
+            proven.push(swbf_update.clone());
+            composer_proofs = Some(ComposerProofs {
+                knows_mutator_set,
+                swbf_update,
+            });
         }
         let parent_digest = primitive_witness.predecessor_block.hash();
         let parent_mutator_set = primitive_witness
@@ -335,7 +369,7 @@ impl Block {
             (appendix, BlockProof::SingleProof(proof))
         };
 
-        Ok(Block::new(header, body, appendix, proof))
+        Ok((Block::new(header, body, appendix, proof), composer_proofs))
     }
 
     /// The claim that the predecessor is valid, with its proof, for a block
@@ -390,7 +424,9 @@ impl Block {
     }
 
     /// The SWBF update root claim of a block with this body on this
-    /// predecessor, with its proof.
+    /// predecessor, with its proof. Given the root of an earlier proposal's
+    /// tree, over the body's first inputs, the tree is extended by the
+    /// inputs after those instead of proven from the start.
     ///
     /// Proof verifies the leaf proofs [`CorrectSwbfUpdateWitness::leaves`], and
     /// guarantees to meet the required proof complexity.
@@ -398,40 +434,73 @@ impl Block {
         body: &BlockBody,
         predecessor: &Block,
         height: BlockHeight,
+        previous_root: Option<(Claim, Proof)>,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<(Claim, Proof)> {
         let network = proof_job_options.job_settings.network;
         let floor = ConsensusRuleSet::infer_from(network, height).min_swbf_padded_rows(network);
         let inputs = &body.transaction_kernel.inputs;
-        info!(
-            "Sizing the SWBF update tree for {} inputs at a floor of {floor} padded rows; \
-             one VM trace per leaf",
-            inputs.len()
-        );
+        let mutator_set = predecessor.mutator_set_accumulator_after()?;
         let start = std::time::Instant::now();
-        let leaves = CorrectSwbfUpdateWitness::leaves(
-            inputs,
-            &predecessor.mutator_set_accumulator_after()?,
-            floor,
-        );
-        info!(
-            "Proving the SWBF update tree: {} leaves and {} aggregations",
-            leaves.len(),
-            leaves.len() - 1
-        );
-        let (claim, proof) = SwbfUpdateAggregation::new()
-            .tree(&leaves, |claim, program, nondeterminism| {
-                let proof = ProofBuilder::new()
-                    .program(program)
-                    .claim(claim)
-                    .nondeterminism(move || nondeterminism)
-                    .job_queue(triton_vm_job_queue.clone())
-                    .proof_job_options(proof_job_options.clone())
-                    .build();
-                async { proof.await.map(tasm_lib::triton_vm::proof::Proof::from) }
-            })
-            .await?;
+        let prove = |claim, program, nondeterminism| {
+            let proof = ProofBuilder::new()
+                .program(program)
+                .claim(claim)
+                .nondeterminism(move || nondeterminism)
+                .job_queue(triton_vm_job_queue.clone())
+                .proof_job_options(proof_job_options.clone())
+                .build();
+            async { proof.await.map(tasm_lib::triton_vm::proof::Proof::from) }
+        };
+        let (claim, proof) = match previous_root {
+            Some((root_claim, root_proof)) => {
+                let covered = ClaimOutput::try_parse(&root_claim.output).ok_or_else(|| {
+                    anyhow::anyhow!("the root must have the SWBF update claim's layout")
+                })?;
+                let allow_big_chunks = ConsensusRuleSet::HardforkDelta.allow_big_chunks();
+                let unpacked = RemovalRecordList::try_unpack(inputs.clone(), allow_big_chunks)?;
+                let (covered_inputs, gained) = unpacked.split_at(covered.count);
+                let gained = RemovalRecordList::pack(gained.to_vec(), allow_big_chunks);
+                let after_covered = SwbfiPeaksAfterRemovals::try_apply_removals(
+                    &RemovalRecordList::pack(covered_inputs.to_vec(), allow_big_chunks),
+                    &mutator_set,
+                )
+                .ok_or_else(|| anyhow::anyhow!("the covered inputs must be removable"))?;
+                info!(
+                    "Extending the SWBF update tree over {} inputs by {} inputs",
+                    covered.count,
+                    unpacked.len() - covered.count
+                );
+                let leaves = CorrectSwbfUpdateWitness::appended_leaves(
+                    &gained,
+                    &after_covered,
+                    covered.last_leaf_index.value() + 1,
+                );
+                SwbfUpdateAggregation::new()
+                    .extend(
+                        (root_claim, root_proof.into()),
+                        covered_inputs,
+                        &leaves,
+                        prove,
+                    )
+                    .await?
+            }
+            None => {
+                info!(
+                    "Sizing the SWBF update tree for {} inputs at a floor of {floor} padded rows; \
+                     one VM trace per leaf",
+                    inputs.len()
+                );
+                let leaves = CorrectSwbfUpdateWitness::leaves(inputs, &mutator_set, floor);
+                info!(
+                    "Proving the SWBF update tree: {} leaves and {} aggregations",
+                    leaves.len(),
+                    leaves.len() - 1
+                );
+                SwbfUpdateAggregation::new().tree(&leaves, prove).await?
+            }
+        };
         info!("SWBF update tree proven in {:.0?}", start.elapsed());
         Ok((claim, Proof::from(proof)))
     }
@@ -443,7 +512,7 @@ impl Block {
         composer_witness: Option<ComposerWitness>,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
-    ) -> anyhow::Result<Block> {
+    ) -> anyhow::Result<(Block, Option<ComposerProofs>)> {
         let new_height = predecessor.header().height.next();
         let network = proof_job_options.job_settings.network;
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, new_height);
@@ -488,7 +557,7 @@ impl Block {
         composer_witness: Option<ComposerWitness>,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
-    ) -> anyhow::Result<Block> {
+    ) -> anyhow::Result<(Block, Option<ComposerProofs>)> {
         Self::make_block_template_with_valid_proof(
             predecessor,
             transaction,
@@ -1784,7 +1853,7 @@ mod test_support {
             let mut fake_genesis = primitive_witness.predecessor_block().to_owned();
             fake_genesis.proof = BlockProof::Genesis;
             let block_timestamp = primitive_witness.transaction().kernel.timestamp;
-            let fake_child = Self::block_template_from_block_primitive_witness(
+            let (fake_child, _) = Self::block_template_from_block_primitive_witness(
                 primitive_witness,
                 block_timestamp,
                 None,

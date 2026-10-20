@@ -186,6 +186,36 @@ impl CorrectSwbfUpdateWitness {
             .collect()
     }
 
+    /// The leaves that extend a block's tree by these packed inputs: built
+    /// on the mutator set the tree's root outputs, numbered from this leaf
+    /// index, as few as hold the inputs at
+    /// [`CorrectSwbfUpdate::MAX_INPUTS_PER_LEAF`], spread evenly, each at
+    /// [`CorrectSwbfUpdate::LEAF_LOG2_PADDED_HEIGHT`]. None for no inputs.
+    pub fn appended_leaves(
+        inputs: &[RemovalRecord],
+        mutator_set: &MutatorSetAccumulator,
+        first_leaf_index: u64,
+    ) -> Vec<Self> {
+        if inputs.is_empty() {
+            return vec![];
+        }
+        let num_leaves = inputs
+            .len()
+            .div_ceil(CorrectSwbfUpdate::MAX_INPUTS_PER_LEAF);
+        let (base, extra) = (inputs.len() / num_leaves, inputs.len() % num_leaves);
+        let sizes = (0..num_leaves)
+            .map(|position| base + usize::from(position < extra))
+            .collect::<Vec<_>>();
+        Self::segments(inputs, mutator_set, &sizes)
+            .into_iter()
+            .enumerate()
+            .map(|(position, leaf)| {
+                leaf.with_leaf_index(first_leaf_index + position as u64)
+                    .with_padded_height(CorrectSwbfUpdate::LEAF_LOG2_PADDED_HEIGHT)
+            })
+            .collect()
+    }
+
     /// How many leaves this number of inputs produce, at this specified proving
     /// complexity.
     pub fn num_leaves(num_inputs: usize, min_padded_rows: u64) -> usize {

@@ -58,6 +58,7 @@ pub(crate) async fn next_block(
         TritonVmProofJobOptions::default_with_network(network),
     )
     .await
+    .unwrap()
     .unwrap();
 
     let height = child_no_pow.header().height;

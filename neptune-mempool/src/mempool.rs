@@ -19,6 +19,7 @@ use bytesize::ByteSize;
 use get_size2::GetSize;
 use itertools::Itertools;
 use neptune_consensus::block::Block;
+use neptune_consensus::block::validity::swbf_update::leaf::CorrectSwbfUpdate;
 use neptune_consensus::block::validity::swbf_update::leaf::CorrectSwbfUpdateWitness;
 use neptune_consensus::chaintx::link_tx::LinkTx;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
@@ -300,22 +301,112 @@ struct BlockTransactionSelection {
     remaining_num_outputs: usize,
     remaining_num_announcements: usize,
     selected_inputs: Vec<RemovalRecord>,
+    selected_outputs: Vec<AdditionRecord>,
     kernel_wo_inputs_size_acc: usize,
     full_kernel_size_acc: usize,
     transactions: Vec<Transaction>,
+
+    /// Whether the selection extends a block transaction whose SWBF update
+    /// tree is already proven.
+    extends_proven_tree: bool,
 }
 
 impl BlockTransactionSelection {
+    fn empty(
+        consensus_rule_set: ConsensusRuleSet,
+        network: Network,
+        max_kernel_size: usize,
+        min_fee_per_swbf_leaf: NativeCurrencyAmount,
+    ) -> Self {
+        // Inputs, outputs, and announcements reserved for the coinbase
+        // transaction that the returned transactions will be merged with.
+        const COINBASE_NUM_OUTPUTS_RESERVATION: usize = 128;
+        const COINBASE_NUM_ANNOUNCEMENTS_RESERVATION: usize = 128;
+        const COINBASE_NUM_INPUTS_RESERVATION: usize = 4;
+
+        Self {
+            consensus_rule_set,
+            max_kernel_size,
+            min_swbf_padded_rows: consensus_rule_set.min_swbf_padded_rows(network),
+            // Before the predecessor claim, a block has no SWBF tree to pay for.
+            min_fee_per_swbf_leaf: if consensus_rule_set.requires_predecessor_claim() {
+                min_fee_per_swbf_leaf
+            } else {
+                NativeCurrencyAmount::zero()
+            },
+            remaining_num_inputs: consensus_rule_set
+                .max_num_inputs()
+                .saturating_sub(COINBASE_NUM_INPUTS_RESERVATION),
+            remaining_num_outputs: consensus_rule_set
+                .max_num_outputs()
+                .saturating_sub(COINBASE_NUM_OUTPUTS_RESERVATION),
+            remaining_num_announcements: consensus_rule_set
+                .max_num_announcements()
+                .saturating_sub(COINBASE_NUM_ANNOUNCEMENTS_RESERVATION),
+            selected_inputs: vec![],
+            selected_outputs: vec![],
+            kernel_wo_inputs_size_acc: 0,
+            full_kernel_size_acc: 0,
+            transactions: vec![],
+            extends_proven_tree: false,
+        }
+    }
+
+    /// The selection that starts from a block transaction composed for an
+    /// earlier proposal: its inputs and outputs count as selected, and its
+    /// SWBF update tree is proven.
+    fn extending(
+        block_transaction: &TransactionKernel,
+        consensus_rule_set: ConsensusRuleSet,
+        network: Network,
+        max_kernel_size: usize,
+        min_fee_per_swbf_leaf: NativeCurrencyAmount,
+    ) -> Self {
+        let mut selection = Self::empty(
+            consensus_rule_set,
+            network,
+            max_kernel_size,
+            min_fee_per_swbf_leaf,
+        );
+        let inputs = RemovalRecordList::try_unpack(
+            block_transaction.inputs.clone(),
+            consensus_rule_set.allow_big_chunks(),
+        )
+        .expect("a block transaction's inputs unpack");
+        let full_kernel_size = block_transaction.encode().len();
+        selection.kernel_wo_inputs_size_acc =
+            full_kernel_size - block_transaction.inputs.encode().len() - 1;
+        selection.full_kernel_size_acc = full_kernel_size;
+        selection.remaining_num_inputs -= inputs.len();
+        selection.remaining_num_outputs = selection
+            .remaining_num_outputs
+            .saturating_sub(block_transaction.outputs.len());
+        selection.remaining_num_announcements = selection
+            .remaining_num_announcements
+            .saturating_sub(block_transaction.announcements.len());
+        selection.selected_inputs = inputs;
+        selection.selected_outputs = block_transaction.outputs.clone();
+        selection.extends_proven_tree = true;
+        selection
+    }
+
     /// Whether the transaction pays the composer's price for every leaf its
     /// inputs add to the block's SWBF update tree. Inputs below the proving
-    /// threshold dictated by the consensus rules are free.
+    /// threshold dictated by the consensus rules are free, unless the tree
+    /// is proven already.
     fn pays_for_its_leaves(&self, kernel: &TransactionKernel) -> bool {
         let num_selected = self.selected_inputs.len();
-        let leaves_added =
+        let leaves_added = if self.extends_proven_tree {
+            kernel
+                .inputs
+                .len()
+                .div_ceil(CorrectSwbfUpdate::MAX_INPUTS_PER_LEAF)
+        } else {
             CorrectSwbfUpdateWitness::num_leaves(
                 num_selected + kernel.inputs.len(),
                 self.min_swbf_padded_rows,
-            ) - CorrectSwbfUpdateWitness::num_leaves(num_selected, self.min_swbf_padded_rows);
+            ) - CorrectSwbfUpdateWitness::num_leaves(num_selected, self.min_swbf_padded_rows)
+        };
         let Ok(leaves_added) = u32::try_from(leaves_added) else {
             return false;
         };
@@ -324,12 +415,17 @@ impl BlockTransactionSelection {
             .is_some_and(|price| kernel.fee >= price)
     }
 
+    /// Whether the transaction spends an input, or makes an output, that a
+    /// selected transaction does.
     fn conflicts_with(&self, kernel: &TransactionKernel) -> bool {
         kernel.inputs.iter().any(|input| {
             self.selected_inputs
                 .iter()
                 .any(|selected| selected.absolute_indices == input.absolute_indices)
-        })
+        }) || kernel
+            .outputs
+            .iter()
+            .any(|output| self.selected_outputs.contains(output))
     }
 
     /// Include the transaction unless it does not fit in the block's limits.
@@ -382,6 +478,7 @@ impl BlockTransactionSelection {
         }
 
         self.selected_inputs.extend_from_slice(&kernel.inputs);
+        self.selected_outputs.extend_from_slice(&kernel.outputs);
         self.full_kernel_size_acc += full_kernel_size;
         self.kernel_wo_inputs_size_acc += kernel_wo_inputs_size;
         self.remaining_num_inputs -= kernel.inputs.len();
@@ -1706,36 +1803,44 @@ impl Mempool {
         max_num_txs: Option<usize>,
         min_fee_per_swbf_leaf: NativeCurrencyAmount,
     ) -> Vec<Transaction> {
-        // Numbers of outputs and announcements reserved for the coinbase
-        // transaction that the returned transactions will be merged with. No
-        // reservation is needed for inputs since the coinbase transaction has
-        // none.
-        const COINBASE_NUM_OUTPUTS_RESERVATION: usize = 128;
-        const COINBASE_NUM_ANNOUNCEMENTS_RESERVATION: usize = 128;
-
-        let mut selection = BlockTransactionSelection {
+        let selection = BlockTransactionSelection::empty(
             consensus_rule_set,
+            network,
             max_kernel_size,
-            min_swbf_padded_rows: consensus_rule_set.min_swbf_padded_rows(network),
-            // Before the predecessor claim, a block has no SWBF tree to pay for.
-            min_fee_per_swbf_leaf: if consensus_rule_set.requires_predecessor_claim() {
-                min_fee_per_swbf_leaf
-            } else {
-                NativeCurrencyAmount::zero()
-            },
-            remaining_num_inputs: consensus_rule_set.max_num_inputs(),
-            remaining_num_outputs: consensus_rule_set
-                .max_num_outputs()
-                .saturating_sub(COINBASE_NUM_OUTPUTS_RESERVATION),
-            remaining_num_announcements: consensus_rule_set
-                .max_num_announcements()
-                .saturating_sub(COINBASE_NUM_ANNOUNCEMENTS_RESERVATION),
-            selected_inputs: vec![],
-            kernel_wo_inputs_size_acc: 0,
-            full_kernel_size_acc: 0,
-            transactions: vec![],
-        };
+            min_fee_per_swbf_leaf,
+        );
+        self.select_for_block(selection, max_num_txs)
+    }
 
+    /// The transactions that extend a block transaction composed for an
+    /// earlier proposal, selected as [`Self::get_transactions_for_block_composition`]
+    /// selects, except that transactions the block transaction contains are
+    /// skipped and that every input added needs a new leaf of the proven
+    /// SWBF update tree.
+    pub fn get_transactions_extending_block_transaction(
+        &self,
+        block_transaction: &TransactionKernel,
+        consensus_rule_set: ConsensusRuleSet,
+        network: Network,
+        max_kernel_size: usize,
+        max_num_txs: Option<usize>,
+        min_fee_per_swbf_leaf: NativeCurrencyAmount,
+    ) -> Vec<Transaction> {
+        let selection = BlockTransactionSelection::extending(
+            block_transaction,
+            consensus_rule_set,
+            network,
+            max_kernel_size,
+            min_fee_per_swbf_leaf,
+        );
+        self.select_for_block(selection, max_num_txs)
+    }
+
+    fn select_for_block(
+        &self,
+        mut selection: BlockTransactionSelection,
+        max_num_txs: Option<usize>,
+    ) -> Vec<Transaction> {
         let now = self.now();
 
         for (txkid, _fee_density) in self.fee_density_iter() {
@@ -1759,6 +1864,7 @@ impl Mempool {
             if transaction_ptr
                 .kernel
                 .retires_before(now + MEMPOOL_RETIREMENT_MARGIN)
+                || selection.conflicts_with(&transaction_ptr.kernel)
             {
                 continue;
             }
@@ -1768,8 +1874,9 @@ impl Mempool {
                 continue;
             }
 
-            // If the transaction does not pay enough for the SWBF proving work,
-            // check if any of the transactions in the merge cache do.
+            // The transaction does not pay for the leaves it adds to the
+            // block's SWBF tree. Compose the transactions it was merged from
+            // that do pay, as far as the merge cache still holds them.
             let parts = self
                 .merge_input_cache
                 .parts_of(&transaction_ptr.kernel)
@@ -3113,6 +3220,90 @@ mod tests {
             selected_at_leaf_price(&mempool, NativeCurrencyAmount::zero())
         );
         assert_eq!(vec![a.txid()], selected_at_leaf_price(&mempool, leaf_price));
+    }
+
+    #[test]
+    fn extending_a_block_transaction_skips_what_it_contains_and_charges_every_input() {
+        let (removal_records, mutator_set_hash) = consistent_removal_records(3);
+        let leaf_price = NativeCurrencyAmount::coins_from_str("0.1").unwrap();
+        let [merged, outputs_only, paying, underpaying] =
+            make_plenty_mock_transaction_supported_by_invalid_single_proofs(4)
+                .try_into()
+                .unwrap();
+
+        // The block transaction contains the merged transaction and the one
+        // with outputs only, as a block transaction's inputs are packed.
+        let merged = synced_transaction(
+            &merged,
+            &removal_records[..1],
+            NativeCurrencyAmount::coins(1),
+            mutator_set_hash,
+        );
+        let outputs_only = synced_transaction(
+            &outputs_only,
+            &[],
+            NativeCurrencyAmount::coins(1),
+            mutator_set_hash,
+        );
+        let block_transaction = TransactionKernelModifier::default()
+            .inputs(RemovalRecordList::pack(merged.kernel.inputs.clone(), true))
+            .outputs(
+                [
+                    merged.kernel.outputs.clone(),
+                    outputs_only.kernel.outputs.clone(),
+                ]
+                .concat(),
+            )
+            .merge_bit(true)
+            .modify(merged.kernel.clone());
+
+        // The newcomers each add one input, a new leaf each, however few
+        // inputs the block transaction has.
+        let paying = synced_transaction(
+            &paying,
+            &removal_records[1..2],
+            leaf_price,
+            mutator_set_hash,
+        );
+        let underpaying = synced_transaction(
+            &underpaying,
+            &removal_records[2..],
+            leaf_price
+                .checked_sub(&NativeCurrencyAmount::from_nau(1))
+                .unwrap(),
+            mutator_set_hash,
+        );
+        let mut mempool = Mempool::new(
+            ByteSize::gb(1),
+            TxProvingCapability::SingleProof,
+            &Block::genesis(Network::Testnet(42)),
+        );
+        mempool.tip_mutator_set_hash = mutator_set_hash;
+        for tx in [&merged, &outputs_only, &paying, &underpaying] {
+            mempool.insert(tx.clone(), UpgradePriority::Irrelevant);
+        }
+        assert_eq!(4, mempool.len());
+
+        let extending = |leaf_price| {
+            mempool
+                .get_transactions_extending_block_transaction(
+                    &block_transaction,
+                    ConsensusRuleSet::SoftforkEpsilon,
+                    Network::Testnet(42),
+                    usize::MAX,
+                    None,
+                    leaf_price,
+                )
+                .into_iter()
+                .map(|tx| tx.txid())
+                .collect_vec()
+        };
+        assert_eq!(vec![paying.txid()], extending(leaf_price));
+        assert_eq!(
+            vec![paying.txid(), underpaying.txid()],
+            extending(NativeCurrencyAmount::zero())
+        );
+        assert_eq!(4, selected_at_leaf_price(&mempool, leaf_price).len());
     }
 
     #[test]

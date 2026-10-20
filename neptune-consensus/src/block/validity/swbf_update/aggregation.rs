@@ -242,13 +242,51 @@ impl SwbfUpdateAggregation {
     where
         Fut: Future<Output = Result<Proof, E>>,
     {
-        struct Node {
-            claim: Claim,
-            proof: Proof,
-            index_set_digests: Vec<Digest>,
-        }
-
         assert!(!leaves.is_empty(), "a tree needs a leaf");
+        let root = self.subtree(leaves, &prove).await?;
+        Ok((root.claim, root.proof))
+    }
+
+    /// The root claim and proof of a proven tree extended by these leaves:
+    /// the segments of the inputs a block gained, built on the mutator set
+    /// the root outputs and numbered from the leaf after the root's last.
+    /// The leaves make a tree of their own, which one aggregation joins to
+    /// the root as its right child. Without leaves the root is returned as
+    /// it is.
+    pub async fn extend<E, Fut>(
+        &self,
+        root: (Claim, Proof),
+        root_inputs: &[RemovalRecord],
+        leaves: &[CorrectSwbfUpdateWitness],
+        prove: impl Fn(Claim, Program, NonDeterminism) -> Fut,
+    ) -> Result<(Claim, Proof), E>
+    where
+        Fut: Future<Output = Result<Proof, E>>,
+    {
+        let (claim, proof) = root;
+        let root = Node {
+            claim,
+            proof,
+            index_set_digests: IndexSetDigests::digests(root_inputs),
+        };
+        let joined = if leaves.is_empty() {
+            root
+        } else {
+            info!("Extending the SWBF update tree by {} leaves", leaves.len());
+            let right = self.subtree(leaves, &prove).await?;
+            self.aggregate(root, right, &prove).await?
+        };
+        Ok((joined.claim, joined.proof))
+    }
+
+    async fn subtree<E, Fut>(
+        &self,
+        leaves: &[CorrectSwbfUpdateWitness],
+        prove: &impl Fn(Claim, Program, NonDeterminism) -> Fut,
+    ) -> Result<Node, E>
+    where
+        Fut: Future<Output = Result<Proof, E>>,
+    {
         let mut level = Vec::with_capacity(leaves.len());
         for (position, leaf) in leaves.iter().enumerate() {
             info!(
@@ -271,8 +309,6 @@ impl SwbfUpdateAggregation {
             });
         }
 
-        let num_aggregations = leaves.len() - 1;
-        let mut aggregation = 0;
         while level.len() > 1 {
             let mut next = Vec::with_capacity(level.len().div_ceil(2));
             let mut nodes = level.into_iter();
@@ -281,35 +317,52 @@ impl SwbfUpdateAggregation {
                     next.push(left);
                     break;
                 };
-                let index_set_digests = [left.index_set_digests, right.index_set_digests].concat();
-                let witness = SwbfUpdateAggregationWitness::new(
-                    left.claim,
-                    left.proof,
-                    right.claim,
-                    right.proof,
-                    index_set_digests.clone(),
-                );
-                let claim = witness.claim_for(self);
-                aggregation += 1;
-                info!("Proving SWBF update aggregation {aggregation} of {num_aggregations}");
-                let proof = prove(
-                    claim.clone(),
-                    self.program(),
-                    witness.nondeterminism_for(self),
-                )
-                .await?;
-                next.push(Node {
-                    claim,
-                    proof,
-                    index_set_digests,
-                });
+                next.push(self.aggregate(left, right, prove).await?);
             }
             level = next;
         }
 
-        let root = level.pop().expect("a level has a node");
-        Ok((root.claim, root.proof))
+        Ok(level.pop().expect("a level has a node"))
     }
+
+    async fn aggregate<E, Fut>(
+        &self,
+        left: Node,
+        right: Node,
+        prove: &impl Fn(Claim, Program, NonDeterminism) -> Fut,
+    ) -> Result<Node, E>
+    where
+        Fut: Future<Output = Result<Proof, E>>,
+    {
+        let index_set_digests = [left.index_set_digests, right.index_set_digests].concat();
+        let witness = SwbfUpdateAggregationWitness::new(
+            left.claim,
+            left.proof,
+            right.claim,
+            right.proof,
+            index_set_digests.clone(),
+        );
+        let claim = witness.claim_for(self);
+        info!("Proving an SWBF update aggregation");
+        let proof = prove(
+            claim.clone(),
+            self.program(),
+            witness.nondeterminism_for(self),
+        )
+        .await?;
+        Ok(Node {
+            claim,
+            proof,
+            index_set_digests,
+        })
+    }
+}
+
+/// A proven node of an SWBF update tree.
+struct Node {
+    claim: Claim,
+    proof: Proof,
+    index_set_digests: Vec<Digest>,
 }
 
 impl TritonProgram for SwbfUpdateAggregation {
@@ -674,6 +727,7 @@ pub(in crate::block::validity) mod tests {
 
     use futures::executor::block_on;
     use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+    use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
     use neptune_mutator_set::removal_record::RemovalRecord;
     use neptune_primitives::network::Network;
     use tasm_lib::triton_vm::proof_item::ProofItem;
@@ -947,6 +1001,35 @@ pub(in crate::block::validity) mod tests {
                 parsed.mutator_set_hash
             );
         }
+    }
+
+    #[test]
+    fn extending_a_tree_by_the_gained_inputs_matches_the_tree_over_all() {
+        let leaves = chained_witnesses(&[2, 1, 3], 9);
+        let (whole, _) = block_on(skipping().tree(&leaves, run_and_placeholder)).unwrap();
+        let root = block_on(skipping().tree(&leaves[..2], run_and_placeholder)).unwrap();
+
+        // The inputs of the leaves the root covers, and the ones the block
+        // gained since, packed as a transaction packs them.
+        let root_inputs = [leaves[0].unpacked_records(), leaves[1].unpacked_records()].concat();
+        let gained = RemovalRecordList::pack(leaves[2].unpacked_records(), true);
+        let appended =
+            CorrectSwbfUpdateWitness::appended_leaves(&gained, leaves[2].mutator_set(), 3);
+        assert_eq!(1, appended.len());
+        assert_eq!(leaves[2].versioned_claim(), appended[0].versioned_claim());
+
+        let (extended, _) =
+            block_on(skipping().extend(root.clone(), &root_inputs, &appended, run_and_placeholder))
+                .unwrap();
+        assert_eq!(whole, extended);
+
+        let (unchanged, _) =
+            block_on(skipping().extend(root.clone(), &root_inputs, &[], run_and_placeholder))
+                .unwrap();
+        assert_eq!(root.0, unchanged);
+        assert!(
+            CorrectSwbfUpdateWitness::appended_leaves(&[], leaves[2].mutator_set(), 3).is_empty()
+        );
     }
 
     #[test]

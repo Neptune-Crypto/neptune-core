@@ -86,6 +86,28 @@ impl MergeWitness {
         shuffle_seed: [u8; 32],
         consensus_rule_set: ConsensusRuleSet,
     ) -> Self {
+        Self::composition_witness(left, right, shuffle_seed, consensus_rule_set, true)
+    }
+
+    /// Like [`Self::for_composition`], but with the left inputs first and
+    /// the right inputs after them, so that an SWBF update tree over the
+    /// left inputs extends by the right ones.
+    pub fn for_composition_appending(
+        left: BlockOrRegularTransaction,
+        right: Transaction,
+        shuffle_seed: [u8; 32],
+        consensus_rule_set: ConsensusRuleSet,
+    ) -> Self {
+        Self::composition_witness(left, right, shuffle_seed, consensus_rule_set, false)
+    }
+
+    fn composition_witness(
+        left: BlockOrRegularTransaction,
+        right: Transaction,
+        shuffle_seed: [u8; 32],
+        consensus_rule_set: ConsensusRuleSet,
+        shuffle_inputs: bool,
+    ) -> Self {
         let left_kernel = left.kernel();
         let right_kernel = right.kernel;
 
@@ -106,6 +128,7 @@ impl MergeWitness {
             &right_kernel,
             shuffle_seed,
             consensus_rule_set,
+            shuffle_inputs,
         );
 
         Self {
@@ -140,7 +163,7 @@ impl MergeWitness {
             "Cannot use this function for coinbase transactions"
         );
 
-        let new_kernel = Self::new_kernel(&left_kernel, &right_kernel, shuffle_seed);
+        let new_kernel = Self::new_kernel(&left_kernel, &right_kernel, shuffle_seed, true);
 
         Self {
             left_kernel,
@@ -202,6 +225,7 @@ impl MergeWitness {
         right_kernel: &TransactionKernel,
         shuffle_seed: [u8; 32],
         consensus_rule_set: ConsensusRuleSet,
+        shuffle_inputs: bool,
     ) -> BlockTransactionKernel {
         let lhs = match left_kernel {
             BlockOrRegularTransactionKernel::Regular(regular) => regular.clone(),
@@ -220,7 +244,7 @@ impl MergeWitness {
             }
         };
 
-        let mut new_kernel = Self::new_kernel(&lhs, right_kernel, shuffle_seed);
+        let mut new_kernel = Self::new_kernel(&lhs, right_kernel, shuffle_seed, shuffle_inputs);
 
         let inputs = RemovalRecordList::pack(
             new_kernel.inputs.clone(),
@@ -241,6 +265,7 @@ impl MergeWitness {
         left_kernel: &TransactionKernel,
         right_kernel: &TransactionKernel,
         shuffle_seed: [u8; 32],
+        shuffle_inputs: bool,
     ) -> TransactionKernel {
         assert_eq!(
             left_kernel.mutator_set_hash, right_kernel.mutator_set_hash,
@@ -259,7 +284,9 @@ impl MergeWitness {
         let old_coinbase = left_kernel.coinbase;
 
         let mut inputs = [left_kernel.inputs.clone(), right_kernel.inputs.clone()].concat();
-        inputs.shuffle(&mut rng);
+        if shuffle_inputs {
+            inputs.shuffle(&mut rng);
+        }
         let mut outputs = [left_kernel.outputs.clone(), right_kernel.outputs.clone()].concat();
         outputs.shuffle(&mut rng);
         let mut announcements = [
@@ -1289,6 +1316,72 @@ pub(crate) mod tests {
                 TransactionKernel::MAST_HEIGHT as u32,
             );
         }
+    }
+
+    #[test]
+    fn appending_keeps_the_left_inputs_first() {
+        let mut test_runner = TestRunner::deterministic();
+        let [left, right] =
+            PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets([(3, 2, 1), (2, 1, 0)])
+                .new_tree(&mut test_runner)
+                .unwrap()
+                .current();
+        let shuffle_seed = arb::<[u8; 32]>()
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let consensus_rule_set = ConsensusRuleSet::default();
+        let index_sets = |inputs: &[RemovalRecord]| {
+            inputs
+                .iter()
+                .map(|input| input.absolute_indices.to_array())
+                .collect_vec()
+        };
+
+        let appended = MergeWitness::new_block_transaction_kernel(
+            &BlockOrRegularTransactionKernel::Regular(left.kernel.clone()),
+            &right.kernel,
+            shuffle_seed,
+            consensus_rule_set,
+            false,
+        );
+        let appended_inputs = RemovalRecordList::try_unpack(
+            TransactionKernel::from(appended).inputs.clone(),
+            consensus_rule_set.allow_big_chunks(),
+        )
+        .unwrap();
+        assert_eq!(
+            [
+                index_sets(&left.kernel.inputs),
+                index_sets(&right.kernel.inputs)
+            ]
+            .concat(),
+            index_sets(&appended_inputs)
+        );
+
+        let shuffled = MergeWitness::new_block_transaction_kernel(
+            &BlockOrRegularTransactionKernel::Regular(left.kernel.clone()),
+            &right.kernel,
+            shuffle_seed,
+            consensus_rule_set,
+            true,
+        );
+        let shuffled_inputs = RemovalRecordList::try_unpack(
+            TransactionKernel::from(shuffled).inputs.clone(),
+            consensus_rule_set.allow_big_chunks(),
+        )
+        .unwrap();
+        assert_ne!(index_sets(&appended_inputs), index_sets(&shuffled_inputs));
+        assert_eq!(
+            index_sets(&appended_inputs)
+                .into_iter()
+                .sorted()
+                .collect_vec(),
+            index_sets(&shuffled_inputs)
+                .into_iter()
+                .sorted()
+                .collect_vec()
+        );
     }
 
     pub(crate) async fn deterministic_merge_witness(
