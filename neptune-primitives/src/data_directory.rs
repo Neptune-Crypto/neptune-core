@@ -44,9 +44,9 @@ impl DataDirectory {
     ///
     /// The default varies by operating system, and includes the network, e.g.
     ///
-    /// - Linux:   /home/alice/.config/neptune/core/main
-    /// - Windows: C:\Users\Alice\AppData\Roaming\neptune\core\main
-    /// - macOS:   /Users/Alice/Library/Application Support/neptune/main
+    /// - Linux:   /home/alice/.local/share/neptune/main
+    /// - Windows: C:\Users\Alice\AppData\Roaming\neptune\neptune\data\main
+    /// - macOS:   /Users/Alice/Library/Application Support/org.neptune.neptune/main
     pub fn get(root_dir: Option<PathBuf>, network: Network) -> Result<Self> {
         let project_dirs = root_dir
             .map(ProjectDirs::from_path)

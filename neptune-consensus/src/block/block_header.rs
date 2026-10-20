@@ -52,7 +52,9 @@ pub struct BlockHeader {
     /// Total proof-of-work accumulated by this chain
     pub cumulative_proof_of_work: ProofOfWork,
 
-    /// The difficulty for the *next* block. Unit: expected # hashes
+    /// The difficulty of this block, from which its proof-of-work target is
+    /// derived. (Before HardforkBeta, it set the target of the *next* block.)
+    /// Unit: expected # hashes
     pub difficulty: Difficulty,
 
     /// Information for the guesser to take custody of the guesser UTXOs.

@@ -243,8 +243,8 @@ impl ConsensusRuleSet {
     /// If true, then the consensus rule set disallows transactions that carry
     /// announcements of the type
     /// `[[RETIREMENT_FLAGS; 2], retirement_timestamp]` from being
-    /// mined after `retirement_timestamp`. Enforced through the transaction
-    /// timestamp: if the tranasction timestamp *exceeds* the
+    /// mined after `retirement_timestamp`. Enforced through the block
+    /// timestamp: if the block timestamp *exceeds* the
     /// `retirement_timestamp`, the block containing the transaction is
     /// invalid.
     pub fn enforce_transaction_retirement(&self) -> bool {

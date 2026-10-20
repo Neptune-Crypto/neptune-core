@@ -238,8 +238,8 @@ impl<'a> TransactionProofBuilder<'a> {
     /// ## External Process
     ///
     /// Proofs are generated in the Triton VM. The proof generation occurs in a
-    /// separate executable, `triton-vm-prover`, which is spawned by the
-    /// job-queue for each proving job.  Only one `triton-vm-prover` process
+    /// separate executable, `neptune-prover`, which is spawned by the
+    /// job-queue for each proving job.  Only one `neptune-prover` process
     /// should be executing at a time for a given neptune-core instance.
     ///
     /// If the external process is killed for any reason, the proof-generation job will fail
