@@ -105,6 +105,7 @@ impl BlockAppendix {
                 claims.push(KnowsMutatorSet::claim(
                     parent_digest,
                     parent_mutator_set,
+                    ConsensusRuleSet::knows_mutator_set_activation_height(network),
                     consensus_rule_set,
                 ));
             }
@@ -147,6 +148,7 @@ impl BlockAppendix {
                 claims.push(KnowsMutatorSet::claim(
                     parent.hash(),
                     &mutator_set,
+                    ConsensusRuleSet::knows_mutator_set_activation_height(network),
                     consensus_rule_set,
                 ));
             }

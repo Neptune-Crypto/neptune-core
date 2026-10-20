@@ -24,6 +24,7 @@ use neptune_consensus::block::mutator_set_update::MutatorSetCatchUp;
 use neptune_consensus::block::validity::knows_mutator_set::KnowsMutatorSetWitness;
 use neptune_consensus::block::validity::knows_mutator_set::sampled_leafs;
 use neptune_consensus::block::validity::swbfi_reveal::guesser_node_index;
+use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_consensus::proof_abstractions::verifier::CHECKPOINT_MAIN;
 use neptune_consensus::proof_abstractions::verifier::CHECKPOINT_TESTNET_0;
 use neptune_consensus::proof_abstractions::verifier::cache_true_claims;
@@ -2538,20 +2539,18 @@ impl ArchivalState {
 
     /// The composer's witness to knowing the archival mutator set.
     ///
-    /// The mutator set must be sync to the expected block.
+    /// The mutator set must be synced to the expected block.
     ///
     /// # Panics
     /// - If the mutator set is synced to another block than the one called
     ///   for.
-    pub async fn knows_mutator_set_witness(
-        &self,
-        prev_block_digest: Digest,
-    ) -> KnowsMutatorSetWitness {
-        self.assert_synced_to(prev_block_digest);
+    pub async fn knows_mutator_set_witness(&self, current_tip: &Block) -> KnowsMutatorSetWitness {
+        let tip_hash = current_tip.hash();
+        self.assert_synced_to(tip_hash);
         let ams = self.archival_mutator_set.ams();
         let msa = ams.accumulator().await;
         let (chunk_indices, aocl_index) = sampled_leafs(
-            prev_block_digest,
+            tip_hash,
             msa.swbf_inactive.num_leafs(),
             msa.aocl.num_leafs(),
         );
@@ -2576,8 +2575,9 @@ impl ArchivalState {
             None => (Digest::default(), vec![]),
         };
         KnowsMutatorSetWitness::new(
-            prev_block_digest,
+            &current_tip,
             &msa,
+            ConsensusRuleSet::knows_mutator_set_activation_height(self.network),
             chunks,
             chunk_paths,
             aocl_leaf,
@@ -2767,10 +2767,8 @@ mod tests {
         ArchivalState::new(data_dir, Block::genesis(network), utxo_index, network).await
     }
 
-    /// The witness for block 1, on the archival state synced to genesis,
-    /// then for block 2, synced to block 1.
     #[apply(shared_tokio_runtime)]
-    async fn knows_mutator_set_witness_satisfies_the_program() {
+    async fn knows_mutator_set_witness_satisfies_its_program() {
         let network = Network::Main;
         let mut archival_state = make_test_archival_state(network, false).await;
         let genesis = Block::genesis(network);
@@ -2788,12 +2786,14 @@ mod tests {
 
         for (parent, child) in [(genesis, &block1), (block1.clone(), &block2)] {
             let ams = archival_state.archival_mutator_set.ams();
-            let witness = archival_state
-                .knows_mutator_set_witness(parent.hash())
-                .await;
+            let witness = archival_state.knows_mutator_set_witness(&parent).await;
             let rule_set = ConsensusRuleSet::infer_from(network, child.header().height);
-            let expected =
-                KnowsMutatorSet::claim(parent.hash(), &ams.accumulator().await, rule_set);
+            let expected = KnowsMutatorSet::claim(
+                parent.hash(),
+                &ams.accumulator().await,
+                ConsensusRuleSet::knows_mutator_set_activation_height(network),
+                rule_set,
+            );
             let claim = witness.claim();
             assert_eq!(expected.program_digest, claim.program_digest);
             assert_eq!(expected.input, claim.input);
@@ -2808,8 +2808,6 @@ mod tests {
         }
     }
 
-    /// The reveal from the archival mutator set after genesis passes the
-    /// rule for a block 1 header.
     #[apply(shared_tokio_runtime)]
     async fn guesser_swbfi_reveal_passes_the_rule() {
         let network = Network::Main;

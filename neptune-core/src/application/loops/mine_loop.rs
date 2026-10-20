@@ -104,7 +104,7 @@ pub(crate) async fn compose_block_helper(
         let knows_ams = state
             .chain
             .archival_state()
-            .knows_mutator_set_witness(latest_block.hash())
+            .knows_mutator_set_witness(&latest_block)
             .await;
         let prev_block_transaction_mutator_set = state
             .chain

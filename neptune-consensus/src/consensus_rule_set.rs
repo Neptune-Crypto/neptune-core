@@ -207,7 +207,13 @@ impl ConsensusRuleSet {
         }
     }
 
-    /// The first block that must carry the succinctness claims
+    /// The first height at which a block must contain the proof that the
+    /// archival mutator set is known.
+    pub fn knows_mutator_set_activation_height(network: Network) -> BlockHeight {
+        Self::epsilon_activation_block_height(network)
+    }
+
+    /// The first block that must contain the succinctness claims
     pub fn epsilon_activation_block_height(network: Network) -> BlockHeight {
         match network {
             Network::Main => BLOCK_HEIGHT_SOFTFORK_EPSILON_MAIN_NET,
