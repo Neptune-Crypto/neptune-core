@@ -13,7 +13,23 @@ Composing involves making a selection of transactions, merging them, and produci
 
 ## Guessing
 
-The objective in the guessing step is to find *proof-of-work data*, (called `Pow` in the source code), which consists of:
+The objective of the guessing step is to find a nonce such that the block's hash is less than or equal to the target,
+which is derived from the difficulty: higher difficulty means a lower target. Going from a new nonce to a new block
+hash can be done with a handful of Tip5 permutations and less than a kilobyte of RAM. Verifying the proof-of-work
+requires hashing the block and comparing the resulting digest to the target.
+
+For backwards compatibility the proof-of-work data keeps its memory-hard layout: a nonce, a root and two authentication
+paths. Only the lustration status and the block version, both stored in the first authentication path, are
+constrained. Everything else is free and can serve as the nonce. Miners should vary elements that come late in the
+encoding, so that the hash of the fixed prefix can be computed once and reused.
+
+### Memory-Hard Guessing
+
+Up until Hard Fork Beta, guessing was *memory-hard*. Hard Fork Beta canceled memory-hard guessing in favor of the simple
+mechanism described above. The following text describes memory-hard guessing as a historical note; it is no longer
+relevant.
+
+The objective in the memory-hard guessing step is to find *proof-of-work data*, (called `Pow` in the source code), which consists of:
  - one nonce, which is a `Digest`;
  - one root, which is a `Digest`;
  - two authentication paths, which are both lists of `Digest`s of length `M`.
@@ -22,11 +38,11 @@ Here, `M = 29` is the memory parameter which is chosen so as to make guessing ex
 
 Guessing consists of two phases, a preprocessing phase and an online phase.
 
-### Preprocessing
+#### Preprocessing
 
 During the preprocessing phase, a large buffer of around 40 GB is prepared. In the source code it is the `GuesserBuffer`. The *root* field of the proof-of-work data lives in this buffer.
 
-### Online Guessing
+#### Online Guessing
 
 Making one guess involves:
  - Sampling a nonce;
@@ -37,7 +53,7 @@ Making one guess involves:
 
 The [Tip5](https://eprint.iacr.org/2023/107) hash function is used internally.
 
-### Validating
+#### Validating
 
 In addition to verifying the inequality between the block hash and the target, validating proof-of-work also involves verifying the authentication paths embedded in the proof-of-work data. Phrased differently, the guesser *must* produce a valid root and authentication paths in order for his block to be accepted.
 
