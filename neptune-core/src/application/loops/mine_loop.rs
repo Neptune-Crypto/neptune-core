@@ -44,7 +44,6 @@ use rayon::iter::ParallelIterator;
 use rayon::ThreadPoolBuilder;
 use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::twenty_first::tip5::digest::Digest;
-use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -119,46 +118,14 @@ pub(crate) async fn compose_block_helper(
     // created transaction.
     let block_timestamp = transaction.kernel().timestamp;
 
-    // The composer's witness, from the archival state while it is still
-    // synced to the tip.
-    let network = global_state_lock.cli().network;
-    let next_height = latest_block.header().height.next();
-    let consensus_rules = ConsensusRuleSet::infer_from(network, next_height);
-    let composer_witness = if consensus_rules.requires_predecessor_claim() {
-        let state = global_state_lock.lock_guard().await;
-        if state.chain.tip().hash() != latest_block.hash() {
-            bail!("tip changed while composing");
-        }
-        let knows_ams = state
-            .chain
-            .archival_state()
-            .knows_mutator_set_witness(&latest_block)
-            .await;
-        let prev_block_transaction_mutator_set = state
-            .chain
-            .mutator_set_after_by_block_hash(latest_block.header().prev_block_digest)
-            .await
-            .unwrap_or_default();
-
-        // Internal nodes of SWBFI MMR after parent removals will agree with
-        // that of tip, which includes both parent removals, and its additions.
-        let prev_block_swbfi_peaks_after_removals = state
-            .chain
-            .archival_state()
-            .archival_mutator_set
-            .ams()
-            .swbf_inactive
-            .peaks_at(prev_block_transaction_mutator_set.swbf_inactive.num_leafs())
-            .await;
-        Some(ComposerWitness {
-            knows_ams,
-            prev_block_transaction_mutator_set,
-            prev_block_swbfi_peaks_after_removals,
-            previous,
-        })
-    } else {
-        None
-    };
+    let mut composer_witness = global_state_lock
+        .lock_guard()
+        .await
+        .composer_witness(&latest_block)
+        .await?;
+    if let Some(witness) = &mut composer_witness {
+        witness.previous = previous;
+    }
 
     let predecessor = latest_block.hash();
     let (block, proofs) = Block::compose(
