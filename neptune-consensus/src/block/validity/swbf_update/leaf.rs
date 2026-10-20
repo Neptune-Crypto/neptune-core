@@ -186,7 +186,9 @@ impl CorrectSwbfUpdateWitness {
             .collect()
     }
 
-    fn num_leaves(num_inputs: usize, min_padded_rows: u64) -> usize {
+    /// How many leaves this number of inputs produce, at this specified proving
+    /// complexity.
+    pub fn num_leaves(num_inputs: usize, min_padded_rows: u64) -> usize {
         let for_floor = min_padded_rows.div_ceil(1 << CorrectSwbfUpdate::LEAF_LOG2_PADDED_HEIGHT);
         let for_inputs = num_inputs.div_ceil(CorrectSwbfUpdate::MAX_INPUTS_PER_LEAF);
         usize::try_from(for_floor)

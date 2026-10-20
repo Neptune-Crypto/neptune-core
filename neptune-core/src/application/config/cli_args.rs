@@ -343,6 +343,14 @@ pub struct Args {
     #[clap(long, default_value = "1")]
     pub(crate) max_num_compose_mergers: NonZero<usize>,
 
+    /// When composing, the minimum fee a transaction must pay for each leaf
+    /// proof its inputs add to the block's SWBF update tree. Inputs below the
+    /// proving complexity threshold dictated by the consensus rules are
+    /// included at a marginal cost of zero, since that proving work has to be
+    /// done anyway.
+    #[clap(long, default_value = "0.2", value_parser = NativeCurrencyAmount::coins_from_str)]
+    pub(crate) min_fee_per_swbf_leaf: NativeCurrencyAmount,
+
     /// By default, a composer will share block proposals with all peers. If
     /// this flag is set, the composer will *not* share their block proposals.
     #[clap(long)]
@@ -1255,6 +1263,10 @@ mod tests {
             default_args.peer_listen_addr
         );
         assert_eq!(1, default_args.max_num_compose_mergers.get());
+        assert_eq!(
+            NativeCurrencyAmount::coins_from_str("0.2").unwrap(),
+            default_args.min_fee_per_swbf_leaf
+        );
         assert_eq!(TxUpgradeFilter::match_all(), default_args.tx_upgrade_filter);
     }
 

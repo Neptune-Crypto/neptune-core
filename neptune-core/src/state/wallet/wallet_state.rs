@@ -5474,8 +5474,13 @@ pub(crate) mod tests {
                 .lock_guard()
                 .await
                 .mempool
-                .get_transactions_for_block_composition(consensus_rule_set1, 1_000_000_000, None)
-                [0]
+                .get_transactions_for_block_composition(
+                    consensus_rule_set1,
+                    network,
+                    1_000_000_000,
+                    None,
+                    NativeCurrencyAmount::zero(),
+                )[0]
             .clone();
 
             // create block ignoring that transaction. Rando has upgraded tx
@@ -5536,7 +5541,13 @@ pub(crate) mod tests {
                 .lock_guard()
                 .await
                 .mempool
-                .get_transactions_for_block_composition(consensus_rule_set1, 10_000_000, None);
+                .get_transactions_for_block_composition(
+                    consensus_rule_set1,
+                    network,
+                    10_000_000,
+                    None,
+                    NativeCurrencyAmount::zero(),
+                );
             assert_eq!(1, transactions_for_block.len());
             let upgraded_transaction = transactions_for_block[0].clone();
             let new_num_announcements = upgraded_transaction.kernel.announcements.len();

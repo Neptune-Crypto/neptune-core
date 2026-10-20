@@ -199,8 +199,10 @@ pub(crate) async fn mock_compose_block(
     let (guesser_address, _) = gs.mining_rewards_address();
     let txs = gs.mempool().get_transactions_for_block_composition(
         consensus_rule_set,
+        network,
         max_kernel_len,
         Some(gs.cli().max_num_compose_mergers.get()),
+        gs.cli().min_fee_per_swbf_leaf,
     );
     drop(gs);
 
@@ -610,6 +612,7 @@ pub(crate) async fn create_block_transaction_from(
 
     // Get most valuable transactions from mempool.
     let max_num_mergers = global_state_lock.cli().max_num_compose_mergers.get();
+    let min_fee_per_swbf_leaf = global_state_lock.cli().min_fee_per_swbf_leaf;
     let mut transactions_to_merge = match &tx_merge_origin {
         TxMergeOrigin::Mempool => global_state_lock
             .lock_guard()
@@ -617,8 +620,10 @@ pub(crate) async fn create_block_transaction_from(
             .mempool()
             .get_transactions_for_block_composition(
                 new_rules,
+                network,
                 max_kernel_len,
                 Some(max_num_mergers),
+                min_fee_per_swbf_leaf,
             ),
         #[cfg(test)]
         TxMergeOrigin::ExplicitList(transactions) => transactions.to_owned(),
@@ -759,8 +764,10 @@ pub(crate) async fn create_block_transaction_from(
             .mempool()
             .get_transactions_for_block_composition(
                 new_rules,
+                network,
                 max_kernel_len,
                 Some(max_num_mergers),
+                min_fee_per_swbf_leaf,
             );
 
         transactions_to_merge = if txs_from_mempool.is_empty() || old_rules != new_rules {
@@ -1454,8 +1461,10 @@ pub(crate) mod tests {
                 .mempool()
                 .get_transactions_for_block_composition(
                     ConsensusRuleSet::default(),
+                    network,
                     10_000_000,
-                    None
+                    None,
+                    NativeCurrencyAmount::zero()
                 )
                 .is_empty(),
             "May not have synced tx in mempool"
@@ -1496,8 +1505,10 @@ pub(crate) mod tests {
                 .mempool()
                 .get_transactions_for_block_composition(
                     ConsensusRuleSet::default(),
+                    network,
                     10_000_000,
-                    None
+                    None,
+                    NativeCurrencyAmount::zero()
                 )
                 .is_empty(),
             "Updated transaction must have been inserted into mempool"
