@@ -1655,7 +1655,7 @@ pub(crate) mod tests {
             .unwrap();
             assert!(
                 block_1_empty_mempool
-                    .is_valid(&genesis_block, now, network)
+                    .is_valid_proposal(&genesis_block, now, network)
                     .await,
                 "Block template created by miner with empty mempool must be valid"
             );
@@ -1706,7 +1706,7 @@ pub(crate) mod tests {
             .unwrap();
             assert!(
                 block_1_nonempty_mempool
-                    .is_valid(&genesis_block, now + Timestamp::seconds(2), network)
+                    .is_valid_proposal(&genesis_block, now + Timestamp::seconds(2), network)
                     .await,
                 "Block template created by miner with non-empty mempool must be valid"
             );
@@ -1748,7 +1748,9 @@ pub(crate) mod tests {
         .await
         .unwrap();
         let (block_1, _) = receiver_1.await.unwrap().unwrap();
-        let validation_result = block_1.validate(&genesis_block, mocked_now, network).await;
+        let validation_result = block_1
+            .validate_proposal(&genesis_block, mocked_now, network)
+            .await;
         assert!(validation_result.is_ok(), "{:?}", validation_result);
 
         assert!(
@@ -1770,7 +1772,11 @@ pub(crate) mod tests {
         .await
         .unwrap();
         let (block_2, _) = receiver_2.await.unwrap().unwrap();
-        assert!(block_2.is_valid(&block_1, mocked_now, network).await);
+        assert!(
+            block_2
+                .is_valid_proposal(&block_1, mocked_now, network)
+                .await
+        );
     }
 
     #[traced_test]
@@ -1798,7 +1804,7 @@ pub(crate) mod tests {
         .unwrap();
         assert!(
             first
-                .is_valid(&genesis_block, now + Timestamp::seconds(2), network)
+                .is_valid_proposal(&genesis_block, now + Timestamp::seconds(2), network)
                 .await
         );
         assert!(first.body().transaction_kernel.inputs.is_empty());
@@ -1853,7 +1859,7 @@ pub(crate) mod tests {
                 .unwrap();
         assert!(
             second
-                .is_valid(&genesis_block, now + Timestamp::seconds(2), network)
+                .is_valid_proposal(&genesis_block, now + Timestamp::seconds(2), network)
                 .await
         );
         let block_kernel = &second.body().transaction_kernel;
@@ -1957,7 +1963,7 @@ pub(crate) mod tests {
         let (block_1, _) = receiver_1.await.unwrap().unwrap();
         assert!(
             block_1
-                .is_valid(&genesis_block, block1_timestamp, network)
+                .is_valid_proposal(&genesis_block, block1_timestamp, network)
                 .await
         );
     }

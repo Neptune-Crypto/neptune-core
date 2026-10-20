@@ -861,6 +861,18 @@ impl Block {
         self.validate_as(previous_block, now, network, true).await
     }
 
+    /// Verify a block proposal and return detailed error: like
+    /// [`Self::validate`], but the guesser's reveal in the proof-of-work field
+    /// is not checked, as only the guesser should populate this value.
+    pub async fn validate_proposal(
+        &self,
+        previous_block: &Block,
+        now: Timestamp,
+        network: Network,
+    ) -> Result<(), BlockValidationError> {
+        self.validate_as(previous_block, now, network, false).await
+    }
+
     /// `guessed` says whether the guesser has filled the proof-of-work field.
     async fn validate_as(
         &self,
