@@ -10,6 +10,7 @@ use crate::block::pow::LustrationStatus;
 use crate::block::validity::block_program::BlockProgram;
 use crate::block::validity::epoch_table::Epoch;
 use crate::block::validity::epoch_table::EpochTable;
+use crate::block::validity::swbf_update::aggregation::SwbfUpdateAggregation;
 use crate::block::INITIAL_BLOCK_SUBSIDY;
 use crate::block::MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS;
 use crate::block::PREMINE_MAX_SIZE;
@@ -300,6 +301,7 @@ impl ConsensusRuleSet {
             )),
             block_program_digest: BlockProgram.hash(),
             single_proof_digest: SingleProof::new(rule_set).hash(),
+            swbf_aggregation_digest: SwbfUpdateAggregation::new().hash(),
         }])
     }
 
@@ -748,6 +750,7 @@ pub(crate) mod tests {
             requires_mutator_set_reveals: bfe!(1),
             block_program_digest: BlockProgram.hash(),
             single_proof_digest: SingleProof::new(ConsensusRuleSet::SoftforkEpsilon).hash(),
+            swbf_aggregation_digest: SwbfUpdateAggregation::new().hash(),
         };
         assert_eq!(EpochTable::new(&[expected]), table);
         assert_eq!(

@@ -50,6 +50,9 @@ pub struct Epoch {
     /// The digest of the program the transaction claim in a block's appendix
     /// is about.
     pub single_proof_digest: Digest,
+
+    /// Program digest of the SWBF update
+    pub swbf_aggregation_digest: Digest,
 }
 
 /// Number of entries in an [`EpochTable`], used or not.
