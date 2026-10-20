@@ -22,8 +22,9 @@ use neptune_primitives::mast_hash::HasDiscriminant;
 use neptune_primitives::mast_hash::MastHash;
 use serde::Deserialize;
 use serde::Serialize;
-use tasm_lib::arithmetic::u64::div_mod::DivMod;
+use tasm_lib::arithmetic::u64::add::Add as U64Add;
 use tasm_lib::arithmetic::u64::lt::Lt as U64Lt;
+use tasm_lib::arithmetic::u64::safe_mul::SafeMul;
 use tasm_lib::field;
 use tasm_lib::field_with_size;
 use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
@@ -39,6 +40,7 @@ use tasm_lib::mmr::leaf_index_to_mt_index_and_peak_index::MmrLeafIndexToMtIndexA
 use tasm_lib::prelude::*;
 use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
+use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::verifier::own_program_digest::OwnProgramDigest;
 
@@ -167,6 +169,21 @@ impl SecretWitness for KnowsMutatorSetWitness {
             self,
         );
         nondeterminism.digests = self.paths.concat();
+        // Each sampled leaf index with the quotient that proves it, as limbs.
+        let [chunk_a, chunk_b, aocl_leaf, _, _] =
+            Tip5::hash_pair(self.prev_block_digest, Digest::default()).values();
+        let swbfi_leafs = self.mutator_set.swbf_inactive.num_leafs();
+        let aocl_leafs = self.mutator_set.aocl.num_leafs();
+        nondeterminism.individual_tokens = [
+            (chunk_a, swbfi_leafs),
+            (chunk_b, swbfi_leafs),
+            (aocl_leaf, aocl_leafs),
+        ]
+        .into_iter()
+        .filter(|&(_, num_leafs)| num_leafs != 0)
+        .flat_map(|(sample, num_leafs)| [sample.value() % num_leafs, sample.value() / num_leafs])
+        .flat_map(|value| [bfe!(value >> 32), bfe!(value & u64::from(u32::MAX))])
+        .collect();
         nondeterminism
     }
 }
@@ -180,11 +197,11 @@ impl SecretWitness for KnowsMutatorSetWitness {
 /// Output: none.
 ///
 /// Divines the mutator set, which must hash to the input, two chunks and an
-/// AOCL leaf, and their authentication paths to the leafs the parent's hash
-/// samples. For a parent at or past the activation height, divines the
-/// parent's parts, which must hash to its hash, and finds this program's
-/// claim about the parent's parent and transaction mutator set in its
-/// appendix.
+/// AOCL leaf, the leaf indices the parent's hash samples with the quotients
+/// that prove them, and the authentication paths. For a parent at or past
+/// the activation height, divines the parent's parts, which must hash to its
+/// hash, and finds this program's claim about the parent's parent and
+/// transaction mutator set in its appendix.
 #[derive(
     Debug, Clone, Copy, Default, BFieldCodec, GetSize, PartialEq, Eq, Serialize, Deserialize,
 )]
@@ -194,6 +211,8 @@ impl KnowsMutatorSet {
     const MUTATOR_SET_MISMATCH_ERROR_ID: i128 = 1_000_610;
     const WRONG_LEAF_ERROR_ID: i128 = 1_000_611;
     const PARENT_MISMATCH_ERROR_ID: i128 = 1_000_612;
+    const LEAF_INDEX_TOO_LARGE_ERROR_ID: i128 = 1_000_613;
+    const WRONG_LEAF_INDEX_ERROR_ID: i128 = 1_000_614;
 
     const INPUT_LEN: usize = 2 * Digest::LEN + 1;
 
@@ -257,8 +276,9 @@ impl TritonProgram for KnowsMutatorSet {
         let push_digest = library.import(Box::new(Push::new(DataType::Digest)));
         let merkle_root = library.import(Box::new(MerkleRoot));
         let merkle_verify = library.import(Box::new(MerkleVerify));
-        let div_mod = library.import(Box::new(DivMod));
         let u64_lt = library.import(Box::new(U64Lt));
+        let u64_add = library.import(Box::new(U64Add));
+        let safe_mul = library.import(Box::new(SafeMul));
         let leaf_index_to_mt_index = library.import(Box::new(MmrLeafIndexToMtIndexAndPeakIndex));
         let merkle_step = library.import(Box::new(MerkleStepU64Index));
         let sample_alloc = library.kmalloc(Digest::LEN as u32);
@@ -293,6 +313,8 @@ impl TritonProgram for KnowsMutatorSet {
         let verify_chunk = "knows_mutator_set_verify_chunk".to_string();
         let verify_aocl_leaf = "knows_mutator_set_verify_aocl_leaf".to_string();
         let verify_sample = "knows_mutator_set_verify_sample".to_string();
+        // Crashes unless the u64 on top is encoded as two u32 limbs.
+        let assert_u64_encoding = triton_asm!(dup 1 pop_count pop 1 dup 0 pop_count pop 1);
         let climb = "knows_mutator_set_climb".to_string();
         let parent_contains_claim = "knows_mutator_set_parent_contains_claim".to_string();
         let header_mast_hash = "knows_mutator_set_header_mast_hash".to_string();
@@ -425,15 +447,26 @@ impl TritonProgram for KnowsMutatorSet {
                 return
 
             // The leaf at the sample's index, modulo the leaf count, must be
-            // that of the MMR.
+            // that of the MMR. The index is divined with the quotient that
+            // proves it.
             // BEFORE: _ *peaks [leaf] [leaf_count] sample
             // AFTER:  _
             {verify_sample}:
                 split
-                // _ *peaks [leaf] [leaf_count] [sample]
-                dup 3 dup 3 call {div_mod}
-                // _ *peaks [leaf] [leaf_count] [quotient] [leaf_index]
-                pick 3 pick 3 pop 2
+                divine 2
+                // _ *peaks [leaf] [leaf_count] [sample] [leaf_index]
+                {&assert_u64_encoding}
+                dup 5 dup 5 dup 3 dup 3 call {u64_lt}
+                assert error_id {Self::LEAF_INDEX_TOO_LARGE_ERROR_ID}
+                divine 2
+                // _ *peaks [leaf] [leaf_count] [sample] [leaf_index] [quotient]
+                {&assert_u64_encoding}
+                dup 7 dup 7 call {safe_mul}
+                dup 3 dup 3 call {u64_add}
+                // _ *peaks [leaf] [leaf_count] [sample] [leaf_index] [quotient * leaf_count + leaf_index]
+                pick 5 pick 5 {&DataType::U64.compare()}
+                assert error_id {Self::WRONG_LEAF_INDEX_ERROR_ID}
+                // _ *peaks [leaf] [leaf_count] [leaf_index]
                 call {leaf_index_to_mt_index}
                 // _ *peaks [leaf] [mt_index] peak_index
                 place 7 place 6 place 6
@@ -651,20 +684,33 @@ pub(super) mod tests {
             let activation_height: BlockHeight = tasm::tasmlib_io_read_stdin___bfe().into();
             let swbfi = &witness.mutator_set.swbf_inactive;
             let aocl = &witness.mutator_set.aocl;
-            let (chunks, aocl_leaf) =
-                sampled_leafs(prev_block_digest, swbfi.num_leafs(), aocl.num_leafs());
-            if let Some(leaf_indices) = chunks {
-                let leafs = [&witness.chunk_a, &witness.chunk_b].map(Tip5::hash);
-                for (leaf_index, leaf) in leaf_indices.into_iter().zip(leafs) {
+            let [chunk_a, chunk_b, aocl_leaf, _, _] =
+                Tip5::hash_pair(prev_block_digest, Digest::default()).values();
+            let sampled_leaf_index = |sample: BFieldElement, num_leafs: u64| {
+                let leaf_index = tasm::tasmlib_io_read_secin___u64();
+                assert!(leaf_index < num_leafs);
+                let quotient = tasm::tasmlib_io_read_secin___u64();
+                let reconstructed = quotient
+                    .checked_mul(num_leafs)
+                    .and_then(|product| product.checked_add(leaf_index))
+                    .unwrap();
+                assert_eq!(sample.value(), reconstructed);
+                leaf_index
+            };
+            if swbfi.num_leafs() != 0 {
+                let samples = [(chunk_a, &witness.chunk_a), (chunk_b, &witness.chunk_b)];
+                for (sample, chunk) in samples {
+                    let leaf_index = sampled_leaf_index(sample, swbfi.num_leafs());
                     assert!(tasm::mmr_verify_from_secret_in_leaf_index_on_stack(
                         &swbfi.peaks(),
                         swbfi.num_leafs(),
                         leaf_index,
-                        leaf,
+                        Tip5::hash(chunk),
                     ));
                 }
             }
-            if let Some(leaf_index) = aocl_leaf {
+            if aocl.num_leafs() != 0 {
+                let leaf_index = sampled_leaf_index(aocl_leaf, aocl.num_leafs());
                 assert!(tasm::mmr_verify_from_secret_in_leaf_index_on_stack(
                     &aocl.peaks(),
                     aocl.num_leafs(),
@@ -904,6 +950,18 @@ pub(super) mod tests {
             .unwrap();
     }
 
+    fn assert_rejects_tokens(
+        witness: &KnowsMutatorSetWitness,
+        tokens: Vec<BFieldElement>,
+        error_id: i128,
+    ) {
+        let mut nondeterminism = witness.nondeterminism();
+        nondeterminism.individual_tokens = tokens;
+        KnowsMutatorSet
+            .test_assertion_failure(witness.standard_input(), nondeterminism, &[error_id])
+            .unwrap();
+    }
+
     #[test]
     fn sampled_leafs_of_any_trees_are_accepted() {
         let mut rng = StdRng::seed_from_u64(0);
@@ -991,6 +1049,46 @@ pub(super) mod tests {
                 other_path.paths[path][0] = rng.random();
                 assert_rejects(&other_path, KnowsMutatorSet::WRONG_LEAF_ERROR_ID);
             }
+        }
+    }
+
+    #[test]
+    fn leaf_index_not_below_the_leaf_count_or_not_the_sample_is_rejected() {
+        let mut rng = StdRng::seed_from_u64(7);
+        let witness = witness_on_activated_parent(&mut rng);
+        let tokens = witness.nondeterminism().individual_tokens;
+        let num_leafs = witness.mutator_set.swbf_inactive.num_leafs();
+
+        let mut index_is_the_count = tokens.clone();
+        index_is_the_count[1] = bfe!(num_leafs);
+        assert_rejects_tokens(
+            &witness,
+            index_is_the_count,
+            KnowsMutatorSet::LEAF_INDEX_TOO_LARGE_ERROR_ID,
+        );
+
+        let mut other_index = tokens.clone();
+        other_index[1] = bfe!((other_index[1].value() + 1) % num_leafs);
+        assert_rejects_tokens(
+            &witness,
+            other_index,
+            KnowsMutatorSet::WRONG_LEAF_INDEX_ERROR_ID,
+        );
+
+        let mut other_aocl_quotient = tokens.clone();
+        other_aocl_quotient[11] += bfe!(1);
+        assert_rejects_tokens(
+            &witness,
+            other_aocl_quotient,
+            KnowsMutatorSet::WRONG_LEAF_INDEX_ERROR_ID,
+        );
+
+        for limb in [0, 1, 2, 3] {
+            let mut nondeterminism = witness.nondeterminism();
+            nondeterminism.individual_tokens[limb] = bfe!(1u64 << 32);
+            assert!(KnowsMutatorSet
+                .run_tasm(&witness.standard_input(), nondeterminism)
+                .is_err());
         }
     }
 
