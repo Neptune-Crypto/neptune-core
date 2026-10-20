@@ -1756,8 +1756,10 @@ impl RpcApi for RpcServer {
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, next_block_height);
         let tx = state.mempool().get_transactions_for_block_composition(
             consensus_rule_set,
+            network,
             usize::MAX,
             Some(1),
+            self.state.cli().min_fee_per_swbf_leaf,
         );
         drop(state);
         let tx = tx.first();
