@@ -1,5 +1,6 @@
 use futures::channel::oneshot;
 use neptune_consensus::block::block_transaction::BlockTransaction;
+use neptune_consensus::block::proof_of_work_puzzle::ProofOfWorkPuzzle;
 use neptune_consensus::block::test_helpers::invalid_block_with_transaction;
 use neptune_consensus::block::validity::block_primitive_witness::BlockPrimitiveWitness;
 use neptune_consensus::block::validity::block_program::BlockProgram;
@@ -266,6 +267,32 @@ pub async fn fake_block_successor_with_merged_tx(
     } else {
         fake_valid_block_proposal_from_tx(predecessor, block_tx, network).await
     }
+}
+
+/// Guess the proposal as the node's guesser would: reveal the sampled leaf
+/// of the inactive SWBF after the parent and find a nonce that meets the
+/// difficulty. The node's tip must be the proposal's parent.
+pub(crate) async fn guess_for_tests(proposal: &mut Block, state: &GlobalStateLock) {
+    let network = state.cli().network;
+    let state = state.lock_guard().await;
+    let parent = state.chain.tip();
+    assert_eq!(parent.hash(), proposal.header().prev_block_digest);
+    let rules = ConsensusRuleSet::infer_from(network, proposal.header().height);
+    let difficulty = if rules.use_parent_difficulty() {
+        parent.header().difficulty
+    } else {
+        proposal.header().difficulty
+    };
+    let reveal = state
+        .chain
+        .guesser_swbfi_reveal(
+            proposal.header(),
+            &proposal.header().guesser_receiver_data,
+            network,
+        )
+        .await;
+    let pow = ProofOfWorkPuzzle::new(proposal.clone(), difficulty, reveal).solve(rules);
+    proposal.set_header_pow(pow);
 }
 
 pub(crate) async fn fake_valid_block_proposal_successor_for_test(

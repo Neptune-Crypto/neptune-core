@@ -405,7 +405,7 @@ pub enum PowValidationError {
 impl PowValidationError {
     /// The error ID a Triton program asserts with when it checks this rule.
     pub(super) fn error_id(self) -> i128 {
-        1_000_400 + self as i128
+        1_000_800 + self as i128
     }
 }
 

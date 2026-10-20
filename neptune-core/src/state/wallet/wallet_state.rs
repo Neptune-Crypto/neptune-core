@@ -5184,6 +5184,7 @@ pub(crate) mod tests {
         use crate::application::loops::mine_loop::create_block_transaction;
         use crate::application::loops::mine_loop::make_coinbase_transaction_stateless;
         use crate::application::loops::peer_loop::channel::MainToPeerTask;
+        use crate::tests::shared::blocks::guess_for_tests;
         use crate::PEER_CHANNEL_CAPACITY;
 
         #[traced_test]
@@ -5394,7 +5395,7 @@ pub(crate) mod tests {
             )
             .await
             .unwrap();
-            let (block1, _) = Block::compose(
+            let (mut block1, _) = Block::compose(
                 genesis_block.clone(),
                 block1_tx,
                 block1_timestamp,
@@ -5409,6 +5410,7 @@ pub(crate) mod tests {
             )
             .await
             .unwrap();
+            guess_for_tests(&mut block1, &alice).await;
             alice
                 .lock_guard_mut()
                 .await
@@ -5496,7 +5498,7 @@ pub(crate) mod tests {
                 create_block_transaction(&block1, alice.clone(), now, job_options.clone())
                     .await
                     .unwrap();
-            let (block2, _) = Block::compose(
+            let (mut block2, _) = Block::compose(
                 block1.clone(),
                 block_transaction,
                 now,
@@ -5511,6 +5513,7 @@ pub(crate) mod tests {
             )
             .await
             .unwrap();
+            guess_for_tests(&mut block2, &alice).await;
             alice
                 .lock_guard_mut()
                 .await

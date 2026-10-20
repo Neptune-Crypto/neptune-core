@@ -572,7 +572,12 @@ mod block_is_valid {
                 block2_without_valid_pow.clone(),
                 block3_tx,
                 plus_nine_months,
-                None,
+                alice
+                    .lock_guard()
+                    .await
+                    .composer_witness(&block2_without_valid_pow)
+                    .await
+                    .unwrap(),
                 TritonVmJobQueue::get_instance(),
                 TritonVmProofJobOptions::default_with_network(network),
             )

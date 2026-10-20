@@ -1020,7 +1020,7 @@ mod tests {
             block_2_b.clone(),
             merged_tx,
             timestamp,
-            None,
+            alice.composer_witness(&block_2_b).await.unwrap(),
             TritonVmJobQueue::get_instance(),
             TritonVmProofJobOptions::default_with_network(network),
         )
@@ -1189,7 +1189,11 @@ mod tests {
             genesis_block.clone(),
             tx_for_block,
             in_seven_months,
-            None,
+            bob.lock_guard()
+                .await
+                .composer_witness(&genesis_block)
+                .await
+                .unwrap(),
             TritonVmJobQueue::get_instance(),
             TritonVmProofJobOptions::default_with_network(network),
         )

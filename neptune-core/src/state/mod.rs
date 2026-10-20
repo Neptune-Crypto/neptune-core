@@ -3775,6 +3775,7 @@ mod tests {
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::wallet::wallet_status::WalletStatusExportFormat;
     use crate::tests::shared::blocks::fake_valid_block_proposal_successor_for_test;
+    use crate::tests::shared::blocks::guess_for_tests;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::globalstate::state_with_premine_and_self_mined_blocks;
     use crate::tests::shared::mock_tx::send_coins;
@@ -6057,16 +6058,22 @@ mod tests {
         .await
         .unwrap();
 
-        let (block_1, _) = Block::compose(
+        let (mut block_1, _) = Block::compose(
             genesis_block.clone(),
             block_transaction,
             in_seven_months,
-            None,
+            alice
+                .lock_guard()
+                .await
+                .composer_witness(&genesis_block)
+                .await
+                .unwrap(),
             TritonVmJobQueue::get_instance(),
             TritonVmProofJobOptions::default_with_network(network),
         )
         .await
         .unwrap();
+        guess_for_tests(&mut block_1, &alice).await;
 
         assert!(
             block_1
@@ -6303,7 +6310,12 @@ mod tests {
             block_1.clone(),
             block_transaction2,
             in_eight_months,
-            None,
+            alice
+                .lock_guard()
+                .await
+                .composer_witness(&block_1)
+                .await
+                .unwrap(),
             TritonVmJobQueue::get_instance(),
             TritonVmProofJobOptions::default_with_network(network),
         )
@@ -7407,10 +7419,15 @@ mod tests {
                 .await
                 .unwrap();
                 let (block_1, _) = Block::compose(
-                    genesis_block,
+                    genesis_block.clone(),
                     block_1_tx,
                     seven_months_post_launch,
-                    None,
+                    alice_state_lock
+                        .lock_guard()
+                        .await
+                        .composer_witness(&genesis_block)
+                        .await
+                        .unwrap(),
                     TritonVmJobQueue::get_instance(),
                     TritonVmProofJobOptions::default_with_network(network),
                 )

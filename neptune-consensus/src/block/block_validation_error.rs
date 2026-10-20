@@ -185,6 +185,6 @@ impl BlockValidationRule {
     /// The error ID reported by Triton VM's crash if this rule is not
     /// satisfied.
     pub(in crate::block) fn error_id(self) -> i128 {
-        1_000_300 + self as i128
+        1_000_700 + self as i128
     }
 }
