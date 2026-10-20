@@ -5396,7 +5396,12 @@ pub(crate) mod tests {
                 genesis_block.clone(),
                 block1_tx,
                 block1_timestamp,
-                None,
+                alice
+                    .lock_guard()
+                    .await
+                    .composer_witness(&genesis_block)
+                    .await
+                    .unwrap(),
                 dummy_queue.clone(),
                 job_options.clone(),
             )
@@ -5493,7 +5498,12 @@ pub(crate) mod tests {
                 block1.clone(),
                 block_transaction,
                 now,
-                None,
+                alice
+                    .lock_guard()
+                    .await
+                    .composer_witness(&block1)
+                    .await
+                    .unwrap(),
                 dummy_queue.clone(),
                 job_options.clone(),
             )
@@ -5559,6 +5569,12 @@ pub(crate) mod tests {
 
             // merge with some other transaction to set merge bit, Alice gets
             // composer rewards.
+            let block3_witness = alice
+                .lock_guard()
+                .await
+                .composer_witness(&block2)
+                .await
+                .unwrap();
             let (some_other_transaction, _) = create_block_transaction(
                 &block2,
                 alice,
@@ -5586,7 +5602,7 @@ pub(crate) mod tests {
                 block2,
                 block3_transaction,
                 now + Timestamp::minutes(10),
-                None,
+                block3_witness,
                 dummy_queue,
                 job_options,
             )

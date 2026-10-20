@@ -44,6 +44,7 @@ use neptune_consensus::block::block_header::BlockHeaderWithBlockHashWitness;
 use neptune_consensus::block::guesser_receiver_data::GuesserReceiverData;
 use neptune_consensus::block::mutator_set_update::MutatorSetUpdate;
 use neptune_consensus::block::Block;
+use neptune_consensus::block::ComposerWitness;
 use neptune_consensus::chaintx::link_tx::LinkTx;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
@@ -1643,6 +1644,52 @@ impl GlobalState {
                 (key.to_address().into(), Some(key.receiver_preimage()))
             }
         }
+    }
+
+    /// The composer's witness for a block on this predecessor, from the
+    /// archival state while it is synced to it. None where the rules need no
+    /// witness.
+    pub(crate) async fn composer_witness(
+        &self,
+        predecessor: &Block,
+    ) -> Result<Option<ComposerWitness>> {
+        let network = self.cli().network;
+        let next_height = predecessor.header().height.next();
+        let consensus_rules = ConsensusRuleSet::infer_from(network, next_height);
+        if !consensus_rules.requires_predecessor_claim() {
+            return Ok(None);
+        }
+
+        if self.chain.tip().hash() != predecessor.hash() {
+            bail!("tip changed while composing");
+        }
+        let knows_ams = self
+            .chain
+            .archival_state()
+            .knows_mutator_set_witness(predecessor)
+            .await;
+        let prev_block_transaction_mutator_set = self
+            .chain
+            .mutator_set_after_by_block_hash(predecessor.header().prev_block_digest)
+            .await
+            .unwrap_or_default();
+
+        // Internal nodes of SWBFI MMR after parent removals will agree with
+        // that of tip, which includes both parent removals, and its additions.
+        let prev_block_swbfi_peaks_after_removals = self
+            .chain
+            .archival_state()
+            .archival_mutator_set
+            .ams()
+            .swbf_inactive
+            .peaks_at(prev_block_transaction_mutator_set.swbf_inactive.num_leafs())
+            .await;
+        Ok(Some(ComposerWitness {
+            knows_ams,
+            prev_block_transaction_mutator_set,
+            prev_block_swbfi_peaks_after_removals,
+            previous: None,
+        }))
     }
 
     /// Automatically assemble the composer parameters for composing the next
