@@ -11,14 +11,21 @@ proof server can be used. This proof server is a simple HTTP file server that
 has the proofs stored as files.
 
 ## Getting the proofs from a proof server
-Ask someone involved with the project for a URL and put the URL into the
-`proof_servers.txt` file.
+Proof servers are listed in the files `neptune-core/test_data/proof_servers.txt`
+and `neptune-consensus/test_data/proof_servers.txt`, one URL per line, each
+ending in a slash. Both files already list the project's proof servers, so
+normally nothing needs to be done. To use an additional proof server, add its
+URL to both files.
 
 ## Running a proof server
 If you have a powerful machine you can generate all proofs yourself. You can
 then run a file server that serves files that match the name of the files that
-were produced (and placed in `neptune-core/test_data/`) during the execution of
-the test suite.
+were produced (and placed in `neptune-core/test_data/` and
+`neptune-consensus/test_data/`) during the execution of the test suite.
+
+More proof servers make the test suite faster and more reliable for everyone,
+so if you are able to, please host one. Once your server is up, open a pull
+request that adds its URL to both `proof_servers.txt` files.
 
 Such a server can e.g. be run as an nginx file server with the following
 settings:

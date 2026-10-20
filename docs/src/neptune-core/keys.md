@@ -111,7 +111,6 @@ the originating wallet.  However additional use-cases exist such as sending betw
 
 Data encrypted with `Symmetric` keys is smaller than data encrypted with asymmetric keys such as `Generation`.  As such, it requires less blockchain space and should result in lower fees.
 
-For this reason change output notifications are encrypted with a `Symmetric` key by default and it is desirable to do the same for all outputs destined for the
-originating wallet.
+Change outputs used to be sent to `Symmetric` keys by default, but they are now sent to the next unused `ViewingAddress` key, with on-chain notification (`ChangePolicy::default()`). The reason is that `Symmetric` keys are easy to misuse in a way that loses funds: a `Symmetric` address is also its spending key (see below), so anyone who hands it out, believing it to be an ordinary receiving address, gives away the funds sent to it. A `ViewingAddress` handed out by mistake leaks privacy, but not funds. For this reason, `Symmetric` keys are being phased out.
 
 Note that the `Symmetric` variant of abstract types `SpendingKey` and `ReceivingAddress` both use the same underlying `SymmetricKey`.  So they differ only in the methods available.  For this reason, it is important never to give an "address" of the `Symmetric` type to an untrusted third party, because it is also the spending key.

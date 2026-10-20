@@ -20,8 +20,8 @@ on a list of blocks from LUCA to the peer's tip; and it proceeds to validate the
 loop for processing.
 
 The fork reconciliation mechanism is managed by `PeerLoopHandler::try_ensure_path` with the list of blocks living in
-`MutablePeerState`. The threshold difference in block heights defaults to 1000 but can be overridden via the CLI
-`sync-mode-threshold`.
+`MutablePeerState`. The threshold difference in block heights defaults to 100 but can be overridden via the CLI
+`--sync-mode-threshold`.
 
 The reason why the shallow sync only works for small block height differences is because the list of reconciliation
 blocks (*i.e.*, those connecting LUCA to the peer's tip) are stored in RAM. It is therefore a denial of service vector.
@@ -31,7 +31,7 @@ and if the block height difference exceeds this number, the node goes into *sync
 ### Sync Challenge and Response
 
 When it is determined that the backlog of blocks is too large for the shallow sync procedure, the node sends the peer
-a `SyncChallenge`. This struct is a list of 10 block heights and a target height corresponding to the peer's
+a `SyncChallenge`. This struct is a list of 10 block heights and the digest of the peer's
 claimed tip. The peer must respond with a valid `SyncChallengeResponse`, consisting of all the indicated blocks along
 with their predecessors (so that they can be determined to be valid) and membership proofs into the block MMR (so that
 they can be determined to all be on the same chain). The node enters into sync mode if this response is valid (and on
@@ -61,7 +61,7 @@ set and unset in tandem, and one is accessible to peer loops whereas the other i
 The sync loop communicates with the outside world by using the main loop as a proxy. So the main loop is responsible
 for forwarding messages from the sync loop to peers if necessary, and from peers to the sync loop (if one is active).
 
-The sync loop stores blocks in a temporary directory. By default, whenever a new sync loop starts it will attempt to
+The sync loop stores blocks in a temporary directory, which can be overridden with `--sync-dir` (for instance when the temp partition is too small, or when the downloaded blocks should survive a reboot). By default, whenever a new sync loop starts it will attempt to
 resume the sync with all blocks found in its temporary directory. To override this behavior, and force new sync loops
 to start from scratch, run `neptune-core` with the argument `--no-resume-sync`.
 

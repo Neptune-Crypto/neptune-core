@@ -45,7 +45,7 @@ A development shell is included and can be accessed by running `nix develop` or 
 - Install clang and its linker: `sudo apt install clang && sudo apt install libstdc++-14-dev`
 - Download the repository: `git clone https://github.com/Neptune-Crypto/neptune-core.git`
 - Enter the repository: `cd neptune-core`
-- Checkout the release branch `git checkout release`. (Alternatively, for the *unstable development*
+- Checkout the latest release, which is tagged `release`: `git checkout release`. (Alternatively, for the *unstable development*
   branch, skip this step.)
 - Build for release and put the binaries in your local path (`~/.cargo/bin/`): `make install-linux`
 
@@ -66,7 +66,7 @@ Windows should just work out-of-the-box with cargo build etc.
 - Open PowerShell to run the following commands.
 - Download the repository: `git clone https://github.com/Neptune-Crypto/neptune-core.git`
 - Enter the repository: `cd neptune-core`
-- Checkout the release branch `git checkout release`. (Alternatively, for an *unstable development*
+- Checkout the latest release, which is tagged `release`: `git checkout release`. (Alternatively, for an *unstable development*
   branch, skip this step.)
 - Build for release and put the binaries in your local path (`~/.cargo/bin/`):
   ```
