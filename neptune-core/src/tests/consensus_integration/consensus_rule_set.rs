@@ -6,7 +6,6 @@ use neptune_consensus::block::block_validation_error::BlockValidationError;
 use neptune_consensus::block::pow::LustrationStatus;
 use neptune_consensus::block::test_helpers::invalid_block_with_tx_kernel;
 use neptune_consensus::block::test_helpers::invalid_empty_block;
-use neptune_consensus::block::validity::block_primitive_witness::BlockPrimitiveWitness;
 use neptune_consensus::block::validity::predecessor_is_valid::PredecessorIsValid;
 use neptune_consensus::block::Block;
 use neptune_consensus::block::BlockProof;
@@ -20,7 +19,6 @@ use neptune_consensus::transaction::transaction_proof::TransactionProofType;
 use neptune_consensus::transaction::validity::neptune_proof::NeptuneProof;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_primitives::block_height::BlockHeight;
-use neptune_primitives::difficulty_control::Difficulty;
 use neptune_primitives::mast_hash::MastHash;
 use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
@@ -54,13 +52,10 @@ use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::Tri
 use crate::api::tx_initiation::error;
 use crate::application::config::cli_args;
 use crate::application::loops::mine_loop::compose_block_helper;
-use crate::application::loops::mine_loop::create_block_transaction_from;
-use crate::application::loops::mine_loop::TxMergeOrigin;
 use crate::tests::shared::blocks::compose_and_guess_for_tests;
 use crate::tests::shared::blocks::guess_for_tests;
 use crate::tests::shared::globalstate::mock_genesis_global_state;
 use crate::tests::shared::globalstate::mock_genesis_global_state_with_block;
-use crate::tests::tokio_runtime;
 
 /// Send n outputs to the same address.
 ///
@@ -171,38 +166,6 @@ pub(crate) async fn tx_with_n_outputs(
     })
 }
 
-async fn block_with_n_outputs(
-    me: GlobalStateLock,
-    num_outputs: usize,
-    timestamp: Timestamp,
-) -> Block {
-    let current_tip = me.lock_guard().await.chain.archival_state().get_tip().await;
-    let job_options = TritonVmProofJobOptions::default_with_network(me.cli().network);
-    let tx_many_outputs = tx_with_n_outputs(me.clone(), num_outputs, timestamp, None, None, None)
-        .await
-        .unwrap();
-    let (block_tx, _) = create_block_transaction_from(
-        &current_tip,
-        me,
-        timestamp,
-        job_options.clone(),
-        TxMergeOrigin::ExplicitList(vec![tx_many_outputs.transaction.into()]),
-    )
-    .await
-    .unwrap();
-    Block::compose(
-        current_tip,
-        block_tx,
-        timestamp,
-        None,
-        vm_job_queue(),
-        job_options,
-    )
-    .await
-    .unwrap()
-    .0
-}
-
 async fn mine_to_own_wallet(
     me: GlobalStateLock,
     timestamp: Timestamp,
@@ -217,36 +180,19 @@ async fn mine_to_own_wallet(
     .await
     .unwrap()
     .unwrap();
+    // Guess for the node's own guesser address, as its guesser would.
+    let (guesser_address, _) = me.lock_guard().await.mining_rewards_address();
+    block.set_header_guesser_data(guesser_address.into());
     guess_for_tests(&mut block, &me).await;
     (block, expected_composer_utxos)
 }
 
-#[traced_test]
-#[test]
-fn new_blocks_at_block_height_100_000() {
-    // We want to use the following block primitive witness generator (which
-    // uses async code on the inside) in combination with async code. We
-    // make this test function async because we would be entering into the
-    // same runtime twice. Therefore, we generate the block primitive
-    // witness once, in this synchronous wrapper, and continue
-    // asynchronously with the helper function.
-
-    let network = Network::TestnetMock;
-    let init_block_heigth = BlockHeight::from(100_000u64);
-    let bpw = BlockPrimitiveWitness::deterministic_with_block_height_and_difficulty(
-        init_block_heigth,
-        Difficulty::MINIMUM,
-        network,
-    );
-
-    tokio_runtime().block_on(new_blocks_at_block_height_100_000_async(bpw, network));
-}
-
-async fn new_blocks_at_block_height_100_000_async(
-    block_primitive_witness: BlockPrimitiveWitness,
-    network: Network,
-) {
-    // 1. generate state synced to height
+/// Build on a stand-in genesis block at height 99,999, named as the
+/// network's genesis block, so that every block is built under the rule set
+/// in force at a large height.
+async fn new_blocks_at_block_height_100_000_on(network: Network) {
+    let fake_genesis = Block::fake_genesis_at_height(network, BlockHeight::from(99_999u64));
+    fake_genesis.name_as_genesis(network);
     let mut rng = StdRng::seed_from_u64(55512345);
     let bob_wallet = WalletEntropy::new_pseudorandom(rng.random());
     let cli = cli_args::Args {
@@ -257,33 +203,17 @@ async fn new_blocks_at_block_height_100_000_async(
         number_of_mps_per_utxo: 3,
         ..Default::default()
     };
+    let mut bob =
+        mock_genesis_global_state_with_block(0, bob_wallet, cli, fake_genesis.clone()).await;
+    let mut now = fake_genesis.header().timestamp;
 
-    let (fake_genesis, block_100_000) =
-        Block::fake_block_pair_genesis_and_child_from_witness(block_primitive_witness).await;
-    let mut now = block_100_000.header().timestamp;
-    assert!(
-        block_100_000
-            .is_valid_proposal(&fake_genesis, now, network)
-            .await
-    );
-
-    let mut bob = mock_genesis_global_state_with_block(0, bob_wallet, cli, fake_genesis).await;
-    bob.set_new_tip(block_100_000.clone()).await.unwrap();
-
-    let observed_block_height = bob.lock_guard().await.chain.tip().header().height;
-    assert_eq!(BlockHeight::from(100_000u64), observed_block_height,);
-
-    // 2. get a positive balance, by mining.
+    // 1. get a positive balance, by mining.
     let blocks_to_mine = 3;
-    let mut predecessor = block_100_000;
+    let mut predecessor = fake_genesis;
     for _ in 0..blocks_to_mine {
         now += Timestamp::hours(1);
         let (next_block, expected_composer_utxos) = mine_to_own_wallet(bob.clone(), now).await;
-        assert!(
-            next_block
-                .is_valid_proposal(&predecessor, now, network)
-                .await
-        );
+        assert!(next_block.is_valid(&predecessor, now, network).await);
         bob.set_new_self_composed_tip(next_block.clone(), expected_composer_utxos)
             .await
             .unwrap();
@@ -291,7 +221,7 @@ async fn new_blocks_at_block_height_100_000_async(
     }
 
     let hopefully_plus_3 = bob.lock_guard().await.chain.tip().header().height;
-    assert_eq!(BlockHeight::from(100_003u64), hopefully_plus_3);
+    assert_eq!(BlockHeight::from(100_002u64), hopefully_plus_3);
     assert!(
         bob.api()
             .wallet()
@@ -307,7 +237,8 @@ async fn new_blocks_at_block_height_100_000_async(
         .wallet_spendable_inputs_at_time(now)
         .await;
 
-    // Bob composes and guesses
+    // Bob composes and guesses, so each block pays him a liquid reward of
+    // each kind.
     assert_eq!(
         2 * blocks_to_mine,
         bob_spendable_inputs.len(),
@@ -315,21 +246,40 @@ async fn new_blocks_at_block_height_100_000_async(
         2 * blocks_to_mine
     );
 
-    // 3. create blocks with enough outputs to give some/all owned UTXOs
+    // 2. create blocks with enough outputs to give some/all owned UTXOs
     //    non-empty chunk dictionaries. This serves to check that the
     //    membership proofs/removal records are updated correctly.
     let num_blocks_with_many_outputs = 3;
     for _ in 0..num_blocks_with_many_outputs {
         now += Timestamp::hours(1);
-        let next_block = block_with_n_outputs(bob.clone(), 24, now).await;
-        assert!(
-            next_block
-                .is_valid_proposal(&predecessor, now, network)
-                .await
-        );
+        // Inputs this early look like lustration candidates to the wallet.
+        let lustrating = InputSelectionPolicy::default().set_lustration_acceptance(true);
+        let tx = tx_with_n_outputs(bob.clone(), 24, now, Some(lustrating), None, None)
+            .await
+            .unwrap();
+        let next_block = compose_and_guess_for_tests(&bob, vec![tx.transaction.into()], now).await;
+        assert!(next_block.is_valid(&predecessor, now, network).await);
         bob.set_new_tip(next_block.clone()).await.unwrap();
         predecessor = next_block;
     }
+}
+
+#[traced_test]
+#[tokio::test]
+async fn new_blocks_at_block_height_100_000_on_main_net() {
+    new_blocks_at_block_height_100_000_on(Network::Main).await;
+}
+
+#[traced_test]
+#[tokio::test]
+async fn new_blocks_at_block_height_100_000_on_testnet_42() {
+    new_blocks_at_block_height_100_000_on(Network::Testnet(42)).await;
+}
+
+#[traced_test]
+#[tokio::test]
+async fn new_blocks_at_block_height_100_000_with_mock_proofs() {
+    new_blocks_at_block_height_100_000_on(Network::TestnetMock).await;
 }
 
 /// A block on the stand-in genesis block passes every rule but the proof,
@@ -429,7 +379,9 @@ async fn blocks_across_epsilon_activation_on_main_net() {
     for _ in 0..3 {
         now += Timestamp::hours(1);
         let predecessor = bob.lock_guard().await.chain.tip().to_owned();
-        let tx = tx_with_n_outputs(bob.clone(), 24, now, None, None, None)
+        // Inputs this early look like lustration candidates to the wallet.
+        let lustrating = InputSelectionPolicy::default().set_lustration_acceptance(true);
+        let tx = tx_with_n_outputs(bob.clone(), 24, now, Some(lustrating), None, None)
             .await
             .unwrap();
         let block = compose_and_guess_for_tests(&bob, vec![tx.transaction.into()], now).await;
