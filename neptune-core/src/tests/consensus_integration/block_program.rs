@@ -21,54 +21,14 @@ use rand::SeedableRng;
 use tracing_test::traced_test;
 
 use crate::application::config::cli_args;
-use crate::application::loops::mine_loop::create_block_transaction_from;
-use crate::application::loops::mine_loop::TxMergeOrigin;
 use crate::state::transaction::tx_creation_config::TxCreationConfig;
-use crate::tests::shared::blocks::guess_for_tests;
+use crate::tests::shared::blocks::compose_and_guess_for_tests;
 use crate::tests::shared::globalstate::mock_genesis_global_state;
 use crate::tests::shared_tokio_runtime;
-use crate::GlobalStateLock;
 
 #[traced_test]
 #[apply(shared_tokio_runtime)]
 async fn disallow_double_spends_across_blocks() {
-    async fn mine_txs(
-        state: &GlobalStateLock,
-        txs: Vec<Transaction>,
-        timestamp: Timestamp,
-    ) -> Block {
-        let predecessor = state.lock_guard().await.chain.tip().to_owned();
-        let job_options = TritonVmProofJobOptions::default_with_network(state.cli().network);
-        let (block_tx, _) = create_block_transaction_from(
-            &predecessor,
-            state.clone(),
-            timestamp,
-            job_options.clone(),
-            TxMergeOrigin::ExplicitList(txs),
-        )
-        .await
-        .unwrap();
-
-        let witness = state
-            .lock_guard()
-            .await
-            .composer_witness(&predecessor)
-            .await
-            .unwrap();
-        let (mut block, _) = Block::compose(
-            predecessor,
-            block_tx,
-            timestamp,
-            witness,
-            TritonVmJobQueue::get_instance(),
-            job_options.clone(),
-        )
-        .await
-        .unwrap();
-        guess_for_tests(&mut block, state).await;
-        block
-    }
-
     let network = Network::Testnet(42);
     let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
     let alice_wallet = WalletEntropy::devnet_wallet();
@@ -97,7 +57,7 @@ async fn disallow_double_spends_across_blocks() {
     // it carries the lustration announcements that block 2, and the update into
     // block 3, require.
     let block1_timestamp = genesis_block.header().timestamp + Timestamp::months(11);
-    let block1 = mine_txs(&alice, vec![], block1_timestamp).await;
+    let block1 = compose_and_guess_for_tests(&alice, vec![], block1_timestamp).await;
     alice.set_new_tip(block1.clone()).await.unwrap();
 
     let now = genesis_block.header().timestamp + Timestamp::months(12);
@@ -115,7 +75,7 @@ async fn disallow_double_spends_across_blocks() {
         .unwrap()
         .transaction
         .into();
-    let block2 = mine_txs(&alice, vec![tx.clone()], now).await;
+    let block2 = compose_and_guess_for_tests(&alice, vec![tx.clone()], now).await;
     alice.set_new_tip(block2.clone()).await.unwrap();
 
     // Update transaction, stick it into block 3, and verify that block 3

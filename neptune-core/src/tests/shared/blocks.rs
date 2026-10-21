@@ -11,6 +11,7 @@ use neptune_consensus::block::Block;
 use neptune_consensus::block::BlockProof;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 use neptune_consensus::proof_abstractions::verifier::cache_true_claims;
 use neptune_consensus::transaction::validity::neptune_proof::Proof;
 use neptune_consensus::transaction::Transaction;
@@ -34,8 +35,10 @@ use crate::api::export::GlobalStateLock;
 use crate::api::export::OutputFormat;
 use crate::application::loops::channel::NewBlockFound;
 use crate::application::loops::mine_loop::compose_block_helper;
+use crate::application::loops::mine_loop::create_block_transaction_from;
 use crate::application::loops::mine_loop::guess_nonce;
 use crate::application::loops::mine_loop::guesser_configuration::GuessingConfiguration;
+use crate::application::loops::mine_loop::TxMergeOrigin;
 use crate::tests::shared::mock_tx::send_coins;
 use crate::tests::shared::Randomness;
 
@@ -324,6 +327,45 @@ pub async fn fake_block_successor_with_merged_tx(
     } else {
         fake_valid_block_proposal_from_tx(predecessor, block_tx, network).await
     }
+}
+
+/// Compose a block on the node's tip that confirms these transactions and
+/// nothing from the mempool, as the node's composer would, and guess it as
+/// [`guess_for_tests`] does.
+pub(crate) async fn compose_and_guess_for_tests(
+    state: &GlobalStateLock,
+    txs: Vec<Transaction>,
+    timestamp: Timestamp,
+) -> Block {
+    let predecessor = state.lock_guard().await.chain.tip().to_owned();
+    let job_options = TritonVmProofJobOptions::default_with_network(state.cli().network);
+    let (block_tx, _) = create_block_transaction_from(
+        &predecessor,
+        state.clone(),
+        timestamp,
+        job_options.clone(),
+        TxMergeOrigin::ExplicitList(txs),
+    )
+    .await
+    .unwrap();
+    let witness = state
+        .lock_guard()
+        .await
+        .composer_witness(&predecessor)
+        .await
+        .unwrap();
+    let (mut block, _) = Block::compose(
+        predecessor,
+        block_tx,
+        timestamp,
+        witness,
+        TritonVmJobQueue::get_instance(),
+        job_options,
+    )
+    .await
+    .unwrap();
+    guess_for_tests(&mut block, state).await;
+    block
 }
 
 /// Guess the proposal as the node's guesser would: reveal the sampled leaf
