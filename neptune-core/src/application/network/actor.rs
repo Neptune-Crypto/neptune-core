@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -12,6 +13,8 @@ use std::time::SystemTime;
 
 use futures::prelude::*;
 use itertools::Itertools;
+use libp2p::core::ConnectedPoint;
+use libp2p::core::Endpoint;
 use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::swarm::SwarmEvent;
 use libp2p::Multiaddr;
@@ -55,6 +58,9 @@ use crate::state::GlobalStateLock;
 struct ActiveConnection {
     /// When the first connection to this peer was established.
     connected_at: SystemTime,
+
+    /// Whether the peer opened the first connection.
+    inbound: bool,
 
     /// The remote address of each open connection to this peer.
     addresses: HashMap<libp2p::swarm::ConnectionId, Multiaddr>,
@@ -188,6 +194,10 @@ pub(crate) struct NetworkActor {
 
     /// Limits the total number of connections.
     max_num_peers: usize,
+
+    /// Whether to make room for inbound newcomers when at capacity; see
+    /// [`Self::bootstrap_victim`].
+    bootstrap: bool,
 
     /// Tracks the state in regards to whether we are publicly reachable or our
     /// strategy for becoming publicly reachable.
@@ -591,6 +601,7 @@ impl NetworkActor {
             pending_manual_dials: HashSet::new(),
             relay_servers: HashSet::new(),
             max_num_peers,
+            bootstrap: config.bootstrap,
             upgraded_peers,
             reachability_state,
             swarm_panics: PanicBreaker::new(
@@ -1090,6 +1101,15 @@ impl NetworkActor {
                 send_back_addr,
             } => {
                 if let Some(reason) = self.should_bounce(&send_back_addr) {
+                    // A bootstrap node makes room once the connection is
+                    // established, which validates the source address.
+                    if self.bootstrap
+                        && reason == BounceReason::MaxReached
+                        && !Self::is_relayed(&send_back_addr)
+                    {
+                        return;
+                    }
+
                     if reason == BounceReason::MaxReached {
                         tracing::trace!(target: "net::bounce", bouncee = %send_back_addr, "Bouncing incoming connection from {send_back_addr} because {reason}.");
                     } else {
@@ -1163,6 +1183,25 @@ impl NetworkActor {
                     self.disconnect_from_longest_lived_peer();
                 }
 
+                // A bootstrap node makes room for every direct inbound
+                // newcomer. So evict a peer. Possibly more than one, because
+                // hole punches can take the number of direct peers above the
+                // limit.
+                if self.bootstrap
+                    && Self::is_inbound(&endpoint)
+                    && !Self::is_relayed(&address)
+                    && self.should_bounce(&address) == Some(BounceReason::MaxReached)
+                {
+                    let excess = (self.num_direct_peers() + 1).saturating_sub(self.max_num_peers);
+                    for _ in 0..excess {
+                        let Some(victim) = self.bootstrap_victim() else {
+                            break;
+                        };
+                        tracing::debug!(%victim, "At connection capacity; evicting a peer for a newcomer.");
+                        self.evict(victim);
+                    }
+                }
+
                 // Check for banned IPs again. The catch above in
                 // `IncomingConnection` is a good first filter but because of
                 // race conditions, masked addresses, and automatic outgoing
@@ -1215,6 +1254,7 @@ impl NetworkActor {
                     })
                     .or_insert(ActiveConnection {
                         connected_at: SystemTime::now(),
+                        inbound: Self::is_inbound(&endpoint),
                         addresses: HashMap::from([(connection_id, address)]),
                     });
 
@@ -1256,12 +1296,7 @@ impl NetworkActor {
             }
         }
 
-        let num_relayed_only = self
-            .active_connections
-            .values()
-            .filter(|entry| entry.addresses.values().all(Self::is_relayed))
-            .count();
-        let num_direct = self.active_connections.len() - num_relayed_only;
+        let num_direct = self.num_direct_peers();
         let at_capacity = if Self::is_relayed(address) {
             // New connection is relayed: Don't exceed cap in total connections.
             self.active_connections.len() >= self.max_num_peers
@@ -2501,17 +2536,104 @@ impl NetworkActor {
 
         if let Some(peer_id) = oldest_peer {
             tracing::debug!(%peer_id, "Disconnecting from longest-lived peer.");
-
-            // Signal the swarm to drop the connection
-            if self.swarm.disconnect_peer_id(peer_id).is_err() {
-                tracing::warn!(%peer_id, "Attempted to disconnect peer, but it was already gone.");
-            }
-
-            // We remove it from our map immediately so the count is
-            // accurate for any dial logic happening in the same tick.
-            self.active_connections.remove(&peer_id);
+            self.evict(peer_id);
         } else {
             tracing::debug!("No peers available to disconnect from.");
+        }
+    }
+
+    /// The number of peers with at least one direct connection.
+    fn num_direct_peers(&self) -> usize {
+        self.active_connections
+            .values()
+            .filter(|entry| !entry.addresses.values().all(Self::is_relayed))
+            .count()
+    }
+
+    /// Disconnect from a peer to make room for another.
+    ///
+    /// The peer is forgotten immediately, so that the count is accurate for
+    /// any admission happening in the same tick. `ConnectionClosed` will not
+    /// find it any more, so its bookkeeping happens here.
+    fn evict(&mut self, peer_id: PeerId) {
+        if self.swarm.disconnect_peer_id(peer_id).is_err() {
+            tracing::warn!(%peer_id, "Attempted to disconnect peer, but it was already gone.");
+        }
+        self.active_connections.remove(&peer_id);
+        self.relay_servers.remove(&peer_id);
+    }
+
+    /// Whether the remote opened the connection. A hole punch is dialed from
+    /// both sides; libp2p assigns one of them the listener role.
+    fn is_inbound(endpoint: &ConnectedPoint) -> bool {
+        matches!(
+            endpoint,
+            ConnectedPoint::Listener { .. }
+                | ConnectedPoint::Dialer {
+                    role_override: Endpoint::Listener,
+                    ..
+                }
+        )
+    }
+
+    /// The peer a bootstrap node disconnects to admit an inbound newcomer.
+    ///
+    /// The policy, and why:
+    /// - Candidates are exactly the peers that count towards the limit (see
+    ///   [`Self::num_direct_peers`]). Evicting any other frees no room, and a
+    ///   peer that takes up room without being evictable would let a full
+    ///   node be locked out of admitting anyone.
+    /// - Sticky peers are never evicted: the operator asked for them.
+    /// - Inbound peers go first, outbound ones only when there are no inbound
+    ///   ones. Newcomers are inbound, and must not displace the peers we chose
+    ///   ourselves, which keep our own view of the network independent of who
+    ///   connects to us; Bitcoin Core never evicts outbound peers. Evicting
+    ///   them at all only undoes a pile-up of our own outbound connections,
+    ///   which would otherwise leave no room for newcomers.
+    /// - Among the candidates, the youngest member of the largest network
+    ///   group goes; see [`youngest_of_largest_group`]. Youngest, so that a
+    ///   flood evicts its own connections, however many groups it comes from,
+    ///   and peers that were there first keep their place; turnover among
+    ///   young inbound peers is what a bootstrap node is for. Largest group,
+    ///   so that an attacker crowding one group cannot displace the peers of
+    ///   others.
+    ///
+    /// Bitcoin Core protects some inbound peers further, by uptime and by
+    /// network group, to guard its own view of the network. The outbound
+    /// peers already do that here, so those protections are left out.
+    fn bootstrap_victim(&self) -> Option<PeerId> {
+        let sticky = self
+            .sticky_peers
+            .values()
+            .filter_map(|sticky_peer| match sticky_peer {
+                StickyPeer::Connected(peer_id) => Some(*peer_id),
+                _ => None,
+            })
+            .collect::<HashSet<_>>();
+        let candidates = |inbound: bool| {
+            self.active_connections
+                .iter()
+                .filter(|(peer_id, entry)| entry.inbound == inbound && !sticky.contains(peer_id))
+                // Same predicate as in `num_direct_peers`.
+                .filter(|(_, entry)| !entry.addresses.values().all(Self::is_relayed))
+                .map(|(peer_id, entry)| {
+                    let group = entry
+                        .addresses
+                        .values()
+                        .filter(|address| !Self::is_relayed(address))
+                        .filter_map(ip_of)
+                        .min()
+                        .map(network_group);
+                    (*peer_id, entry.connected_at, group)
+                })
+                .collect_vec()
+        };
+
+        let inbound = candidates(true);
+        if inbound.is_empty() {
+            youngest_of_largest_group(&candidates(false))
+        } else {
+            youngest_of_largest_group(&inbound)
         }
     }
 
@@ -2607,6 +2729,31 @@ fn panic_message(panic: &(dyn Any + Send)) -> String {
 
 /// Trips when more than a given number of panics are recorded within a sliding
 /// time window.
+/// The network group of an IP address, as in Bitcoin Core's `GetGroup`
+/// without an AS map: its `/16` for IPv4, its `/32` for IPv6.
+fn network_group(ip: IpAddr) -> IpAddr {
+    match ip.to_canonical() {
+        IpAddr::V4(ip) => IpAddr::V4(Ipv4Addr::from(u32::from(ip) & 0xffff_0000)),
+        IpAddr::V6(ip) => IpAddr::V6(Ipv6Addr::from(u128::from(ip) & !(u128::MAX >> 32))),
+    }
+}
+
+/// The last step of Bitcoin Core's `SelectNodeToEvict`: the youngest member of
+/// the network group with the most members, ties going to the group with the
+/// youngest member. An attacker who crowds a group thus evicts itself first.
+///
+/// Candidates are `(peer, connected_at, network group)`; a peer without a
+/// known group counts as one group with the others like it.
+fn youngest_of_largest_group(
+    candidates: &[(PeerId, SystemTime, Option<IpAddr>)],
+) -> Option<PeerId> {
+    let group_sizes = candidates.iter().map(|(_, _, group)| group).counts();
+    candidates
+        .iter()
+        .max_by_key(|(_, connected_at, group)| (group_sizes[group], *connected_at))
+        .map(|(peer_id, _, _)| *peer_id)
+}
+
 #[derive(Debug)]
 struct PanicBreaker {
     window: Duration,
@@ -2651,7 +2798,10 @@ pub(crate) enum ActorError {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::num::NonZeroU32;
+
     use libp2p::identity::Keypair;
+    use libp2p::swarm::ConnectionId;
     use neptune_wallet::wallet_entropy::WalletEntropy;
     use tokio::sync::broadcast;
 
@@ -2812,6 +2962,115 @@ mod tests {
             Some(BounceReason::MaxReached),
             actor.should_bounce(&circuit)
         );
+    }
+
+    fn at(secs: u64) -> SystemTime {
+        SystemTime::UNIX_EPOCH + Duration::from_secs(secs)
+    }
+
+    /// Track a new peer as the actor does on `ConnectionEstablished`.
+    fn track(
+        actor: &mut NetworkActor,
+        inbound: bool,
+        address: Multiaddr,
+        connected_at: SystemTime,
+    ) -> PeerId {
+        let peer_id = PeerId::random();
+        let entry = ActiveConnection {
+            connected_at,
+            inbound,
+            addresses: HashMap::from([(ConnectionId::new_unchecked(0), address)]),
+        };
+        actor.active_connections.insert(peer_id, entry);
+        peer_id
+    }
+
+    #[test]
+    fn network_groups_are_bitcoins() {
+        let group = |ip: &str| network_group(ip.parse().unwrap());
+        assert_eq!(group("1.2.3.4"), group("1.2.200.100"));
+        assert_ne!(group("1.2.3.4"), group("1.3.3.4"));
+        assert_eq!(group("1.2.3.4"), group("::ffff:1.2.3.4"));
+        assert_eq!(group("2001:db8:1::1"), group("2001:db8:ffff::1"));
+        assert_ne!(group("2001:db8::1"), group("2001:db9::1"));
+    }
+
+    #[test]
+    fn victim_is_youngest_of_largest_group() {
+        let [a, b, c] = std::array::from_fn(|_| PeerId::random());
+        let group = |ip: &str| Some(network_group(ip.parse().unwrap()));
+
+        let crowded = [
+            (a, at(1), group("1.2.0.1")),
+            (b, at(2), group("1.2.0.2")),
+            (c, at(3), group("9.9.0.1")),
+        ];
+        assert_eq!(Some(b), youngest_of_largest_group(&crowded));
+
+        let tied = [(a, at(1), group("1.2.0.1")), (c, at(3), group("9.9.0.1"))];
+        assert_eq!(Some(c), youngest_of_largest_group(&tied));
+
+        assert_eq!(None, youngest_of_largest_group(&[]));
+    }
+
+    #[tokio::test]
+    async fn bootstrap_victim_is_inbound_unless_there_is_none() {
+        let mut actor = test_actor().await;
+        let direct = |ip: &str| format!("/ip4/{ip}/tcp/9798").parse::<Multiaddr>().unwrap();
+
+        let inbound = track(&mut actor, true, direct("198.51.100.1"), at(1));
+        let sticky = track(&mut actor, true, direct("203.0.113.1"), at(2));
+        actor
+            .sticky_peers
+            .insert(direct("203.0.113.1"), StickyPeer::Connected(sticky));
+        let circuit = Multiaddr::empty().with(libp2p::multiaddr::Protocol::P2p(PeerId::random()));
+        track(&mut actor, true, circuit, at(3));
+        let outbound = track(&mut actor, false, direct("192.0.2.1"), at(4));
+
+        assert_eq!(Some(inbound), actor.bootstrap_victim());
+        actor.active_connections.remove(&inbound);
+        assert_eq!(Some(outbound), actor.bootstrap_victim());
+        actor.active_connections.remove(&outbound);
+        assert_eq!(None, actor.bootstrap_victim());
+    }
+
+    #[tokio::test]
+    async fn bootstrap_node_evicts_until_newcomer_fits() {
+        let mut actor = test_actor().await;
+        actor.max_num_peers = 2;
+
+        // Hole punches can take the number of direct peers above the limit.
+        let oldest = track(
+            &mut actor,
+            true,
+            "/ip4/198.51.1.1/tcp/9798".parse().unwrap(),
+            at(1),
+        );
+        for i in 2..=4 {
+            let address = format!("/ip4/198.51.{i}.1/tcp/9798").parse().unwrap();
+            track(&mut actor, true, address, at(i));
+        }
+        let newcomer = PeerId::random();
+        let arrival = || SwarmEvent::ConnectionEstablished {
+            peer_id: newcomer,
+            connection_id: ConnectionId::new_unchecked(1),
+            endpoint: ConnectedPoint::Listener {
+                local_addr: "/ip4/127.0.0.1/tcp/9798".parse().unwrap(),
+                send_back_addr: "/ip4/203.0.113.9/tcp/50000".parse().unwrap(),
+            },
+            num_established: NonZeroU32::MIN,
+            concurrent_dial_errors: None,
+            established_in: Duration::ZERO,
+        };
+
+        actor.handle_swarm_event(arrival());
+        assert_eq!(4, actor.active_connections.len(), "a regular node bounces");
+
+        actor.bootstrap = true;
+        actor.handle_swarm_event(arrival());
+        assert_eq!(2, actor.active_connections.len());
+        assert!(actor.active_connections.contains_key(&oldest));
+        assert!(actor.active_connections.contains_key(&newcomer));
     }
 
     #[tokio::test]

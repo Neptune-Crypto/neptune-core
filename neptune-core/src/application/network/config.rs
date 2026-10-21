@@ -37,6 +37,9 @@ pub(crate) struct NetworkConfig {
 
     /// Whether to offer relay reservations to peers behind NATs.
     pub(super) relay_server: bool,
+
+    /// Whether to make room for inbound newcomers when at capacity.
+    pub(super) bootstrap: bool,
 }
 
 impl Default for NetworkConfig {
@@ -53,6 +56,7 @@ impl Default for NetworkConfig {
             source_limits: SourceLimitsConfig::default(),
             external_addresses: vec![],
             relay_server: true,
+            bootstrap: false,
         }
     }
 }
@@ -90,6 +94,11 @@ impl NetworkConfig {
 
     pub(crate) fn with_relay_server(mut self, enabled: bool) -> Self {
         self.relay_server = enabled;
+        self
+    }
+
+    pub(crate) fn with_bootstrap(mut self, enabled: bool) -> Self {
+        self.bootstrap = enabled;
         self
     }
 
