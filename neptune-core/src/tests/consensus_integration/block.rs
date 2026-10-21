@@ -46,6 +46,7 @@ use crate::application::config::cli_args;
 use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
 use crate::state::transaction::tx_creation_config::TxCreationConfig;
 use crate::tests::shared::blocks::fake_valid_successor_for_tests;
+use crate::tests::shared::blocks::guess_for_tests;
 use crate::tests::shared::blocks::invalid_empty_block1_with_guesser_fraction;
 use crate::tests::shared::globalstate::mock_genesis_global_state;
 use crate::tests::shared_tokio_runtime;
@@ -962,7 +963,7 @@ async fn avoid_reselecting_same_input_utxos() {
         }
 
         // compose block
-        let (block, _) = Block::compose(
+        let (mut block, _) = Block::compose(
             blocks.last().unwrap().to_owned(),
             transaction.try_into().expect(
                 "went through at least one iteration of above loop, so merge bit must be set",
@@ -979,6 +980,7 @@ async fn avoid_reselecting_same_input_utxos() {
         )
         .await
         .unwrap();
+        guess_for_tests(&mut block, &alice).await;
 
         let block_is_valid = block.validate(blocks.last().unwrap(), now, network).await;
         println!("block is valid? {:?}", block_is_valid.map(|_| "yes"));

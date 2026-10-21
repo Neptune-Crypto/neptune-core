@@ -6441,7 +6441,7 @@ mod tests {
                         target,
                         lustration_status,
                         Some(version),
-                        None,
+                        pow_puzzle.swbfi_reveal.as_ref(),
                     ) {
                         break valid_pow;
                     }

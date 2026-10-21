@@ -4125,9 +4125,11 @@ mod tests {
 
     mod blocks {
         use itertools::Itertools;
+        use neptune_consensus::block::proof_of_work_puzzle::ProofOfWorkPuzzle;
 
         use super::*;
         use crate::tests::shared::blocks::fake_valid_block_proposal_successor_for_test;
+        use crate::tests::shared::blocks::guesser_reveal_empty_swbfi;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
@@ -4213,7 +4215,7 @@ mod tests {
             Ok(())
         }
 
-        /// Return two blocks:
+        /// Returns two blocks:
         /// - one with invalid PoW
         /// - one with valid PoW
         async fn pow_related_blocks(network: Network, predecessor: &Block) -> (Block, Block) {
@@ -4233,7 +4235,10 @@ mod tests {
             assert!(!invalid_pow.has_proof_of_work(network, predecessor.header()));
 
             let mut block_with_valid_gamma_pow = block.clone();
-            block_with_valid_gamma_pow.satisfy_pow(difficulty, ConsensusRuleSet::HardforkGamma);
+            let reveal = guesser_reveal_empty_swbfi(predecessor, &block, network).await;
+            let pow = ProofOfWorkPuzzle::new(block, difficulty, reveal)
+                .solve(ConsensusRuleSet::HardforkGamma);
+            block_with_valid_gamma_pow.set_header_pow(pow);
 
             (invalid_pow, block_with_valid_gamma_pow)
         }

@@ -1,6 +1,9 @@
 use macro_rules_attr::apply;
+use neptune_consensus::block::block_appendix::BlockAppendix;
+use neptune_consensus::block::block_transaction::BlockTransaction;
 use neptune_consensus::block::block_validation_error::BlockValidationError;
 use neptune_consensus::block::mutator_set_update::MutatorSetCatchUp;
+use neptune_consensus::block::test_helpers::invalid_empty_block_with_timestamp;
 use neptune_consensus::block::Block;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
@@ -137,10 +140,23 @@ async fn disallow_double_spends_across_blocks() {
     .await
     .unwrap();
 
-    let block3 = mine_txs(&alice, vec![tx], later).await;
+    // Build block manually since composer refuses to prove a double spend.
+    let mut block3 = invalid_empty_block_with_timestamp(&block2, later, network);
+    block3.set_transaction_kernel(BlockTransaction::from_tx_kernel(tx.kernel).kernel().clone());
+    let claims = BlockAppendix::consensus_claims(
+        block3.body(),
+        block3.header().height,
+        block2.hash(),
+        &block2.mutator_set_accumulator_after().unwrap(),
+        network,
+    );
+    block3.set_appendix(BlockAppendix::new(claims));
     assert_eq!(
         BlockValidationError::RemovalRecordsValidity,
-        block3.validate(&block2, later, network,).await.unwrap_err(),
-        "Block doing a double-spend must be invalid."
+        block3
+            .validate_proposal(&block2, later, network)
+            .await
+            .unwrap_err(),
+        "Double-spending block must be invalid."
     );
 }
