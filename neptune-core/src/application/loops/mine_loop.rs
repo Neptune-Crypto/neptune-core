@@ -1902,7 +1902,7 @@ pub(crate) mod tests {
         .is_none());
         alice.set_cli(cli).await;
 
-        let (second, _) =
+        let (mut second, _) =
             compose_block_helper(genesis_block.clone(), alice.clone(), now, job_options)
                 .await
                 .unwrap()
@@ -1963,6 +1963,17 @@ pub(crate) mod tests {
             )
         );
         assert_eq!(*block_kernel, *second_work.block_transaction.kernel());
+
+        // Ensure composer work is cleared when a new tip is set, as it cannot
+        // be used again.
+        guess_for_tests(&mut second, &alice).await;
+        alice.set_new_tip(second).await.unwrap();
+        assert!(alice
+            .lock_guard()
+            .await
+            .mining_state
+            .composer_work
+            .is_none());
     }
 
     #[apply(shared_tokio_runtime)]

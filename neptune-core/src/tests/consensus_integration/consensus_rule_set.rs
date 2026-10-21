@@ -18,6 +18,7 @@ use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifie
 use neptune_consensus::transaction::transaction_proof::TransactionProofType;
 use neptune_consensus::transaction::validity::neptune_proof::NeptuneProof;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_mempool::upgrade_priority::UpgradePriority;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::mast_hash::MastHash;
 use neptune_primitives::network::Network;
@@ -340,27 +341,65 @@ async fn blocks_across_epsilon_activation_on_main_net() {
     )
     .await;
 
-    // Mine the last block of delta, the first block of epsilon and one more.
-    let mut now = fake_genesis.header().timestamp;
-    let mut blocks = vec![];
-    for _ in 0..3 {
-        now += Timestamp::hours(1);
-        let predecessor = bob.lock_guard().await.chain.tip().to_owned();
-        let (block, expected_composer_utxos) = mine_to_own_wallet(bob.clone(), now).await;
-        assert!(block.is_valid(&predecessor, now, network).await);
-        bob.set_new_self_composed_tip(block.clone(), expected_composer_utxos)
+    // Mine the last block of delta.
+    let mut now = fake_genesis.header().timestamp + Timestamp::hours(1);
+    let (last_delta_block, delta_composer_utxos) = mine_to_own_wallet(bob.clone(), now).await;
+    assert!(last_delta_block.is_valid(&fake_genesis, now, network).await);
+    assert_eq!(
+        activation.previous().unwrap(),
+        last_delta_block.header().height
+    );
+    bob.set_new_self_composed_tip(last_delta_block.clone(), delta_composer_utxos)
+        .await
+        .unwrap();
+
+    // A transaction proven under delta stays in the mempool across the
+    // activation, and the first block of epsilon confirms it. Inputs this
+    // early look like lustration candidates to the wallet.
+    now += Timestamp::hours(1);
+    let lustrating = InputSelectionPolicy::default().set_lustration_acceptance(true);
+    let straddling = tx_with_n_outputs(bob.clone(), 1, now, Some(lustrating), None, None)
+        .await
+        .unwrap();
+    bob.lock_guard_mut()
+        .await
+        .mempool_insert((*straddling.transaction).clone(), UpgradePriority::Critical)
+        .await;
+    let (first_epsilon_block, epsilon_composer_utxos) = mine_to_own_wallet(bob.clone(), now).await;
+    assert!(
+        first_epsilon_block
+            .is_valid(&last_delta_block, now, network)
             .await
-            .unwrap();
-        blocks.push(block);
-    }
-    assert_eq!(activation.previous().unwrap(), blocks[0].header().height);
+    );
+    assert!(!first_epsilon_block
+        .body()
+        .transaction_kernel
+        .inputs
+        .is_empty());
+    bob.set_new_self_composed_tip(first_epsilon_block.clone(), epsilon_composer_utxos)
+        .await
+        .unwrap();
 
     // The delta block contains the transaction's claim only; the epsilon
     // block also contains the claim about its predecessor.
-    assert_eq!(1, blocks[0].appendix().len());
-    let predecessor_claim =
-        PredecessorIsValid::claim_about(&blocks[0], blocks[1].body().mast_hash(), network);
-    assert!(blocks[1].appendix().find(&predecessor_claim).is_some());
+    assert_eq!(1, last_delta_block.appendix().len());
+    let predecessor_claim = PredecessorIsValid::claim_about(
+        &last_delta_block,
+        first_epsilon_block.body().mast_hash(),
+        network,
+    );
+    assert!(first_epsilon_block
+        .appendix()
+        .find(&predecessor_claim)
+        .is_some());
+
+    // One more block, mined.
+    now += Timestamp::hours(1);
+    let (third, composer_utxos) = mine_to_own_wallet(bob.clone(), now).await;
+    assert!(third.is_valid(&first_epsilon_block, now, network).await);
+    bob.set_new_self_composed_tip(third, composer_utxos)
+        .await
+        .unwrap();
     assert!(
         bob.api()
             .wallet()
@@ -376,8 +415,6 @@ async fn blocks_across_epsilon_activation_on_main_net() {
     for _ in 0..3 {
         now += Timestamp::hours(1);
         let predecessor = bob.lock_guard().await.chain.tip().to_owned();
-        // Inputs this early look like lustration candidates to the wallet.
-        let lustrating = InputSelectionPolicy::default().set_lustration_acceptance(true);
         let tx = tx_with_n_outputs(bob.clone(), 24, now, Some(lustrating), None, None)
             .await
             .unwrap();
