@@ -1,10 +1,12 @@
 use futures::channel::oneshot;
+use neptune_archival_mmr::mock::get_ammr_from_digests;
 use neptune_consensus::block::block_transaction::BlockTransaction;
 use neptune_consensus::block::proof_of_work_puzzle::ProofOfWorkPuzzle;
 use neptune_consensus::block::test_helpers::invalid_block_with_transaction;
 use neptune_consensus::block::validity::block_primitive_witness::BlockPrimitiveWitness;
 use neptune_consensus::block::validity::block_program::BlockProgram;
 use neptune_consensus::block::validity::block_proof_witness::BlockProofWitness;
+use neptune_consensus::block::validity::swbfi_reveal::guesser_node_index;
 use neptune_consensus::block::Block;
 use neptune_consensus::block::BlockProof;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
@@ -12,6 +14,7 @@ use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOption
 use neptune_consensus::proof_abstractions::verifier::cache_true_claims;
 use neptune_consensus::transaction::validity::neptune_proof::Proof;
 use neptune_consensus::transaction::Transaction;
+use neptune_mutator_set::removal_record::chunk::Chunk;
 use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 use neptune_wallet::address::generation_address::GenerationReceivingAddress;
@@ -23,6 +26,9 @@ use neptune_wallet::mock_block::make_mock_block_with_puts_and_guesser_preimage_a
 use rand::rngs::StdRng;
 use rand::RngExt;
 use rand::SeedableRng;
+use tasm_lib::prelude::Tip5;
+use tasm_lib::twenty_first::tip5::digest::Digest;
+use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 use crate::api::export::GlobalStateLock;
 use crate::api::export::OutputFormat;
@@ -71,6 +77,16 @@ pub(crate) async fn next_block(
         .lock_guard()
         .await
         .mining_rewards_address();
+    let swbfi_reveal = global_state_lock
+        .lock_guard()
+        .await
+        .chain
+        .guesser_swbfi_reveal(
+            child_no_pow.header(),
+            &guesser_address.clone().into(),
+            network,
+        )
+        .await;
     let new_timestamp = parent.header().timestamp + Timestamp::minutes(9);
     let new_timestamp = std::cmp::max(new_timestamp, child_no_pow.header().timestamp);
     let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
@@ -84,7 +100,7 @@ pub(crate) async fn next_block(
             address: guesser_address,
             override_rng_seed: Some(deterministic_guesser_rng_seed),
             override_timestamp: Some(new_timestamp),
-            swbfi_reveal: None,
+            swbfi_reveal,
         },
     )
     .await;
@@ -181,6 +197,40 @@ pub(crate) async fn fake_valid_block_proposal_from_tx(
     Block::new(header, body, appendix, proof)
 }
 
+/// The guesser's reveal of the inactive SWBF after the predecessor, for a
+/// chain whose inactive SWBF holds only empty chunks: no removal has slid out
+/// of the active window yet, as holds while every block's transaction has no
+/// inputs. None where the rule set requires no reveal.
+pub(crate) async fn guesser_reveal_empty_swbfi(
+    predecessor: &Block,
+    proposal: &Block,
+    network: Network,
+) -> Option<(Digest, Vec<Digest>)> {
+    let rules = ConsensusRuleSet::infer_from(network, proposal.header().height);
+    if !rules.miners_must_prove_ams_knowledge(network) {
+        return None;
+    }
+    let leaf_count = predecessor
+        .mutator_set_accumulator_after()
+        .unwrap()
+        .swbf_inactive
+        .num_leafs();
+    let (index, levels) = guesser_node_index(
+        predecessor.hash(),
+        &proposal.header().guesser_receiver_data,
+        leaf_count,
+    )?;
+    let empty_chunk = Tip5::hash(&Chunk::empty_chunk());
+    let num_chunks = usize::try_from(leaf_count).unwrap();
+    let swbfi = get_ammr_from_digests(vec![empty_chunk; num_chunks]).await;
+    let levels_up = leaf_count.ilog2() - levels;
+    Some(
+        swbfi
+            .get_ancestor_and_path(index << levels_up, levels_up)
+            .await,
+    )
+}
+
 /// Create a block from a transaction without the hassle of proving but such
 /// that it appears valid.
 async fn fake_valid_block_from_block_tx_for_tests(
@@ -192,7 +242,14 @@ async fn fake_valid_block_from_block_tx_for_tests(
 
     let block_height = block.header().height;
     let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
-    block.satisfy_pow(predecessor.header().difficulty, consensus_rule_set);
+    let difficulty = if consensus_rule_set.use_parent_difficulty() {
+        predecessor.header().difficulty
+    } else {
+        block.header().difficulty
+    };
+    let reveal = guesser_reveal_empty_swbfi(predecessor, &block, network).await;
+    let pow = ProofOfWorkPuzzle::new(block.clone(), difficulty, reveal).solve(consensus_rule_set);
+    block.set_header_pow(pow);
 
     block
 }
