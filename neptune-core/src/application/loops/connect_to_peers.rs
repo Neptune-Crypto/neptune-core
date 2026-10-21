@@ -43,6 +43,7 @@ use crate::application::config::parser::multiaddr::multiaddr_to_socketaddr;
 use crate::application::config::parser::multiaddr::socketaddr_to_multiaddr;
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
 use crate::application::loops::peer_loop::channel::PeerTaskToMain;
+use crate::application::loops::peer_loop::NetworkStackKind;
 use crate::application::loops::peer_loop::PeerLoopHandler;
 use crate::application::network::frame_codec::PeerFrameCodec;
 use crate::application::network::handshake::WireEncoding;
@@ -459,7 +460,8 @@ where
         peer_multiaddr,
         *peer_handshake,
         true,
-    );
+    )
+    .with_network_stack(NetworkStackKind::Legacy);
 
     // Run peer loop.
     peer_loop_handler

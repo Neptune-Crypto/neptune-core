@@ -29,6 +29,7 @@ use tokio::time::Instant;
 
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
 use crate::application::loops::peer_loop::channel::PeerTaskToMain;
+use crate::application::loops::peer_loop::NetworkStackKind;
 use crate::application::loops::peer_loop::PeerLoopHandler;
 use crate::application::network::address_book::AddressBook;
 use crate::application::network::address_book::ADDRESS_BOOK_MAX_SIZE;
@@ -2435,7 +2436,8 @@ impl NetworkActor {
             peer_address,
             remote_handshake,
             inbound,
-        );
+        )
+        .with_network_stack(NetworkStackKind::Libp2p);
 
         let peer_stream = bridge_libp2p_stream(raw_stream, encoding);
 

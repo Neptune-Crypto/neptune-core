@@ -134,6 +134,21 @@ fn is_transport_error(err: &(dyn std::error::Error + 'static)) -> bool {
         .is_some_and(|e| e.kind() != std::io::ErrorKind::InvalidData)
 }
 
+/// The network stack a peer loop runs over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NetworkStackKind {
+    /// The legacy TCP stack, which relies on the peer loop to enforce the peer
+    /// limit.
+    Legacy,
+
+    /// The libp2p stack, whose network actor enforces the peer limit itself
+    /// and makes room before it admits a peer. A peer it evicts leaves
+    /// `peer_map` only once its own loop has ended, which can take a while, so
+    /// checking the limit against `peer_map` again would refuse the very peer
+    /// the actor made room for.
+    Libp2p,
+}
+
 /// Handles messages from peers via TCP
 ///
 /// also handles messages from main task over the main-to-peer-tasks broadcast
@@ -156,6 +171,8 @@ pub struct PeerLoopHandler {
     /// `blocks_served_since`.
     blocks_served: u32,
     blocks_served_since: SystemTime,
+
+    network_stack: NetworkStackKind,
 
     #[cfg(test)]
     mock_now: Option<Timestamp>,
@@ -181,9 +198,17 @@ impl PeerLoopHandler {
             rng: StdRng::from_rng(&mut rand::rng()),
             blocks_served: 0,
             blocks_served_since: SystemTime::UNIX_EPOCH,
+            network_stack: NetworkStackKind::Legacy,
             #[cfg(test)]
             mock_now: None,
         }
+    }
+
+    /// Set the network stack the peer loop runs over; [`Self::new`] assumes the
+    /// legacy one.
+    pub(crate) fn with_network_stack(mut self, network_stack: NetworkStackKind) -> Self {
+        self.network_stack = network_stack;
+        self
     }
 
     /// The message that notifies the connected peer of `block`, in the form
@@ -3246,7 +3271,9 @@ impl PeerLoopHandler {
                     bail!("Already connected to peer with this instance ID. Aborting connection.");
                 }
 
-                if peer_map.len() >= cli_args.max_num_peers {
+                if self.network_stack == NetworkStackKind::Legacy
+                    && peer_map.len() >= cli_args.max_num_peers
+                {
                     bail!("Attempted to connect to more peers than allowed. Aborting connection.");
                 }
 
@@ -3388,6 +3415,7 @@ mod tests {
                 peer_tx_relay: peer_handshake_data.relays_transactions(),
                 blocks_served: 0,
                 blocks_served_since: SystemTime::UNIX_EPOCH,
+                network_stack: NetworkStackKind::Legacy,
                 mock_now: Some(mocked_time),
                 rng: StdRng::from_rng(&mut rand::rng()),
             }
@@ -4189,6 +4217,56 @@ mod tests {
                 .await;
             assert!(result.is_err(), "second peer from the IP must be refused");
             assert_eq!(1, state_lock.peers().len());
+
+            Ok(())
+        }
+
+        /// The libp2p network actor enforces the peer limit for the peers it
+        /// admits, making room first; the peer it evicted may linger in the
+        /// peer map.
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn libp2p_peer_loop_leaves_peer_limit_to_network_actor() -> Result<()> {
+            use crate::tests::shared::globalstate::get_dummy_peer_incoming;
+
+            let network = Network::Main;
+            let cli = cli_args::Args {
+                max_num_peers: 1,
+                network,
+                ..Default::default()
+            };
+            let (peer_broadcast_tx, _from_main_rx, to_main_tx, _to_main_rx, _, _, state_lock, hsd) =
+                get_test_genesis_setup(0, cli).await?;
+
+            // The peer map is full.
+            let lingering: std::net::SocketAddr = "253.4.5.1:28011".parse()?;
+            state_lock.peers().insert(
+                pseudorandom_peer_id(&lingering),
+                get_dummy_peer_incoming(lingering),
+            );
+
+            let newcomer: std::net::SocketAddr = "253.4.6.1:28012".parse()?;
+            let handler = || {
+                PeerLoopHandler::new(
+                    to_main_tx.clone(),
+                    state_lock.clone(),
+                    pseudorandom_peer_id(&newcomer),
+                    socketaddr_to_multiaddr(newcomer),
+                    hsd,
+                    true,
+                )
+            };
+            let bye = || Mock::new(vec![Action::Read(PeerMessage::Bye)]);
+
+            let refused = handler()
+                .run_wrapper(bye(), peer_broadcast_tx.subscribe())
+                .await;
+            assert!(refused.is_err(), "a full peer map refuses other peers");
+
+            handler()
+                .with_network_stack(NetworkStackKind::Libp2p)
+                .run_wrapper(bye(), peer_broadcast_tx.subscribe())
+                .await?;
 
             Ok(())
         }
