@@ -415,7 +415,10 @@ mod tests {
         }
         for (membership_proof, &item) in membership_proofs.iter().zip_eq(&items).step_by(3) {
             let removal_record = rms.ams().drop(item, membership_proof).await;
-            rms.ams_mut().remove(&removal_record).await;
+            rms.ams_mut()
+                .remove(removal_record.absolute_indices)
+                .await
+                .unwrap();
         }
         rms.set_sync_label(random()).await;
         rms.persist().await;

@@ -1034,13 +1034,7 @@ impl GlobalState {
         #[cfg(test)]
         {
             is_archival
-                && self
-                    .chain
-                    .archival_state()
-                    .genesis_block
-                    .header()
-                    .height
-                    .is_genesis()
+                && self.chain.archival_state().tracks_genesis()
                 && !self.force_wallet_membership_proof_maintance
         }
         #[cfg(not(test))]
