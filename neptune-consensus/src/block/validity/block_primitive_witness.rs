@@ -52,7 +52,7 @@ pub struct BlockPrimitiveWitness {
 
     maybe_body: OnceLock<BlockBody>,
 
-    pub(super) network: Network,
+    pub(in crate::block) network: Network,
 }
 
 impl BlockPrimitiveWitness {

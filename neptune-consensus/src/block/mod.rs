@@ -1810,6 +1810,7 @@ mod test_support {
 
     use super::*;
     use crate::block::proof_of_work_puzzle::ProofOfWorkPuzzle;
+    use crate::block::test_helpers::block_mmra_with_num_leafs;
     use crate::proof_abstractions::triton_vm_job_queue::vm_job_queue;
     use crate::transaction::transaction_kernel::TransactionKernelModifier;
 
@@ -1858,6 +1859,32 @@ mod test_support {
             self.unset_digest();
         }
 
+        /// A fake genesis block with the specified height, for building a chain
+        /// from there.
+        ///
+        /// The mutator set after it contains only the genesis outputs, so the
+        /// archival mutator set is known.
+        pub fn fake_genesis_at_height(network: Network, height: BlockHeight) -> Self {
+            let genesis = Self::genesis(network);
+            let body = BlockBody::new(
+                genesis.body().transaction_kernel.clone(),
+                genesis.body().mutator_set_accumulator.clone(),
+                genesis.body().lock_free_mmr_accumulator.clone(),
+                block_mmra_with_num_leafs(height.value(), vec![]),
+            );
+            let mut header = *genesis.header();
+            header.height = height;
+            header.difficulty = Difficulty::MINIMUM;
+            if let Some(counter) = ConsensusRuleSet::lustration_counter_initial(network, height) {
+                header.pow.set_lustration_status(LustrationStatus {
+                    counter,
+                    max_lustrating_aocl_leaf_index: body.max_aocl_leaf_index(),
+                });
+            }
+
+            Self::new(header, body, BlockAppendix::default(), BlockProof::Genesis)
+        }
+
         /// Produce two fake blocks, parent and child.
         pub async fn fake_block_pair_genesis_and_child_from_witness(
             primitive_witness: BlockPrimitiveWitness,
@@ -1865,12 +1892,14 @@ mod test_support {
             let mut fake_genesis = primitive_witness.predecessor_block().to_owned();
             fake_genesis.proof = BlockProof::Genesis;
             let block_timestamp = primitive_witness.transaction().kernel.timestamp;
+            let job_options =
+                TritonVmProofJobOptions::default_with_network(primitive_witness.network);
             let (fake_child, _) = Self::block_template_from_block_primitive_witness(
                 primitive_witness,
                 block_timestamp,
                 None,
                 vm_job_queue(),
-                TritonVmProofJobOptions::default(),
+                job_options,
             )
             .await
             .unwrap();

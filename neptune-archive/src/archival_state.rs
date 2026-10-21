@@ -457,7 +457,10 @@ impl ArchivalState {
         archival_mutator_set: &mut RustyArchivalMutatorSet,
         genesis_block: &Block,
     ) {
-        for addition_record in &genesis_block.kernel.body.transaction_kernel.outputs {
+        let addition_records = genesis_block
+            .all_addition_records()
+            .expect("genesis block must have addition records");
+        for addition_record in &addition_records {
             archival_mutator_set.ams_mut().add(addition_record).await;
         }
         let genesis_hash = genesis_block.hash();
@@ -2104,10 +2107,18 @@ impl ArchivalState {
         #[cfg(any(test, feature = "test-helpers"))]
         {
             // In tests you're allowed to set a genesis block with a height
-            // different than zero. In such cases, this part of the archival state
-            // update cannot work. So we skip it.
+            // different than zero. In such cases, this part of the archival
+            // state update may not work, depending on this fake genesis block's
+            // mutator set.
             if !self.genesis_block.header().height.is_genesis() {
-                return Ok(());
+                let mut from_outputs = MutatorSetAccumulator::default();
+                for addition_record in &self.genesis_block.body().transaction_kernel.outputs {
+                    from_outputs.add(addition_record);
+                }
+                if from_outputs.hash() != self.genesis_block.body().mutator_set_accumulator().hash()
+                {
+                    return Ok(());
+                }
             }
         }
 
