@@ -50,6 +50,16 @@ use crate::macros::fn_name;
 use crate::macros::log_slow_scope;
 use crate::state::GlobalStateLock;
 
+/// A connected peer, as tracked in [`NetworkActor`]'s `active_connections`.
+#[derive(Debug, Clone)]
+struct ActiveConnection {
+    /// When the first connection to this peer was established.
+    connected_at: SystemTime,
+
+    /// The remote address of each open connection to this peer.
+    addresses: HashMap<libp2p::swarm::ConnectionId, Multiaddr>,
+}
+
 /// Tracks the status of a relay reservation.
 #[derive(Debug, Copy, Clone)]
 enum RelayStatus {
@@ -137,8 +147,7 @@ pub(crate) struct NetworkActor {
 
     /// Lookup table to find the current address of connected peers or how long
     /// they have been connected for.
-    active_connections:
-        HashMap<PeerId, (SystemTime, HashMap<libp2p::swarm::ConnectionId, Multiaddr>)>,
+    active_connections: HashMap<PeerId, ActiveConnection>,
 
     /// Where each peer was observed connecting from.
     observed_ips: ObservedIps,
@@ -1105,13 +1114,10 @@ impl NetworkActor {
                     tracing::debug!("Redundant connection {connection_id} to {peer_id} closed.");
 
                     // Remove connection
-                    self.active_connections.entry(peer_id).and_modify(
-                        |(_timestamp, address_map)| {
-                            address_map.remove(&connection_id);
-                        },
-                    );
-                } else if let Some((_timestamp, _)) = self.active_connections.get(&peer_id).cloned()
-                {
+                    self.active_connections.entry(peer_id).and_modify(|entry| {
+                        entry.addresses.remove(&connection_id);
+                    });
+                } else if self.active_connections.contains_key(&peer_id) {
                     // Book-keep.
                     self.active_connections.remove(&peer_id);
                     self.relay_servers.remove(&peer_id);
@@ -1140,11 +1146,9 @@ impl NetworkActor {
                 // actions that follow should only happen on the first
                 // connection to this peer.
                 if self.active_connections.contains_key(&peer_id) {
-                    self.active_connections.entry(peer_id).and_modify(
-                        |(_timestamp, address_map)| {
-                            address_map.insert(connection_id, address);
-                        },
-                    );
+                    self.active_connections.entry(peer_id).and_modify(|entry| {
+                        entry.addresses.insert(connection_id, address);
+                    });
                     tracing::debug!(
                         "Established duplicate {connection_id} to peer {peer_id}; tracking address.",
                     );
@@ -1206,10 +1210,13 @@ impl NetworkActor {
                 // Store the new connection.
                 self.active_connections
                     .entry(peer_id)
-                    .and_modify(|(_timestamp, address_map)| {
-                        address_map.insert(connection_id, address.clone());
+                    .and_modify(|entry| {
+                        entry.addresses.insert(connection_id, address.clone());
                     })
-                    .or_insert((SystemTime::now(), HashMap::from([(connection_id, address)])));
+                    .or_insert(ActiveConnection {
+                        connected_at: SystemTime::now(),
+                        addresses: HashMap::from([(connection_id, address)]),
+                    });
 
                 // Note: Identify and Kademlia will now automatically start
                 // their handshakes over this new "open line."
@@ -1227,7 +1234,7 @@ impl NetworkActor {
         let num_relayed_only = self
             .active_connections
             .values()
-            .filter(|(_, addresses)| addresses.values().all(Self::is_relayed))
+            .filter(|entry| entry.addresses.values().all(Self::is_relayed))
             .count();
         let num_direct = self.active_connections.len() - num_relayed_only;
         let at_capacity = if Self::is_relayed(address) {
@@ -1555,7 +1562,7 @@ impl NetworkActor {
                 let relayed_only = self
                     .active_connections
                     .get(&remote_peer_id)
-                    .is_some_and(|(_, addresses)| addresses.values().all(Self::is_relayed));
+                    .is_some_and(|entry| entry.addresses.values().all(Self::is_relayed));
                 if relayed_only {
                     self.swarm.disconnect_peer_id(remote_peer_id).ok();
                 }
@@ -1702,7 +1709,9 @@ impl NetworkActor {
         let from_main_rx = self.main_to_peer_broadcast.subscribe();
 
         // Fetch address from carefully maintained address map.
-        let Some((_timestamp, address)) = self.active_connections.get(&peer_id).cloned() else {
+        let Some(ActiveConnection { addresses, .. }) =
+            self.active_connections.get(&peer_id).cloned()
+        else {
             tracing::warn!(
                 peer = %peer_id,
                 "Dropping hijacked stream: no address is tracked for this peer."
@@ -1722,10 +1731,10 @@ impl NetworkActor {
 
         // Spawn the blockchain peer loop with the hijacked stream.
         // Prefer a direct address: a relayed one names the relay.
-        let peer_address = address
+        let peer_address = addresses
             .values()
             .find(|address| Self::is_direct(address))
-            .or_else(|| address.values().next())
+            .or_else(|| addresses.values().next())
             .cloned()
             .unwrap_or_else(|| Multiaddr::from(Ipv4Addr::new(127, 0, 0, 1)));
         if let Some(loop_handle) = self.spawn_peer_loop(
@@ -1996,7 +2005,7 @@ impl NetworkActor {
                             .get(&malicious_peer_id)
                             .cloned()
                             .into_iter()
-                            .flat_map(|(_ts, adm)| adm.values().cloned().collect_vec());
+                            .flat_map(|entry| entry.addresses.into_values());
                         for address in active_connection_addresses {
                             // Ignore relay addresses: avoid banning relay
                             // servers.
@@ -2250,7 +2259,8 @@ impl NetworkActor {
         // to have announced a circuit address later than a non-circuit
         // address.
         for &peer_id in available_peers {
-            let Some((_timestamp, addresses)) = self.active_connections.get(&peer_id).cloned()
+            let Some(ActiveConnection { addresses, .. }) =
+                self.active_connections.get(&peer_id).cloned()
             else {
                 continue;
             };
@@ -2477,7 +2487,7 @@ impl NetworkActor {
         let oldest_peer = self
             .active_connections
             .iter()
-            .min_by_key(|(_peer_id, (connected_at, _addr))| *connected_at)
+            .min_by_key(|(_peer_id, entry)| entry.connected_at)
             .map(|(peer_id, _)| *peer_id);
 
         if let Some(peer_id) = oldest_peer {
