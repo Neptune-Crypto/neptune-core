@@ -1637,8 +1637,9 @@ impl NetworkActor {
     ///     new, authenticated peer is fully operational and ready for
     ///     synchronization.
     ///
-    /// If the peer is not present in the address map, the stream is dropped,
-    /// which closes the connection to that peer. The actor keeps running.
+    /// If no peer loop is spawned, the connection is closed, except when
+    /// refused for lack of room which keeps the connection for Identify and
+    /// Kademlia, required for communicating potential peers to the other node.
     fn handle_stream_gateway_event(&mut self, event: GatewayEvent) {
         let (peer_id, connection_id, remote_handshake, encoding, stream, inbound) = match event {
             GatewayEvent::HandshakeReceived {
@@ -1675,9 +1676,9 @@ impl NetworkActor {
         let Some((_timestamp, address)) = self.active_connections.get(&peer_id).cloned() else {
             tracing::warn!(
                 peer = %peer_id,
-                "Dropping hijacked stream: no address is tracked for this peer."
+                "Closing connection: no address is tracked for this peer."
             );
-            drop(stream);
+            self.swarm.close_connection(connection_id);
             return;
         };
 
@@ -1685,14 +1686,13 @@ impl NetworkActor {
         if let Some(reason) =
             Self::already_connected_reason(&self.global_state_lock, peer_id, &remote_handshake)
         {
-            tracing::debug!(peer = %peer_id, "Dropping hijacked stream: {reason}.");
-            drop(stream);
+            tracing::debug!(peer = %peer_id, "Closing connection: {reason}.");
+            self.swarm.close_connection(connection_id);
             return;
         }
 
         // Refuse a peer loop beyond the limit, but keep the connection: it
-        // serves Identify and Kademlia until it idles out. Room was made for
-        // a sticky peer when it connected.
+        // serves Identify and Kademlia until it idles out.
         let is_sticky = address.values().any(|a| self.sticky_peers.contains_key(a));
         if !is_sticky && self.upgraded_peers.lock().unwrap().len() >= self.max_num_peers {
             tracing::debug!(peer = %peer_id, "Refusing peer loop: maximum number of peers reached.");
@@ -1738,6 +1738,8 @@ impl NetworkActor {
             let _ = self
                 .event_tx
                 .send(NetworkEvent::NewPeerLoop { loop_handle });
+        } else {
+            self.swarm.close_connection(connection_id);
         }
     }
 
