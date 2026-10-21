@@ -5,7 +5,6 @@ use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 
 use crate::block::mutator_set_update::MutatorSetCatchUp;
-use crate::block::mutator_set_update::MutatorSetUpdate;
 use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 
@@ -220,7 +219,10 @@ impl Transaction {
         new_addition_records: Vec<neptune_mutator_set::addition_record::AdditionRecord>,
         new_removal_records: Vec<neptune_mutator_set::removal_record::RemovalRecord>,
     ) -> Transaction {
-        let mutator_set_update = MutatorSetUpdate::new(new_removal_records, new_addition_records);
+        let mutator_set_update = crate::block::mutator_set_update::MutatorSetUpdate::new(
+            new_removal_records,
+            new_addition_records,
+        );
         let primitive_witness =
             PrimitiveWitness::update_with_new_ms_data(old_primitive_witness, mutator_set_update);
         let kernel = primitive_witness.kernel.clone();
@@ -250,6 +252,7 @@ pub(crate) mod tests {
     use tracing_test::traced_test;
 
     use super::*;
+    use crate::block::mutator_set_update::MutatorSetUpdate;
     use crate::proof_abstractions::test_runtime::shared_tokio_runtime;
     use crate::transaction::test_helpers::make_mock_transaction;
     use crate::transaction::utxo_triple::UtxoTriple;
