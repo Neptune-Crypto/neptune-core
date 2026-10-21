@@ -3083,7 +3083,7 @@ mod tests {
     }
 
     #[test]
-    fn an_unpaid_merge_yields_to_the_parts_that_pay() {
+    fn underpaying_merge_yields_to_its_constituents() {
         let free_inputs = free_inputs_under_epsilon_on_testnet_42();
         let (removal_records, mutator_set_hash) = consistent_removal_records(free_inputs + 1);
         let leaf_price = NativeCurrencyAmount::coins_from_str("0.1").unwrap();
@@ -3139,6 +3139,76 @@ mod tests {
             selected_at_leaf_price(&mempool, NativeCurrencyAmount::zero())
         );
         assert_eq!(vec![a.txid()], selected_at_leaf_price(&mempool, leaf_price));
+    }
+
+    #[test]
+    fn underpaying_merge_yields_to_its_constituents_on_block_extension() {
+        let (removal_records, mutator_set_hash) =
+            consistent_removal_records(CorrectSwbfUpdate::MAX_INPUTS_PER_LEAF + 1);
+        let leaf_price = NativeCurrencyAmount::coins_from_str("0.1").unwrap();
+        let [a, b, in_block] = make_plenty_mock_transaction_supported_by_invalid_single_proofs(3)
+            .try_into()
+            .unwrap();
+
+        // Extending a proven tree, every input is charged. a's one input
+        // takes a leaf its fee pays for, b's leaf of dust inputs does not,
+        // and merged they take two leaves their fees together do not pay for.
+        let a = synced_transaction(&a, &removal_records[..1], leaf_price, mutator_set_hash);
+        let b = synced_transaction(
+            &b,
+            &removal_records[1..],
+            NativeCurrencyAmount::coins_from_str("0.001").unwrap(),
+            mutator_set_hash,
+        );
+        let merged = Transaction {
+            kernel: TransactionKernelModifier::default()
+                .inputs(removal_records.clone())
+                .outputs([a.kernel.outputs.clone(), b.kernel.outputs.clone()].concat())
+                .announcements(
+                    [
+                        a.kernel.announcements.clone(),
+                        b.kernel.announcements.clone(),
+                    ]
+                    .concat(),
+                )
+                .fee(a.kernel.fee + b.kernel.fee)
+                .timestamp(a.kernel.timestamp.max(b.kernel.timestamp))
+                .merge_bit(true)
+                .modify(a.kernel.clone()),
+            proof: TransactionProof::invalid(),
+        };
+        let block_transaction = TransactionKernelModifier::default()
+            .inputs(vec![])
+            .merge_bit(true)
+            .modify(in_block.kernel.clone());
+        let mut mempool = Mempool::new(
+            ByteSize::gb(1),
+            TxProvingCapability::SingleProof,
+            &Block::genesis(Network::Testnet(42)),
+        );
+        mempool.tip_mutator_set_hash = mutator_set_hash;
+        mempool.insert(a.clone(), UpgradePriority::Irrelevant);
+        mempool.insert(b.clone(), UpgradePriority::Irrelevant);
+        mempool.insert(merged.clone(), UpgradePriority::Irrelevant);
+        assert_eq!(1, mempool.len());
+        assert_eq!(2, mempool.merge_input_cache_len());
+
+        let extending = |leaf_price| {
+            mempool
+                .get_transactions_extending_block_transaction(
+                    &block_transaction,
+                    ConsensusRuleSet::SoftforkEpsilon,
+                    Network::Testnet(42),
+                    usize::MAX,
+                    None,
+                    leaf_price,
+                )
+                .into_iter()
+                .map(|tx| tx.txid())
+                .collect_vec()
+        };
+        assert_eq!(vec![merged.txid()], extending(NativeCurrencyAmount::zero()));
+        assert_eq!(vec![a.txid()], extending(leaf_price));
     }
 
     #[test]
