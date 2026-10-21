@@ -153,11 +153,10 @@ impl SingleProofWitness {
         proof_job_options: TritonVmProofJobOptions,
     ) -> Result<Proof, CreateProofError> {
         let claim = self.claim(consensus_rule_set);
-        let nondeterminism = self.nondeterminism(consensus_rule_set);
         ProofBuilder::new()
             .program(self.program(consensus_rule_set))
             .claim(claim)
-            .nondeterminism(|| nondeterminism)
+            .nondeterminism(|| self.nondeterminism(consensus_rule_set))
             .job_queue(triton_vm_job_queue)
             .proof_job_options(proof_job_options)
             .build()
@@ -354,14 +353,12 @@ impl SingleProof {
         .await?;
         let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
         let claim = single_proof_witness.claim(self.consensus_rule_set);
-
-        let nondeterminism = single_proof_witness.nondeterminism(self.consensus_rule_set);
         info!("Start: generate single proof from proof collection");
 
         let proof = ProofBuilder::new()
             .program(self.program())
             .claim(claim)
-            .nondeterminism(|| nondeterminism)
+            .nondeterminism(|| single_proof_witness.nondeterminism(self.consensus_rule_set))
             .job_queue(triton_vm_job_queue)
             .proof_job_options(proof_job_options)
             .build()
