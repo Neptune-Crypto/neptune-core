@@ -12,10 +12,15 @@ pub struct Epoch {
     /// The first block height the parameters apply to. An entry of an
     /// [`EpochTable`] that is all zeros is unused.
     pub height: BFieldElement,
+
     pub minimum_block_time: Timestamp,
+
     pub target_block_interval: Timestamp,
+
     pub max_num_inputs: BFieldElement,
+
     pub max_num_outputs: BFieldElement,
+
     pub max_num_announcements: BFieldElement,
 
     /// Maximum block size in number of BFieldElements.
@@ -33,11 +38,15 @@ pub struct Epoch {
     /// if so, 0 otherwise.
     pub resets_lustration_status: BFieldElement,
 
+    /// Bar for proving complexity that the composer must pass when
+    /// constructing the SWBF update proof.
+    ///
     /// The least the padded heights of the leaf proofs beneath a block's
     /// SWBF update claim may sum to: proving work a block carries whatever
     /// its inputs, so that leaving transactions out saves the composer
     /// nothing. Zero for no floor.
     pub min_swbf_padded_rows: BFieldElement,
+
     /// Whether a block must reveal the mutator set after its parent: the
     /// guesser a leaf of the inactive SWBF's first Merkle tree in the
     /// proof-of-work field, the composer two chunks and an AOCL leaf through

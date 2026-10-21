@@ -52,10 +52,6 @@ pub enum BlockValidationError {
     ///   1.f) Version field consistent
     #[error("Version in pow field and in header must match")]
     VersionMismatch,
-    ///   1.g) A parent at height zero is the genesis block the claim names,
-    ///        in place of a proof.
-    #[error("Parent at height zero must be the named genesis block")]
-    GenesisHash,
     ///   1.h) The children of an aggregated SWBF update claim must chain: The
     ///        right child must continue where the left stopped. Checked as part
     ///        of proof verification, not on the host machine. The host machine

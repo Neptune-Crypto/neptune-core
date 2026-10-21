@@ -511,6 +511,7 @@ impl TritonProgram for PredecessorIsValid {
         let own_program_digest_alloc = library.kmalloc(Digest::LEN as u32);
         // The genesis block hash the claim names.
         let genesis_alloc = library.kmalloc(Digest::LEN as u32);
+        let prev_block_is_genesis_alloc = library.kmalloc(1);
 
         let prev_block_body_mh_alloc = library.kmalloc(Digest::LEN as u32);
         let prev_block_txk_mh_alloc = library.kmalloc(Digest::LEN as u32);
@@ -2074,6 +2075,9 @@ impl TritonProgram for PredecessorIsValid {
             push 0 eq
             // _ *w [prev_block_hash] (prev_block_height >= activation_height)
 
+            push {prev_block_is_genesis_alloc.read_address()} read_mem 1 pop 1 push 0 eq mul
+            // _ *w [prev_block_hash] (prev_block_height >= activation_height && !prev_block_is_genesis)
+
             skiz call {prev_block_epoch_rules}
             // _ *w [prev_block_hash]
         );
@@ -2353,21 +2357,15 @@ impl TritonProgram for PredecessorIsValid {
         let (rule_1c_prev, rule_1c_prev_code) = subroutine("rule_1c_prev", rule_1c_prev);
         let (rule_1d_prev, rule_1d_prev_code) = subroutine("rule_1d_prev", rule_1d_prev);
 
-        // 1.g) A parent at height zero is the genesis block the claim names;
-        // no other rule applies to it.
-        // BEFORE: _ *w [prev_block_hash] prev_block_is_genesis
-        // AFTER:  _ *w [prev_block_hash] prev_block_is_genesis
-        let rule_1g_prev = triton_asm!(
-            dup 5 dup 5 dup 5 dup 5 dup 5
-            push {genesis_alloc.read_address()} read_mem {Digest::LEN} pop 1
-            assert_vector error_id {BlockValidationRule::GenesisHash.error_id()}
-            pop {Digest::LEN}
-        );
-        let (rule_1g_prev, rule_1g_prev_code) = subroutine("rule_1g_prev", rule_1g_prev);
-
+        // 1.g) A parent that hashes to the genesis block the claim names is
+        // subject to no other rule, whatever its height.
         // BEFORE: _ *w [prev_block_hash]
         // AFTER:  _ *w [prev_block_hash] prev_block_is_genesis
-        let prev_block_is_genesis = triton_asm!(dup 5 {&read_prev_block_height} push 0 eq);
+        let prev_block_is_genesis = triton_asm!(
+            dup 4 dup 4 dup 4 dup 4 dup 4
+            push {genesis_alloc.read_address()} read_mem {Digest::LEN} pop 1
+            {&digests_are_equal}
+        );
         let (verify_prev_block_proof, verify_prev_block_proof_code) =
             if self.verifies_prev_block_proof {
                 (
@@ -2521,7 +2519,7 @@ impl TritonProgram for PredecessorIsValid {
             // _ [next_block_body_mh] *w [prev_block_hash]
 
             {&prev_block_is_genesis}
-            dup 0 skiz call {rule_1g_prev}
+            dup 0 push {prev_block_is_genesis_alloc.write_address()} write_mem 1 pop 1
             push 0 eq skiz call {rules_for_mined_parent}
             // _ [next_block_body_mh] *w [prev_block_hash]
 
@@ -2566,7 +2564,6 @@ impl TritonProgram for PredecessorIsValid {
             {&prev_block_pow_code}
             {&rule_1b_prev_code}
             {&verify_prev_block_proof_code}
-            {&rule_1g_prev_code}
             {&rules_for_mined_parent_code}
             {&rule_1a_txproof_prev_code}
             {&rule_2g_prev_code}
@@ -2777,11 +2774,10 @@ mod tests {
             let prev_epoch = epochs.in_force_at(prev_block_height);
 
             let prev_transaction_kernel = &witness.prev_block_body.transaction_kernel;
-            if witness.prev_block_header.height.is_genesis() {
-                // 1.g) The parent at height zero is the named genesis block;
-                // no other rule applies to it.
-                assert_eq!(genesis_digest, prev_block_hash);
-            } else {
+            // 1.g) A parent that hashes to the named genesis block is subject
+            // to no other rule, whatever its height.
+            let prev_block_is_genesis = prev_block_hash == genesis_digest;
+            if !prev_block_is_genesis {
                 // 1.f)
                 assert_eq!(
                     witness.prev_block_header.version,
@@ -2869,7 +2865,7 @@ mod tests {
             // values come from the previous block's copy of the claim for this
             // program execution.
             let cumulative_pow_size = ProofOfWork::static_length().unwrap();
-            if prev_block_height >= epochs.activation_height() {
+            if prev_block_height >= epochs.activation_height() && !prev_block_is_genesis {
                 let prev_minimum_block_time = prev_epoch.minimum_block_time;
                 let prev_target_block_interval = prev_epoch.target_block_interval;
 
@@ -5496,6 +5492,7 @@ ones):
                 assert_accepts(&program, &genesis, &next_body, &next_header);
             }
 
+            // Any other block is a mined parent, which this one is not.
             let other_genesis = Block::genesis(Network::TestnetMock);
             let (next_body, next_header) = next(&other_genesis);
             for program in [PredecessorIsValid::new(), skipping()] {
@@ -5504,7 +5501,7 @@ ones):
                     &other_genesis,
                     &next_body,
                     &next_header,
-                    BlockValidationRule::GenesisHash.error_id(),
+                    PowValidationError::ThresholdNotMet.error_id(),
                 );
             }
         }

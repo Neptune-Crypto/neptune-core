@@ -101,6 +101,9 @@ use crate::transaction::validity::neptune_proof::Proof;
 /// wallets to scan through all.
 pub(crate) const MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS: usize = 1 << 14;
 
+/// The hash of each network's genesis block, computed once.
+static GENESIS_DIGESTS: OnceLock<std::sync::Mutex<Vec<(Network, Digest)>>> = OnceLock::new();
+
 /// Duration of timelock for half of all mining rewards.
 ///
 /// Half the block subsidy is liquid immediately. Half of it is locked for this
@@ -721,8 +724,7 @@ impl Block {
 
     /// The hash of the network's genesis block, computed once.
     pub fn genesis_digest(network: Network) -> Digest {
-        static DIGESTS: OnceLock<std::sync::Mutex<Vec<(Network, Digest)>>> = OnceLock::new();
-        let digests = DIGESTS.get_or_init(Default::default);
+        let digests = GENESIS_DIGESTS.get_or_init(Default::default);
         let known = digests
             .lock()
             .unwrap()
@@ -1874,7 +1876,38 @@ mod test_support {
                 });
             }
 
-            Self::new(header, body, BlockAppendix::default(), BlockProof::Genesis)
+            // A block built on a parent past activation looks for the parent's
+            // claim of knowing the mutator set.
+            let rules = ConsensusRuleSet::infer_from(network, height);
+            let activation = ConsensusRuleSet::knows_mutator_set_activation_height(network);
+            let claims = if rules.miners_must_prove_ams_knowledge(network) && height >= activation {
+                vec![KnowsMutatorSet::claim(
+                    header.prev_block_digest,
+                    &MutatorSetAccumulator::default(),
+                    activation,
+                    rules,
+                )]
+            } else {
+                vec![]
+            };
+
+            Self::new(
+                header,
+                body,
+                BlockAppendix::new(claims),
+                BlockProof::Genesis,
+            )
+        }
+
+        /// Name this block the network's genesis block for the rest of the
+        /// process: the claims a block built on it must contain refer to it.
+        pub fn name_as_genesis(&self, network: Network) {
+            let mut digests = GENESIS_DIGESTS
+                .get_or_init(Default::default)
+                .lock()
+                .unwrap();
+            digests.retain(|(known, _)| *known != network);
+            digests.push((network, self.hash()));
         }
 
         /// Produce two fake blocks, parent and child.
