@@ -426,6 +426,13 @@ pub fn single_proof_claim(
     claim.about_version(consensus_rule_set.triton_proof_version().version())
 }
 
+/// Whether a transaction proven under the previous rule set satisfies the
+/// claim the next rule set demands: the single-proof program and the proof
+/// version are unchanged.
+pub fn single_proof_claims_agree(previous: ConsensusRuleSet, next: ConsensusRuleSet) -> bool {
+    single_proof_claim(Digest::default(), previous) == single_proof_claim(Digest::default(), next)
+}
+
 /// The claim a proof-backed [`LinkTx`]'s
 /// proof must relate to, for this consensus rule set: the
 /// [`link_proof_claim`](crate::chaintx::link_proof::link_proof_claim) with `D`
@@ -1082,6 +1089,18 @@ pub(crate) mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn epsilon_keeps_deltas_single_proof_claim() {
+        assert!(single_proof_claims_agree(
+            ConsensusRuleSet::HardforkDelta,
+            ConsensusRuleSet::SoftforkEpsilon
+        ));
+        assert!(!single_proof_claims_agree(
+            ConsensusRuleSet::HardforkGamma,
+            ConsensusRuleSet::HardforkDelta
+        ));
     }
 
     /// The rule sets whose `SingleProof` program a node still assembles and
