@@ -1230,7 +1230,32 @@ impl NetworkActor {
     ///
     /// Return Some(reason) with reason: BounceReason if the connection should
     /// be bounced; and None otherwise.
+    ///
+    /// The address is checked before capacity is checked, so that a banned peer
+    /// is never rejected with reason `MaxReached`.
     fn should_bounce(&self, address: &Multiaddr) -> Option<BounceReason> {
+        let ip = address.iter().find_map(|protocol| match protocol {
+            libp2p::multiaddr::Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
+            libp2p::multiaddr::Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
+            _ => None,
+        });
+        match ip {
+            Some(ip) if self.black_list.is_banned(&ip) => {
+                tracing::debug!("IP is banned");
+                return Some(BounceReason::Banned);
+            }
+            Some(_) => {}
+            // Incoming connection via a single-hop circuit; subject to the
+            // capacity check below like any other.
+            None if address
+                .iter()
+                .all(|proto| matches!(proto, libp2p::multiaddr::Protocol::P2p(_))) => {}
+            None => {
+                tracing::debug!("No IP address and not bare p2p");
+                return Some(BounceReason::UnsupportedAddressFormat);
+            }
+        }
+
         let num_relayed_only = self
             .active_connections
             .values()
@@ -1248,25 +1273,6 @@ impl NetworkActor {
         if at_capacity {
             tracing::debug!("Max active connections reached");
             return Some(BounceReason::MaxReached);
-        }
-        if let Some(ip) = address.iter().find_map(|protocol| match protocol {
-            libp2p::multiaddr::Protocol::Ip4(ip) => Some(IpAddr::V4(ip)),
-            libp2p::multiaddr::Protocol::Ip6(ip) => Some(IpAddr::V6(ip)),
-            _ => None,
-        }) {
-            if self.black_list.is_banned(&ip) {
-                tracing::debug!("IP is banned");
-                return Some(BounceReason::Banned);
-            }
-        } else if address
-            .iter()
-            .all(|proto| matches!(proto, libp2p::multiaddr::Protocol::P2p(_)))
-        {
-            // Accept incoming connections via single-hop circuits.
-            return None;
-        } else {
-            tracing::debug!("No IP address and not bare p2p");
-            return Some(BounceReason::UnsupportedAddressFormat);
         }
 
         None
@@ -2775,6 +2781,34 @@ mod tests {
         let main = NetworkActor::kademlia_protocol(Network::Main);
         assert_eq!("/neptune/main/kad/1.0.0", main.as_ref());
         assert_ne!(main, NetworkActor::kademlia_protocol(Network::Testnet(42)));
+    }
+
+    #[tokio::test]
+    async fn address_is_checked_before_capacity() {
+        let mut actor = test_actor().await;
+        actor.max_num_peers = 0;
+
+        let banned: Multiaddr = "/ip4/203.0.113.8/tcp/9798".parse().unwrap();
+        actor
+            .black_list
+            .ban(IpAddr::V4("203.0.113.8".parse().unwrap()));
+        assert_eq!(Some(BounceReason::Banned), actor.should_bounce(&banned));
+
+        let dns: Multiaddr = "/dns4/example.com/tcp/9798".parse().unwrap();
+        assert_eq!(
+            Some(BounceReason::UnsupportedAddressFormat),
+            actor.should_bounce(&dns)
+        );
+
+        let fine: Multiaddr = "/ip4/203.0.113.9/tcp/9798".parse().unwrap();
+        assert_eq!(Some(BounceReason::MaxReached), actor.should_bounce(&fine));
+
+        // A bare `/p2p` address (inbound circuit) is not exempt from capacity.
+        let circuit = Multiaddr::empty().with(libp2p::multiaddr::Protocol::P2p(PeerId::random()));
+        assert_eq!(
+            Some(BounceReason::MaxReached),
+            actor.should_bounce(&circuit)
+        );
     }
 
     #[tokio::test]
