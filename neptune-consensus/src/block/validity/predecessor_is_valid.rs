@@ -316,6 +316,57 @@ pub struct PredecessorIsValid {
     verifies_prev_block_proof: bool,
 }
 
+/// What a block's successor needs of it, besides the mutator set after it.
+/// The output of a [`PredecessorIsValid`] claim describes the previous block
+/// this way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ParentBlockInfo {
+    pub hash: Digest,
+    /// None where the previous block's proof-of-work field does not parse.
+    pub lustration_status: Option<LustrationStatus>,
+    pub timestamp: Timestamp,
+    pub cumulative_proof_of_work: ProofOfWork,
+    pub difficulty: Difficulty,
+    pub mutator_set_hash: Digest,
+}
+
+impl ParentBlockInfo {
+    /// Describe this block as the previous block.
+    pub fn of_block(prev_block: &Block) -> Self {
+        let header = prev_block.header();
+        // The mutator set the next block's transaction is built on. A
+        // previous block whose fee is negative is rejected regardless, so
+        // any value serves for it.
+        let mutator_set_after_prev_block = prev_block
+            .mutator_set_accumulator_after()
+            .map(|mutator_set| mutator_set.hash())
+            .unwrap_or_default();
+        Self {
+            hash: prev_block.hash(),
+            lustration_status: header.pow.lustration_status().ok(),
+            timestamp: header.timestamp,
+            cumulative_proof_of_work: header.cumulative_proof_of_work,
+            difficulty: header.difficulty,
+            mutator_set_hash: mutator_set_after_prev_block,
+        }
+    }
+
+    /// The claim's output.
+    pub fn encode(&self) -> Vec<BFieldElement> {
+        [
+            self.hash.values().to_vec(),
+            self.lustration_status
+                .map(|status| status.encode())
+                .unwrap_or_default(),
+            vec![self.timestamp.0],
+            self.cumulative_proof_of_work.encode(),
+            self.difficulty.encode(),
+            self.mutator_set_hash.values().to_vec(),
+        ]
+        .concat()
+    }
+}
+
 impl PredecessorIsValid {
     #[expect(
         clippy::new_without_default,
@@ -402,6 +453,31 @@ impl PredecessorIsValid {
         Self::output_difficulty_offset() + Difficulty::NUM_LIMBS
     }
 
+    /// The previous block as a claim's output describes it. None if the
+    /// output does not have the layout [`Self::claim`] gives it.
+    pub fn parse_output(output: &[BFieldElement]) -> Option<ParentBlockInfo> {
+        let timestamp_offset = Self::output_timestamp_offset();
+        let cumulative_pow_offset = Self::output_cumulative_pow_offset();
+        let difficulty_offset = Self::output_difficulty_offset();
+        let mutator_set_offset = Self::output_mutator_set_offset();
+        if output.len() != mutator_set_offset + Digest::LEN {
+            return None;
+        }
+        Some(ParentBlockInfo {
+            hash: Digest::new(output[..Digest::LEN].try_into().unwrap()),
+            lustration_status: LustrationStatus::decode(&output[Digest::LEN..timestamp_offset])
+                .ok()
+                .map(|status| *status),
+            timestamp: Timestamp(output[timestamp_offset]),
+            cumulative_proof_of_work: *ProofOfWork::decode(
+                &output[cumulative_pow_offset..difficulty_offset],
+            )
+            .ok()?,
+            difficulty: *Difficulty::decode(&output[difficulty_offset..mutator_set_offset]).ok()?,
+            mutator_set_hash: Digest::new(output[mutator_set_offset..].try_into().unwrap()),
+        })
+    }
+
     /// Number of words in the claim's standard-in stream.
     ///
     /// Same number as the number of words read from standard-in in this
@@ -457,35 +533,13 @@ impl PredecessorIsValid {
         epochs: &EpochTable,
         consensus_rule_set: ConsensusRuleSet,
     ) -> Claim {
-        let prev_block_header = prev_block.header();
         let input = Self::claim_input(
             next_block_body_mh,
             next_block_height,
             genesis_digest,
             epochs,
         );
-
-        let prev_lustration_status = prev_block_header
-            .pow
-            .lustration_status()
-            .map(|status| status.encode())
-            .unwrap_or_default();
-        // The mutator set the next block's transaction is built on. A
-        // previous block whose fee is negative is rejected regardless, so
-        // any value serves for it.
-        let mutator_set_after_prev_block = prev_block
-            .mutator_set_accumulator_after()
-            .map(|mutator_set| mutator_set.hash())
-            .unwrap_or_default();
-        let output = [
-            prev_block.hash().values().to_vec(),
-            prev_lustration_status,
-            vec![prev_block_header.timestamp.0],
-            prev_block_header.cumulative_proof_of_work.encode(),
-            prev_block_header.difficulty.encode(),
-            mutator_set_after_prev_block.values().to_vec(),
-        ]
-        .concat();
+        let output = ParentBlockInfo::of_block(prev_block).encode();
 
         Claim::new(self.hash())
             .with_input(input)
@@ -6766,6 +6820,24 @@ ones):
                     .values(),
                 claim.output[offset..]
             );
+
+            let parsed = PredecessorIsValid::parse_output(&claim.output).unwrap();
+            assert_eq!(prev_block.hash(), parsed.hash);
+            assert_eq!(
+                prev_block.header().pow.lustration_status().ok(),
+                parsed.lustration_status
+            );
+            assert_eq!(prev_block.header().timestamp, parsed.timestamp);
+            assert_eq!(
+                prev_block.header().cumulative_proof_of_work,
+                parsed.cumulative_proof_of_work
+            );
+            assert_eq!(prev_block.header().difficulty, parsed.difficulty);
+            assert_eq!(
+                prev_block.mutator_set_accumulator_after().unwrap().hash(),
+                parsed.mutator_set_hash
+            );
+            assert!(PredecessorIsValid::parse_output(&claim.output[1..]).is_none());
         }
 
         #[test]

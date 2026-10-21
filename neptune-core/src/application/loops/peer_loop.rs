@@ -9364,6 +9364,7 @@ mod tests {
     }
 
     mod tip_with_parent_accumulator {
+        use neptune_consensus::block::block_validation_error::BlockValidationError;
         use neptune_p2p::peer::peer_info::pseudorandom_peer_id;
 
         use super::*;
@@ -9423,6 +9424,23 @@ mod tests {
             assert_eq!(
                 block2.body().transaction_kernel().mutator_set_hash,
                 parent_accumulator.hash()
+            );
+            let now = block2.header().timestamp;
+            let parent = block2
+                .validate_tip(&parent_accumulator, now, network)
+                .await
+                .unwrap();
+            assert!(block2.has_proof_of_work_against(network, parent.timestamp, parent.difficulty));
+            // Another mutator set changes the claims the block must contain.
+            assert_eq!(
+                Err(BlockValidationError::AppendixMissingClaim),
+                block2
+                    .validate_tip(
+                        &genesis.mutator_set_accumulator_after().unwrap(),
+                        now,
+                        network
+                    )
+                    .await
             );
             let response =
                 PeerMessage::TipWithParentAccumulator(Box::new(BlockWithParentAccumulator {

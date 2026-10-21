@@ -62,6 +62,7 @@ use validity::block_program::BlockProgram;
 use validity::block_proof_witness::BlockProofWitness;
 use validity::knows_mutator_set::KnowsMutatorSet;
 use validity::knows_mutator_set::KnowsMutatorSetWitness;
+use validity::predecessor_is_valid::ParentBlockInfo;
 use validity::predecessor_is_valid::PredecessorIsValid;
 use validity::predecessor_is_valid::PredecessorIsValidWitness;
 use validity::swbf_update::aggregation::SwbfUpdateAggregation;
@@ -883,6 +884,36 @@ impl Block {
         self.validate_as(previous_block, now, network, false).await
     }
 
+    /// Verify a block without knowledge of its parent, and return a detailed
+    /// error on failure.
+    ///
+    /// The mutator set after the parent must be provided. Everything else
+    /// relating to the parent is read from the block's claim about its
+    /// predecessor.
+    pub async fn validate_tip(
+        &self,
+        parent_mutator_set: &MutatorSetAccumulator,
+        now: Timestamp,
+        network: Network,
+    ) -> Result<ParentBlockInfo, BlockValidationError> {
+        let predecessor_claim = PredecessorIsValid::required_claim(
+            self.body().mast_hash(),
+            self.header().height,
+            network,
+        );
+        let parent = self
+            .appendix()
+            .find(&predecessor_claim)
+            .and_then(|claim| PredecessorIsValid::parse_output(&claim.output))
+            .ok_or(BlockValidationError::AppendixMissingClaim)?;
+        self.validate_except_proof(&parent, parent_mutator_set, None, now, network, true)?;
+
+        // 1.c) 1.d)
+        self.validate_proof(network).await?;
+
+        Ok(parent)
+    }
+
     /// `guessed` says whether the guesser has filled the proof-of-work field.
     async fn validate_as(
         &self,
@@ -891,15 +922,31 @@ impl Block {
         network: Network,
         guessed: bool,
     ) -> Result<(), BlockValidationError> {
-        self.validate_except_proof(previous_block, now, network, guessed)?;
+        // 0.a)
+        if previous_block.header().height.next() != self.header().height {
+            return Err(BlockValidationError::BlockHeight);
+        }
+
+        let parent_mutator_set = previous_block.mutator_set_accumulator_after()?;
+        self.validate_except_proof(
+            &ParentBlockInfo::of_block(previous_block),
+            &parent_mutator_set,
+            Some(&previous_block.body().block_mmr_accumulator),
+            now,
+            network,
+            guessed,
+        )?;
 
         // 1.c) 1.d)
         self.validate_proof(network).await
     }
 
+    /// Every rule except the block's proof.
     fn validate_except_proof(
         &self,
-        previous_block: &Block,
+        parent: &ParentBlockInfo,
+        parent_mutator_set: &MutatorSetAccumulator,
+        parent_block_mmr_accumulator: Option<&MmrAccumulator>,
         now: Timestamp,
         network: Network,
         guessed: bool,
@@ -909,47 +956,42 @@ impl Block {
 
         let new_height = self.header().height;
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, new_height);
-
-        // 0.a)
-        if previous_block.kernel.header.height.next() != new_height {
+        let Some(parent_height) = new_height.previous() else {
             return Err(BlockValidationError::BlockHeight);
-        }
+        };
 
         // 0.b)
-        if previous_block.hash() != self.kernel.header.prev_block_digest {
+        if parent.hash != self.kernel.header.prev_block_digest {
             return Err(BlockValidationError::PrevBlockDigest);
         }
 
         // 0.c)
-        let mut mmra = previous_block.kernel.body.block_mmr_accumulator.clone();
-        mmra.append(previous_block.hash());
-        if mmra != self.kernel.body.block_mmr_accumulator {
-            return Err(BlockValidationError::BlockMmrUpdate);
+        if let Some(parent_block_mmr_accumulator) = parent_block_mmr_accumulator {
+            let mut mmra = parent_block_mmr_accumulator.clone();
+            mmra.append(parent.hash);
+            if mmra != self.kernel.body.block_mmr_accumulator {
+                return Err(BlockValidationError::BlockMmrUpdate);
+            }
         }
 
         // 0.d)
-        if previous_block.kernel.header.timestamp + network.minimum_block_time()
-            > self.kernel.header.timestamp
-        {
+        if parent.timestamp + network.minimum_block_time() > self.kernel.header.timestamp {
             return Err(BlockValidationError::MinimumBlockTime);
         }
 
         // 0.e)
-        let expected_difficulty = if Self::should_reset_difficulty(
-            network,
-            self.header().timestamp,
-            previous_block.header().timestamp,
-        ) {
-            network.genesis_difficulty()
-        } else {
-            difficulty_control(
-                self.header().timestamp,
-                previous_block.header().timestamp,
-                previous_block.header().difficulty,
-                network.target_block_interval(),
-                previous_block.header().height,
-            )
-        };
+        let expected_difficulty =
+            if Self::should_reset_difficulty(network, self.header().timestamp, parent.timestamp) {
+                network.genesis_difficulty()
+            } else {
+                difficulty_control(
+                    self.header().timestamp,
+                    parent.timestamp,
+                    parent.difficulty,
+                    network.target_block_interval(),
+                    parent_height,
+                )
+            };
 
         let new_difficulty = self.kernel.header.difficulty;
         if new_difficulty != expected_difficulty {
@@ -958,12 +1000,11 @@ impl Block {
 
         // 0.f)
         let delta_difficulty = if consensus_rule_set.use_parent_difficulty() {
-            previous_block.header().difficulty
+            parent.difficulty
         } else {
             new_difficulty
         };
-        let expected_cumulative_proof_of_work =
-            previous_block.header().cumulative_proof_of_work + delta_difficulty;
+        let expected_cumulative_proof_of_work = parent.cumulative_proof_of_work + delta_difficulty;
         if self.header().cumulative_proof_of_work != expected_cumulative_proof_of_work {
             return Err(BlockValidationError::CumulativeProofOfWork);
         }
@@ -973,12 +1014,11 @@ impl Block {
         self.solo_validate_without_proof(now, network)?;
 
         // 1.a) 1.b)
-        let parent_mutator_set = previous_block.mutator_set_accumulator_after()?;
         let required_claims = BlockAppendix::consensus_claims(
             self.body(),
             new_height,
-            previous_block.hash(),
-            &parent_mutator_set,
+            parent.hash,
+            parent_mutator_set,
             network,
         );
         self.validate_appendix(&required_claims)?;
@@ -991,15 +1031,17 @@ impl Block {
         .map_err(BlockValidationError::from)?;
 
         // 2.b)
-        let msa_before = previous_block.mutator_set_accumulator_after()?;
+        let msa_before = parent_mutator_set.clone();
         for removal_record in &inputs {
             if !msa_before.can_remove(removal_record) {
                 return Err(BlockValidationError::RemovalRecordsValidity);
             }
         }
 
-        // 2.t)
-        if msa_before.hash() != self.body().transaction_kernel.mutator_set_hash {
+        // 2.t) mutator set matches parent commitment, and transaction.
+        if msa_before.hash() != parent.mutator_set_hash
+            || msa_before.hash() != self.body().transaction_kernel.mutator_set_hash
+        {
             return Err(BlockValidationError::TransactionMutatorSetMismatch);
         }
 
@@ -1074,7 +1116,7 @@ impl Block {
                 }
                 LustrationRule::Updated { initial_counter } => {
                     // 2.n)
-                    let Ok(parent) = previous_block.header().pow.lustration_status() else {
+                    let Some(parent) = parent.lustration_status else {
                         return Err(BlockValidationError::BadLustrationCounterEncodingOfParent);
                     };
 
@@ -1411,26 +1453,38 @@ impl Block {
     /// may be either the parent block's difficulty, or the block's own
     /// difficulty. Returns true if the target is met.
     pub fn has_proof_of_work(&self, network: Network, previous_block_header: &BlockHeader) -> bool {
+        self.has_proof_of_work_against(
+            network,
+            previous_block_header.timestamp,
+            previous_block_header.difficulty,
+        )
+    }
+
+    /// Like [`Self::has_proof_of_work`], given the parent's timestamp and
+    /// difficulty, all it reads of the parent's header.
+    pub fn has_proof_of_work_against(
+        &self,
+        network: Network,
+        parent_timestamp: Timestamp,
+        parent_difficulty: Difficulty,
+    ) -> bool {
         // enforce network difficulty-reset-interval if present. Note that *no*
         // pow checks are enforced in this case, not even Merkle authentication
         // path checks. Consequently, very little memory is required to produce
         // blocks on networks that reset difficulty.
-        if Self::should_reset_difficulty(
-            network,
-            self.header().timestamp,
-            previous_block_header.timestamp,
-        ) && self.header().difficulty == network.genesis_difficulty()
+        if Self::should_reset_difficulty(network, self.header().timestamp, parent_timestamp)
+            && self.header().difficulty == network.genesis_difficulty()
         {
             return true;
         }
 
         // Reject values that the difficulty control mechanism can never
         // produce, rather than dividing by zero.
-        if previous_block_header.difficulty < Difficulty::MINIMUM {
+        if parent_difficulty < Difficulty::MINIMUM {
             return false;
         }
 
-        let parent_threshold = previous_block_header.difficulty.target();
+        let parent_threshold = parent_difficulty.target();
         if network.allows_mock_pow() && self.is_valid_mock_pow(parent_threshold) {
             return true;
         }
@@ -2073,7 +2127,15 @@ pub(crate) mod tests {
             now: Timestamp,
             network: Network,
         ) -> Result<(), BlockValidationError> {
-            self.validate_except_proof(previous_block, now, network, false)
+            let parent_mutator_set = previous_block.mutator_set_accumulator_after()?;
+            self.validate_except_proof(
+                &ParentBlockInfo::of_block(previous_block),
+                &parent_mutator_set,
+                Some(&previous_block.body().block_mmr_accumulator),
+                now,
+                network,
+                false,
+            )
         }
     }
 
