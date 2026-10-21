@@ -72,6 +72,18 @@ pub(crate) struct NetworkStack {
     /// Limits on inbound connections from clustered IPs.
     pub(crate) source_limits: SourceLimits,
 
+    /// Custom "Hijacker" that handles the handshake and turns it into a stream.
+    ///
+    /// Behaviours are asked to accept an established connection in field
+    /// order. When one denies it, as the gateway does for a peer whose
+    /// connection is already upgraded, libp2p tells the ones before it only
+    /// that the connection failed, never that it closed. A behaviour that
+    /// recorded the connection on accepting it then keeps it forever, as the
+    /// request-response protocol inside `autonat` does, which breaks its
+    /// bookkeeping once the peer disconnects. So the gateway comes before
+    /// every behaviour that records connections.
+    pub(crate) gateway: StreamGateway,
+
     pub(crate) ping: libp2p::ping::Behaviour,
     pub(crate) identify: libp2p::identify::Behaviour,
     pub(crate) upnp: libp2p::upnp::tokio::Behaviour,
@@ -80,7 +92,4 @@ pub(crate) struct NetworkStack {
     pub(crate) relay_client: libp2p::relay::client::Behaviour,
     pub(crate) dcutr: libp2p::dcutr::Behaviour,
     pub(crate) kademlia: libp2p::kad::Behaviour<libp2p::kad::store::MemoryStore>,
-
-    /// Custom "Hijacker" that handles the handshake and turns it into a stream.
-    pub(crate) gateway: StreamGateway,
 }
