@@ -2557,7 +2557,15 @@ impl NetworkActor {
     /// The peer is forgotten immediately, so that the count is accurate for
     /// any admission happening in the same tick. `ConnectionClosed` will not
     /// find it any more, so its bookkeeping happens here.
+    ///
+    /// Its peer loop, if any, is told directly. Closing the connection does
+    /// not wake the loop's stream, so the loop would only notice once it next
+    /// polls the stream, which can take more than a second, and meanwhile the
+    /// peer would still hold its place in the peer map.
     fn evict(&mut self, peer_id: PeerId) {
+        let _ = self
+            .main_to_peer_broadcast
+            .send(MainToPeerTask::Disconnect(peer_id));
         if self.swarm.disconnect_peer_id(peer_id).is_err() {
             tracing::warn!(%peer_id, "Attempted to disconnect peer, but it was already gone.");
         }
@@ -3034,6 +3042,26 @@ mod tests {
         assert_eq!(Some(outbound), actor.bootstrap_victim());
         actor.active_connections.remove(&outbound);
         assert_eq!(None, actor.bootstrap_victim());
+    }
+
+    #[tokio::test]
+    async fn eviction_tells_the_peer_loop_directly() {
+        let mut actor = test_actor().await;
+        let mut peer_loops = actor.main_to_peer_broadcast.subscribe();
+        let peer_id = track(
+            &mut actor,
+            true,
+            "/ip4/198.51.100.1/tcp/9798".parse().unwrap(),
+            at(1),
+        );
+
+        actor.evict(peer_id);
+
+        assert!(matches!(
+            peer_loops.try_recv(),
+            Ok(MainToPeerTask::Disconnect(id)) if id == peer_id
+        ));
+        assert!(actor.active_connections.is_empty());
     }
 
     #[tokio::test]
