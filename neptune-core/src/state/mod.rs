@@ -3148,14 +3148,17 @@ impl GlobalState {
         let (update_events, mut update_jobs) = self.mempool.update_with_block(tip)?;
         mempool_events.extend(update_events);
 
-        // Clear mempool if needed
         let network = self.cli().network;
         let previous_rules = ConsensusRuleSet::infer_from(network, previous_height);
         let new_rules = ConsensusRuleSet::infer_from(network, tip.header().height);
+        if previous_rules != new_rules {
+            info!("Blockchain rules changed! From {previous_rules} to {new_rules}.");
+        }
+
+        // Do not attempt to maintain the mempool across a fork that changes
+        // what a transaction's proof must satisfy.
         if !single_proof_claims_agree(previous_rules, new_rules) {
-            info!(
-                "Blockchain rules changed! From {previous_rules} to {new_rules}. Clearing mempool."
-            );
+            info!("Clearing mempool.");
 
             let clear_events = self.mempool.clear();
             mempool_events.extend(clear_events);
