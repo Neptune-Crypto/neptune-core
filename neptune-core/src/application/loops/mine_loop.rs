@@ -22,6 +22,7 @@ use neptune_consensus::proof_abstractions::triton_vm_job_queue::vm_job_queue;
 use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
 use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 use neptune_consensus::transaction::transaction_proof::TransactionProofType;
+use neptune_consensus::transaction::validity::single_proof::single_proof_claims_agree;
 use neptune_consensus::transaction::*;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_job_queue::errors::JobHandleError;
@@ -685,7 +686,7 @@ pub(crate) async fn create_block_transaction_from(
         .build();
     if transactions_to_merge.is_empty()
         && tx_merge_origin == TxMergeOrigin::Mempool
-        && new_rules == old_rules
+        && single_proof_claims_agree(old_rules, new_rules)
     {
         info!("No synced single-proof tx found for merge. Looking for one to update.");
         let min_gobbling_fee = NativeCurrencyAmount::zero();
@@ -733,7 +734,7 @@ pub(crate) async fn create_block_transaction_from(
     }
 
     // Ensure we don't mine incompatible transactions from mempool
-    if old_rules != new_rules {
+    if !single_proof_claims_agree(old_rules, new_rules) {
         transactions_to_merge.clear();
     }
 
@@ -815,7 +816,9 @@ pub(crate) async fn create_block_transaction_from(
                 min_fee_per_swbf_leaf,
             );
 
-        transactions_to_merge = if txs_from_mempool.is_empty() || old_rules != new_rules {
+        transactions_to_merge = if txs_from_mempool.is_empty()
+            || !single_proof_claims_agree(old_rules, new_rules)
+        {
             vec![nop]
         } else {
             info!("Found synced transaction in mempool after building nop. Using mempool transaction instead!");
