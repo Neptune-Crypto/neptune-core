@@ -148,6 +148,20 @@ impl ArchivalState {
         Ok(block_index)
     }
 
+    /// Whether the archival mutator set and the archival block MMR can resolve
+    /// lookups back to block height zero.
+    #[cfg(any(test, feature = "test-helpers"))]
+    pub fn tracks_genesis(&self) -> bool {
+        if self.genesis_block.header().height.is_genesis() {
+            return true;
+        }
+        let mut from_outputs = MutatorSetAccumulator::default();
+        for addition_record in &self.genesis_block.body().transaction_kernel.outputs {
+            from_outputs.add(addition_record);
+        }
+        from_outputs.hash() == self.genesis_block.body().mutator_set_accumulator().hash()
+    }
+
     /// Initialize an `ArchivalMutatorSet` by opening or creating its databases.
     pub(crate) async fn initialize_mutator_set(
         data_dir: &DataDirectory,
@@ -326,6 +340,21 @@ impl ArchivalState {
 
         // Add genesis block digest to archival MMR, if empty.
         if archival_block_mmr.ammr().is_empty().await {
+            // A genesis block at another height, as tests may set, sits at
+            // the leaf index of its height; the leaves below are placeholders.
+            #[cfg(any(test, feature = "test-helpers"))]
+            {
+                assert!(
+                    genesis_block.header().height.value() < 250_000,
+                    "a genesis block at another height must be within reach of placeholder leaves"
+                );
+                for _ in 0..genesis_block.header().height.value() {
+                    archival_block_mmr
+                        .ammr_mut()
+                        .append(Digest::default())
+                        .await;
+                }
+            }
             archival_block_mmr
                 .ammr_mut()
                 .append(genesis_block.hash())
@@ -632,13 +661,8 @@ impl ArchivalState {
     /// must be known and stored in the block index database for it to work.
     pub(crate) async fn append_to_archival_block_mmr(&mut self, new_block: &Block) {
         #[cfg(any(test, feature = "test-helpers"))]
-        {
-            // In tests you're allowed to set a genesis block with a height
-            // different than zero. In such cases, this part of the archival state
-            // update cannot work. So we skip it.
-            if !self.genesis_block.header().height.is_genesis() {
-                return;
-            }
+        if !self.tracks_genesis() {
+            return;
         }
 
         // If the new block is the genesis block, special case and exit early
@@ -1923,21 +1947,8 @@ impl ArchivalState {
     #[doc(hidden)]
     pub async fn update_mutator_set(&mut self, new_block: &Block) -> Result<()> {
         #[cfg(any(test, feature = "test-helpers"))]
-        {
-            // In tests you're allowed to set a genesis block with a height
-            // different than zero. In such cases, this part of the archival
-            // state update may not work, depending on this fake genesis block's
-            // mutator set.
-            if !self.genesis_block.header().height.is_genesis() {
-                let mut from_outputs = MutatorSetAccumulator::default();
-                for addition_record in &self.genesis_block.body().transaction_kernel.outputs {
-                    from_outputs.add(addition_record);
-                }
-                if from_outputs.hash() != self.genesis_block.body().mutator_set_accumulator().hash()
-                {
-                    return Ok(());
-                }
-            }
+        if !self.tracks_genesis() {
+            return Ok(());
         }
 
         // If new block is genesis block, special case and exit early.

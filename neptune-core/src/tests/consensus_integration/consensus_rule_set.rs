@@ -197,10 +197,7 @@ async fn new_blocks_at_block_height_100_000_on(network: Network) {
     let bob_wallet = WalletEntropy::new_pseudorandom(rng.random());
     let cli = cli_args::Args {
         network,
-        compose: true,
-        guess: true,
         tx_proving_capability: Some(TxProvingCapability::SingleProof),
-        number_of_mps_per_utxo: 3,
         ..Default::default()
     };
     let mut bob =
