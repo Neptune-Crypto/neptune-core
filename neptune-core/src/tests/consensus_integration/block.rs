@@ -292,7 +292,9 @@ mod block_is_valid {
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
     use crate::application::loops::mine_loop::TxMergeOrigin;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
+    use crate::tests::shared::blocks::compose_and_guess_for_tests;
     use crate::tests::shared::blocks::fake_valid_successor_for_tests;
+    use crate::tests::shared::blocks::guess_for_tests;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared_tokio_runtime;
 
@@ -419,13 +421,6 @@ mod block_is_valid {
         let genesis_block = Block::genesis(network);
         let plus_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
         let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
-        let block1 = fake_valid_successor_for_tests(
-            &genesis_block,
-            plus_seven_months,
-            rng.random(),
-            network,
-        )
-        .await;
 
         let alice_wallet = WalletEntropy::devnet_wallet();
         let mut alice = mock_genesis_global_state(
@@ -438,6 +433,7 @@ mod block_is_valid {
             },
         )
         .await;
+        let block1 = compose_and_guess_for_tests(&alice, vec![], plus_seven_months).await;
         alice.set_new_tip(block1.clone()).await.unwrap();
         let alice_key = alice
             .lock_guard()
@@ -503,7 +499,7 @@ mod block_is_valid {
             )
             .await
             .unwrap();
-            let (block2_without_valid_pow, _) = Block::compose(
+            let (mut block2, _) = Block::compose(
                 block1.clone(),
                 block2_tx,
                 plus_eight_months,
@@ -520,18 +516,16 @@ mod block_is_valid {
             .unwrap();
 
             assert!(
-                block2_without_valid_pow
+                block2
                     .is_valid_proposal(&block1, plus_eight_months, network)
                     .await,
                 "Block with {i} inputs must be valid"
             );
 
-            alice
-                .set_new_tip(block2_without_valid_pow.clone())
-                .await
-                .unwrap();
+            guess_for_tests(&mut block2, &alice).await;
+            alice.set_new_tip(block2.clone()).await.unwrap();
             let (coinbase_for_block3, _) = make_coinbase_transaction_from_state_lock(
-                &block2_without_valid_pow,
+                &block2,
                 &alice,
                 plus_nine_months,
                 TritonVmProofJobOptions::default_with_network(network),
@@ -539,7 +533,7 @@ mod block_is_valid {
             .await
             .unwrap();
 
-            let block_height2 = block2_without_valid_pow.header().height;
+            let block_height2 = block2.header().height;
             let consensus_rule_set_2 = ConsensusRuleSet::infer_from(network, block_height2);
 
             let tx3 = alice
@@ -570,13 +564,13 @@ mod block_is_valid {
                 "block transaction 3 must have inputs"
             );
             let (block3_without_valid_pow, _) = Block::compose(
-                block2_without_valid_pow.clone(),
+                block2.clone(),
                 block3_tx,
                 plus_nine_months,
                 alice
                     .lock_guard()
                     .await
-                    .composer_witness(&block2_without_valid_pow)
+                    .composer_witness(&block2)
                     .await
                     .unwrap(),
                 TritonVmJobQueue::get_instance(),
@@ -587,7 +581,7 @@ mod block_is_valid {
 
             assert!(
                 block3_without_valid_pow
-                    .is_valid_proposal(&block2_without_valid_pow, plus_nine_months, network)
+                    .is_valid_proposal(&block2, plus_nine_months, network)
                     .await,
                 "Block of height 3 after block 2 with {i} inputs must be valid"
             );
