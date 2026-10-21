@@ -5845,6 +5845,71 @@ ones):
         }
 
         #[test]
+        fn a_new_epoch_may_change_the_programs() {
+            // A later epoch brings other transaction and SWBF update programs,
+            // as a hard fork would. The last block before it is judged under
+            // the old programs, the first block of it under the new ones.
+            let mut rng = StdRng::seed_from_u64(0);
+            let fork_height = activation_height().value() + 2;
+            let fork = Epoch {
+                height: BlockHeight::from(fork_height).into(),
+                single_proof_digest: rng.random(),
+                swbf_aggregation_digest: rng.random(),
+                ..activation_epoch()
+            };
+            let epochs = EpochTable::new(&[activation_epoch(), fork]);
+            let kernel = transaction_kernel_and_proof().0.clone();
+
+            let (prev_block, next_body, next_header) = prev_block_with_transaction_kernel_at_height(
+                kernel.clone(),
+                &epochs,
+                fork_height - 1,
+            );
+            assert_accepts_with_epochs(&skipping(), &prev_block, &next_body, &next_header, &epochs);
+
+            let (old_programs, next_body, next_header) =
+                prev_block_with_transaction_kernel_at_height(kernel, &epochs, fork_height);
+            assert_rejects_with_epochs(
+                &skipping(),
+                &old_programs,
+                &next_body,
+                &next_header,
+                &epochs,
+                BlockValidationRule::AppendixMissingClaim.error_id(),
+            );
+
+            let claims = old_programs
+                .appendix()
+                .claims()
+                .iter()
+                .cloned()
+                .map(|mut claim| {
+                    if claim.program_digest == activation_epoch().single_proof_digest {
+                        claim.program_digest = fork.single_proof_digest;
+                    }
+                    if claim.program_digest == activation_epoch().swbf_aggregation_digest {
+                        claim.program_digest = fork.swbf_aggregation_digest;
+                    }
+                    claim
+                })
+                .collect();
+            let new_programs = block_solved_by_nonce_search(
+                *old_programs.header(),
+                old_programs.body().clone(),
+                BlockAppendix::new(claims),
+                BlockProof::Invalid,
+            );
+            let (next_body, next_header) = next_body_and_header(&new_programs, 0);
+            assert_accepts_with_epochs(
+                &skipping(),
+                &new_programs,
+                &next_body,
+                &next_header,
+                &epochs,
+            );
+        }
+
+        #[test]
         fn prev_block_claiming_an_unknown_epoch_fails() {
             let prev_prev_block = random_unproven_block(0);
             let (body, header) = next_body_and_header(&prev_prev_block, 0);
