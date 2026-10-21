@@ -122,7 +122,8 @@ pub(crate) enum PeerTaskToMain {
     Transaction(Box<PeerTaskToMainTransaction>),
     LinkTx(Box<PeerTaskToMainLinkTx>),
     BlockProposal(Box<Block>),
-    DisconnectFromLongestLivedPeer,
+    /// Ask the main loop to disconnect the given peer.
+    Disconnect(PeerId),
     NewSyncTarget(Box<Block>),
     /// A downloaded middle block for the sync loop, along with its
     /// authentication path relative to the sync anchor, if it arrived with
@@ -165,7 +166,7 @@ impl PeerTaskToMain {
             PeerTaskToMain::Transaction(_) => "transaction",
             PeerTaskToMain::LinkTx(_) => "link tx",
             PeerTaskToMain::BlockProposal(_) => "block proposal",
-            PeerTaskToMain::DisconnectFromLongestLivedPeer => "disconnect from longest lived peer",
+            PeerTaskToMain::Disconnect(_) => "disconnect",
             PeerTaskToMain::NewSyncTarget(_block) => "new sync target",
             PeerTaskToMain::NewSyncBlock(..) => "new sync block",
             PeerTaskToMain::NewPeer { .. } => "new peer",

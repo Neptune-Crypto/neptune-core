@@ -54,7 +54,6 @@ use tracing::trace;
 use tracing::warn;
 
 use crate::application::config::auto_consolidation::ConsolidationTarget;
-use crate::application::config::parser::multiaddr::multiaddr_to_socketaddr;
 use crate::application::loops::channel::MainToMiner;
 use crate::application::loops::channel::MinerToMain;
 use crate::application::loops::channel::RPCServerToMain;
@@ -1019,34 +1018,8 @@ impl MainLoopHandler {
                     self.main_to_miner_tx.send(MainToMiner::NewBlockProposal);
                 }
             }
-            PeerTaskToMain::DisconnectFromLongestLivedPeer => {
-                // filter out CLI peers
-                let cli_peers = self
-                    .global_state_lock
-                    .cli()
-                    .peers
-                    .iter()
-                    .collect::<HashSet<_>>();
-                let longest_lived_peer =
-                    self.global_state_lock.peers().with_connected(|connected| {
-                        connected
-                            .iter()
-                            .filter(|(_id, info)| !cli_peers.contains(&info.address()))
-                            .filter(|p| multiaddr_to_socketaddr(&p.1.address()).is_some())
-                            // find the one with the oldest connection
-                            .min_by(|(_, peer_info_left), (_, peer_info_right)| {
-                                peer_info_left
-                                    .connection_established()
-                                    .cmp(&peer_info_right.connection_established())
-                            })
-                            .map(|(peer_id, _peer_info)| *peer_id)
-                    });
-
-                // tell to disconnect
-                if let Some(peer_id) = longest_lived_peer {
-                    let pmsg = MainToPeerTask::Disconnect(peer_id);
-                    self.main_to_peer_broadcast(pmsg);
-                }
+            PeerTaskToMain::Disconnect(peer_id) => {
+                self.main_to_peer_broadcast(MainToPeerTask::Disconnect(peer_id));
             }
             PeerTaskToMain::NewSyncTarget(new_target) => {
                 if let Some(sync_loop) = &mut main_loop_state.maybe_sync_loop {
@@ -3312,12 +3285,11 @@ mod tests {
                 }
             });
 
-            // `answer_peer_wrapper` should send a
-            // `DisconnectFromLongestLivedPeer` message to main
+            // `answer_peer_wrapper` should send a `Disconnect` message to main
             let peer_to_main_message = main_loop_handler.peer_task_to_main_rx.recv().await.unwrap();
             assert!(matches!(
                 peer_to_main_message,
-                PeerTaskToMain::DisconnectFromLongestLivedPeer,
+                PeerTaskToMain::Disconnect(_),
             ));
 
             // process this message

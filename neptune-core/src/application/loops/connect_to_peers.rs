@@ -15,6 +15,7 @@ use chrono::Utc;
 use futures::SinkExt;
 use futures::TryStreamExt;
 use libp2p::Multiaddr;
+use libp2p::PeerId;
 use neptune_p2p::peer::handshake_data::VersionString;
 use neptune_p2p::peer::peer_info::pseudorandom_peer_id;
 use neptune_p2p::peer::ConnectionRefusedReason;
@@ -214,9 +215,8 @@ async fn check_if_connection_is_allowed(
     // race conditions.
     // Note that if we are bootstrapping, then we *do* want to accept the
     // connection and temporarily exceed the maximum. In this case a
-    // `DisconnectFromLongestLivedPeer` message should have been sent to
-    // the main loop already but that message need not have been processed by
-    // the time we get here.
+    // `Disconnect` message should have been sent to the main loop already but
+    // that message need not have been processed by the time we get here.
     if cli_arguments.max_num_peers <= global_state_lock.peers().len() && !cli_arguments.bootstrap {
         return InternalConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded);
     }
@@ -272,6 +272,26 @@ async fn check_if_connection_is_allowed(
 
     debug!("ConnectionStatus::Accepted");
     InternalConnectionStatus::Accepted
+}
+
+/// The peer a bootstrapping node disconnects to make room for a legacy
+/// newcomer: the longest-lived legacy peer that is not a CLI peer.
+///
+/// Only legacy peers qualify, recognizable by their id deriving from their
+/// socket address. Peers of the libp2p stack are its own to evict.
+fn longest_lived_legacy_peer(state: &GlobalStateLock) -> Option<PeerId> {
+    let cli_peers = state.cli().peers.iter().collect::<HashSet<_>>();
+    state.peers().with_connected(|connected| {
+        connected
+            .iter()
+            .filter(|(_id, info)| !cli_peers.contains(&info.address()))
+            .filter(|(id, info)| {
+                multiaddr_to_socketaddr(&info.address())
+                    .is_some_and(|address| pseudorandom_peer_id(&address) == **id)
+            })
+            .min_by_key(|(_id, info)| info.connection_established())
+            .map(|(id, _info)| *id)
+    })
 }
 
 /// Respond to an incoming connection initiation.
@@ -422,10 +442,12 @@ where
 
     // If necessary, disconnect from another, existing peer.
     if connection_status == InternalConnectionStatus::AcceptedMaxReached && state.cli().bootstrap {
-        info!("Maximum # peers reached, so disconnecting from an existing peer.");
-        peer_task_to_main_tx
-            .send(PeerTaskToMain::DisconnectFromLongestLivedPeer)
-            .await?;
+        if let Some(peer_id) = longest_lived_legacy_peer(&state) {
+            info!("Maximum # peers reached, so disconnecting from an existing peer.");
+            peer_task_to_main_tx
+                .send(PeerTaskToMain::Disconnect(peer_id))
+                .await?;
+        }
     }
 
     let peer_id = pseudorandom_peer_id(&peer_address);
@@ -1362,5 +1384,28 @@ mod tests {
         };
 
         Ok(())
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn bootstrap_evicts_only_legacy_peers() {
+        let (_, _, _, _, _, _, state, _) = get_test_genesis_setup(1, cli_args::Args::default())
+            .await
+            .unwrap();
+        let legacy_peer = state
+            .peers()
+            .with_connected(|connected| *connected.keys().next().unwrap());
+
+        // A libp2p peer over TCP, connected before the legacy one. Its id is
+        // not derived from its address.
+        let libp2p_peer = PeerId::random();
+        let mut libp2p_peer_info = get_dummy_peer_incoming("203.0.113.8:9798".parse().unwrap());
+        libp2p_peer_info.set_connection_established(UNIX_EPOCH);
+        state.peers().insert(libp2p_peer, libp2p_peer_info);
+        assert_eq!(Some(legacy_peer), longest_lived_legacy_peer(&state));
+
+        state
+            .peers()
+            .with_connected_mut(|connected| connected.remove(&legacy_peer));
+        assert_eq!(None, longest_lived_legacy_peer(&state));
     }
 }
