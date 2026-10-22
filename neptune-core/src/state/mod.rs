@@ -2107,7 +2107,10 @@ impl GlobalState {
             is_archival_node: self.chain.is_archival_node(),
             is_bootstrapper_node: false,
             timestamp: SystemTime::now(),
-            extra_data: HandshakeData::extra_data(!self.cli().blocks_only),
+            extra_data: HandshakeData::extra_data(
+                !self.cli().blocks_only,
+                self.chain.is_archival_node() && !self.cli().no_serve_archival_mutator_set,
+            ),
         }
     }
 
