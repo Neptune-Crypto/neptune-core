@@ -118,19 +118,21 @@ The main composite protocol is named `NetworkStack`. This struct defines the pro
 ```rust
 #[derive(libp2p::swarm::NetworkBehaviour)]
 pub struct NetworkStack {
-    pub kademlia: kad::Behaviour<MemoryStore>,
-    pub identify: identify::Behaviour,
-    pub ping: ping::Behaviour,
     pub connection_limits: connection_limits::Behaviour,
-    pub autonat: autonat::Behaviour,
-    pub relay_client: relay::client::Behaviour,
-    pub relay_server: relay::Behaviour,
-    pub dcutr: dcutr::Behaviour,
-    pub upnp: upnp::tokio::Behaviour,
+    pub source_limits: SourceLimits, // Limits per IP and per address prefix
     pub gateway: StreamGateway, // The custom bridge to the PeerLoop
+    pub ping: ping::Behaviour,
+    pub identify: identify::Behaviour,
+    pub upnp: upnp::tokio::Behaviour,
+    pub autonat: autonat::Behaviour,
+    pub relay_server: Toggle<relay::Behaviour>,
+    pub relay_client: relay::client::Behaviour,
+    pub dcutr: dcutr::Behaviour,
+    pub kademlia: kad::Behaviour<MemoryStore>,
 }
-
 ```
+
+The order of the fields matters. `libp2p` asks the subprotocols in this order whether to accept an established connection, and when one refuses, the ones before it are told only that the connection failed, never that it closed. So the subprotocols that may refuse a connection come first: the limits, and the `gateway`, which refuses a second connection from a peer that already has a blockchain peer loop. Otherwise `autonat`, which records every connection it accepts, would keep refused ones forever.
 
 ### Actor State and Blockchain Peer Loop Spawning
 
