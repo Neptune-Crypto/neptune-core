@@ -216,15 +216,6 @@ pub async fn admissible(
         return Err(TxAdmissionError::NotConfirmable(confirmability_error));
     }
 
-    let mutator_set_update = MutatorSetUpdate::new(kernel.inputs.clone(), kernel.outputs.clone());
-    if mutator_set_update
-        .apply_to_accumulator(&mut judged_against.clone())
-        .is_err()
-    {
-        // Should not be reachable because of above check
-        return Err(TxAdmissionError::CannotApplyToMutatorSet);
-    }
-
     // Check if a transaction synced to a tip ancestor is a double spend.
     if synced_to.is_some() && !synced_to_tip {
         match recent_mutator_sets.catch_up(kernel.mutator_set_hash, &kernel.inputs) {
@@ -263,8 +254,8 @@ pub async fn admissible(
         }
     }
 
-    // Verifying the proof is by far the most expensive check, so it runs once
-    // every cheaper reason to reject has been ruled out.
+    // Expensive check, so it runs late in the pipeline. After all cheaper
+    // checks.
     let valid = match tx {
         AnyTxRef::Standard(transaction) => transaction.is_valid(network, consensus_rule_set).await,
         AnyTxRef::Link(link_tx) => match &link_tx.proof {
@@ -280,6 +271,18 @@ pub async fn admissible(
     };
     if !valid {
         return Err(TxAdmissionError::Invalid);
+    }
+
+    // Applying the update is potentially the most expensive check. So should
+    // run at the very end and after proof verification has succeeded so any
+    // attack reaching here is expensive for the attacker.
+    let mutator_set_update = MutatorSetUpdate::new(kernel.inputs.clone(), kernel.outputs.clone());
+    if mutator_set_update
+        .apply_to_accumulator(&mut judged_against.clone())
+        .is_err()
+    {
+        // Should not be reachable because of the confirmability check above.
+        return Err(TxAdmissionError::CannotApplyToMutatorSet);
     }
 
     Ok(())
