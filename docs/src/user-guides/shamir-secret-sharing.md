@@ -21,11 +21,11 @@ First, make sure you have a wallet installed.
  - Whenever you run `neptune-core`, it will read the wallet file or create one if none is found. Unless you moved or removed this file, it is still there.
  - To test if the wallet file is present, run `neptune-cli which-wallet`.
  - To generate a wallet file without running `neptune-core`, try `neptune-cli generate-wallet`.
- - To import a wallet from a seed phrase, first make sure there is no wallet file, and then run `neptune-cli import-seed-phrase`.
+ - To import a wallet from a seed phrase, first make sure neither the wallet directory nor the wallet database directory exists (see [Managing Secret Seeds](./managing-secret-seeds.md)), and then run `neptune-cli import-seed-phrase`.
 
 To generate \\(n\\) shares in a \\(t\\)-out-of-\\(n\\) scheme, run `neptune-cli shamir-share t n` and replace `t` and `n` with the values you want. This command generates \\(n\\) seed phrases. **Note:** be sure to record the share index ("`i/n`") along with each share, as you will need this information to reconstruct the original secret.
 
-To reconstruct the original secret, first make sure the wallet file is absent. Then run `neptune-cli shamir-combine t` and replace `t` with the same value used earlier. This command will ask you for \\(t\\) secret shares (with index) which you can supply by writing the seed phrase words of each share.
+To reconstruct the original secret, first make sure neither the wallet directory nor the wallet database directory exists (see [Managing Secret Seeds](./managing-secret-seeds.md)). Then run `neptune-cli shamir-combine t` and replace `t` with the same value used earlier. This command will ask you for \\(t\\) secret shares (with index) which you can supply by writing the seed phrase words of each share.
 
 ## Example
 

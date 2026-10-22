@@ -2,7 +2,7 @@
 
 ## Generation Address
 
-Presently, Neptune has two types of addresses, Generation Addresses and Symmetric Addresses. The latter type is used internally for sending funds to the same client from which they originate, like with change and composer UTXOs. Generation addresses are the type you want for addresses that third parties can send funds to.
+Presently, Neptune has four types of addresses: Generation addresses, Symmetric addresses, EC-hybrid addresses, and Viewing addresses; see [Keys and Addresses](../neptune-core/keys.md) for the differences. Generation addresses are the type you want for addresses that third parties can send funds to, and the only type that can safely be shared with more than one party. The wallet uses Viewing addresses internally for sending funds to itself, like with change, and its first generation address for composer UTXOs.
 
 A generation address looks like this:
 
@@ -40,7 +40,7 @@ All generation addresses are deterministically generated from the wallet secret 
  - Start `neptune-dashboard` in a new console window `> neptune-dashboard`.
  - Navigate to the "Receive" tab. Your current generation address is shown.
  - Press `Enter` to generate a new generation address.
- - Press `C` to enter into *console mode*, where you can copy the address.
+ - Press `c` to enter into *console mode*, where you can copy the address.
  - Press `Enter` to exit console mode.
 
 ## Using `neptune-cli`
@@ -49,11 +49,11 @@ All generation addresses are deterministically generated from the wallet secret 
 
 To generate the *next* generation address without going through the dashboard, `neptune-cli` is your friend:
  - Make sure a node is running: `> neptune-core`.
- - `> neptune-cli next-generation-address`.
+ - `> neptune-cli next-receiving-address`.
 
 ## Nth Address
 
-The previous two methods require a running node in order to read the derivation index and increment it. To generate a generation address with a given derivation address, run `> neptune-cli nth-receiving-address n` and replace `n` by the index.
+The previous two methods require a running node in order to read the derivation index and increment it. To generate a generation address with a given derivation index, run `> neptune-cli nth-receiving-address n generation` and replace `n` by the index. (The second argument is the key type; `ec_hybrid` and `viewing_address` are also accepted. Add `--network <network>` for networks other than main net.)
 
 ## Premine Receiving Address
 

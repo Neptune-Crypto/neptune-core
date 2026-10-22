@@ -445,7 +445,7 @@ impl NetworkActor {
             max_reservations: 128,
             // # active connections
             max_circuits: 16,
-            // time for hole punch only
+            // reservations are renewed by the client; see the constant's doc
             reservation_duration: Self::RELAY_RESERVATION_DURATION,
             ..Default::default()
         };

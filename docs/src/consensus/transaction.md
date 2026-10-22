@@ -237,7 +237,7 @@ The motivation for splitting transaction validity into subclaims is that the ind
    - for each input or output UTXO:
      - collect the type script hash by pushing it into the list if it is new
    - output the unique type script hashes
- - `TypeScript :: (transaction_kernel_mast_hash : Digest) × (salted_input_utxos_hash : Digest) × (salted_output_utxos_hash : Digest) ⟶ ∅` Authenticates the correct evolution of all UTXOs of a given type. The concrete program value depends on the token types involved in the transaction. For Neptune's native currency, Neptune Coins, the type script asserts that *a)* all output amounts are positive, and *b)* the sum of all input amounts is greater than or equal to the fee plus the sum of all output amounts. Every type script whose hash was returned by `CollectTypeScripts` must halt gracefully.
+ - `TypeScript :: (transaction_kernel_mast_hash : Digest) × (salted_input_utxos_hash : Digest) × (salted_output_utxos_hash : Digest) ⟶ ∅` Authenticates the correct evolution of all UTXOs of a given type. The concrete program value depends on the token types involved in the transaction. For Neptune's native currency, Neptune Coins, the type script asserts that *a)* no output amount is negative, *b)* the sum of all input amounts, plus the coinbase if set, equals the fee plus the sum of all output amounts, and *c)* if the coinbase is set, at least half of it is time-locked for 3 years. Every type script whose hash was returned by `CollectTypeScripts` must halt gracefully.
 
 Diagram 1 shows how the explicit inputs and outputs of all the subprograms relate to each other. Single arrows denote inputs or outputs. Double lines indicate that the program(s) on the one end hash to the digest(s) on the other.
 
@@ -280,13 +280,14 @@ Two transactions can be merged into one. Among other things, this operation repl
    - verify that `rr` is not a member of `txb.inputs`
  - for each removal record `rr` in `txb.inputs`
    - verify that `rr` is not a member of `txa.inputs`
- - verify that at most one of `txa.coinbase` and `txb.coinbase` is set
+ - verify that `txb.coinbase` is not set (only the left operand may carry a coinbase)
+ - if `txa.coinbase` is set, verify that the timestamps of `txa` and `txb` differ by at most 12 hours
  - verify that `txa.mutator_set_hash == txb.mutator_set_hash`
  - compile a new `TransactionKernel` object `kernel`:
    - set `kernel.inputs` to `txa.inputs || txb.inputs` after shuffling randomly
    - set `kernel.outputs` to `txa.outputs || txb.outputs` after shuffling randomly
    - set `kernel.announcements` to `txa.announcements || txb.announcements` after shuffling randomly
-   - set `kernel.coinbase` to `txa.coinbase` or `txb.coinbase` or to `None`
+   - set `kernel.coinbase` to `txa.coinbase`
    - set `kernel.fee` to `txa.fee + txb.fee`
    - set `kernel.timestamp` to `max(txa.timestamp, txb.timestamp)`
    - set `kernel.mutator_set_hash` to `txa.mutator_set_hash`
@@ -316,7 +317,7 @@ A transaction is valid if another transaction that is identical except for fixin
 
 ### Wishlist: Proof of Integral Mempool Operation
 
-**Note:** this section is included as a wishlist item. Proofs of integral mempool operation are not presently supported. It is not one of the validity variants (a)–(e) above, and correspondingly there is no `SingleProofWitness::IntegralMempool` variant yet (see the commented-out placeholder in the enum).
+**Note:** this section is included as a wishlist item. Proofs of integral mempool operation are not presently supported. It is not one of the validity variants (a)–(g) above, and correspondingly there is no `SingleProofWitness::IntegralMempool` variant yet (see the commented-out placeholder in the enum).
 
 A transaction is valid if it was ever added to an integral mempool. The motivating use case for this feature is that mempool operators can delete transaction proofs as long as they store and routinely update one proof -- a *proof of integral mempool operation*.
 
@@ -349,7 +350,7 @@ Clauses (c)--(g) are presented as separate computations, but in reality they are
      - `LockScript :: (transaction_kernel_mast_hash : Digest) ⟶ ∅` for each lock script hash
      - `KernelToOutputs :: (transaction_kernel_mast_hash : Digest) ⟶ (outputs_salted_utxos_hash : Digest)`
      - `CollectTypeScripts :: (inputs_salted_utxos_hash : Digest) × (outputs_salted_utxos_hash : Digest) ⟶ (type_script_hashes : [Digest])`
-     - `TypeScript :: (transaction_kernel_mast_hash : Digest) ⟶ ∅` for each type script hash;
+     - `TypeScript :: (transaction_kernel_mast_hash : Digest) × (salted_input_utxos_hash : Digest) × (salted_output_utxos_hash : Digest) ⟶ ∅` for each type script hash;
    - verify claim `TransactionMerger :: (transaction_kernel_mast_hash : Digest) ⟶ ∅`
    - verify claim `TransactionDataUpdate :: (transaction_kernel_mast_hash : Digest) ⟶ ∅`
    - *(after hardfork delta)* verify claim `LinkProof` claim and that the link kernel MAST hash is derived from `transaction_kernel_mast_hash` under the assumption that the thruputs are empty -- this is `Fix`

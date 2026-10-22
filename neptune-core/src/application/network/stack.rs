@@ -52,7 +52,7 @@ pub(crate) const NEPTUNE_PROTOCOL_STR: &str = "/neptune/";
 ///   looking up ourselves, we end up crawling the network and populating our
 ///   internal phone book along the way, not to mention those of peers.
 /// * **[`gateway`](Self::gateway)**: A "stream factory" that uses a raw stream
-///   and hijacks it. It negotiates the initial handshake via CBOR
+///   and hijacks it. It negotiates the initial handshake via bincode
 ///   and provides the raw [`libp2p::Stream`] which is then upgraded into a
 ///   long-lived bidirectional communication channel by the peer message
 ///   handler.

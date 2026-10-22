@@ -10,18 +10,18 @@ There are two broad possibilities:
 1. write the secrets to the blockchain, encrypted to the recipient
 2. do not write secrets to the blockchain. Use some out-of-band method instead.
 
-`neptune-core` supports both of these.  They are referred to as notification methods.  An enum `UtxoNotifyMethod` exists and provides variant `OnChain` and `OffChain`.
+`neptune-core` supports both of these.  They are referred to as notification methods.  An enum `UtxoNotificationMethod` exists and provides variants `OnChain`, `OffChain`, and `None` (no notification intended). Where only the medium matters, the simpler enum `UtxoNotificationMedium` with variants `OnChain` and `OffChain` is used.
 
 It is also important to recognize that sometimes the sender and receiver may be the same wallet or two wallets owned by the same person or organization.
 
 ## On-Chain Utxo Notifications
 
-`OnChain` transfers are performed with the struct `PublicAnnouncement`.  It is an opaque list of elements of type `BFieldElement` that can hold arbitrary data.  A list of `PublicAnnouncement` is attached to each Neptune `Transaction` and stored on the blockchain.
+`OnChain` transfers are performed with the struct `Announcement`.  It is an opaque list of elements of type `BFieldElement` (its `message` field) that can hold arbitrary data.  A list of `Announcement`s is attached to each Neptune `Transaction` and stored on the blockchain.
 
-The Neptune key types use `PublicAnnouncement`s follows:
- - elements `0..1`: `key_type` identifies which kind of secret spending key or public receiving address this announcement is for;
- - elements `1..2`: `receiver_id` identifies the recipient's receiving address
- - elements `3..`: a ciphertext, decryptable only by the recipient's secret key, that holds `Utxo` and `sender_randomness`, which are necessary pieces of data to claim and spend the UTXO.
+The Neptune key types use `Announcement`s follows:
+ - element `0`: `key_type` identifies which kind of secret spending key or public receiving address this announcement is for;
+ - element `1`: `receiver_id` identifies the recipient's receiving address
+ - elements `2..`: a ciphertext, decryptable only by the recipient's secret key, that holds `Utxo` and `sender_randomness`, which are necessary pieces of data to claim and spend the UTXO.
 
 The first two elements are plaintext, so anyone can read them.
 
@@ -31,30 +31,32 @@ As of v0.2.1, all payments create on-chain notifications for the recipients by d
 
 #### Illustrating the challenge.
 
-Given that the notification secrets are encrypted there exists a problem.  How can a wallet identify which `PublicAnnouncement` are intended for it?
+Given that the notification secrets are encrypted there exists a problem.  How can a wallet identify which `Announcement` are intended for it?
 
-The simplest and most obvious solution is to attempt to decrypt the ciphertext of each.  If the encryption succeeds then we can proceed with claiming the `Utxo`.  While this works it is very inefficient.  Each block may contain thousands of `PublicAnnouncement`.  Further our wallet may have hundreds or even thousands of keys that must be checked against each announcement, making this an `n*m` operation.  While it may be feasible for a node to do this if it is online all the time it becomes very expensive to scan the entire blockchain as may be necessary when restoring an old wallet from a seed.
+The simplest and most obvious solution is to attempt to decrypt the ciphertext of each.  If the encryption succeeds then we can proceed with claiming the `Utxo`.  While this works it is very inefficient.  Each block may contain thousands of `Announcement`.  Further our wallet may have hundreds or even thousands of keys that must be checked against each announcement, making this an `n*m` operation.  While it may be feasible for a node to do this if it is online all the time it becomes very expensive to scan the entire blockchain as may be necessary when restoring an old wallet from a seed.
 
 We can do better.
 
 #### How `neptune-core` solves it.
 
-This is where the `key-type` and `receiver_identifier` of the `PublicAnnouncement` come into play.
+This is where the `key-type` and `receiver_identifier` of the `Announcement` come into play.
 
 Since these fields are plaintext we can use them to identify notifications intended for our wallet prior to attempting decryption.
 
-Each `SpendingKey` has a `receiver_identifier` field that is derived from the secret-key.  This uniquely identifies the key without giving away the secret.  As such, it can be shared in the public-announcement.
+Each `SpendingKey` has a `receiver_identifier` field that is derived from the secret-key.  This uniquely identifies the key without giving away the secret.  As such, it can be shared in the announcement.
 
 The algorithm looks like:
 
 ```
-for each key-type we support:
-    for each known key in our wallet:
-        for each public-announcement in the block-transaction:
-            filter by key-type
-            filter by key.receiver_id
-            filter by key.decrypt(announcement.ciphertext) result
+index all known keys in our wallet by receiver_id
+for each announcement in the block-transaction:
+    look up the keys with receiver_id == announcement.receiver_id
+    for each such key (almost always exactly one):
+        filter by key-type
+        filter by key.decrypt(announcement.ciphertext) result
 ```
+
+The naive approach would loop over all known keys and, for each key, over all announcements, comparing receiver identifiers; these nested loops take time `O(keys × announcements)`. Building the index costs one pass over the keys, and each announcement then needs only a single lookup, so the algorithm above runs in time `O(keys + announcements)`.
 
 #### Privacy warning
 
@@ -105,11 +107,13 @@ be returned into Bob's wallet.
 
 note: A wallet can send funds to itself for other reasons, but change outputs are predicted to be the most common use-case.
 
-When a wallet is sending a `Utxo` to itself there is no need to announce this on
-the public blockchain.  Instead the wallet simply stores a record, called an
+When a wallet is sending a `Utxo` to itself there is no strict need to announce this on
+the public blockchain.  Instead the wallet can simply store a record, called an
 `ExpectedUtxo` in local state (memory and disk) and once a block is mined that
 contains the transaction, the wallet can recognize the `Utxo`, verify it can be
 claimed, and add it to the list of wallet-owned `Utxo` called `monitored_utxos`.
+
+Note, however, that by default change outputs *are* announced on-chain (`ChangePolicy::default()` uses on-chain notification to a `ViewingAddress` key), so that they can be recovered from the wallet's secret seed alone. Off-chain notification of change is available through `ChangePolicy::recover_to_next_unused_viewing_key_offchain()` and similar constructors; that saves blockchain space, but the change output is then lost if the wallet's local state is lost.
 
 ### Neptune p2p network
 
@@ -121,16 +125,22 @@ There are challenges with keeping the data around in perpetuity as this would pl
 
 ### External / Serialized
 
-note: this is a proposed mechanism.  It does not exist at time of writing.
+note: steps 1–3 of this mechanism are supported by `neptune-core`; the optional step 4 is not implemented.
 
 The idea here is that the transfer and ongoing storage takes place completely outside of `neptune-core`.
 
-1. When a transaction is sent `neptune-core` would provide a serialized data structure, eg `OffchainUtxoNotification` containing fields: key_type, receiver_identifier, ciphertext(utxo, sender_randomness) for each `OffChain` output.   Note that these are the exact fields stored in `PublicAnnouncement` for notifications.
+1. The sender creates a transaction with one or more `OffChain` outputs. With `neptune-cli`, this is done with
+
+```
+neptune-cli send <address> <amount> <fee> <receiver_tag> <notify_self> off-chain
+```
+
+   where the last argument selects off-chain notification for the recipient's output, and `<notify_self>` (`on-chain` or `off-chain`) does the same for the change output. For each off-chain output, `neptune-core` produces an `EncryptedUtxoNotification` containing the fields `flag` (the key type), `receiver_identifier`, and `ciphertext(utxo, sender_randomness)`.   Note that these are the same fields stored in an `Announcement` for on-chain notifications. Its standard serialization is a bech32m string. `neptune-cli` writes one utxo-transfer JSON file per off-chain output into the `utxo-transfer` directory under the data directory, and prints instructions for sender and receiver.
 
 2. Some external process then transfers the serialized data to the intended recipient.
 
-3. The recipient then invokes the `claim_utxos()` RPC api and passes in a list of serialized `OffchainUtxoNotification`.  `neptune-core` then attempts to recognize and claim each one, just as if it had been found on the blockchain.
+3. The recipient then invokes the `claim_utxo` RPC, for instance with `neptune-cli claim-utxo file <path>` or `neptune-cli claim-utxo raw <ciphertext>`, optionally with a maximum search depth for the case that the UTXO was already mined. `neptune-core` then attempts to recognize and claim it, just as if it had been found on the blockchain: on success, a new `ExpectedUtxo` is added to the wallet.
 
-4. Optionally the recipient could pass a flag to `claim_utxos()` that would cause it to initiate a new `OnChain` payment into the recipient's wallet.  This could serve a couple purposes:
+4. *(Optional; not implemented.)* The recipient could pass a flag to `claim_utxo` that would cause it to initiate a new `OnChain` payment into the recipient's wallet.  This could serve a couple purposes:
     * using `OnChain` notification minimizes future data-loss risk for recipient.
     * if the funds were sent with a symmetric-key this prevents the sender from spending (stealing) the funds later.

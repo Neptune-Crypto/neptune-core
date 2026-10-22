@@ -52,26 +52,11 @@ If the branch exists in a triton/neptune official repo, (as opposed to a persona
 
 So if working on issue `#232` and adding feature *walk_and_chew_gum* one might name the branch `myuser/232_walk_and_chew_gum_pr`.
 
-### release branch
+### release tag
 
-The `master` branch can contain changes that are not compatible with whatever network is currently live. Beta-testers looking for the branch that will synchronize with the network that is currently live need branch `release`. This branch may cherry-pick commits that are meant for `master` so long as they are backwards-compatible. However, when this task is too cumbersome, branch `release` will become effectively abandoned -- until the next network version is released.
+The `master` branch can contain changes that are not compatible with whatever network is currently live. Users looking for the latest stable commit, compatible with the network that is currently live, should use the tag `release`.
 
-#### TestNet Release Protocol
-
- - Ensure that master builds against crates that live on [crates.io](https://crates.io). In particular, no dependencies on github repositories or revisions.
- - Update `README.md` in case to make sure the installation instructions are up-to-date.
- - Ensure that all tests pass.
- - Bump the version in `Cargo.toml`
- - Create a commit with the subject line `v0.0.6` (or watever the new version number is) and in the body list all the changes.
- - Push to `master` on github.
- - Add a tag marking the current commit with the version:
-   - `git tag v0.0.6` (or whatever the next version is)
-   - `git push --tags`.
- - Set branch `release` to point to `master`:
-   - `git checkout release`
-   - `git reset master`
-   - `git push`
- - Consider making an announcement.
+To make a release, follow [Releasing](./releasing.md).
 
 # Conventional Commits
 

@@ -13,8 +13,8 @@ use super::utxo_notification::UtxoNotificationMedium;
 /// When the selected inputs represent more coins than the outputs (with fee)
 /// where does this change go?
 ///
-/// The default behavior is to recover to the next unused (symmetric) key with
-/// onchain utxo notifications.
+/// The default behavior is to recover to the next unused viewing-address key
+/// with onchain utxo notifications.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ChangePolicy {
     /// Inputs must exactly equal spend amount, or else an error will result.
@@ -40,8 +40,8 @@ pub enum ChangePolicy {
     Burn,
 }
 
-/// The default behavior is to recover to the next unused (symmetric) key with
-/// onchain utxo notifications.
+/// The default behavior is to recover to the next unused viewing-address key
+/// with onchain utxo notifications.
 impl Default for ChangePolicy {
     fn default() -> Self {
         Self::recover_to_next_unused_viewing_key_onchain()

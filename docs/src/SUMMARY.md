@@ -25,6 +25,7 @@
   - [Scan Mode](./user-guides/scan-mode.md)
   - [Shamir Secret Sharing](./user-guides/shamir-secret-sharing.md)
   - [Wallet Rescan](./user-guides/wallet-rescan.md)
+  - [Bootstrapping from Raw Block Files](./user-guides/bootstrapping-state.md)
 - [Contributing](./contributing.md)
   - [Git Workflow](./contributing/git-workflow.md)
   - [Git Message](./contributing/git-message.md)

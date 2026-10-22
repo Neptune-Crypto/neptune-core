@@ -17,7 +17,7 @@ The rule sets below are the ones main net has used since the (balance-preserving
 | TvmProofVersion1 | hard                       | 2026-02-04                        | 23,401                              | Fixed a soundness bug in Triton VM (proof version 0), which was used by Triton VM v1.0.0. Note that proof version (0 vs 1) is independent of semantic version (v1.0.0 vs v2.0.0)  |
 | HardforkBeta     | hard                       | ~2026-05-13                       | 38,000                              | Removes memory hardness of PoW; adds a lustration barrier to ensure the prior soundness bug did not inflate supply; checks PoW threshold against own difficulty, not parent.      |
 | HardforkGamma    | hard                       | 2026-06-18                        | 40,300                              | Fixes June 2026 soundness bugs in the recursive proof verifier (upstream in `tasm-lib`) and in Triton VM's `sponge_mem_absorb` instruction, along with other under-constrained trace values; restarts the lustration counting, all earlier proofs having been found unsound; rejects transactions backdated by more than three days. |
-| HardforkDelta    | hard                       | ~2026-09-24 (scheduled)           | 55,000                              | Activates transaction chaining: `SingleProof` gains the `Fix` and `Weld` branches, which recursively verify a `LinkProof` and so let a chained transaction (`LinkTx`) become a block-borne transaction. See [Transaction](./transaction.md).      |
+| HardforkDelta    | hard                       | ~2026-09-24                       | 55,000                              | Activates transaction chaining: `SingleProof` gains the `Fix` and `Weld` branches, which recursively verify a `LinkProof` and so let a chained transaction (`LinkTx`) become a block-borne transaction. See [Transaction](./transaction.md).      |
 
 ### Other networks
 
@@ -48,6 +48,8 @@ A rule set is a bundle of individually small decisions. The table below gives th
 | Lustration double-counting fixed | -- | -- | -- | no | yes | yes |
 | Transaction backdating limit | none | none | none | none | 3 days | 3 days |
 | `SingleProof` has the `Fix` and `Weld` branches | no | no | no | no | no | yes |
+| Transactions can be retired via announcements | no | no | no | no | no | yes |
+| Packed chunks may use the extended (23-bit) length indicator | no | no | no | no | no | yes |
 
 The last row is the one that makes delta a change to `SingleProof` itself rather than to the rules around it: two branches more is a different program with a different digest, so from delta there are two `SingleProof` programs, and which one a transaction's proof is about is settled by the height of the block that would contain it. See [Transaction](./transaction.md).
 
@@ -61,7 +63,7 @@ VM is taken on faith by `neptune-core`. To verify their validity, older versions
 To avoid having to carry around multiple versions of Triton VM, all blocks prior to the activation of hardfork delta are verified through a checkpoint that is defined for both main net and for testnet-0. All blocks mined
 prior to the activation of hardfork delta are part of the checkpoint.
 
-Consensus therefore carries a *checkpoint*: block 54,999, one below the HardforkDelta activation height, on main net; block 5,599 on test net; and genesis on every other network. At or below the checkpoint, stored blocks are canonical and their proofs are valid by fiat.
+Consensus therefore carries a *checkpoint*: block 54,999, one below the HardforkDelta activation height, on main net; block 5,399, likewise one below, on test net; and genesis on every other network. At or below the checkpoint, stored blocks are canonical and their proofs are valid by fiat.
 
 Two implications. A node that starts up and finds its own tip's block proof no longer valid rolls back to the checkpoint rather than all the way to genesis. And a node importing blocks from disk skips an invalid block at or below the checkpoint, instead of rejecting the file it came in.
 
@@ -78,4 +80,4 @@ hardfork delta. If anyone presents us with a proof that a hardfork gamma proof i
 - **Historical proof versions** Reboot and HardforkAlpha use proof version 0; TvmProofVersion1 and HardforkBeta use 1; HardforkGamma uses 5; HardforkDelta uses 8. Every claim names the version it is made under, so a proof produced for one rule set does not verify under another.
 - **HardforkBeta** introduces a lustration barrier to the block header. This lustration barrier acts as a counter that is decremented whenever a UTXO generated prior to the barrier is spent. The counter is decremented by the number of Neptune coins being spent. If the counter reaches zero, UTXOs generated prior to the barrier become unspendable. The guarantee is global: no more can ever be spent out of the pre-barrier supply than the counter was initialised to, so a soundness error preceding the barrier cannot be cashed out beyond that bound.
 - **HardforkGamma** restarts the lustration counting, and it is worth being clear why: The barrier that HardforkBeta erected bounds what can be spent out of the UTXOs that predate *it*; the June 2026 soundness bugs then showed that proofs made between beta and gamma could not be relied upon either. Gamma therefore moves the barrier forward to its own activation height and re-initialises the counter -- to the premine, plus the claims pool, plus everything mined up to that height -- so that the bound once again covers every proof that might be unsound.
-- **HardforkDelta** Upgraded the proof version to a more secure version of Triton VM, namely proof version 8. However, the problem with Triton VM proof version 7 did not affect the consensus programs that protect the total supply of Neptune coins. So the lustration counter was not restarted with hardfork delta, since all block proofs after hardfork *gamma* have been found to be valid and sound.
+- **HardforkDelta** Upgraded the proof version to a more secure version of Triton VM, namely proof version 8. However, the problem with Triton VM v7 (proof version 5) did not affect the consensus programs that protect the total supply of Neptune coins. So the lustration counter was not restarted with hardfork delta, since all block proofs after hardfork *gamma* have been found to be valid and sound.

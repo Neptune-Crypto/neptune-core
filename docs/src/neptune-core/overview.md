@@ -1,26 +1,40 @@
 # Neptune Core Overview
 `neptune-core` uses the [tokio](https://tokio.rs/tokio/tutorial) async framework and tokio's multi-threaded executor which assigns tasks to threads in a threadpool and requires the use of thread synchronization primitives.  We refer to spawned tokio tasks as `tasks` but you can think of them as threads if that fits your mental model better.  Note that a tokio task may (or may not) run on a separate operating system thread from that task that spawned it, at tokio's discretion.
 
-`neptune-core` connects to other clients through TCP/IP and accepts calls to its RPC server via [tarpc](https://github.com/google/tarpc) using json serialization over the [serde_transport](https://docs.rs/tarpc/latest/tarpc/serde_transport/index.html).  The project also includes `neptune-cli` a command-line client and `neptune-dashboard`, a cli/tui wallet tool.  Both interact with `neptune-core` via the tarpc RPC protocol.
+`neptune-core` connects to other clients through the libp2p [network stack](network_stack.md), over TCP or QUIC, and also accepts incoming connections from legacy (pre-libp2p) clients over plain TCP. It accepts calls to its RPC server via [tarpc](https://github.com/google/tarpc) using json serialization over the [serde_transport](https://docs.rs/tarpc/latest/tarpc/serde_transport/index.html); this server only listens on `127.0.0.1`. The project also includes `neptune-cli` a command-line client and `neptune-dashboard`, a cli/tui wallet tool.  Both interact with `neptune-core` via the tarpc RPC protocol.
+
+Optionally, `neptune-core` also serves an HTTP JSON-RPC API. It is enabled with `--listen-rpc [ADDR]`, where `ADDR` defaults to `127.0.0.1:9797`. The JSON-RPC methods are grouped into namespaces, and only the namespaces passed to `--rpc-modules` are exposed, as a comma-separated, case-insensitive list. The default is `--rpc-modules node,chain`. The available namespaces are:
+ - `node`
+ - `network`
+ - `chain`
+ - `mining`
+ - `archival`
+ - `mempool`: endpoints for inspecting the mempool status
+ - `wallet`: endpoints for serving external wallets
+ - `personal`: endpoints for managing the node's own wallet
+ - `utxoindex`: endpoints relating to and requiring a UTXO index (see `--utxo-index`)
+
+Activating some namespaces, `personal` in particular, can expose wallet secrets, so do not enable them on an address reachable from an untrusted network. Additionally, `--unsafe-rpc` enables methods that are unsafe over HTTP, such as those that trigger expensive computations; use it only in isolated, controlled environments.
 
 ## Long-lived async tasks of neptune-core binary
-There are four classes of tasks:
-- `main`: handles init and `main_loop`
-- `peer[]`: handles `connect_to_peers` and `peer_loop`
-- `mining`: runs `miner_loop`, has a worker and a monitor task
-- `server[]`: handles `server` for incoming RPC requests
-
-With the introduction of the libp2p [network stack](network_stack.md), there is a fifth:
- - `NetworkActor`: responsible for driving the libp2p swarm of peers and, whenever a new connection is established, spawning a `peer_loop` for it.
+There are six classes of tasks:
+- `main`: handles init and then runs the main loop, `MainLoopHandler::run`.
+- `peer[]`: one per peer connection, each running `peer_loop`. Incoming connections from legacy peers are first handled by `connect_to_peers::answer_peer`.
+- `mining`: runs `mine_loop::mine`, which spawns a composer task and a guesser task as needed.
+- `sync`: runs the sync loop, which downloads blocks from peers. It is started by the main loop when a peer reports a tip with sufficiently more cumulative proof-of-work, and stops once the node has caught up. See [Syncing](syncing.md).
+- `server[]`: handles incoming RPC requests, both tarpc and (if enabled) HTTP JSON-RPC.
+- `NetworkActor`: responsible for driving the libp2p swarm of peers and, whenever a new connection is established, spawning a `peer_loop` for it.
 
 ## Channels
 Long-lived tasks can communicate with each other through channels provided by the tokio framework. All communication goes through the main task. Eg, there is no way for the miner task to communicate with peer tasks.
 
 The channels are:
 - peer to main: `mpsc`, "multiple producer, single consumer".
-- main to peer: `broadcast`, messages can only be sent to *all* peer tasks. If you only want one peer task to act, the message must include an IP that represents the peer for which the action is intended.
-- miner to main: `mpsc`. Only one miner task (the monitor/master task) sends messages to main. Used to tell the main loop about newly found blocks.
-- main to miner: `watch`. Used to tell the miner to mine on top of a new block; to shut down; or that the mempool has been updated, and that it therefore is safe to mine on the next block.
+- main to peer: `broadcast`, messages can only be sent to *all* peer tasks. If you only want one peer task to act, the message must include the `PeerId` of the peer for which the action is intended.
+- miner to main: `mpsc`. Used to tell the main loop about newly found blocks and new block proposals, or to request shutdown.
+- main to miner: `mpsc`. Used to tell the miner about a new tip or a new block proposal to work on; to pause and resume; to start or stop mining; that syncing has started or stopped; or to shut down.
+- sync to main: `mpsc`. Used by the sync loop to request blocks from peers, hand over the blocks that extend the tip, and report when it has finished.
+- main to sync: `mpsc`. Used to relay blocks received from peers to the sync loop, to add or remove peers, and to abort syncing.
 - rpc server to main: `mpsc`: Used to e.g. send a transaction object that is built from client-controlled UTXOs to the main task where it can be added to the mempool. This channel is also used to shut down the program when the `shutdown` command is called.
 - NetworkActor to main: `mpsc`: used to notify the main loop of network-level events.
 - main to NetworkActor: `mpsc`: used to issue commands (e.g., "dial this address") to the NetworkActor.
@@ -28,46 +42,45 @@ The channels are:
 ## Global State
 All tasks that are part of Neptune Core have access to the global state and they can all read from it. Each type of task can have its own local state that is not shared across tasks, this is **not** what is discussed here.
 
-The global state has five fields and they each follow some rules:
+The global state has six fields and they each follow some rules:
 - `wallet_state` contains information necessary to generate new transactions and print the user's balance.
-- `chain` Blockchain state. Contains information about state of the blockchain, block height, digest of latest block etc. Only `main` task may update `chain`. `chain` consists of two field:
+- `chain` Blockchain state. Contains information about state of the blockchain, block height, digest of latest block etc. Only `main` task may update `chain`. `chain` is an enum with an `Archival` and a `Light` variant. At present, nodes always run with the archival variant, which consists of two fields:
   - `light_state`, ephemeral, contains only latest block
   - `archival_state`, persistent.
   `archival_state` consists of data stored both in a database and on disk. The blocks themselves are stored on disk, and meta-information about the blocks are stored in the `block_index` database. `archival_state` also contains the `archival_mutator_set` which can be used to recover unsynced membership proofs for the mutator set. `archival_state` also contains an optional UTXO index that can be maintained by starting the node with the `--utxo-index` flag. The UTXO index contains a digest for each historical transaction input, and two b-field elements for each historical announcement. These two b-field elements are interpreted as `AnnouncementFlag`s and can be used to quickly identify announcements that are relevant to a wallet. They are just the two first elements of each announcement in the block. The UTXO index also contains mappings from addition records (transaction outputs) to block heights, and from the digests of absolute index sets (transaction inputs) to block heights, in other words: it maintains bi-directional mappings between blocks on one side and UTXOs and announcements on the other side. Exchanges and mining pools should run the node with the UTXO index, as this makes the full rescanning of UTXOs for once's own wallet possible. Maintaining a UTXO index also allows for the activation of the RPC namespace `Utxoindex` which are endpoints helping non-archival nodes and wallets to find relevant UTXOs. The index does not contain a block hash to transaction output mapping, since the transaction outputs are already present in another database, the `archival_mutator_set`. The UTXO index attempts to strike a balance between functionality, lookup speeds, and the minimization of required disk space.
-- `network`, network state. Contains the sync anchor and sync status (only `main` may write the anchor), the `freeze` flag (only the RPC server may write) and `instance_id` which is read-only. The connected peers and the database of peer standings are *not* part of the global state: they live beside the global state lock, reachable through `GlobalStateLock::peers()`, so that connecting, disconnecting and sanctioning peers never wait for block processing.
+- `net`, network state. Contains the sync anchor and sync status (only `main` may write the anchor), the `freeze` flag (only the RPC server may write) and `instance_id` which is read-only. The connected peers and the database of peer standings are *not* part of the global state: they live beside the global state lock, reachable through `GlobalStateLock::peers()`, so that connecting, disconnecting and sanctioning peers never wait for block processing.
 - `cli` CLI arguments. The state carries around the CLI arguments. These are read-only.
-- `mempool`, in-memory data structure of a set of transactions that have not yet been mined in a block. The miner reads from the `mempool` to find the most valuable transactions to mine. Only the main task may write to `mempool`. `mempool` comes with a concept of ordering such that only the transactions that pay the highest fee per size are remembered. `mempool` enforces a max size such that its size can be constrained.
+- `mempool`, in-memory data structure of a set of transactions that have not yet been mined in a block. The miner reads from the `mempool` to find the most valuable transactions to mine. The field is private: it is read through `GlobalState::mempool()`, and it is modified only through the `mempool_*` methods on `GlobalState` (such as `mempool_insert`), which broadcast the resulting mempool events to the wallet and other consumers. `mempool` comes with a concept of ordering such that only the transactions that pay the highest fee per size are remembered. `mempool` enforces a max size such that its size can be constrained.
+- `mining_state`, which holds the most profitable block proposal seen on the network, the proposals exported to external guessers, and the status of the composing and guessing tasks. It can be updated by the main task, the mining task, and the RPC server.
 
 ## Receiving a New Block
 When a new block is received from a peer, it is first validated by the peer task. If the block is valid and more canonical than the current tip, it is sent to the main task. The main task is responsible for updating the `GlobalState` data structure to reflect the new block. This is done by write-acquiring the single `GlobalStateLock` and then calling the respective helper functions with this lock held throughout the updating process.
 
 There are two pieces of code in the main loop that update the state with a new block: one when new blocks are received from a peer, and one for when the block is found locally by the miner task. These two functionalities are somewhat similar. In this process all databases are flushed to ensure that the changes are persisted on disk.
-The individual steps of updating the global state with a new block are:
+The individual steps of updating the global state with a new block are performed by `GlobalState::set_new_tip`:
 
-0. &nbsp;
-    - If block was found locally: Send it to all peers before updating state.
-    - If block was received from peer: Check if `sync` mode is activated and if we can leave `sync` mode (see below for an explanation of synchronization).
-1. `write_block`: Write the block to disk and update the `block_index` database with the block's meta information.
-2. `update_mutator_set`: Update the archival mutator set with the transaction (input and output UTXOs) from this block by applying all addition records and removal records contained in the block.
-3. `update_wallet_state_with_new_block`: Check if this block contains UTXOs spent by or sent to us. Also update membership proofs for unspent UTXOs that are managed/relevant to/spendable by this client's wallet.
-4. `mempool.update_with_block`: Remove transactions that were included in this block and update all mutator set data associated with all remaining transactions in the mempool
-5. Update `light_state` with the latest block.
-6. Flush all databases
-7. Tell miner
-    - If block was found locally: Tell miner that it can start working on next block since the `mempool` has now been updated with the latest block.
-    - If blocks were received from peer: Tell miner to start building on top of a new chain tip.
+1. Update the archival state (`ArchivalState::set_new_tip`): write the block to disk and update the `block_index` database (`write_block_as_tip`), append the block to the archival block MMR, update the archival mutator set with the block's addition and removal records, and update the UTXO index if one is maintained.
+2. Update `light_state` with the new tip.
+3. Update the mempool: first prune stale transactions, then remove the transactions that were included in this block or became unconfirmable because of it (`mempool.update_with_block`). This step returns a list of `MempoolUpdateJob`s for the remaining transactions, whose proofs must be updated to the new mutator set; these jobs are run asynchronously, after the global state lock has been released. If the new block activates a new consensus rule set, the mempool is cleared instead.
+4. Update the wallet state (`update_wallet_state_with_new_block`): check if this block contains UTXOs spent by or sent to us. Membership proofs are read from the archival mutator set, so the wallet only maintains its own membership proofs when the node is not archival.
+5. Reset the block proposal and the set of exported block proposals.
+
+Then the main loop flushes all databases. Only after that is the block shared with peers (if it was found locally), and, if blocks were received from a peer, is the miner told to start building on top of the new tip (`MainToMiner::NewBlock`).
 
 ## Spending UTXOs
-A transaction that spends UTXOs managed by the client can be made by calling the `create_transaction` method on the `GlobalState` instance. This function needs a synced `wallet_db` and a chain tip in `light_state` to produce a valid transaction.
+Transactions that spend UTXOs managed by the client are initiated through the API in `neptune_cash::api::tx_initiation`, reachable from a `GlobalStateLock` through `api()` / `api_mut()`. It has three layers:
+ - `builder`, a set of transaction builders for low-level control;
+ - `TransactionInitiator` (`api().tx_initiator()`), which wraps the builders and records and broadcasts the transaction;
+ - `TransactionSender` (`api_mut().tx_sender_mut()`), which offers a single high-level `send()` method.
 
-For a working example, see the implementation of the `send_to_many()` RPC method.
+For a working example, see the implementation of the `send` RPC method, which wraps `TransactionSender::send()`.
 
 ## Scheduled Tasks in Main Loop
-Different tasks are scheduled in the main loop every N seconds. These currently handle: peer maintenance, and mempoool cleanup.
-- Peer maintenance: Reconnects to peers given as CLI arguments whose connection was lost, and disconnects from excess peers. Discovery of new peers is the network actor's job, through the libp2p DHT.
-- Mempool cleanup: Remove from the mempool transactions that are more than 72 hours old.
-
-A task for recovering unsynced membership proofs would fit well in here.
+Different tasks are scheduled in the main loop at fixed intervals. These currently handle:
+- Peer maintenance: Disconnects from excess peers. Reconnecting to peers given as CLI arguments whose connection was lost is the network actor's job, as is discovery of new peers through the libp2p DHT.
+- Mempool cleanup (every 30 minutes): Remove from the mempool transactions that are more than 10 hours old.
+- Membership proof resynchronization (every 59 seconds): Recover unsynced membership proofs of the wallet's UTXOs. This is skipped while the node is syncing.
+- Proof upgrading (every 10 seconds): Upgrade the proofs of transactions in the mempool, if the node is configured to do so.
 
 ## Design Philosophies
 - Avoid state-through-instruction-pointer. This means that a request/response exchange should be handled without nesting of e.g. matched messages from another peer. So when a peer task requests a block from another peer the peer task must return to the instruction pointer where it can receive *any* message from the peer and not only work if it actually gets the block as the next message. The reasoning behind this is that a peer task must be able to respond to e.g. a peer discovery request message from the same peer before that peer responds with the requested block.
@@ -81,16 +94,16 @@ From `tokio`
 From Std lib:
 - `Arc`
 
-From neptune-core:
-- `neptune_core::locks::tokio::AtomicRw`  (wraps `Arc<tokio::sync::RwLock>`)
+From the `neptune-locks` crate:
+- `neptune_locks::tokio::AtomicRw`  (wraps `Arc<tokio::sync::RwLock>`)
 
 ## Persistent Memory
 
 We use `leveldb` for our database layer with custom wrappers that make it more async-friendly, type safe, and emulate multi-table transactions.
 
-`neptune_core::database::NeptuneLevelDb` provides async wrappers for leveldb APIs to avoid blocking async tasks.
+`neptune_database::NeptuneLevelDb` provides async wrappers for leveldb APIs to avoid blocking async tasks.
 
-`leveldb` is a simple key/value store, meaning it only allows manipulating individual strings. It does however provide a batch update facility. `neptune_core::database::storage::storage_schema::DbSchema` leverages these batch updates to provide vector and singleton types that can be manipulated in rust code and then atomically written to `leveldb` as a single batch update (aka transaction).
+`leveldb` is a simple key/value store, meaning it only allows manipulating individual strings. It does however provide a batch update facility. `neptune_database::storage::storage_schema::DbtSchema` leverages these batch updates to provide vector, map, and singleton types that can be manipulated in rust code and then atomically written to `leveldb` as a single batch update (aka transaction).
 
 Blocks are stored on disk and their position on disk is stored in the `block_index` database. Blocks are read from and written to disk using `mmap`.  We wrap all file-system calls with tokio's `spawn_blocking()` so they will not block other async tasks.
 
@@ -132,8 +145,8 @@ It then prints everything that is `debug` level or above, where `trace < debug <
 To develop a new RPC, it can be productive to view two terminals simultaneously and run one of the following commands in each:
 
 ```bash
-XDG_DATA_HOME=~/.local/share/neptune-integration-test/0/ RUST_LOG=debug cargo run -- --compose --guess --network regtest # Window1 RPC-server
-XDG_DATA_HOME=~/.local/share/neptune-integration-test/0/ RUST_LOG=trace cargo run --bin rpc_cli -- --port 9799 send '[{"public_key": "0399bb06fa556962201e1647a7c5b231af6ff6dd6d1c1a8599309caa126526422e", "amount":{"values":[11,0,0,0]}}]' # Window2 RPC-client
+XDG_DATA_HOME=~/.local/share/neptune-integration-test/0/ RUST_LOG=debug cargo run --bin neptune-core -- --compose --guess --network regtest # Window1 RPC-server
+XDG_DATA_HOME=~/.local/share/neptune-integration-test/0/ RUST_LOG=trace cargo run --bin neptune-cli -- --port 9799 block-height # Window2 RPC-client
 ```
 
 Note that the client exists quickly, so here the `.pretty()` tracing subscriber is suitable, while `.compact()` is perhaps better for the server.

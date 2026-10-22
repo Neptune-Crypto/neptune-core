@@ -6,7 +6,7 @@ The wallet derives all spending keys and receiving addresses from a secret seed.
 
 ## Wallet File
 
-By default, `neptune-core` stores the wallet secret seed to and reads it from `[data-dir]/neptune/[network]/wallet/wallet.dat`. Here `[data-dir]` is the data directory and this directory is the second line in the log output when running `neptune-core`. The `[network]` is `main` unless you are not on mainnet.
+By default, `neptune-core` stores the wallet secret seed to and reads it from `[data-dir]/wallet/wallet.dat`. Here `[data-dir]` is the data directory, which is shown in the second line of the log output when running `neptune-core` ("Data directory is …"). By default it is `~/.local/share/neptune/[network]` on Linux, where `[network]` is `main` unless you are not on mainnet.
 
 A convenient command is `> neptune-cli which-wallet`, which shows the location of the wallet file.
 
@@ -54,4 +54,4 @@ Neptune supports [BIP-39](https://github.com/bitcoin/bips/blob/master/bip-0039.m
 ```
 
  - To export a seed phrase: `> neptune-cli export-seed-phrase`. This command will read from the `wallet.dat` file and will fail if that file does not exist.
- - To import a seed phrase: `> neptune-cli import-seed-phrase`. Note that this command will not do anything if a `wallet.dat` file already exists.
+ - To import a seed phrase: `> neptune-cli import-seed-phrase`. Note that this command refuses to run, with an error, if the wallet directory (`[data-dir]/wallet/`) or the wallet database directory (`[data-dir]/databases/wallet/`) already exists. Move them elsewhere first.

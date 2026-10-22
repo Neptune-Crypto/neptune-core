@@ -11,7 +11,7 @@ The RPC server listens on the address specified by the `rpc-port` configuration 
 Operators can disable `cookie-hint` API by using `--disable-cookie-hint` flag when starting the node.
 
 ## Versioning 
-Currently, `neptune-core` RPC server is on version `1.0` of the RPC server. This version is hardcoded in the RPC server and client. The version number will increment if there are breaking changes to the RPC server.
+The tarpc RPC interface carries no version number. The HTTP JSON-RPC API (see below) is versioned by the constant `RPC_API_VERSION` in the `neptune-rpc` crate, currently `2`, which is bumped whenever a breaking change is made to that API. Adding an endpoint, or a field to a returned type, is not considered a breaking change.
 
 ## Security 
 
@@ -21,11 +21,11 @@ The RPC server allows other programs to interact with a `neptune-core` node incl
 
 - Securing local access : By default, the RPC interface is accessible only to clients running on the same machine, and only when they provide a valid authentication cookie. Securing local access to the RPC server is crucial to prevent unauthorized use. Any program on your computer with access to the file system or local network could potentially gain this level of access. Additionally, other programs on your system might attempt to mimic an RPC interface on the same port as the node, potentially tricking you into disclosing your authentication credentials. Therefore, it is essential to use `neptune-core` for security-sensitive operations only on a computer where you trust all other installed programs.
 
-- Securing remote network access: You can choose to let other computers remotely control `neptune-core` by configuring the `listen-addr` and `rpc-port` settings. These options are intended for use within secure private networks or connections that have been properly secured (e.g., via VPN, SSH port forwarding, or stunnel). **Avoid enabling RPC connections over the public Internet**. While `neptune-core`'s RPC interface includes authentication, it lacks encryption, meaning your login credentials are transmitted in plain text and could be intercepted by anyone on your network path. Furthermore, the RPC interface is not designed to handle arbitrary Internet traffic securely. Exposing it to the Internet—even through methods like a Tor onion service—could leave you vulnerable to unforeseen risks.
+- Securing remote network access: The tarpc RPC server only listens on `127.0.0.1`; it cannot be configured to accept remote connections. Remote access is possible only through the HTTP JSON-RPC server, enabled with `--listen-rpc <ADDR>` and restricted to the namespaces selected with `--rpc-modules` (see [Overview](overview.md)). **Note that the JSON-RPC server does not use cookie authentication**: anyone who can reach its address can call every enabled endpoint, including, if the `personal` namespace is enabled, endpoints that observe and spend the wallet's balance. Bind it only to addresses within secure private networks or connections that have been properly secured (e.g., via VPN, SSH port forwarding, or stunnel), and never use `--unsafe-rpc` on an address reachable by untrusted parties. **Avoid exposing RPC over the public Internet**. The RPC interfaces lack encryption, and are not designed to handle arbitrary Internet traffic securely. Exposing them to the Internet—even through methods like a Tor onion service—could leave you vulnerable to unforeseen risks.
 
 ## RPC Methods
 
-The RPC server provides several methods that allow clients to interact with the node. The list of methods and examples are provided on the [`neptune-cash` crate documentation](https://docs.rs/neptune-cash/latest/neptune_cash/server/trait.RPC.html).
+The RPC server provides several methods that allow clients to interact with the node. The list of methods and examples are provided on the [`neptune-cash` crate documentation](https://docs.rs/neptune-cash/latest/neptune_cash/application/rpc/server/trait.RPC.html).
 
 ## RPC consistency guarantees
 State that can be queried via RPCs is guaranteed to be at least up-to-date with the chain state immediately prior to the call's execution.

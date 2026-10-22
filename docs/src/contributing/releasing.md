@@ -57,6 +57,7 @@ Bump the version of all crates in `Cargo.toml` [as appropriate](https://doc.rust
 
 At the time of writing, you need to bump the versions in these files:
  - `neptune-archival-mmr/Cargo.toml`
+ - `neptune-archival-mutator-set/Cargo.toml`
  - `neptune-archive/Cargo.toml`
  - `neptune-consensus/Cargo.toml`
  - `neptune-core/Cargo.toml`
@@ -134,7 +135,7 @@ Copy the now-polished changelog addition from `/tmp/change_diff.md` into `CHANGE
 Add and commit the changed files.
 
 ```sh
-git add Cargo.toml
+git add Cargo.lock '*Cargo.toml'
 git add CHANGELOG.md
 git commit -m "chore: Release vX.Y.Z"
 #                              ~~~~~

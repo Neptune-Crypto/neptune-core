@@ -46,11 +46,11 @@ pub struct Args {
     ///
     /// The default varies by operating system, and includes the network, e.g.
     ///
-    /// Linux:   /home/alice/.config/neptune/core/main
+    /// Linux:   /home/alice/.local/share/neptune/main
     ///
-    /// Windows: C:\Users\Alice\AppData\Roaming\neptune\core\main
+    /// Windows: C:\Users\Alice\AppData\Roaming\neptune\neptune\data\main
     ///
-    /// macOS:   /Users/Alice/Library/Application Support/neptune/main
+    /// macOS:   /Users/Alice/Library/Application Support/org.neptune.neptune/main
     #[clap(long, value_name = "DIR")]
     pub data_dir: Option<PathBuf>,
 
@@ -111,8 +111,9 @@ pub struct Args {
     pub(crate) peer_tolerance: u16,
 
     /// Only connect to the peers specified by --peer.
-    /// When this flag is set, peer discovery is disabled and incoming
-    /// connections from unlisted peers are rejected.
+    ///
+    /// Presently only enforced for incoming connections over the legacy
+    /// network stack; the libp2p network actor ignores this flag.
     #[arg(long)]
     pub restrict_peers_to_list: bool,
 
@@ -170,6 +171,9 @@ pub struct Args {
     /// to be reached. As a result, they will respond with high likelihood to
     /// incoming connection requests -- in contrast to regular nodes, which
     /// refuse incoming connections when the max is reached.
+    ///
+    /// Presently only enforced for incoming connections over the legacy
+    /// network stack; the libp2p network actor ignores this flag.
     #[clap(long)]
     pub(crate) bootstrap: bool,
 

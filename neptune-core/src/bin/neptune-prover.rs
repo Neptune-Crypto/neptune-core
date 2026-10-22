@@ -175,7 +175,7 @@ fn main() {
 
     let proof = execute_prover_job(job);
 
-    eprintln!("DEBUG: triton-vm-prover: completed proof");
+    eprintln!("DEBUG: neptune-prover: completed proof");
 
     // Write serialized proof to STDOUT.
     let as_bytes = bincode::serialize(&proof).unwrap();

@@ -102,7 +102,7 @@ To ensure a stable presence in the network, `neptune-core` persists its networki
 
 #### Why Identity Persistence Matters
 
-1. **Network Reputation:** By maintaining a stable `PeerId`, a node can build good standing with its neighbors. While there is presently no mechanism for persisting peer standing across connection outages, a stable `PeerId` is necessary for it.
+1. **Network Reputation:** By maintaining a stable `PeerId`, a node can build good standing with its neighbors. Note, however, that peer standings are presently persisted per IP address rather than per `PeerId`, in a LevelDB database in the data directory; they therefore survive connection outages and restarts, but not a change of IP address.
 2. **Kademlia DHT Efficiency:** The Distributed Hash Table (DHT), which powers peer discovery, relies on nodes staying at a fixed "distance" from one another in the network's keyspace. If `PeerId`s changed constantly, the DHT would be in a perpetual state of reorganization, making peer discovery slow and unreliable.
 3. **Reconnect Speed:** Peers who have previously connected to you store your `PeerId` and `Multiaddr` in their local address books, resulting in faster re-connections without needing to query the DHT again.
 4. **IPs Change:** IPs are rarely static but vary because they are assigned from a limited address space or resampled upon system reboot. As a result, whitelisting peers based on IP is fragile and unsound in the face of IP spoofing, but whitelisting based on their `PeerId` provides a robust countermeasure against this range of attacks. However, persistent `PeerId`s offer little security against misbehaving nodes which is why the ban list contains IP addresses and not `PeerId`s.
@@ -116,18 +116,25 @@ The `NetworkActor` is the central struct that manages the network's lifecycle. I
 The main composite protocol is named `NetworkStack`. This struct defines the protocols our node supports. By deriving `NetworkBehaviour`, `libp2p` handles routing events between these internal modules.
 
 ```rust
-#[derive(libp2p::swarm::NetworkBehaviour)]
+#[derive(NetworkBehaviour)]
 pub struct NetworkStack {
-    pub kademlia: kad::Behaviour<MemoryStore>,
-    pub identify: identify::Behaviour,
-    pub ping: ping::Behaviour,
-    pub connection_limits: connection_limits::Behaviour,
-    pub autonat: autonat::Behaviour,
-    pub relay_client: relay::client::Behaviour,
-    pub relay_server: relay::Behaviour,
-    pub dcutr: dcutr::Behaviour,
-    pub upnp: upnp::tokio::Behaviour,
-    pub gateway: StreamGateway, // The custom bridge to the PeerLoop
+    /// Global cap on connections being initiated, protects against floods.
+    pub connection_limits: libp2p::connection_limits::Behaviour,
+
+    /// Limits on inbound connections from clustered IPs.
+    pub source_limits: SourceLimits,
+
+    pub ping: libp2p::ping::Behaviour,
+    pub identify: libp2p::identify::Behaviour,
+    pub upnp: libp2p::upnp::tokio::Behaviour,
+    pub autonat: libp2p::autonat::Behaviour,
+    pub relay_server: Toggle<libp2p::relay::Behaviour>,
+    pub relay_client: libp2p::relay::client::Behaviour,
+    pub dcutr: libp2p::dcutr::Behaviour,
+    pub kademlia: libp2p::kad::Behaviour<libp2p::kad::store::MemoryStore>,
+
+    /// Custom "Hijacker" that handles the handshake and turns it into a stream.
+    pub gateway: StreamGateway,
 }
 
 ```
@@ -166,6 +173,8 @@ In the `NetworkStack` (the libp2p `NetworkBehaviour`), each subprotocol serves a
 
 The total number of connections is limited by the command-line argument `--max-num-peers` which defaults to 10. This limit is enforced by the `NetworkActor` (as opposed to by some subprotocol like connection-limits) in order to prioritize sticky peers and own dialing attempts.
 
+In addition, two subprotocols impose looser caps that only matter under a flood of connection attempts. `connection_limits` caps pending incoming connections at `2 · max-num-peers + 4`, established connections per peer at 3 (a peer may legitimately hold a relayed and a direct connection while a hole punch completes), and established incoming connections. `source_limits` caps the number of inbound connections from a single IP address or address prefix; see `--max-connections-per-ip` and `--max-connections-per-prefix` below.
+
 To prevent memory-based DoS attacks without impacting the Mempool's growth, Neptune Cash avoids process-wide memory limits. Instead, it uses Yamux Auto-Tuning and a strict cap on sub-streams (`set_max_num_streams(256)`) to ensure that a single malicious peer cannot exhaust the node's resources by opening thousands of idle streams.
 
 ## 5. Persistence
@@ -174,16 +183,21 @@ Three separate pieces of information are persisted to disk, and read from disk a
 
  1. The *identity file* `identity.key` contains the secret key for the node's libp2p key pair. As per standard libp2p practice, the node's `PeerId` is the multihash of its public key, and this public key is determined by this file.
  2. The *address book* `address-book.json` contains peer metadata for long-lived dialable connections. The address book can contain entries that do not correspond to currently active connections, but over time unreachable nodes will be degraded in score and eventually booted from the list. If the address book is empty, and the user specified no peers using `--peer` in the command line arguments, then the address book will respond to a request for initial peers with a list of *hardcoded bootstrap addresses* listed explicitly in `AddressBook::select_initial_peers`.
- 3. The *black list* `black-list.json` contains the IP addresses of banned peers. The `NetworkActor` has no logic for deciding whether to ban peers. It merely follows instructions passed to it by the main loop. The main loop, in turn, passes these instructions on from the blockchain peer loop or the RPC server. Bans apply to incoming as well as outgoing connections because hole punching makes even incoming connections look like outgoing ones.
+ 3. The *black list* `blacklist.json` contains the IP addresses of banned peers. The `NetworkActor` has no logic for deciding whether to ban peers. It merely follows instructions passed to it by the main loop. The main loop, in turn, passes these instructions on from the blockchain peer loop or the RPC server. Bans apply to incoming as well as outgoing connections because hole punching makes even incoming connections look like outgoing ones.
 
 ## 6. CLI
 
 The following network-related flags or arguments are available when starting `neptune-core`:
 
- - `--peer <SocketAddr or Multiaddr>` if the port is different from 9798, this flag instructs the `NetworkActor` to ensure that there is always a connection to the given peer, now called a *sticky peer*. If the port is 9798, then this peer is passed to the legacy network stack.
+ - `--peer <SocketAddr or Multiaddr>` if the port is different from 9798, this flag instructs the `NetworkActor` to ensure that there is always a connection to the given peer, now called a *sticky peer*. Connections are made over libp2p only: an address on the legacy port 9798 is not dialed, and a warning is logged instead.
  - `--ban <SocketAddr or Multiaddr>` instructs the `NetworkActor` to disconnect from the given peers, in addition to the peers in the black list. No changes are made to the black list.
- - *Not presently supported:* `--restrict-peers-to-list` instructs the `NetworkActor` to only upgrade peers specified via `--peer` to blockchain peer loops.
- - *Not presently supported:* `--max-connections-per-ip <number>` instructs the `NetworkActor` to reject connections to different `PeerId`s living at the same IP in excess of the given number.
+ - *Only partially supported:* `--restrict-peers-to-list` is intended to restrict blockchain peer loops to peers specified via `--peer`. At present it only applies to incoming connections over the legacy network stack; the `NetworkActor` ignores it.
+ - `--max-num-peers <number>` (default 10) sets the maximum number of peers; see [Resource Management](#resource-management).
+ - `--max-connections-per-ip <number>` (default 4) caps the number of peers accepted from one IP address. Multiple nodes can legitimately share an IP, for instance behind NAT.
+ - `--max-connections-per-prefix <number>` (default 8) caps the number of inbound connections accepted from one address prefix (/24 for IPv4, /64 for IPv6).
+ - `--max-connection-attempts-per-ip-per-minute <number>` (default 6) caps the rate of inbound connection attempts from one IP, refused attempts included.
+ - `--disable-relay-server` stops the node from offering relay reservations to peers behind NATs. The node can still use other nodes as relays.
+ - `--bootstrap` makes the node act as a bootstrapper for legacy peers: an incoming connection over the legacy network stack is accepted even when the peer limit is reached, and the longest-lived peer (other than those given with `--peer`) is disconnected to make room. The `NetworkActor` does not presently honor this flag; it advertises it in the handshake only.
  - `--quic-port` instructs the `NetworkActor` on which port to listen for UDP connections.
  - `--tcp-port` instructs the `NetworkActor` on which port to listen for TCP connections.
  - `--peer-listen-addr` instructs the `NetworkActor` on which IP to listen for connections.
@@ -240,7 +254,7 @@ A protocol for automatic port mapping on local routers.
 
 ### [Circuit Relay v2](https://github.com/libp2p/specs/tree/master/relay)
 
-Allows a node to be reachable even if it is behind a restrictive firewall by using a third-party "Relay" node as a proxy. Otherwise-unreachable nodes can acquire circuit addresses, which route traffic through relay servers. Relays are configured to expire after 2 minutes, which should be long enough to coordinate a hole-punch.
+Allows a node to be reachable even if it is behind a restrictive firewall by using a third-party "Relay" node as a proxy. Otherwise-unreachable nodes can acquire circuit addresses, which route traffic through relay servers. Relay reservations last one hour (the libp2p default), and are renewed by the client before they expire. Individual relayed connections (circuits) are limited to libp2p's defaults of 2 minutes and 128 KiB, which should be long enough to coordinate a hole-punch.
 
 * **Neptune Use:** Neptune nodes can act as both **Clients** (to be reachable) and **Servers** (to help others).
 
@@ -257,4 +271,4 @@ A custom protocol that acts as the handoff point between libp2p and the legacy c
 * **Function:** It negotiates a stream, validates the `HandshakeData`, and then "hijacks" the underlying stream to feed it into the `PeerLoopHandler`.
 * **Neptune Use:** The "glue" that allows modern libp2p transports to power our existing consensus and synchronization loops.
 
-***Serialization:*** Uses Bincode with a length-prefixed framing. Bincode was selected over CBOR to ensure robust handling of fixed-capacity `ArrayString` types and to minimize serialization overhead in the high-frequency handshake phase.
+***Serialization:*** The handshake (`HandshakeData`) is serialized with Bincode, with a length-prefixed framing. Bincode was selected over CBOR to ensure robust handling of fixed-capacity `ArrayString` types and to minimize serialization overhead in the high-frequency handshake phase. The encoding of the subsequent `PeerMessage` stream is negotiated when the stream is opened: each encoding is advertised as its own protocol, `/id/stream-gateway-handshake/2.0` for length-delimited Bincode (preferred) and `/id/stream-gateway-handshake/1.0` for length-delimited JSON, and multistream-select settles on the first one both peers support. JSON is the only encoding understood by versions up to 0.19.0.

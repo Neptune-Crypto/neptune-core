@@ -6,6 +6,6 @@ This can be done by using the `--import-blocks-from-directory=<DIR>` CLI argumen
 
 Once the node has read all blocks this way, the directory containing the block data used for block importing can be deleted, as the process copies all block data.
 
-By default, the blocks read this way will be validated. Skipping this validation step can speedup initial synchronization significantly. To skip the validation step, add the argument `--disable-validation-in-block-import`. If you skip the validation step, this process can no longer be considered trustless, and `neptune-core` may end up in an unrecoverable state if the source data is somehow corrupted.
+While importing, the node flushes its databases every 250 blocks by default. This period can be set with `--import-block-flush-period=<N>`; a value of 0 disables automatic flushing during the import. Lower values flush more often, which reduces memory usage but increases I/O; if you run into memory issues during block import, consider lowering this value.
 
-A torrent of the latest snapshot can always be downloaded from <http://neptunefundamentals.org:42580/latest-snapshot.torrent>. This snapshot is updated weekly.
+By default, the blocks read this way will be validated. Skipping this validation step can speedup initial synchronization significantly. To skip the validation step, add the argument `--disable-validation-in-block-import`. If you skip the validation step, this process can no longer be considered trustless, and `neptune-core` may end up in an unrecoverable state if the source data is somehow corrupted.
