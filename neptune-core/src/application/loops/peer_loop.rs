@@ -1146,6 +1146,10 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::TipWithParentAccumulatorRequest => {
+                if !self.may_serve_blocks(1).await? {
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
                 // Serving this response is intended to be very low cost. So
                 // avoid reading from disk/archival state to fetch earlier
                 // mutator set accumulators.
@@ -2688,6 +2692,10 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockProposalRequest(block_proposal_request) => {
+                if !self.may_serve_blocks(1).await? {
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
                 let matching_proposal = self
                     .global_state_lock
                     .lock_guard()
@@ -6377,6 +6385,98 @@ mod tests {
             );
 
             Ok(())
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn tip_and_proposal_requests_count_against_the_budget() {
+            use super::block_proposals::genesis_setup;
+            use super::block_proposals::TestSetup;
+            use crate::state::mining::block_proposal::BlockProposal;
+
+            let cli = cli_args::Args {
+                max_blocks_served_per_minute: 1,
+                ..cli_args::Args::default_with_network(Network::Testnet(42))
+            };
+            let TestSetup {
+                peer_broadcast_tx,
+                mut peer_loop_handler,
+                to_main_rx: _,
+                from_main_rx,
+                mut peer_state,
+                to_main_tx,
+                genesis_block,
+            } = genesis_setup(cli).await;
+            let [block1, block2] = fake_valid_sequence_of_blocks_for_tests(
+                &genesis_block,
+                Timestamp::hours(1),
+                StdRng::seed_from_u64(5550003).random(),
+                Network::Testnet(42),
+            )
+            .await;
+            peer_loop_handler
+                .global_state_lock
+                .set_new_tip(block1.clone())
+                .await
+                .unwrap();
+            peer_loop_handler
+                .global_state_lock
+                .set_new_tip(block2.clone())
+                .await
+                .unwrap();
+            peer_loop_handler
+                .global_state_lock
+                .lock_guard_mut()
+                .await
+                .mining_state
+                .block_proposal = BlockProposal::ForeignComposition(block2.clone());
+            let now = peer_loop_handler.now();
+            let latest_punishment = |handler: &PeerLoopHandler| {
+                handler
+                    .global_state_lock
+                    .peers()
+                    .with_connected(|connected| {
+                        connected[&handler.peer_id]
+                            .standing()
+                            .latest_punishment
+                            .map(|(sanction, _)| sanction)
+                    })
+            };
+
+            let tip_response =
+                PeerMessage::TipWithParentAccumulator(Box::new(BlockWithParentAccumulator {
+                    block: block2.clone().try_into().unwrap(),
+                    parent_accumulator: block1.mutator_set_accumulator_after().unwrap(),
+                }));
+            let proposal_request = PeerMessage::BlockProposalRequest(BlockProposalRequest::new(
+                block2.body().mast_hash(),
+            ));
+            let proposal_response = PeerMessage::BlockProposal(Box::new(block2.clone()));
+            let exchanges = [
+                (PeerMessage::TipWithParentAccumulatorRequest, tip_response),
+                (proposal_request, proposal_response),
+            ];
+            for (request, response) in exchanges {
+                // Each window serves one, and refuses the second.
+                peer_loop_handler.mock_now = Some(now + Timestamp::minutes(1));
+                let mock = Mock::new(vec![
+                    Action::Read(request.clone()),
+                    Action::Write(response),
+                    Action::Read(request),
+                    Action::Read(PeerMessage::Bye),
+                ]);
+                peer_loop_handler
+                    .run(mock, from_main_rx.resubscribe(), &mut peer_state)
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    Some(NegativePeerSanction::ExcessiveBlockRequests),
+                    latest_punishment(&peer_loop_handler),
+                );
+            }
+
+            drop(to_main_tx);
+            drop(peer_broadcast_tx);
         }
 
         #[traced_test]
