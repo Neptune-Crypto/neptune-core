@@ -918,6 +918,31 @@ impl PeerLoopHandler {
             return Ok(None);
         }
 
+        // Early check if block is already known.
+        if peer_state.fork_reconciliation_blocks.is_empty() {
+            let known = self
+                .global_state_lock
+                .lock_guard()
+                .await
+                .chain
+                .archival_state()
+                .block_is_stored(received_block.hash())
+                .await;
+            if known {
+                debug!(
+                    "Received known block of height {}.",
+                    received_block.header().height
+                );
+                self.global_state_lock
+                    .pending_requests()
+                    .resolve(&AnnouncedObject::Block {
+                        hash: received_block.hash(),
+                        height: received_block.header().height,
+                    });
+                return Ok(None);
+            }
+        }
+
         // Does the received block match the fork reconciliation list?
         let received_block_matches_fork_reconciliation_list = if let Some(successor) =
             peer_state.fork_reconciliation_blocks.last()
@@ -4025,6 +4050,71 @@ mod tests {
                     .unwrap(),
                 "Must return Some(1) on valid Pow"
             );
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn known_block_is_not_validated_again() -> Result<()> {
+            use neptune_consensus::block::test_helpers::invalid_empty_block;
+            use neptune_consensus::block::BlockProof;
+            use neptune_consensus::transaction::validity::neptune_proof::NeptuneProof;
+
+            let network = Network::Main;
+            let (
+                _peer_broadcast_tx,
+                from_main_rx_clone,
+                to_main_tx,
+                mut to_main_rx1,
+                _,
+                _,
+                mut state_lock,
+                hsd,
+            ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network)).await?;
+            let peer_address = get_dummy_socket_address(0);
+
+            // A tip that fails validation: validating it again would punish
+            // the peer.
+            let mut tip = invalid_empty_block(&Block::genesis(network), network);
+            tip.set_proof(BlockProof::SingleProof(NeptuneProof::invalid()));
+            state_lock.set_new_tip(tip.clone()).await?;
+
+            let mock = Mock::new(vec![
+                Action::Read(PeerMessage::Block(Box::new(
+                    tip.clone().try_into().unwrap(),
+                ))),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
+                to_main_tx.clone(),
+                state_lock.clone(),
+                pseudorandom_peer_id(&peer_address),
+                socketaddr_to_multiaddr(peer_address),
+                hsd,
+                true,
+                tip.header().timestamp,
+            );
+            peer_loop_handler
+                .run_wrapper(mock, from_main_rx_clone)
+                .await?;
+
+            match to_main_rx1.try_recv() {
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => (),
+                Ok(msg) => panic!(
+                    "Unexpected message of type {} sent to main loop",
+                    msg.get_type()
+                ),
+                Err(err) => panic!("Unexpected error: {err}"),
+            };
+            drop(to_main_tx);
+
+            let standing = state_lock
+                .peers()
+                .stored_standing(peer_address.ip())
+                .await
+                .unwrap();
+            assert_eq!(0, standing.standing, "a known block is not punished");
+
+            Ok(())
         }
 
         #[traced_test]
