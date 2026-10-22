@@ -171,7 +171,7 @@ In the `NetworkStack` (the libp2p `NetworkBehaviour`), each subprotocol serves a
 
 ### Resource Management
 
-The total number of connections is limited by the command-line argument `--max-num-peers` which defaults to 10. This limit is enforced by the `NetworkActor` (as opposed to by some subprotocol like connection-limits) in order to prioritize sticky peers and own dialing attempts.
+The number of peer loops is limited by the command-line argument `--max-num-peers` which defaults to 10. This limit is enforced by the `NetworkActor` when a handshake completes (as opposed to by some subprotocol like connection-limits) in order to prioritize sticky peers and own dialing attempts. A connection that is not upgraded with a peer loop stays open until it idles out, so that `Identify` and `Kademlia` serve the peer. The number of connections is limited by the connection-limits subprotocol and by the per-source limits.
 
 In addition, two subprotocols impose looser caps that only matter under a flood of connection attempts. `connection_limits` caps pending incoming connections at `2 · max-num-peers + 4`, established connections per peer at 3 (a peer may legitimately hold a relayed and a direct connection while a hole punch completes), and established incoming connections. `source_limits` caps the number of inbound connections from a single IP address or address prefix; see `--max-connections-per-ip` and `--max-connections-per-prefix` below.
 

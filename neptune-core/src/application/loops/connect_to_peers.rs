@@ -212,12 +212,7 @@ async fn check_if_connection_is_allowed(
     // exceeded. There is another test in `answer_peer_inner` that precedes
     // this one; however this test is still necessary to resolve potential
     // race conditions.
-    // Note that if we are bootstrapping, then we *do* want to accept the
-    // connection and temporarily exceed the maximum. In this case a
-    // `DisconnectFromLongestLivedPeer` message should have been sent to
-    // the main loop already but that message need not have been processed by
-    // the time we get here.
-    if cli_arguments.max_num_peers <= global_state_lock.peers().len() && !cli_arguments.bootstrap {
+    if cli_arguments.max_num_peers <= global_state_lock.peers().len() {
         return InternalConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded);
     }
 
@@ -419,14 +414,6 @@ where
     // This allows new incoming connections to start their handshake.
     // The connection is now governed by max_num_peers, not the semaphore.
     drop(handshake_permit);
-
-    // If necessary, disconnect from another, existing peer.
-    if connection_status == InternalConnectionStatus::AcceptedMaxReached && state.cli().bootstrap {
-        info!("Maximum # peers reached, so disconnecting from an existing peer.");
-        peer_task_to_main_tx
-            .send(PeerTaskToMain::DisconnectFromLongestLivedPeer)
-            .await?;
-    }
 
     let peer_id = pseudorandom_peer_id(&peer_address);
     let peer_multiaddr = socketaddr_to_multiaddr(peer_address);

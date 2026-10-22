@@ -42,6 +42,7 @@ use neptune_p2p::peer::transfer_link_tx::TransferLinkTx;
 use neptune_p2p::peer::BlockProposalRequest;
 use neptune_p2p::peer::BlockRequestBatch;
 use neptune_p2p::peer::BlockWithParentAccumulator;
+use neptune_p2p::peer::ConnectionRefusedReason;
 use neptune_p2p::peer::IssuedSyncChallenge;
 use neptune_p2p::peer::MutablePeerState;
 use neptune_p2p::peer::NegativePeerSanction;
@@ -50,6 +51,7 @@ use neptune_p2p::peer::PeerSanction;
 use neptune_p2p::peer::PeerStanding;
 use neptune_p2p::peer::PositivePeerSanction;
 use neptune_p2p::peer::SyncChallenge;
+use neptune_p2p::peer::TransferConnectionStatus;
 use neptune_p2p::peer::ValidatedBlockRequestByHeight;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::mast_hash::MastHash;
@@ -133,6 +135,11 @@ fn is_transport_error(err: &(dyn std::error::Error + 'static)) -> bool {
     err.downcast_ref::<std::io::Error>()
         .is_some_and(|e| e.kind() != std::io::ErrorKind::InvalidData)
 }
+
+/// The peer refused the connection.
+#[derive(Debug, thiserror::Error)]
+#[error("peer refused the connection: {0:?}")]
+pub(crate) struct PeerRefused(pub(crate) ConnectionRefusedReason);
 
 /// Handles messages from peers via TCP
 ///
@@ -2153,7 +2160,12 @@ impl PeerLoopHandler {
                 self.punish(NegativePeerSanction::InvalidMessage).await?;
                 Ok(KEEP_CONNECTION_ALIVE)
             }
-            PeerMessage::ConnectionStatus(_) => {
+            PeerMessage::ConnectionStatus(TransferConnectionStatus::Refused(reason)) => {
+                log_slow_scope!(fn_name!() + "::PeerMessage::ConnectionStatus");
+
+                Err(PeerRefused(reason).into())
+            }
+            PeerMessage::ConnectionStatus(TransferConnectionStatus::Accepted) => {
                 log_slow_scope!(fn_name!() + "::PeerMessage::ConnectionStatus");
 
                 // The connection status should have been sent during connection
@@ -3142,9 +3154,13 @@ impl PeerLoopHandler {
                             info!("Closing connection to {peer_address}");
                             break;
                         }
+                        Err(err) if err.is::<PeerRefused>() => {
+                            info!("Closing connection to {peer_address}: {err}.");
+                            return Err(err);
+                        }
                         Err(err) => {
                             warn!("Closing connection to {peer_address} because of error {err}.");
-                            bail!("{err}");
+                            return Err(err);
                         }
                     };
                 }

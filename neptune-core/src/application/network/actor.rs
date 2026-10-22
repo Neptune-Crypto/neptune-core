@@ -17,6 +17,9 @@ use libp2p::swarm::SwarmEvent;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
 use neptune_p2p::peer::handshake_data::HandshakeData;
+use neptune_p2p::peer::ConnectionRefusedReason;
+use neptune_p2p::peer::PeerMessage;
+use neptune_p2p::peer::TransferConnectionStatus;
 use neptune_primitives::network::Network;
 use rand::seq::SliceRandom;
 use rand::RngExt;
@@ -27,6 +30,7 @@ use tokio::time::Instant;
 use crate::application::loops::peer_loop::channel::MainToPeerTask;
 use crate::application::loops::peer_loop::channel::PeerTaskToMain;
 use crate::application::loops::peer_loop::PeerLoopHandler;
+use crate::application::loops::peer_loop::PeerRefused;
 use crate::application::network::address_book::AddressBook;
 use crate::application::network::address_book::ADDRESS_BOOK_MAX_SIZE;
 use crate::application::network::ban::BlackList;
@@ -518,8 +522,10 @@ impl NetworkActor {
                 }
             })?
             // A connection without a stream to the peer loop is closed after
-            // this long.
-            .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(120)))
+            // this long. Long enough for a peer we have no peer-loop slot for
+            // to query Kademlia; short enough that a flood holds its
+            // connection slots briefly.
+            .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
             .build();
 
         for external_address in config.external_addresses() {
@@ -986,14 +992,8 @@ impl NetworkActor {
                 }
             }
 
-            // Failed incoming connections.
-            //
-            // We specifically watch for `ListenError::Denied`. This isn't a
-            // failure in the traditional sense; it's our bouncer enforcing
-            // the `max_num_peers` limit.
-            //
-            // Seeing this log confirms that our 'Diversity Policy' is active,
-            // protecting our 50 slots for unique one-hop neighbors.
+            // Failed incoming connections. `ListenError::Denied` is the
+            // connection limits refusing a connection.
             SwarmEvent::IncomingConnectionError { peer_id, error, .. } => {
                 match error {
                     // This is the bouncer (Connection Limits) doing its job.
@@ -1081,11 +1081,7 @@ impl NetworkActor {
                 send_back_addr,
             } => {
                 if let Some(reason) = self.should_bounce(&send_back_addr) {
-                    if reason == BounceReason::MaxReached {
-                        tracing::trace!(target: "net::bounce", bouncee = %send_back_addr, "Bouncing incoming connection from {send_back_addr} because {reason}.");
-                    } else {
-                        tracing::warn!(target: "net::bounce", bouncee = %send_back_addr, "Bouncing incoming connection from {send_back_addr} because {reason}.");
-                    }
+                    tracing::warn!(target: "net::bounce", bouncee = %send_back_addr, "Bouncing incoming connection from {send_back_addr} because {reason}.");
 
                     // Signal the swarm to drop this connection
                     // immediately to prevent Identify/Kademlia from
@@ -1154,8 +1150,8 @@ impl NetworkActor {
                 // Make room for a user-defined peer.
                 let is_wanted = self.sticky_peers.contains_key(&address)
                     || self.pending_manual_dials.remove(&address);
-                if is_wanted && self.active_connections.len() >= self.max_num_peers {
-                    tracing::info!(%address, "At connection capacity; evicting a peer for a requested one.");
+                if is_wanted && self.upgraded_peers.lock().unwrap().len() >= self.max_num_peers {
+                    tracing::info!(%address, "At peer capacity; evicting a peer for a requested one.");
                     self.disconnect_from_longest_lived_peer();
                 }
 
@@ -1165,11 +1161,7 @@ impl NetworkActor {
                 // dials (as happens in Kademlia), it is possible for banned
                 // connections to get to this stage.
                 if let Some(reason) = self.should_bounce(&address) {
-                    if reason == BounceReason::MaxReached {
-                        tracing::trace!(target: "net::bounce", bouncee = %address,  "Bouncing established connection to {address} because {reason}.");
-                    } else {
-                        tracing::warn!(target: "net::bounce", bouncee = %address, "Bouncing established connection to {address} because {reason}.");
-                    }
+                    tracing::warn!(target: "net::bounce", bouncee = %address, "Bouncing established connection to {address} because {reason}.");
                     self.swarm.close_connection(connection_id);
                     return;
                 }
@@ -1224,24 +1216,6 @@ impl NetworkActor {
     /// Return Some(reason) with reason: BounceReason if the connection should
     /// be bounced; and None otherwise.
     fn should_bounce(&self, address: &Multiaddr) -> Option<BounceReason> {
-        let num_relayed_only = self
-            .active_connections
-            .values()
-            .filter(|(_, addresses)| addresses.values().all(Self::is_relayed))
-            .count();
-        let num_direct = self.active_connections.len() - num_relayed_only;
-        let at_capacity = if Self::is_relayed(address) {
-            // New connection is relayed: Don't exceed cap in total connections.
-            self.active_connections.len() >= self.max_num_peers
-        } else {
-            // New connection is direct: Don't let relayed connections that were
-            // not upgraded block it.
-            num_direct >= self.max_num_peers
-        };
-        if at_capacity {
-            tracing::debug!("Max active connections reached");
-            return Some(BounceReason::MaxReached);
-        }
         if let Some(ip) = ip_of(address) {
             if self.black_list.is_banned(&ip) {
                 tracing::debug!("IP is banned");
@@ -1644,8 +1618,8 @@ impl NetworkActor {
     }
 
     /// Process events from the `StreamGateway` subprotocol to transform a raw
-    /// libp2p stream into bidirectional stream compatible with the legacy
-    /// Neptune Cash peer-loop architecture.
+    /// libp2p stream into bidirectional stream compatible with the Neptune
+    /// peer-loop architecture.
     ///
     /// This function acts as the bridge between the asynchronous `libp2p` swarm
     /// and the dedicated actor loops managed by the `NetworkActor`. When a new
@@ -1713,6 +1687,32 @@ impl NetworkActor {
         {
             tracing::debug!(peer = %peer_id, "Dropping hijacked stream: {reason}.");
             drop(stream);
+            return;
+        }
+
+        // Refuse a peer loop beyond the limit, but keep the connection: it
+        // serves Identify and Kademlia until it idles out. Room was made for
+        // a sticky peer when it connected.
+        let is_sticky = address.values().any(|a| self.sticky_peers.contains_key(a));
+        if !is_sticky && self.upgraded_peers.lock().unwrap().len() >= self.max_num_peers {
+            tracing::debug!(peer = %peer_id, "Refusing peer loop: maximum number of peers reached.");
+            let mut peer_stream = bridge_libp2p_stream(stream, encoding);
+            let patience =
+                Duration::from_secs(self.global_state_lock.cli().handshake_timeout.into());
+            tokio::spawn(async move {
+                let status = TransferConnectionStatus::Refused(
+                    ConnectionRefusedReason::MaxPeerNumberExceeded,
+                );
+                let _ = peer_stream
+                    .send(PeerMessage::ConnectionStatus(status))
+                    .await;
+
+                // Hold the stream until the peer has read the refusal and
+                // closed its end. Dropping it now would reset the stream and
+                // fail any write the peer has in flight before it reads.
+                let drain = async { while let Ok(Some(_)) = peer_stream.try_next().await {} };
+                let _ = tokio::time::timeout(patience, drain).await;
+            });
             return;
         }
 
@@ -2326,8 +2326,8 @@ impl NetworkActor {
     /// 2. Subscribes to the global `MainToPeerTask` broadcast channel.
     /// 3. Upgrades the raw [`libp2p::Stream`] into a
     ///    `tokio_util::codec::framed::Framed`
-    ///    [`PeerMessage`](neptune_p2p::peer::PeerMessage) stream using the
-    ///    same codec bridge already in use for the legacy TCP stack.
+    ///    [`PeerMessage`] stream using the same codec bridge already in use for
+    ///    the legacy TCP stack.
     /// 4. Calls the legacy [`PeerLoopHandler::run_wrapper`] method, handing
     ///    over control of the connection to the established protocol logic.
     ///
@@ -2386,26 +2386,33 @@ impl NetworkActor {
         Some(tokio::spawn(async move {
             // Because 'peer_stream' implements Sink + Stream + Unpin,
             // and we have the broadcast receiver, this just works.
-            peer_loop_handler
+            let refused = match peer_loop_handler
                 .run_wrapper(peer_stream, from_main_rx)
                 .await
-                .unwrap_or_else(|e| {
-                    tracing::warn!(peer = %peer_id, "Peer loop exited with error: {e}");
-                });
-
-            // Remove the PeerId from the set of upgraded peers.
             {
-                let mut upgraded_peers = upgraded
-                    .lock()
-                    .expect("We do not hold the lock ever over something that can panic.");
-                let was_present = upgraded_peers.remove(&peer_id);
-                assert!(was_present, "Peer ID must be present in upgraded set.");
-            }
+                Ok(()) => false,
+                Err(error) if error.is::<PeerRefused>() => true,
+                Err(error) => {
+                    tracing::warn!(peer = %peer_id, "Peer loop exited with error: {error}");
+                    false
+                }
+            };
+
+            // Remove the PeerId from the set of upgraded peers, unless an
+            // eviction already did.
+            upgraded
+                .lock()
+                .expect("We do not hold the lock ever over something that can panic.")
+                .remove(&peer_id);
 
             // The connection cannot carry another peer loop; free its slot.
-            let _ = command_tx
-                .send(NetworkActorCommand::CloseConnection(connection_id))
-                .await;
+            // Unless the peer refused us: then it keeps the connection for
+            // Identify and Kademlia, and so do we.
+            if !refused {
+                let _ = command_tx
+                    .send(NetworkActorCommand::CloseConnection(connection_id))
+                    .await;
+            }
         }))
     }
 
@@ -2454,39 +2461,45 @@ impl NetworkActor {
                 .all(|p| matches!(p, libp2p::multiaddr::Protocol::P2p(_)))
     }
 
-    /// Disconnect from the longest-lived peer in the network.
-    ///
-    /// This method identifies the peer that has been connected for the greatest
-    /// amount of time based on its entry in `active_connections`. It then
-    /// requests the [`Swarm`](libp2p::Swarm) to terminate that connection and
-    /// immediately removes the peer from the internal tracking map.
+    /// Disconnect from the longest-lived peer that has a peer loop, to make
+    /// room for another peer loop.
     ///
     /// # Behavior
     ///
     /// - If multiple peers have the exact same connection time, one is chosen
     ///   arbitrarily.
-    /// - If no peers are currently connected, this method does nothing.
-    /// - The peer is removed from `active_connections` even if the
-    ///   [Swarm](libp2p::Swarm) fails to perform the physical disconnect (e.g.,
-    ///   if the peer just disconnected).
+    /// - If no such peer is connected, this method does nothing.
+    /// - The peer is forgotten even if the [Swarm](libp2p::Swarm) fails to
+    ///   perform the physical disconnect (e.g., if the peer just
+    ///   disconnected).
     fn disconnect_from_longest_lived_peer(&mut self) {
-        let oldest_peer = self
-            .active_connections
-            .iter()
-            .min_by_key(|(_peer_id, (connected_at, _addr))| *connected_at)
-            .map(|(peer_id, _)| *peer_id);
+        let oldest_peer = {
+            let upgraded_peers = self.upgraded_peers.lock().unwrap();
+            self.active_connections
+                .iter()
+                .filter(|(peer_id, _)| upgraded_peers.contains(peer_id))
+                .min_by_key(|(_peer_id, (connected_at, _addr))| *connected_at)
+                .map(|(peer_id, _)| *peer_id)
+        };
 
         if let Some(peer_id) = oldest_peer {
             tracing::debug!(%peer_id, "Disconnecting from longest-lived peer.");
+
+            // Tell its peer loop, which does not wake up when the connection
+            // closes under it.
+            let _ = self
+                .main_to_peer_broadcast
+                .send(MainToPeerTask::Disconnect(peer_id));
 
             // Signal the swarm to drop the connection
             if self.swarm.disconnect_peer_id(peer_id).is_err() {
                 tracing::warn!(%peer_id, "Attempted to disconnect peer, but it was already gone.");
             }
 
-            // We remove it from our map immediately so the count is
-            // accurate for any dial logic happening in the same tick.
+            // We forget it immediately so the counts are accurate for any
+            // admission happening in the same tick.
             self.active_connections.remove(&peer_id);
+            self.upgraded_peers.lock().unwrap().remove(&peer_id);
         } else {
             tracing::debug!("No peers available to disconnect from.");
         }
@@ -2629,6 +2642,8 @@ pub(crate) enum ActorError {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use libp2p::identity::Keypair;
+    use neptune_consensus::block::test_helpers::invalid_empty_block;
+    use neptune_consensus::block::Block;
     use neptune_wallet::wallet_entropy::WalletEntropy;
     use tokio::sync::broadcast;
 
@@ -2793,6 +2808,7 @@ mod tests {
         event_rx: mpsc::UnboundedReceiver<NetworkEvent>,
         main_to_peer: broadcast::Sender<MainToPeerTask>,
         _peer_to_main_rx: mpsc::Receiver<PeerTaskToMain>,
+        global_state_lock: GlobalStateLock,
         task: JoinHandle<Result<(), ActorError>>,
     }
 
@@ -2800,6 +2816,15 @@ mod tests {
         async fn start(
             keypair: Keypair,
             external_addresses: Vec<Multiaddr>,
+            force_relay_reservation: bool,
+        ) -> Self {
+            let config = NetworkConfig::default().with_external_addresses(external_addresses);
+            Self::start_with(keypair, config, force_relay_reservation).await
+        }
+
+        async fn start_with(
+            keypair: Keypair,
+            config: NetworkConfig,
             force_relay_reservation: bool,
         ) -> Self {
             let network = Network::RegTest;
@@ -2814,12 +2839,11 @@ mod tests {
             let main_to_peer = main_to_peer_broadcast_tx.clone();
             let (channels, command_tx, event_rx) =
                 NetworkActorChannels::setup(peer_to_main_tx, main_to_peer_broadcast_tx);
-            let config = NetworkConfig::default()
+            let config = config
                 .with_network(network)
-                .with_subdirectory(unit_test_path())
-                .with_external_addresses(external_addresses);
+                .with_subdirectory(unit_test_path());
             let peer_id = keypair.public().to_peer_id();
-            let mut actor = NetworkActor::new(keypair, channels, global_state_lock, config)
+            let mut actor = NetworkActor::new(keypair, channels, global_state_lock.clone(), config)
                 .expect("test actor must build");
             actor.force_relay_reservation = force_relay_reservation;
 
@@ -2829,6 +2853,7 @@ mod tests {
                 event_rx,
                 main_to_peer,
                 _peer_to_main_rx: peer_to_main_rx,
+                global_state_lock,
                 task: tokio::spawn(actor.run()),
             }
         }
@@ -2888,7 +2913,7 @@ mod tests {
                 tokio::time::timeout(duration, self.event_rx.recv())
                     .await
                     .is_err(),
-                "a peer loop started over a relayed connection"
+                "a peer loop started"
             );
         }
     }
@@ -3025,6 +3050,89 @@ mod tests {
 
         dialer.task.abort();
         listener.task.abort();
+    }
+
+    #[tokio::test]
+    async fn fully_connected_node_keeps_a_newcomers_connection_without_a_peer_loop() {
+        // A node at its peer limit keeps a newcomer's connection, so that
+        // Identify and Kademlia serve it, but runs no peer loop over it. The
+        // newcomer keeps the connection too.
+        let address = free_localhost_tcp_address();
+        let config = NetworkConfig::default()
+            .with_max_num_peers(1)
+            .with_external_addresses(vec![address.clone()]);
+        let mut node = TestNode::start_with(Keypair::generate_ed25519(), config, false).await;
+        node.command(NetworkActorCommand::Listen(address.clone()))
+            .await;
+        let mut peer = TestNode::start(Keypair::generate_ed25519(), vec![], false).await;
+        peer.dial_until_connected(address.clone(), 1).await;
+        peer.wait_for_peer_loops(1).await;
+        node.wait_for_peer_loops(1).await;
+
+        // The newcomer's peer loop starts, and ends on the refusal.
+        let mut newcomer = TestNode::start(Keypair::generate_ed25519(), vec![], false).await;
+        newcomer.dial_until_connected(address, 1).await;
+        newcomer.wait_for_peer_loops(1).await;
+        node.assert_no_peer_loop_for(Duration::from_secs(3)).await;
+        assert_eq!(2, node.overview().await.connection_count);
+        assert_eq!(1, newcomer.overview().await.connection_count);
+
+        node.task.abort();
+        peer.task.abort();
+        newcomer.task.abort();
+    }
+
+    #[tokio::test]
+    async fn new_node_finds_peers_through_a_fully_connected_node() {
+        // A new node that only reaches a node at its peer limit still finds
+        // peers: the fully-connected node answers its Kademlia query, and the
+        // new node connects to those peers.
+
+        let network = Network::RegTest;
+        let full_address = free_localhost_tcp_address();
+        let config = NetworkConfig::default()
+            .with_max_num_peers(1)
+            .with_external_addresses(vec![full_address.clone()]);
+        let mut full = TestNode::start_with(Keypair::generate_ed25519(), config, false).await;
+        full.command(NetworkActorCommand::Listen(full_address.clone()))
+            .await;
+        let block = invalid_empty_block(&Block::genesis(network), network);
+        full.global_state_lock.set_new_tip(block).await.unwrap();
+
+        let peer_address = free_localhost_tcp_address();
+        let mut peer = TestNode::start(
+            Keypair::generate_ed25519(),
+            vec![peer_address.clone()],
+            false,
+        )
+        .await;
+        peer.command(NetworkActorCommand::Listen(peer_address))
+            .await;
+        peer.dial_until_connected(full_address.clone(), 1).await;
+        peer.wait_for_peer_loops(1).await;
+        full.wait_for_peer_loops(1).await;
+
+        // Expect two peer loops on the newcomer: one with the full node, which
+        // refuses it at once, and one with the peer, whose address the
+        // newcomer learns from the full node's Kademlia.
+        let mut newcomer = TestNode::start(Keypair::generate_ed25519(), vec![], false).await;
+        newcomer.dial_until_connected(full_address, 1).await;
+        newcomer.wait_for_peer_loops(2).await;
+        peer.wait_for_peer_loops(1).await;
+
+        // Long enough for a close of the refused connection to have been
+        // received.
+        full.assert_no_peer_loop_for(Duration::from_secs(3)).await;
+        assert_eq!(2, newcomer.overview().await.connection_count);
+        assert_eq!(2, full.overview().await.connection_count);
+
+        // The refused loop is gone from the peer map, the libp2p connection is
+        // not.
+        assert_eq!(1, newcomer.global_state_lock.peers().len());
+
+        full.task.abort();
+        peer.task.abort();
+        newcomer.task.abort();
     }
 
     #[tokio::test]

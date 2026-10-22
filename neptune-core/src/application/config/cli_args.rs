@@ -164,19 +164,6 @@ pub struct Args {
     #[clap(long, default_value = "4", value_name = "SECONDS")]
     pub(crate) handshake_timeout: u8,
 
-    /// Whether to act as bootstrapper node.
-    ///
-    /// Bootstrapper nodes ensure that the maximum number of peers is never
-    /// reached by disconnecting from existing peers when the maximum is about
-    /// to be reached. As a result, they will respond with high likelihood to
-    /// incoming connection requests -- in contrast to regular nodes, which
-    /// refuse incoming connections when the max is reached.
-    ///
-    /// Presently only enforced for incoming connections over the legacy
-    /// network stack; the libp2p network actor ignores this flag.
-    #[clap(long)]
-    pub(crate) bootstrap: bool,
-
     /// Do not act as a relay server for peers behind NATs.
     ///
     /// By default, the node offers relay reservations so that peers behind

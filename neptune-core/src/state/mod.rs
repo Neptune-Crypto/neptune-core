@@ -2105,7 +2105,7 @@ impl GlobalState {
             ),
             // For now, all nodes are archival nodes
             is_archival_node: self.chain.is_archival_node(),
-            is_bootstrapper_node: self.cli().bootstrap,
+            is_bootstrapper_node: false,
             timestamp: SystemTime::now(),
             extra_data: HandshakeData::extra_data(!self.cli().blocks_only),
         }
