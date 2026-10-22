@@ -79,8 +79,17 @@ where
 
     /// Return the digests of the peaks of the MMR
     pub async fn peaks(&self) -> Vec<Digest> {
-        let leaf_count = self.num_leafs().await;
-        let (_, peak_node_indices) = get_peak_heights_and_peak_node_indices(leaf_count);
+        self.peaks_at(self.num_leafs().await).await
+    }
+
+    /// The peaks of the MMR over its first `num_leafs` leafs, as those leafs
+    /// are now.
+    ///
+    /// # Panics
+    ///
+    /// - if the argument exceeds the number of leafs in the MMR.
+    pub async fn peaks_at(&self, num_leafs: u64) -> Vec<Digest> {
+        let (_, peak_node_indices) = get_peak_heights_and_peak_node_indices(num_leafs);
         self.digests.get_many(&peak_node_indices).await
     }
 
@@ -157,6 +166,77 @@ where
         }
     }
 
+    /// Perform a batch-mutation of a collection of leaves. Modifies all nodes
+    /// above the affected leaves in a performant way.
+    ///
+    /// # Panics
+    ///
+    /// - If a leaf index repeats.
+    /// - If the mutation data is out-of-bounds.
+    pub async fn batch_mutate_leaf(&mut self, mutation_data: Vec<(u64, Digest)>) {
+        assert!(
+            mutation_data.iter().map(|md| md.0).all_unique(),
+            "Duplicated leaves are not allowed in batch leaf mutation"
+        );
+
+        let num_nodes = self.digests.len().await;
+        let mut level: HashMap<u64, Digest> = mutation_data
+            .into_iter()
+            .map(|(leaf_index, digest)| (leaf_index_to_node_index(leaf_index), digest))
+            .collect();
+        let mut writes = level.clone();
+
+        // Walk up the Merkle mountain range, calculating all nodes affecting by
+        // this batch mutation.
+        while !level.is_empty() {
+            // (parent, node, sibling, node is the right child), for the nodes
+            // that are not peaks
+            let edges = level
+                .keys()
+                .filter(|&&node| shared_advanced::parent(node) < num_nodes)
+                .map(|&node| {
+                    let (right_lineage_length, height) =
+                        shared_advanced::right_lineage_length_and_own_height(node);
+                    let is_right_child = right_lineage_length != 0;
+                    let sibling = if is_right_child {
+                        shared_advanced::left_sibling(node, height)
+                    } else {
+                        shared_advanced::right_sibling(node, height)
+                    };
+                    (shared_advanced::parent(node), node, sibling, is_right_child)
+                })
+                .collect_vec();
+            let missing = edges
+                .iter()
+                .map(|edge| edge.2)
+                .filter(|sibling| !level.contains_key(sibling))
+                .unique()
+                .collect_vec();
+            let read: HashMap<u64, Digest> = missing
+                .iter()
+                .copied()
+                .zip(self.digests.get_many(&missing).await)
+                .collect();
+            let mut parents: HashMap<u64, Digest> = HashMap::new();
+            for (parent, node, sibling, is_right_child) in edges {
+                if parents.contains_key(&parent) {
+                    continue;
+                }
+                let own = level[&node];
+                let sibling = *level.get(&sibling).unwrap_or_else(|| &read[&sibling]);
+                let digest = if is_right_child {
+                    Tip5::hash_pair(sibling, own)
+                } else {
+                    Tip5::hash_pair(own, sibling)
+                };
+                parents.insert(parent, digest);
+            }
+            writes.extend(parents.iter());
+            level = parents;
+        }
+        self.digests.set_many(writes).await;
+    }
+
     /// Modify a bunch of leafs and keep a set of membership proofs in sync. Notice that this
     /// function is not just the application of `mutate_leaf` multiple times, as it also preserves
     /// a list of membership proofs.
@@ -165,14 +245,7 @@ where
         membership_proofs: &mut [&mut MmrMembershipProof],
         mutation_data: Vec<(u64, Digest)>,
     ) -> Vec<usize> {
-        assert!(
-            mutation_data.iter().map(|md| md.0).all_unique(),
-            "Duplicated leaves are not allowed in membership proof updater"
-        );
-
-        for (leaf_index, digest) in &mutation_data {
-            self.mutate_leaf(*leaf_index, *digest).await;
-        }
+        self.batch_mutate_leaf(mutation_data.clone()).await;
 
         let mut modified_mps: Vec<usize> = vec![];
         for ((i, mp), (leaf_index, _old_leaf)) in membership_proofs
@@ -420,6 +493,32 @@ impl<Storage: StorageVec<Digest>> ArchivalMmr<Storage> {
         MmrMembershipProof::new(authentication_path)
     }
 
+    /// The node this many levels above a leaf, along with its authentication
+    /// path. The leaf and its authentication path if levels_up is zero.
+    ///
+    /// # Panics
+    ///
+    /// If the leaf index is out of bounds, or the levels exceed the height
+    /// of the leaf's tree.
+    pub async fn get_ancestor_and_path(
+        &self,
+        leaf_index: u64,
+        levels_up: u32,
+    ) -> (Digest, Vec<Digest>) {
+        let path = self
+            .prove_membership_async(leaf_index)
+            .await
+            .authentication_path;
+        let node_index = (0..levels_up).fold(
+            shared_advanced::leaf_index_to_node_index(leaf_index),
+            |node_index, _| shared_advanced::parent(node_index),
+        );
+        (
+            self.digests.get(node_index).await,
+            path[levels_up as usize..].to_vec(),
+        )
+    }
+
     /// Returns the right-most leaf of the MMR, the leaf that was added the
     /// latest.
     pub async fn get_latest_leaf(&self) -> Option<Digest> {
@@ -517,6 +616,9 @@ pub(crate) mod tests {
     use proptest::prelude::*;
     use proptest_arbitrary_interop::arb;
     use rand::random;
+    use rand::rngs::StdRng;
+    use rand::RngExt;
+    use rand::SeedableRng;
     use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
     use tasm_lib::twenty_first::math::other::*;
     use tasm_lib::twenty_first::tip5::Tip5;
@@ -678,6 +780,41 @@ pub(crate) mod tests {
             &accumulator_mmr.peaks(),
             accumulator_mmr.num_leafs()
         ));
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn peaks_at_are_the_peaks_of_the_prefix() {
+        let leafs: Vec<Digest> = random_elements(40);
+        let ammr = mock::get_ammr_from_digests(leafs.clone()).await;
+        for num_leafs in 0..=leafs.len() {
+            let prefix = MmrAccumulator::new_from_leafs(leafs[..num_leafs].to_vec());
+            assert_eq!(prefix.peaks(), ammr.peaks_at(num_leafs as u64).await);
+        }
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn batch_mutate_leaf_agrees_with_one_at_a_time() {
+        let mut rng = StdRng::seed_from_u64(0);
+        for leaf_count in 1..=70usize {
+            let leafs: Vec<Digest> = random_elements(leaf_count);
+            let mut one_at_a_time = mock::get_ammr_from_digests(leafs.clone()).await;
+            let mut batched = mock::get_ammr_from_digests(leafs).await;
+            let chosen = (0..leaf_count as u64)
+                .filter(|_| rng.random_bool(0.5))
+                .collect_vec();
+            let mutations = chosen
+                .into_iter()
+                .map(|leaf_index| (leaf_index, rng.random()))
+                .collect_vec();
+            for (leaf_index, digest) in &mutations {
+                one_at_a_time.mutate_leaf(*leaf_index, *digest).await;
+            }
+            batched.batch_mutate_leaf(mutations).await;
+            assert_eq!(
+                one_at_a_time.digests.get_all().await,
+                batched.digests.get_all().await
+            );
+        }
     }
 
     #[apply(shared_tokio_runtime)]
@@ -1366,6 +1503,59 @@ pub(crate) mod tests {
         let digests = vec![Digest::default(); 17];
         let ammr = mock::get_ammr_from_digests(digests.clone()).await;
         ammr.get_leaf_async(17).await;
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn internal_path_for_leaf_agrees_with_leaf_membership_proof() {
+        let leaf_hashes: Vec<Digest> = (0..11).map(|_| random()).collect();
+        let archival_mmr = mock::get_ammr_from_digests(leaf_hashes.clone()).await;
+
+        for i in 0..11 {
+            let expected = archival_mmr.prove_membership_async(i).await;
+            let (leaf, leaf_auth_path) = archival_mmr.get_ancestor_and_path(i, 0).await;
+            assert_eq!(expected.authentication_path, leaf_auth_path);
+            assert_eq!(leaf_hashes[i as usize], leaf);
+        }
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn ancestor_and_path_reach_the_peak() {
+        let root_of_path = |index: u64, node: Digest, path: &[Digest]| {
+            path.iter()
+                .enumerate()
+                .fold(node, |node, (level, &sibling)| {
+                    if (index >> level) & 1 == 0 {
+                        Tip5::hash_pair(node, sibling)
+                    } else {
+                        Tip5::hash_pair(sibling, node)
+                    }
+                })
+        };
+        let leaf_hashes: Vec<Digest> = (0..11).map(|_| random()).collect();
+        let archival_mmr = mock::get_ammr_from_digests(leaf_hashes.clone()).await;
+        let first_peak = archival_mmr.peaks().await[0];
+        for (leaf_index, &leaf) in leaf_hashes.iter().enumerate().take(8) {
+            let leaf_index = leaf_index as u64;
+            let full_path = archival_mmr
+                .prove_membership_async(leaf_index)
+                .await
+                .authentication_path;
+            for levels_up in 0..=3u32 {
+                let (node, path) = archival_mmr
+                    .get_ancestor_and_path(leaf_index, levels_up)
+                    .await;
+                let levels_up = levels_up as usize;
+                assert_eq!(
+                    root_of_path(leaf_index, leaf, &full_path[..levels_up]),
+                    node
+                );
+                assert_eq!(full_path[levels_up..], path);
+                assert_eq!(
+                    first_peak,
+                    root_of_path(leaf_index >> levels_up, node, &path)
+                );
+            }
+        }
     }
 
     #[apply(shared_tokio_runtime)]

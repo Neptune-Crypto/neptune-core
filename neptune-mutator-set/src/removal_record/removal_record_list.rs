@@ -96,12 +96,12 @@ impl RemovalRecordList {
     /// When there are more Chunks than trees, this value is used for the tree
     /// height to indicate it (tree height and authentication structure) should
     /// be ignored.
-    const ENCODING_DELIMITER_IGNORE_TREE_HEIGHT: u64 = u64::MAX;
+    pub const ENCODING_DELIMITER_IGNORE_TREE_HEIGHT: u64 = u64::MAX;
 
     /// When there are more trees than Chunks, the tree heights are offset by
     /// this value to indicate that the associated Chunk should be ignored. Note
     /// that the associated authentication structure must be empty in this case.
-    const ENCODING_TREE_HEIGHT_OFFSET: u64 = 64;
+    pub const ENCODING_TREE_HEIGHT_OFFSET: u64 = 64;
 
     /// Convert a `Vec` of [`RemovalRecord`]s to a [`RemovalRecordList`].
     ///

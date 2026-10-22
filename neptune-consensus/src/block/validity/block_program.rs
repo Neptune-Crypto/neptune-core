@@ -64,7 +64,9 @@ impl BlockProgram {
                 ConsensusRuleSet::HardforkGamma => {
                     Digest::try_from_hex(HF_GAMMA_PROGRAM_HASH).unwrap()
                 }
-                ConsensusRuleSet::HardforkDelta => BlockProgram.hash(),
+                ConsensusRuleSet::HardforkDelta | ConsensusRuleSet::SoftforkEpsilon => {
+                    BlockProgram.hash()
+                }
             };
 
             (hash, consensus_rule_set.triton_proof_version().version())
@@ -367,7 +369,8 @@ pub(crate) mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::block::validity::block_primitive_witness::deterministic_block_primitive_witness;
+    use crate::block::validity::block_primitive_witness::BlockPrimitiveWitness;
+    use crate::consensus_rule_set::BLOCK_HEIGHT_SOFTFORK_EPSILON_MAIN_NET;
     use crate::proof_abstractions::tasm::builtins as tasm;
     use crate::proof_abstractions::tasm::builtins::verify_stark;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
@@ -429,7 +432,10 @@ pub(crate) mod tests {
     #[test]
     fn block_program_halts_gracefully() {
         let network = Network::Main;
-        let block_primitive_witness = deterministic_block_primitive_witness(network);
+        // Below epsilon the witness needs only the transaction's claim.
+        let height = BLOCK_HEIGHT_SOFTFORK_EPSILON_MAIN_NET.previous().unwrap();
+        let block_primitive_witness =
+            BlockPrimitiveWitness::deterministic_with_block_height(height, network);
         let block_body_mast_hash_as_input = PublicInput::new(
             block_primitive_witness
                 .body()
@@ -439,7 +445,7 @@ pub(crate) mod tests {
                 .to_vec(),
         );
 
-        let block_proof_witness = BlockProofWitness::produce(block_primitive_witness);
+        let block_proof_witness = BlockProofWitness::produce(block_primitive_witness, vec![]);
 
         let block_program_nondeterminism = block_proof_witness.nondeterminism();
         let rust_output = BlockProgram
@@ -474,7 +480,10 @@ pub(crate) mod tests {
     #[test]
     fn can_verify_block_program_with_two_claims() {
         let network = Network::Main;
-        let block_primitive_witness = deterministic_block_primitive_witness(network);
+        // Below epsilon the witness needs only the transaction's claim.
+        let height = BLOCK_HEIGHT_SOFTFORK_EPSILON_MAIN_NET.previous().unwrap();
+        let block_primitive_witness =
+            BlockPrimitiveWitness::deterministic_with_block_height(height, network);
         let block_body_mast_hash_as_input = PublicInput::new(
             block_primitive_witness
                 .body()
@@ -495,7 +504,7 @@ pub(crate) mod tests {
         )
         .unwrap();
 
-        let block_proof_witness = BlockProofWitness::produce(block_primitive_witness)
+        let block_proof_witness = BlockProofWitness::produce(block_primitive_witness, vec![])
             .with_claim_test(halt_claim, halt_proof.into());
 
         let block_program_nondeterminism = block_proof_witness.nondeterminism();

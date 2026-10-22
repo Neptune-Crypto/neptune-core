@@ -42,7 +42,10 @@ impl BasicSnippet for NewClaim {
     }
 
     fn entrypoint(&self) -> String {
-        "neptune_transaction_new_claim".to_string()
+        format!(
+            "neptune_transaction_new_claim_v{}",
+            self.proof_version.version()
+        )
     }
 
     fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
@@ -220,5 +223,19 @@ mod tests {
     #[test]
     fn unit_test() {
         ShadowedFunction::new(NewClaim::new(ConsensusRuleSet::HardforkDelta)).test();
+    }
+
+    #[test]
+    fn entrypoints_differ_exactly_when_proof_versions_do() {
+        use strum::IntoEnumIterator;
+        for a in ConsensusRuleSet::iter() {
+            for b in ConsensusRuleSet::iter() {
+                assert_eq!(
+                    a.triton_proof_version() == b.triton_proof_version(),
+                    NewClaim::new(a).entrypoint() == NewClaim::new(b).entrypoint(),
+                    "{a} vs {b}"
+                );
+            }
+        }
     }
 }

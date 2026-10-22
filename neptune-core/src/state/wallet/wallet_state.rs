@@ -2253,6 +2253,7 @@ pub(crate) mod tests {
 
     use generation_address::GenerationSpendingKey;
     use macro_rules_attr::apply;
+    use neptune_consensus::block::mutator_set_update::MutatorSetCatchUp;
     use neptune_consensus::block::test_helpers::invalid_block_with_transaction;
     use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
     use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
@@ -3324,6 +3325,7 @@ pub(crate) mod tests {
                     address: guesser_address,
                     override_rng_seed: None,
                     override_timestamp: None,
+                    swbfi_reveal: None,
                 },
             )
             .await;
@@ -3489,7 +3491,11 @@ pub(crate) mod tests {
             .await
             .unwrap();
             let block2 = fake_valid_block_proposal_from_tx(&block1, block2_tx, network).await;
-            assert!(block2.is_valid(&block1, block2_timestamp, network).await);
+            assert!(
+                block2
+                    .is_valid_proposal(&block1, block2_timestamp, network)
+                    .await
+            );
 
             bob.set_new_self_composed_tip(block2.clone(), vec![])
                 .await
@@ -5178,6 +5184,7 @@ pub(crate) mod tests {
         use crate::application::loops::mine_loop::create_block_transaction;
         use crate::application::loops::mine_loop::make_coinbase_transaction_stateless;
         use crate::application::loops::peer_loop::channel::MainToPeerTask;
+        use crate::tests::shared::blocks::guess_for_tests;
         use crate::PEER_CHANNEL_CAPACITY;
 
         #[traced_test]
@@ -5388,15 +5395,22 @@ pub(crate) mod tests {
             )
             .await
             .unwrap();
-            let block1 = Block::compose(
+            let (mut block1, _) = Block::compose(
                 genesis_block.clone(),
                 block1_tx,
                 block1_timestamp,
+                alice
+                    .lock_guard()
+                    .await
+                    .composer_witness(&genesis_block)
+                    .await
+                    .unwrap(),
                 dummy_queue.clone(),
                 job_options.clone(),
             )
             .await
             .unwrap();
+            guess_for_tests(&mut block1, &alice).await;
             alice
                 .lock_guard_mut()
                 .await
@@ -5469,8 +5483,13 @@ pub(crate) mod tests {
                 .lock_guard()
                 .await
                 .mempool
-                .get_transactions_for_block_composition(consensus_rule_set1, 1_000_000_000, None)
-                [0]
+                .get_transactions_for_block_composition(
+                    consensus_rule_set1,
+                    network,
+                    1_000_000_000,
+                    None,
+                    NativeCurrencyAmount::zero(),
+                )[0]
             .clone();
 
             // create block ignoring that transaction. Rando has upgraded tx
@@ -5479,15 +5498,22 @@ pub(crate) mod tests {
                 create_block_transaction(&block1, alice.clone(), now, job_options.clone())
                     .await
                     .unwrap();
-            let block2 = Block::compose(
+            let (mut block2, _) = Block::compose(
                 block1.clone(),
                 block_transaction,
                 now,
+                alice
+                    .lock_guard()
+                    .await
+                    .composer_witness(&block1)
+                    .await
+                    .unwrap(),
                 dummy_queue.clone(),
                 job_options.clone(),
             )
             .await
             .unwrap();
+            guess_for_tests(&mut block2, &alice).await;
             alice
                 .lock_guard_mut()
                 .await
@@ -5504,11 +5530,17 @@ pub(crate) mod tests {
             // upgrade transaction again
             // this time mutator set data
             let block1_mutator_set = block1.mutator_set_accumulator_after().unwrap();
+            let catch_up = MutatorSetCatchUp::from_update(
+                &block1_mutator_set,
+                &single_proof_transaction.kernel.inputs,
+                &block2.mutator_set_update(network).unwrap(),
+            )
+            .unwrap();
             let upgrade_job_two = UpgradeJob::UpdateMutatorSetData(UpdateMutatorSetDataJob::new(
                 single_proof_transaction.kernel,
                 single_proof_transaction.proof.into_single_proof(),
                 block1_mutator_set,
-                block2.mutator_set_update(network).unwrap(),
+                catch_up,
                 upgrade_incentive,
                 consensus_rule_set1,
             ));
@@ -5524,7 +5556,13 @@ pub(crate) mod tests {
                 .lock_guard()
                 .await
                 .mempool
-                .get_transactions_for_block_composition(consensus_rule_set1, 10_000_000, None);
+                .get_transactions_for_block_composition(
+                    consensus_rule_set1,
+                    network,
+                    10_000_000,
+                    None,
+                    NativeCurrencyAmount::zero(),
+                );
             assert_eq!(1, transactions_for_block.len());
             let upgraded_transaction = transactions_for_block[0].clone();
             let new_num_announcements = upgraded_transaction.kernel.announcements.len();
@@ -5536,6 +5574,12 @@ pub(crate) mod tests {
 
             // merge with some other transaction to set merge bit, Alice gets
             // composer rewards.
+            let block3_witness = alice
+                .lock_guard()
+                .await
+                .composer_witness(&block2)
+                .await
+                .unwrap();
             let (some_other_transaction, _) = create_block_transaction(
                 &block2,
                 alice,
@@ -5559,10 +5603,11 @@ pub(crate) mod tests {
             .unwrap();
 
             // create block with that transaction
-            let block3 = Block::compose(
+            let (block3, _) = Block::compose(
                 block2,
                 block3_transaction,
                 now + Timestamp::minutes(10),
+                block3_witness,
                 dummy_queue,
                 job_options,
             )

@@ -1,9 +1,12 @@
 use neptune_archive::archival_state::ArchivalState;
+use neptune_consensus::block::block_header::BlockHeader;
+use neptune_consensus::block::guesser_receiver_data::GuesserReceiverData;
 use neptune_consensus::block::pow::LustrationStatus;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_mempool::recent_mutator_sets::RecentMutatorSets;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::network::Network;
 use tasm_lib::prelude::Digest;
 
 use super::light_state::LightState;
@@ -101,6 +104,57 @@ impl BlockchainState {
     #[inline]
     pub fn tip(&self) -> &Block {
         self.light_state().tip()
+    }
+
+    /// Return the mutator set after the specified block has been applied.
+    pub async fn mutator_set_after_by_block_hash(
+        &self,
+        block_hash: Digest,
+    ) -> Option<MutatorSetAccumulator> {
+        // First look in light state.
+        if let Some(msa) = self
+            .light_state()
+            .recent_mutator_sets()
+            .mutator_set_by_block_digest(block_hash)
+        {
+            return Some(msa);
+        }
+
+        // Then look in archival state, if one such is maintained
+        if !self.is_archival_node() {
+            return None;
+        }
+
+        self.archival_state()
+            .get_block(block_hash)
+            .await
+            .expect("Reading from archival state must work")
+            .map(|block| {
+                block
+                    .mutator_set_accumulator_after()
+                    .expect("Stored block must have valid MS after")
+            })
+    }
+
+    /// The reveal of the inactive SWBF that a block on this proposal needs
+    /// from this guesser, read from the archival state synced to the tip.
+    /// None if the proposal is not on the tip, or the rules require none.
+    pub async fn guesser_swbfi_reveal(
+        &self,
+        proposal_header: &BlockHeader,
+        receiver_data: &GuesserReceiverData,
+        network: Network,
+    ) -> Option<(Digest, Vec<Digest>)> {
+        let tip = self.tip();
+        let rules = ConsensusRuleSet::infer_from(network, proposal_header.height);
+        if tip.hash() != proposal_header.prev_block_digest
+            || !rules.miners_must_prove_ams_knowledge(network)
+        {
+            return None;
+        }
+        self.archival_state()
+            .guesser_swbfi_reveal(tip.hash(), receiver_data)
+            .await
     }
 
     /// The mutator set accumulator as it looks after applying the tip block.

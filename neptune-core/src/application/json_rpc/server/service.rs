@@ -6,6 +6,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures::StreamExt;
 use itertools::Itertools;
+use neptune_consensus::block::guesser_receiver_data::GuesserReceiverData;
 use neptune_consensus::block::Block;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_consensus::transaction::transaction_kernel::TransactionLustrationError;
@@ -1444,19 +1445,32 @@ impl RpcApi for RpcServer {
         &self,
         request: GetBlockTemplateRequest,
     ) -> RpcResult<GetBlockTemplateResponse> {
-        let (maybe_proposal, tip_header) = {
+        let network = self.state.cli().network;
+        let address = ReceivingAddress::from_bech32m(&request.guesser_address, network)
+            .map_err(|_| RpcError::InvalidAddress)?;
+        let receiver_data: GuesserReceiverData = address.into();
+
+        let (maybe_proposal, tip_header, swbfi_reveal) = {
             let global_state = self.state.lock_guard().await;
             let proposal = global_state.mining_state.block_proposal.map(|p| p.clone());
             let tip_header = *global_state.chain.tip().header();
+            let swbfi_reveal = match &proposal {
+                Some(proposal) => {
+                    global_state
+                        .chain
+                        .guesser_swbfi_reveal(proposal.header(), &receiver_data, network)
+                        .await
+                }
+                None => None,
+            };
 
-            (proposal, tip_header)
+            (proposal, tip_header, swbfi_reveal)
         };
 
         let Some(mut proposal) = maybe_proposal else {
             return Ok(GetBlockTemplateResponse { template: None });
         };
 
-        let network = self.state.cli().network;
         let consensus_rules = ConsensusRuleSet::infer_from(network, proposal.header().height);
         let difficulty = if consensus_rules.use_parent_difficulty() {
             tip_header.difficulty
@@ -1464,14 +1478,11 @@ impl RpcApi for RpcServer {
             proposal.header().difficulty
         };
 
-        let address =
-            ReceivingAddress::from_bech32m(&request.guesser_address, self.state.cli().network)
-                .map_err(|_| RpcError::InvalidAddress)?;
-        proposal.set_header_guesser_data(address.into());
+        proposal.set_header_guesser_data(receiver_data);
 
         let template = RpcBlockTemplate {
             block: RpcBlock::from(&proposal),
-            metadata: RpcBlockTemplateMetadata::new(&proposal, difficulty),
+            metadata: RpcBlockTemplateMetadata::new(&proposal, difficulty, swbfi_reveal),
         };
 
         Ok(GetBlockTemplateResponse {
@@ -1745,8 +1756,10 @@ impl RpcApi for RpcServer {
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, next_block_height);
         let tx = state.mempool().get_transactions_for_block_composition(
             consensus_rule_set,
+            network,
             usize::MAX,
             Some(1),
+            self.state.cli().min_fee_per_swbf_leaf,
         );
         drop(state);
         let tx = tx.first();
@@ -1868,6 +1881,7 @@ pub mod tests {
 
     use libp2p::Multiaddr;
     use macro_rules_attr::apply;
+    use neptune_consensus::block::block_validation_error::BlockValidationError;
     use neptune_consensus::block::test_helpers::invalid_block_with_transaction;
     use neptune_consensus::block::test_helpers::invalid_empty_block;
     use neptune_consensus::block::test_helpers::invalid_empty_block_with_announcements;
@@ -2546,6 +2560,56 @@ pub mod tests {
                 .unwrap_err(),
             RpcError::SubmitBlock(SubmitBlockError::InsufficientWork)
         );
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn block_template_carries_the_guesser_reveal() {
+        let network = Network::Testnet(42);
+        let rpc_cli = cli_args::Args::default_with_network(network);
+        let mut rpc_server = test_rpc_server_with_cli_args_and_wallet(
+            rpc_cli,
+            WalletEntropy::new_pseudorandom([0u8; 32]),
+        )
+        .await;
+
+        let genesis = Block::genesis(network);
+
+        // Set fake block proposal
+        let block1 = fake_valid_deterministic_successor(&genesis, network).await;
+        rpc_server
+            .state
+            .lock_mut(|x| x.mining_state.block_proposal = BlockProposal::ForeignComposition(block1))
+            .await;
+        let guesser_address = rpc_server
+            .state
+            .lock_guard_mut()
+            .await
+            .wallet_state
+            .next_unused_spending_key(KeyType::Generation)
+            .await
+            .to_address();
+
+        let RpcBlockTemplate { block, metadata } = rpc_server
+            .get_block_template(guesser_address.to_bech32m(network).unwrap())
+            .await
+            .unwrap()
+            .template
+            .unwrap();
+        assert!(metadata.swbfi_reveal.is_some());
+
+        // Verify the SWBF reveal data from the returned pow puzzle.
+        let parent_swbfi = genesis
+            .mutator_set_accumulator_after()
+            .unwrap()
+            .swbf_inactive;
+        let mut block = Block::from(block);
+        assert_eq!(
+            Err(BlockValidationError::GuesserSwbfiReveal),
+            block.validate_guesser_reveal(&parent_swbfi),
+            "the template's own pow field carries no reveal"
+        );
+        block.set_header_pow(metadata.solve(ConsensusRuleSet::HardforkGamma).into());
+        assert_eq!(Ok(()), block.validate_guesser_reveal(&parent_swbfi));
     }
 
     #[test_strategy::proptest(async = "tokio", cases = 5)]

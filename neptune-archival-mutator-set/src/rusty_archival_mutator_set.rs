@@ -187,7 +187,11 @@ mod tests {
             )
             .expect("Could not batch update membership proofs from remove");
 
-            rusty_mutator_set.ams_mut().remove(&removal_record).await;
+            rusty_mutator_set
+                .ams_mut()
+                .remove(removal_record.absolute_indices)
+                .await
+                .unwrap();
 
             removed_items.push(items.remove(index));
             removed_mps.push(mps.remove(index));

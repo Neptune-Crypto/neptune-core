@@ -22,11 +22,13 @@ use neptune_consensus::proof_abstractions::triton_vm_job_queue::vm_job_queue;
 use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
 use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 use neptune_consensus::transaction::transaction_proof::TransactionProofType;
+use neptune_consensus::transaction::validity::single_proof::single_proof_claims_agree;
 use neptune_consensus::transaction::*;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_job_queue::errors::JobHandleError;
 use neptune_mempool::tx_upgrade_filter::TxUpgradeFilter;
 use neptune_mempool::upgrade_priority::UpgradePriority;
+use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::difficulty_control::difficulty_control;
 use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
@@ -58,6 +60,7 @@ use crate::application::loops::main_loop::proof_upgrader::FixJob;
 use crate::application::loops::main_loop::proof_upgrader::UpgradeJob;
 use crate::application::loops::mine_loop::guesser_configuration::GuessingConfiguration;
 use crate::application::loops::mine_loop::mock_block_generator::MockBlockGenerator;
+use crate::state::mining::mining_state::ComposerWork;
 use crate::state::GlobalStateLock;
 use crate::COMPOSITION_FAILED_EXIT_CODE;
 
@@ -66,44 +69,151 @@ use crate::COMPOSITION_FAILED_EXIT_CODE;
 /// proposal parameters.
 pub(crate) async fn compose_block_helper(
     latest_block: Block,
-    global_state_lock: GlobalStateLock,
+    mut global_state_lock: GlobalStateLock,
     coinbase_timestamp: Timestamp,
     job_options: TritonVmProofJobOptions,
-) -> Result<(Block, Vec<ExpectedUtxo>)> {
+) -> Result<Option<(Block, Vec<ExpectedUtxo>)>> {
     // Mock?
     if global_state_lock.cli().network.use_mock_proof() {
-        return Ok(mock_compose_block(latest_block, global_state_lock, coinbase_timestamp).await);
+        return Ok(Some(
+            mock_compose_block(latest_block, global_state_lock, coinbase_timestamp).await,
+        ));
     }
 
-    // Real STARK composition path.
-    let (transaction, composer_utxos) = create_block_transaction(
-        &latest_block,
-        global_state_lock,
-        coinbase_timestamp,
-        job_options.clone(),
-    )
-    .await?;
+    // Can work on a previous proposal be reused?
+    let composer_work = global_state_lock
+        .lock_guard()
+        .await
+        .mining_state
+        .composer_work
+        .clone()
+        .filter(|work| work.predecessor == latest_block.hash());
+    let (transaction, composer_utxos, previous) = match composer_work {
+        Some(work) => {
+            let Some(transaction) = extend_block_transaction(
+                &work,
+                latest_block.header().height.next(),
+                global_state_lock.clone(),
+                job_options.clone(),
+            )
+            .await?
+            else {
+                return Ok(None);
+            };
+            (transaction, work.composer_utxos, Some(work.proofs))
+        }
+        None => {
+            let (transaction, composer_utxos) = create_block_transaction(
+                &latest_block,
+                global_state_lock.clone(),
+                coinbase_timestamp,
+                job_options.clone(),
+            )
+            .await?;
+            (transaction, composer_utxos, None)
+        }
+    };
 
     // Block timestamp must be at least that of the transaction. So don't use
     // coinbase timestamp here, but rather the actual timestamp from the
     // created transaction.
     let block_timestamp = transaction.kernel().timestamp;
-    let compose_result = Block::compose(
+
+    let mut composer_witness = global_state_lock
+        .lock_guard()
+        .await
+        .composer_witness(&latest_block)
+        .await?;
+    if let Some(witness) = &mut composer_witness {
+        witness.previous = previous;
+    }
+
+    let predecessor = latest_block.hash();
+    let (block, proofs) = Block::compose(
         latest_block,
-        transaction,
+        transaction.clone(),
         block_timestamp,
+        composer_witness,
         vm_job_queue(),
         job_options,
     )
     .await?;
+    if let Some(proofs) = proofs {
+        global_state_lock
+            .lock_guard_mut()
+            .await
+            .mining_state
+            .composer_work = Some(ComposerWork {
+            predecessor,
+            block_transaction: transaction,
+            composer_utxos: composer_utxos.clone(),
+            proofs,
+        });
+    }
 
-    Ok((compose_result, composer_utxos))
+    Ok(Some((block, composer_utxos)))
+}
+
+/// The composer's block transaction with the mempool transactions merged in
+/// that pay to extend it, or None when they do not pay the recomposition fee
+/// together.
+async fn extend_block_transaction(
+    work: &ComposerWork,
+    next_height: BlockHeight,
+    global_state_lock: GlobalStateLock,
+    job_options: TritonVmProofJobOptions,
+) -> Result<Option<BlockTransaction>> {
+    let network = global_state_lock.cli().network;
+    let consensus_rule_set = ConsensusRuleSet::infer_from(network, next_height);
+    let max_kernel_len = consensus_rule_set.max_recommended_block_tx_kernel_size();
+    let newcomers = global_state_lock
+        .lock_guard()
+        .await
+        .mempool()
+        .get_transactions_extending_block_transaction(
+            work.block_transaction.kernel(),
+            consensus_rule_set,
+            network,
+            max_kernel_len,
+            Some(global_state_lock.cli().max_num_compose_mergers.get()),
+            global_state_lock.cli().min_fee_per_swbf_leaf,
+        );
+    let fees = newcomers
+        .iter()
+        .map(|tx| tx.kernel.fee)
+        .sum::<NativeCurrencyAmount>();
+    if newcomers.is_empty() || fees < global_state_lock.cli().min_fee_per_recomposition {
+        debug!("No transaction pays to extend the block proposal on the current tip");
+        return Ok(None);
+    }
+
+    let mut rng: StdRng =
+        SeedableRng::from_seed(global_state_lock.lock_guard().await.shuffle_seed());
+    let mut block_transaction = work.block_transaction.clone();
+    for transaction in newcomers {
+        info!(
+            "Merging transaction with {} inputs and fee {} into the earlier proposal's block transaction",
+            transaction.kernel.inputs.len(),
+            transaction.kernel.fee
+        );
+        block_transaction = BlockTransaction::merge_appending(
+            block_transaction,
+            transaction,
+            rng.random(),
+            vm_job_queue(),
+            job_options.clone(),
+            consensus_rule_set,
+        )
+        .await?;
+    }
+
+    Ok(Some(block_transaction))
 }
 
 async fn compose_block(
     latest_block: Block,
     global_state_lock: GlobalStateLock,
-    sender: oneshot::Sender<(Block, Vec<ExpectedUtxo>)>,
+    sender: oneshot::Sender<Option<(Block, Vec<ExpectedUtxo>)>>,
     cancel_compose_rx: tokio::sync::watch::Receiver<()>,
     now: Timestamp,
 ) -> Result<()> {
@@ -117,11 +227,11 @@ async fn compose_block(
         .proof_job_options(TritonVmJobPriority::High);
     job_options.cancel_job_rx = Some(cancel_compose_rx);
 
-    let (proposal, composer_utxos) =
+    let composed =
         compose_block_helper(latest_block, global_state_lock, timestamp, job_options).await?;
 
     // Please clap.
-    match sender.send((proposal, composer_utxos)) {
+    match sender.send(composed) {
         Ok(_) => Ok(()),
         Err(_) => bail!("Composer task failed to send to miner master"),
     }
@@ -155,8 +265,10 @@ pub(crate) async fn mock_compose_block(
     let (guesser_address, _) = gs.mining_rewards_address();
     let txs = gs.mempool().get_transactions_for_block_composition(
         consensus_rule_set,
+        network,
         max_kernel_len,
         Some(gs.cli().max_num_compose_mergers.get()),
+        gs.cli().min_fee_per_swbf_leaf,
     );
     drop(gs);
 
@@ -230,6 +342,7 @@ fn guess_worker(
         address: guesser_address,
         override_rng_seed: rng_seed,
         override_timestamp: now,
+        swbfi_reveal,
     } = guessing_configuration;
 
     let now = now.unwrap_or(Timestamp::now());
@@ -330,6 +443,7 @@ fn guess_worker(
                         rng,
                         &sender,
                         Some(version),
+                        swbfi_reveal.as_ref(),
                     )
                 },
             )
@@ -399,6 +513,7 @@ fn guess_nonce_iteration(
     rng: &mut rand::rngs::StdRng,
     sender: &oneshot::Sender<NewBlockFound>,
     version: Option<BFieldElement>,
+    swbfi_reveal: Option<&(Digest, Vec<Digest>)>,
 ) -> GuessNonceResult {
     let nonce: Digest = rng.random();
 
@@ -414,6 +529,7 @@ fn guess_nonce_iteration(
         threshold,
         lustration_status,
         version,
+        swbfi_reveal,
     );
 
     match result {
@@ -542,6 +658,7 @@ pub(crate) async fn create_block_transaction_from(
 
     // Get most valuable transactions from mempool.
     let max_num_mergers = global_state_lock.cli().max_num_compose_mergers.get();
+    let min_fee_per_swbf_leaf = global_state_lock.cli().min_fee_per_swbf_leaf;
     let mut transactions_to_merge = match &tx_merge_origin {
         TxMergeOrigin::Mempool => global_state_lock
             .lock_guard()
@@ -549,8 +666,10 @@ pub(crate) async fn create_block_transaction_from(
             .mempool()
             .get_transactions_for_block_composition(
                 new_rules,
+                network,
                 max_kernel_len,
                 Some(max_num_mergers),
+                min_fee_per_swbf_leaf,
             ),
         #[cfg(test)]
         TxMergeOrigin::ExplicitList(transactions) => transactions.to_owned(),
@@ -567,7 +686,7 @@ pub(crate) async fn create_block_transaction_from(
         .build();
     if transactions_to_merge.is_empty()
         && tx_merge_origin == TxMergeOrigin::Mempool
-        && new_rules == old_rules
+        && single_proof_claims_agree(old_rules, new_rules)
     {
         info!("No synced single-proof tx found for merge. Looking for one to update.");
         let min_gobbling_fee = NativeCurrencyAmount::zero();
@@ -615,7 +734,7 @@ pub(crate) async fn create_block_transaction_from(
     }
 
     // Ensure we don't mine incompatible transactions from mempool
-    if old_rules != new_rules {
+    if !single_proof_claims_agree(old_rules, new_rules) {
         transactions_to_merge.clear();
     }
 
@@ -691,11 +810,15 @@ pub(crate) async fn create_block_transaction_from(
             .mempool()
             .get_transactions_for_block_composition(
                 new_rules,
+                network,
                 max_kernel_len,
                 Some(max_num_mergers),
+                min_fee_per_swbf_leaf,
             );
 
-        transactions_to_merge = if txs_from_mempool.is_empty() || old_rules != new_rules {
+        transactions_to_merge = if txs_from_mempool.is_empty()
+            || !single_proof_claims_agree(old_rules, new_rules)
+        {
             vec![nop]
         } else {
             info!("Found synced transaction in mempool after building nop. Using mempool transaction instead!");
@@ -778,6 +901,7 @@ pub(crate) async fn mine(
 
     let mut pause_mine = false;
     let mut wait_for_confirmation = false;
+    let mut nothing_to_compose = false;
     loop {
         // Ensure restart timer doesn't resolve again, without guesser
         // task actually being spawned.
@@ -800,7 +924,7 @@ pub(crate) async fn mine(
         }
 
         let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
-        let (composer_tx, composer_rx) = oneshot::channel::<(Block, Vec<ExpectedUtxo>)>();
+        let (composer_tx, composer_rx) = oneshot::channel::<Option<(Block, Vec<ExpectedUtxo>)>>();
 
         let proposal_meets_threshold = global_state_lock
             .lock_guard()
@@ -830,9 +954,18 @@ pub(crate) async fn mine(
                 .await
                 .mining_rewards_address();
 
-            let latest_block_header = global_state_lock
-                .lock(|s| s.chain.tip().header().to_owned())
-                .await;
+            let (latest_block_header, swbfi_reveal) = {
+                let state = global_state_lock.lock_guard().await;
+                let swbfi_reveal = state
+                    .chain
+                    .guesser_swbfi_reveal(
+                        proposal.header(),
+                        &guesser_address.clone().into(),
+                        network,
+                    )
+                    .await;
+                (state.chain.tip().header().to_owned(), swbfi_reveal)
+            };
             let guesser_task = guess_nonce(
                 network,
                 proposal,
@@ -843,6 +976,7 @@ pub(crate) async fn mine(
                     address: guesser_address,
                     override_rng_seed: None,
                     override_timestamp: None,
+                    swbfi_reveal,
                 },
             );
 
@@ -866,6 +1000,7 @@ pub(crate) async fn mine(
             && !is_syncing
             && !pause_mine
             && is_connected
+            && !nothing_to_compose
         {
             global_state_lock.set_mining_status_to_composing().await;
 
@@ -880,6 +1015,12 @@ pub(crate) async fn mine(
 
             tokio::task::spawn(compose_task)
         } else {
+            // Look for transactions worth a new proposal again later.
+            if nothing_to_compose {
+                guess_restart_timer
+                    .as_mut()
+                    .reset(tokio::time::Instant::now() + guess_restart_interval);
+            }
             tokio::spawn(async { Ok(()) })
         };
 
@@ -893,6 +1034,7 @@ pub(crate) async fn mine(
         select! {
             _ = &mut guess_restart_timer => {
                 restart_guessing = true;
+                nothing_to_compose = false;
             }
             Ok(Err(e)) = &mut composer_task => {
 
@@ -932,6 +1074,7 @@ pub(crate) async fn mine(
 
             Some(main_message) = from_main.recv() => {
                 debug!("Miner received message type: {}", main_message.get_type());
+                nothing_to_compose = false;
 
                 match main_message {
                     MainToMiner::Shutdown => {
@@ -991,9 +1134,13 @@ pub(crate) async fn mine(
                 stop_composing = true;
 
                 match new_composition {
-                    Ok((new_block_proposal, composer_utxos)) => {
+                    Ok(Some((new_block_proposal, composer_utxos))) => {
                         to_main.send(MinerToMain::BlockProposal(Box::new((new_block_proposal, composer_utxos)))).await?;
                         wait_for_confirmation = true;
+                    },
+                    Ok(None) => {
+                        debug!("No better block proposal can be composed now");
+                        nothing_to_compose = true;
                     },
                     Err(e) => warn!("composing task was cancelled prematurely. Got: {}", e),
                 };
@@ -1074,6 +1221,8 @@ pub(crate) mod tests {
 
     use itertools::Itertools;
     use macro_rules_attr::apply;
+    use neptune_consensus::block::block_appendix::BlockAppendix;
+    use neptune_consensus::block::validity::swbf_update::leaf::CorrectSwbfUpdate;
     use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
     use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
     use neptune_consensus::proof_abstractions::verifier::verify;
@@ -1111,6 +1260,7 @@ pub(crate) mod tests {
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::GlobalState;
     use crate::tests::shared::blocks::fake_valid_deterministic_successor;
+    use crate::tests::shared::blocks::guess_for_tests;
     use crate::tests::shared::dummy_expected_utxo;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_tx::make_mock_block_transaction_with_mutator_set_hash_and_proof_size;
@@ -1224,6 +1374,7 @@ pub(crate) mod tests {
                         prng,
                         &worker_task_tx,
                         Some(version),
+                        None,
                     );
                 })
                 .count();
@@ -1361,8 +1512,10 @@ pub(crate) mod tests {
                 .mempool()
                 .get_transactions_for_block_composition(
                     ConsensusRuleSet::default(),
+                    network,
                     10_000_000,
-                    None
+                    None,
+                    NativeCurrencyAmount::zero()
                 )
                 .is_empty(),
             "May not have synced tx in mempool"
@@ -1403,8 +1556,10 @@ pub(crate) mod tests {
                 .mempool()
                 .get_transactions_for_block_composition(
                     ConsensusRuleSet::default(),
+                    network,
                     10_000_000,
-                    None
+                    None,
+                    NativeCurrencyAmount::zero()
                 )
                 .is_empty(),
             "Updated transaction must have been inserted into mempool"
@@ -1492,10 +1647,16 @@ pub(crate) mod tests {
                 transaction_empty_mempool.kernel().inputs.is_empty(),
                 "Coinbase transaction with empty mempool must have zero inputs"
             );
-            let block_1_empty_mempool = Block::compose(
+            let (block_1_empty_mempool, _) = Block::compose(
                 genesis_block.clone(),
                 transaction_empty_mempool,
                 now,
+                alice
+                    .lock_guard()
+                    .await
+                    .composer_witness(&genesis_block)
+                    .await
+                    .unwrap(),
                 TritonVmJobQueue::get_instance(),
                 TritonVmProofJobOptions::default_with_network(network),
             )
@@ -1503,7 +1664,7 @@ pub(crate) mod tests {
             .unwrap();
             assert!(
                 block_1_empty_mempool
-                    .is_valid(&genesis_block, now, network)
+                    .is_valid_proposal(&genesis_block, now, network)
                     .await,
                 "Block template created by miner with empty mempool must be valid"
             );
@@ -1542,10 +1703,16 @@ pub(crate) mod tests {
             );
 
             // Build and verify block template
-            let block_1_nonempty_mempool = Block::compose(
+            let (block_1_nonempty_mempool, _) = Block::compose(
                 genesis_block.clone(),
                 transaction_non_empty_mempool,
                 now,
+                alice
+                    .lock_guard()
+                    .await
+                    .composer_witness(&genesis_block)
+                    .await
+                    .unwrap(),
                 TritonVmJobQueue::get_instance(),
                 TritonVmProofJobOptions::default_with_network(network),
             )
@@ -1553,7 +1720,7 @@ pub(crate) mod tests {
             .unwrap();
             assert!(
                 block_1_nonempty_mempool
-                    .is_valid(&genesis_block, now + Timestamp::seconds(2), network)
+                    .is_valid_proposal(&genesis_block, now + Timestamp::seconds(2), network)
                     .await,
                 "Block template created by miner with non-empty mempool must be valid"
             );
@@ -1594,8 +1761,10 @@ pub(crate) mod tests {
         )
         .await
         .unwrap();
-        let (block_1, _) = receiver_1.await.unwrap();
-        let validation_result = block_1.validate(&genesis_block, mocked_now, network).await;
+        let (mut block_1, _) = receiver_1.await.unwrap().unwrap();
+        let validation_result = block_1
+            .validate_proposal(&genesis_block, mocked_now, network)
+            .await;
         assert!(validation_result.is_ok(), "{:?}", validation_result);
 
         assert!(
@@ -1603,6 +1772,7 @@ pub(crate) mod tests {
             "Mempool must be non-empty after insertion of nop-transaction, and prior to update of tip"
         );
 
+        guess_for_tests(&mut block_1, &alice).await;
         alice.set_new_tip(block_1.clone()).await.unwrap();
 
         let (sender_2, receiver_2) = oneshot::channel();
@@ -1616,8 +1786,162 @@ pub(crate) mod tests {
         )
         .await
         .unwrap();
-        let (block_2, _) = receiver_2.await.unwrap();
-        assert!(block_2.is_valid(&block_1, mocked_now, network).await);
+        let (block_2, _) = receiver_2.await.unwrap().unwrap();
+        assert!(
+            block_2
+                .is_valid_proposal(&block_1, mocked_now, network)
+                .await
+        );
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn composer_absorbs_a_new_fee_paying_transaction_into_its_proposal() {
+        let network = Network::Testnet(42);
+        let mut alice = mock_genesis_global_state(
+            2,
+            WalletEntropy::devnet_wallet(),
+            cli_args::Args::default_with_network(network),
+        )
+        .await;
+        let cli = alice.cli().clone();
+        let genesis_block = Block::genesis(network);
+        let now = genesis_block.header().timestamp + Timestamp::months(7);
+        let job_options = TritonVmProofJobOptions::default_with_network(network);
+
+        // The first proposal, on an empty mempool, leaves the composer's
+        // work behind.
+        let (first, _) = compose_block_helper(
+            genesis_block.clone(),
+            alice.clone(),
+            now,
+            job_options.clone(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(
+            first
+                .is_valid_proposal(&genesis_block, now + Timestamp::seconds(2), network)
+                .await
+        );
+        assert!(first.body().transaction_kernel.inputs.is_empty());
+        let first_work = alice
+            .lock_guard()
+            .await
+            .mining_state
+            .composer_work
+            .clone()
+            .unwrap();
+        assert_eq!(genesis_block.hash(), first_work.predecessor);
+
+        // Nothing pays to extend it, so no new proposal is composed.
+        assert!(compose_block_helper(
+            genesis_block.clone(),
+            alice.clone(),
+            now,
+            job_options.clone()
+        )
+        .await
+        .unwrap()
+        .is_none());
+
+        // A transaction paying above the leaf price arrives. It is not
+        // worth a new proposal while the recomposition fee is above its fee.
+        let tx_from_alice = make_transaction(NativeCurrencyAmount::coins(4), &alice, now).await;
+        assert!(tx_from_alice.kernel.fee > cli.min_fee_per_swbf_leaf);
+        alice
+            .lock_guard_mut()
+            .await
+            .mempool_insert(tx_from_alice.clone(), UpgradePriority::Critical)
+            .await;
+        let mut demanding = cli.clone();
+        demanding.min_fee_per_recomposition =
+            tx_from_alice.kernel.fee + NativeCurrencyAmount::from_nau(1);
+        alice.set_cli(demanding).await;
+        assert!(compose_block_helper(
+            genesis_block.clone(),
+            alice.clone(),
+            now,
+            job_options.clone()
+        )
+        .await
+        .unwrap()
+        .is_none());
+        alice.set_cli(cli).await;
+
+        let (mut second, _) =
+            compose_block_helper(genesis_block.clone(), alice.clone(), now, job_options)
+                .await
+                .unwrap()
+                .unwrap();
+        assert!(
+            second
+                .is_valid_proposal(&genesis_block, now + Timestamp::seconds(2), network)
+                .await
+        );
+        let block_kernel = &second.body().transaction_kernel;
+        assert_eq!(tx_from_alice.kernel.inputs.len(), block_kernel.inputs.len());
+        assert!(tx_from_alice.kernel.inputs.iter().all(|input| block_kernel
+            .inputs
+            .iter()
+            .any(|x| x.absolute_indices == input.absolute_indices)));
+        assert!(tx_from_alice
+            .kernel
+            .outputs
+            .iter()
+            .all(|output| block_kernel.outputs.contains(output)));
+
+        // The second proposal built on the first's work: the same claim of
+        // knowing the mutator set, and the SWBF update tree extended by one
+        // leaf at the leaf height rather than proven anew.
+        let second_work = alice
+            .lock_guard()
+            .await
+            .mining_state
+            .composer_work
+            .clone()
+            .unwrap();
+        assert_eq!(
+            first_work.proofs.knows_mutator_set,
+            second_work.proofs.knows_mutator_set
+        );
+        let (first_root, second_root) = (
+            &first_work.proofs.swbf_update.0,
+            &second_work.proofs.swbf_update.0,
+        );
+        assert_eq!(first_root.input, second_root.input);
+        assert_eq!(
+            first_root.output[0].value() + (1 << CorrectSwbfUpdate::LEAF_LOG2_PADDED_HEIGHT),
+            second_root.output[0].value(),
+            "padded rows, the output's first word"
+        );
+        assert_eq!(
+            Some(second_root),
+            second.appendix().find(
+                BlockAppendix::consensus_claims(
+                    second.body(),
+                    second.header().height,
+                    genesis_block.hash(),
+                    &genesis_block.mutator_set_accumulator_after().unwrap(),
+                    network,
+                )
+                .last()
+                .unwrap()
+            )
+        );
+        assert_eq!(*block_kernel, *second_work.block_transaction.kernel());
+
+        // Ensure composer work is cleared when a new tip is set, as it cannot
+        // be used again.
+        guess_for_tests(&mut second, &alice).await;
+        alice.set_new_tip(second).await.unwrap();
+        assert!(alice
+            .lock_guard()
+            .await
+            .mining_state
+            .composer_work
+            .is_none());
     }
 
     #[apply(shared_tokio_runtime)]
@@ -1665,10 +1989,10 @@ pub(crate) mod tests {
         .await
         .unwrap();
 
-        let (block_1, _) = receiver_1.await.unwrap();
+        let (block_1, _) = receiver_1.await.unwrap().unwrap();
         assert!(
             block_1
-                .is_valid(&genesis_block, block1_timestamp, network)
+                .is_valid_proposal(&genesis_block, block1_timestamp, network)
                 .await
         );
     }
@@ -1740,6 +2064,7 @@ pub(crate) mod tests {
                 address: guesser_address,
                 override_rng_seed: None,
                 override_timestamp: None,
+                swbfi_reveal: None,
             },
             None,
         );
@@ -1819,6 +2144,7 @@ pub(crate) mod tests {
                 address: guesser_key.to_address().into(),
                 override_rng_seed: None,
                 override_timestamp: None,
+                swbfi_reveal: None,
             },
             None,
         );
@@ -1976,6 +2302,7 @@ pub(crate) mod tests {
                     address: guesser_key.to_address().into(),
                     override_rng_seed: None,
                     override_timestamp: None,
+                    swbfi_reveal: None,
                 },
                 Some(target_block_interval),
             );
@@ -2529,6 +2856,7 @@ pub(crate) mod tests {
                     address: guesser_key.to_address().into(),
                     override_rng_seed: None,
                     override_timestamp: Some(block_time),
+                    swbfi_reveal: None,
                 },
                 None,
             );

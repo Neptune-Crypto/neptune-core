@@ -38,6 +38,7 @@ mod tests {
     use neptune_wallet::address::SpendingKey;
     use neptune_wallet::expected_utxo::ExpectedUtxo;
     use neptune_wallet::expected_utxo::UtxoNotifier;
+    use neptune_wallet::fee_notification_policy::FeeNotificationPolicy;
     use neptune_wallet::mock_block::make_mock_block;
     use neptune_wallet::secret_key_material::SecretKeyMaterial;
     use neptune_wallet::transaction_output::TxOutput;
@@ -61,6 +62,7 @@ mod tests {
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::GlobalStateLock;
+    use crate::tests::shared::blocks::compose_and_guess_for_tests;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
     use crate::tests::shared_tokio_runtime;
@@ -679,9 +681,13 @@ mod tests {
         // and the blockchain forks.
 
         let network = Network::Testnet(42);
+
+        // Only the UTXOs the test expects reach the wallets; the composer
+        // rewards of the blocks composed here do not.
         let cli_args = cli_args::Args {
             guesser_fraction: 0.0,
             number_of_mps_per_utxo: 20,
+            fee_notification: FeeNotificationPolicy::OffChain,
             network,
             ..Default::default()
         };
@@ -758,7 +764,8 @@ mod tests {
             .unwrap()
             .transaction;
 
-        let block_1 = invalid_block_with_transaction(&genesis_block, tx_1.into());
+        let block_1 =
+            compose_and_guess_for_tests(&bob_global_lock, vec![tx_1.into()], in_seven_months).await;
 
         // Update wallet state with block_1
         assert!(
@@ -775,6 +782,14 @@ mod tests {
         // Notification for Bob's change happens on-chain. No need to ask
         // wallet to expect change UTXO.
         bob_global_lock.set_new_tip(block_1.clone()).await.unwrap();
+
+        // Bob's fork off block 1, composed while block 1 is his tip.
+        let block_2_b = compose_and_guess_for_tests(
+            &bob_global_lock,
+            vec![],
+            in_seven_months + Timestamp::hours(1),
+        )
+        .await;
 
         assert_eq!(
             bobs_original_balance
@@ -914,7 +929,6 @@ mod tests {
             .wallet_state
             .wallet_entropy
             .nth_generation_spending_key_for_tests(0);
-        let (block_2_b, _) = make_mock_block(&block_1, None, bob_key, rng.random(), network);
         alice.set_new_tip(block_2_b.clone()).await.unwrap();
         bob_global_lock
             .set_new_tip(block_2_b.clone())
@@ -1016,17 +1030,25 @@ mod tests {
         .await
         .unwrap();
         let timestamp = merged_tx.kernel().timestamp;
-        let block_3_b = Block::compose(
+        let (block_3_b, _) = Block::compose(
             block_2_b.clone(),
             merged_tx,
             timestamp,
+            bob_global_lock
+                .lock_guard()
+                .await
+                .composer_witness(&block_2_b)
+                .await
+                .unwrap(),
             TritonVmJobQueue::get_instance(),
             TritonVmProofJobOptions::default_with_network(network),
         )
         .await
         .unwrap();
         assert!(
-            block_3_b.is_valid(&block_2_b, timestamp, network).await,
+            block_3_b
+                .is_valid_proposal(&block_2_b, timestamp, network)
+                .await,
             "Block must be valid after accumulating txs"
         );
         let expected_utxos_for_alice_cb = expected_composer_utxos
@@ -1182,10 +1204,15 @@ mod tests {
         )
         .await
         .unwrap();
-        let block_1 = Block::compose(
+        let (block_1, _) = Block::compose(
             genesis_block.clone(),
             tx_for_block,
             in_seven_months,
+            bob.lock_guard()
+                .await
+                .composer_witness(&genesis_block)
+                .await
+                .unwrap(),
             TritonVmJobQueue::get_instance(),
             TritonVmProofJobOptions::default_with_network(network),
         )
@@ -1196,7 +1223,7 @@ mod tests {
         // be valid in other respects. We don't care about PoW, though.
         assert!(
             block_1
-                .is_valid(&genesis_block, in_seven_months, network)
+                .is_valid_proposal(&genesis_block, in_seven_months, network)
                 .await
         );
 

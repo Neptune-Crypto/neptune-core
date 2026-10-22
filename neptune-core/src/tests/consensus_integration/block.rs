@@ -46,6 +46,7 @@ use crate::application::config::cli_args;
 use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
 use crate::state::transaction::tx_creation_config::TxCreationConfig;
 use crate::tests::shared::blocks::fake_valid_successor_for_tests;
+use crate::tests::shared::blocks::guess_for_tests;
 use crate::tests::shared::blocks::invalid_empty_block1_with_guesser_fraction;
 use crate::tests::shared::globalstate::mock_genesis_global_state;
 use crate::tests::shared_tokio_runtime;
@@ -89,7 +90,8 @@ async fn total_block_subsidy_is_128_coins_regardless_of_guesser_fraction() {
             .sum();
         let block_primitive_witness =
             BlockPrimitiveWitness::new(genesis.clone(), coinbase_transaction, network);
-        let block_proof_witness = BlockProofWitness::produce(block_primitive_witness.clone());
+        let block_proof_witness =
+            BlockProofWitness::produce(block_primitive_witness.clone(), vec![]);
         let block1 = Block::new(
             block_primitive_witness.header(now, network.target_block_interval()),
             block_primitive_witness.body().to_owned(),
@@ -154,7 +156,7 @@ async fn test_difficulty_control_matches() {
 
 #[apply(shared_tokio_runtime)]
 async fn block_with_wrong_mmra_is_invalid() {
-    let network = Network::Testnet(42);
+    let network = Network::Testnet(1);
     let genesis_block = Block::genesis(network);
     let now = genesis_block.kernel.header.timestamp + Timestamp::hours(2);
     let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
@@ -290,7 +292,9 @@ mod block_is_valid {
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
     use crate::application::loops::mine_loop::TxMergeOrigin;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
+    use crate::tests::shared::blocks::compose_and_guess_for_tests;
     use crate::tests::shared::blocks::fake_valid_successor_for_tests;
+    use crate::tests::shared::blocks::guess_for_tests;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared_tokio_runtime;
 
@@ -323,10 +327,16 @@ mod block_is_valid {
         )
         .await
         .unwrap();
-        let block1_proposal = Block::compose(
+        let (block1_proposal, _) = Block::compose(
             genesis.clone(),
             transaction,
             plus_one_hour,
+            alice
+                .lock_guard()
+                .await
+                .composer_witness(&genesis)
+                .await
+                .unwrap(),
             vm_job_queue(),
             job_options,
         )
@@ -339,7 +349,10 @@ mod block_is_valid {
     #[apply(shared_tokio_runtime)]
     async fn block_with_valid_proof_passes() {
         let (predecesor, time, network, block) = deterministic_empty_block1_proposal().await;
-        assert!(block.validate(&predecesor, time, network,).await.is_ok());
+        assert!(block
+            .validate_proposal(&predecesor, time, network,)
+            .await
+            .is_ok());
     }
 
     #[traced_test]
@@ -368,7 +381,7 @@ mod block_is_valid {
         assert_eq!(
             BlockValidationError::ProofValidity,
             block
-                .validate(&predecesor, time, network,)
+                .validate_proposal(&predecesor, time, network,)
                 .await
                 .unwrap_err()
         );
@@ -386,7 +399,7 @@ mod block_is_valid {
         assert_eq!(
             BlockValidationError::ProofValidity,
             block
-                .validate(&predecesor, time, network,)
+                .validate_proposal(&predecesor, time, network,)
                 .await
                 .unwrap_err()
         );
@@ -408,13 +421,6 @@ mod block_is_valid {
         let genesis_block = Block::genesis(network);
         let plus_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
         let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
-        let block1 = fake_valid_successor_for_tests(
-            &genesis_block,
-            plus_seven_months,
-            rng.random(),
-            network,
-        )
-        .await;
 
         let alice_wallet = WalletEntropy::devnet_wallet();
         let mut alice = mock_genesis_global_state(
@@ -427,6 +433,7 @@ mod block_is_valid {
             },
         )
         .await;
+        let block1 = compose_and_guess_for_tests(&alice, vec![], plus_seven_months).await;
         alice.set_new_tip(block1.clone()).await.unwrap();
         let alice_key = alice
             .lock_guard()
@@ -492,10 +499,16 @@ mod block_is_valid {
             )
             .await
             .unwrap();
-            let block2_without_valid_pow = Block::compose(
+            let (mut block2, _) = Block::compose(
                 block1.clone(),
                 block2_tx,
                 plus_eight_months,
+                alice
+                    .lock_guard()
+                    .await
+                    .composer_witness(&block1)
+                    .await
+                    .unwrap(),
                 TritonVmJobQueue::get_instance(),
                 TritonVmProofJobOptions::default_with_network(network),
             )
@@ -503,18 +516,16 @@ mod block_is_valid {
             .unwrap();
 
             assert!(
-                block2_without_valid_pow
-                    .is_valid(&block1, plus_eight_months, network)
+                block2
+                    .is_valid_proposal(&block1, plus_eight_months, network)
                     .await,
                 "Block with {i} inputs must be valid"
             );
 
-            alice
-                .set_new_tip(block2_without_valid_pow.clone())
-                .await
-                .unwrap();
+            guess_for_tests(&mut block2, &alice).await;
+            alice.set_new_tip(block2.clone()).await.unwrap();
             let (coinbase_for_block3, _) = make_coinbase_transaction_from_state_lock(
-                &block2_without_valid_pow,
+                &block2,
                 &alice,
                 plus_nine_months,
                 TritonVmProofJobOptions::default_with_network(network),
@@ -522,7 +533,7 @@ mod block_is_valid {
             .await
             .unwrap();
 
-            let block_height2 = block2_without_valid_pow.header().height;
+            let block_height2 = block2.header().height;
             let consensus_rule_set_2 = ConsensusRuleSet::infer_from(network, block_height2);
 
             let tx3 = alice
@@ -552,10 +563,16 @@ mod block_is_valid {
                 !block3_tx.kernel().inputs.len().is_zero(),
                 "block transaction 3 must have inputs"
             );
-            let block3_without_valid_pow = Block::compose(
-                block2_without_valid_pow.clone(),
+            let (block3_without_valid_pow, _) = Block::compose(
+                block2.clone(),
                 block3_tx,
                 plus_nine_months,
+                alice
+                    .lock_guard()
+                    .await
+                    .composer_witness(&block2)
+                    .await
+                    .unwrap(),
                 TritonVmJobQueue::get_instance(),
                 TritonVmProofJobOptions::default_with_network(network),
             )
@@ -564,7 +581,7 @@ mod block_is_valid {
 
             assert!(
                 block3_without_valid_pow
-                    .is_valid(&block2_without_valid_pow, plus_nine_months, network)
+                    .is_valid_proposal(&block2, plus_nine_months, network)
                     .await,
                 "Block of height 3 after block 2 with {i} inputs must be valid"
             );
@@ -574,7 +591,7 @@ mod block_is_valid {
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn block_with_far_future_timestamp_is_invalid() {
-        let network = Network::Testnet(42);
+        let network = Network::Testnet(1);
         let genesis_block = Block::genesis(network);
         let mut now = genesis_block.kernel.header.timestamp + Timestamp::hours(2);
         let mut rng: StdRng = SeedableRng::seed_from_u64(2225550001);
@@ -940,17 +957,24 @@ async fn avoid_reselecting_same_input_utxos() {
         }
 
         // compose block
-        let block = Block::compose(
+        let (mut block, _) = Block::compose(
             blocks.last().unwrap().to_owned(),
             transaction.try_into().expect(
                 "went through at least one iteration of above loop, so merge bit must be set",
             ),
             now,
+            alice
+                .lock_guard()
+                .await
+                .composer_witness(blocks.last().unwrap())
+                .await
+                .unwrap(),
             job_queue.clone(),
             proof_job_options.clone(),
         )
         .await
         .unwrap();
+        guess_for_tests(&mut block, &alice).await;
 
         let block_is_valid = block.validate(blocks.last().unwrap(), now, network).await;
         println!("block is valid? {:?}", block_is_valid.map(|_| "yes"));

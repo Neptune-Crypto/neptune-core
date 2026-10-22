@@ -4,7 +4,7 @@ use neptune_primitives::mast_hash::MastHash;
 use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 
-use crate::block::mutator_set_update::MutatorSetUpdate;
+use crate::block::mutator_set_update::MutatorSetCatchUp;
 use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 
@@ -24,7 +24,6 @@ pub mod validity;
 use anyhow::ensure;
 use anyhow::Result;
 use get_size2::GetSize;
-use itertools::Itertools;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use num_bigint::BigInt;
 use num_rational::BigRational;
@@ -32,7 +31,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
-use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
 use tracing::info;
 pub use transaction_proof::TransactionProof;
 use validity::proof_collection::ProofCollection;
@@ -72,8 +70,8 @@ impl From<Arc<Transaction>> for Transaction {
 }
 
 impl Transaction {
-    /// Create a new `Transaction` by updating the given one with the mutator
-    /// set update. If `new_timestamp` is `None`, the timestamp from the old
+    /// Create a new `Transaction` by bringing the given one to the catch-up's
+    /// mutator set. If `new_timestamp` is `None`, the timestamp from the old
     /// transaction kernel will be used.
     ///
     /// No primitive witness is present, instead a proof is given. So:
@@ -85,7 +83,7 @@ impl Transaction {
     pub async fn new_with_updated_mutator_set_records_given_proof(
         old_transaction_kernel: TransactionKernel,
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
-        mutator_set_update: &MutatorSetUpdate,
+        catch_up: &MutatorSetCatchUp,
         old_single_proof: Proof,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
@@ -98,30 +96,13 @@ impl Transaction {
                 with supplied mutator set accumulator."
         );
 
-        // apply mutator set update to get new mutator set accumulator
-        let addition_records = mutator_set_update.additions.clone();
-        let mut calculated_new_mutator_set = previous_mutator_set_accumulator.clone();
-        let mut new_inputs = old_transaction_kernel.inputs.clone();
-        mutator_set_update
-            .apply_to_accumulator_and_records(
-                &mut calculated_new_mutator_set,
-                &mut new_inputs.iter_mut().collect_vec(),
-                &mut [],
-            )
-            .unwrap_or_else(|_| panic!("Could not apply mutator set update."));
-
-        let aocl_successor_proof = MmrSuccessorProof::new_from_batch_append(
-            &previous_mutator_set_accumulator.aocl,
-            &addition_records
-                .iter()
-                .map(|addition_record| addition_record.canonical_commitment)
-                .collect_vec(),
-        );
+        let aocl_successor_proof =
+            catch_up.aocl_successor_proof(&previous_mutator_set_accumulator.aocl);
 
         // compute new kernel
         let mut modifier = TransactionKernelModifier::default()
-            .inputs(new_inputs)
-            .mutator_set_hash(calculated_new_mutator_set.hash());
+            .inputs(catch_up.new_inputs.clone())
+            .mutator_set_hash(catch_up.new_mutator_set.hash());
         if let Some(new_timestamp) = new_timestamp {
             modifier = modifier.timestamp(new_timestamp);
         }
@@ -133,7 +114,7 @@ impl Transaction {
             old_single_proof,
             previous_mutator_set_accumulator.clone(),
             new_kernel.clone(),
-            calculated_new_mutator_set,
+            catch_up.new_mutator_set.clone(),
             aocl_successor_proof,
         );
 
@@ -238,7 +219,10 @@ impl Transaction {
         new_addition_records: Vec<neptune_mutator_set::addition_record::AdditionRecord>,
         new_removal_records: Vec<neptune_mutator_set::removal_record::RemovalRecord>,
     ) -> Transaction {
-        let mutator_set_update = MutatorSetUpdate::new(new_removal_records, new_addition_records);
+        let mutator_set_update = crate::block::mutator_set_update::MutatorSetUpdate::new(
+            new_removal_records,
+            new_addition_records,
+        );
         let primitive_witness =
             PrimitiveWitness::update_with_new_ms_data(old_primitive_witness, mutator_set_update);
         let kernel = primitive_witness.kernel.clone();
@@ -254,6 +238,7 @@ impl Transaction {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
+    use itertools::Itertools;
     use lock_script::LockScript;
     use macro_rules_attr::apply;
     use neptune_primitives::network::Network;
@@ -267,6 +252,7 @@ pub(crate) mod tests {
     use tracing_test::traced_test;
 
     use super::*;
+    use crate::block::mutator_set_update::MutatorSetUpdate;
     use crate::proof_abstractions::test_runtime::shared_tokio_runtime;
     use crate::transaction::test_helpers::make_mock_transaction;
     use crate::transaction::utxo_triple::UtxoTriple;
@@ -360,10 +346,16 @@ pub(crate) mod tests {
 
             let mutator_set_update =
                 MutatorSetUpdate::new(mined.kernel.inputs.clone(), mined.kernel.outputs.clone());
+            let catch_up = MutatorSetCatchUp::from_update(
+                &to_be_updated.mutator_set_accumulator,
+                &original_tx.kernel.inputs,
+                &mutator_set_update,
+            )
+            .unwrap();
             let updated_tx = Transaction::new_with_updated_mutator_set_records_given_proof(
                 original_tx.kernel,
                 &to_be_updated.mutator_set_accumulator,
-                &mutator_set_update,
+                &catch_up,
                 original_tx.proof.into_single_proof(),
                 TritonVmJobQueue::get_instance(),
                 TritonVmProofJobOptions::default_with_network(network),

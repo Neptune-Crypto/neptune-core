@@ -44,6 +44,7 @@ use neptune_consensus::block::block_header::BlockHeaderWithBlockHashWitness;
 use neptune_consensus::block::guesser_receiver_data::GuesserReceiverData;
 use neptune_consensus::block::mutator_set_update::MutatorSetUpdate;
 use neptune_consensus::block::Block;
+use neptune_consensus::block::ComposerWitness;
 use neptune_consensus::chaintx::link_tx::LinkTx;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
@@ -51,6 +52,7 @@ use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
 use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
 use neptune_consensus::transaction::validity::neptune_proof::NeptuneProof;
 use neptune_consensus::transaction::validity::proof_collection::ProofCollection;
+use neptune_consensus::transaction::validity::single_proof::single_proof_claims_agree;
 use neptune_consensus::transaction::Transaction;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_database::storage::storage_schema::traits::StorageWriter as SW;
@@ -1029,13 +1031,7 @@ impl GlobalState {
         #[cfg(test)]
         {
             is_archival
-                && self
-                    .chain
-                    .archival_state()
-                    .genesis_block
-                    .header()
-                    .height
-                    .is_genesis()
+                && self.chain.archival_state().tracks_genesis()
                 && !self.force_wallet_membership_proof_maintance
         }
         #[cfg(not(test))]
@@ -1641,6 +1637,52 @@ impl GlobalState {
         }
     }
 
+    /// The composer's witness for a block on this predecessor, from the
+    /// archival state while it is synced to it. None where the rules need no
+    /// witness.
+    pub(crate) async fn composer_witness(
+        &self,
+        predecessor: &Block,
+    ) -> Result<Option<ComposerWitness>> {
+        let network = self.cli().network;
+        let next_height = predecessor.header().height.next();
+        let consensus_rules = ConsensusRuleSet::infer_from(network, next_height);
+        if !consensus_rules.requires_predecessor_claim() {
+            return Ok(None);
+        }
+
+        if self.chain.tip().hash() != predecessor.hash() {
+            bail!("tip changed while composing");
+        }
+        let knows_ams = self
+            .chain
+            .archival_state()
+            .knows_mutator_set_witness(predecessor)
+            .await;
+        let prev_block_transaction_mutator_set = self
+            .chain
+            .mutator_set_after_by_block_hash(predecessor.header().prev_block_digest)
+            .await
+            .unwrap_or_default();
+
+        // Internal nodes of SWBFI MMR after parent removals will agree with
+        // that of tip, which includes both parent removals, and its additions.
+        let prev_block_swbfi_peaks_after_removals = self
+            .chain
+            .archival_state()
+            .archival_mutator_set
+            .ams()
+            .swbf_inactive
+            .peaks_at(prev_block_transaction_mutator_set.swbf_inactive.num_leafs())
+            .await;
+        Ok(Some(ComposerWitness {
+            knows_ams,
+            prev_block_transaction_mutator_set,
+            prev_block_swbfi_peaks_after_removals,
+            previous: None,
+        }))
+    }
+
     /// Automatically assemble the composer parameters for composing the next
     /// block from the state.
     ///
@@ -2229,9 +2271,8 @@ impl GlobalState {
                         .num_leafs()
                         - 1;
                     let num_outputs_in_block: u64 = block
-                        .mutator_set_update(self.cli().network)
-                        .expect("Block from state must have mutator set update")
-                        .additions
+                        .all_addition_records()
+                        .expect("Block from state must have addition records")
                         .len()
                         .try_into()
                         .unwrap();
@@ -3098,14 +3139,17 @@ impl GlobalState {
         let (update_events, mut update_jobs) = self.mempool.update_with_block(tip)?;
         mempool_events.extend(update_events);
 
-        // Do not attempt to maintain the mempool across a fork
         let network = self.cli().network;
         let previous_rules = ConsensusRuleSet::infer_from(network, previous_height);
         let new_rules = ConsensusRuleSet::infer_from(network, tip.header().height);
         if previous_rules != new_rules {
-            info!(
-                "Blockchain rules changed! From {previous_rules} to {new_rules}. Clearing mempool."
-            );
+            info!("Blockchain rules changed! From {previous_rules} to {new_rules}.");
+        }
+
+        // Do not attempt to maintain the mempool across a fork that changes
+        // what a transaction's proof must satisfy.
+        if !single_proof_claims_agree(previous_rules, new_rules) {
+            info!("Clearing mempool.");
 
             let clear_events = self.mempool.clear();
             mempool_events.extend(clear_events);
@@ -3142,10 +3186,11 @@ impl GlobalState {
             .handle_mempool_events(mempool_events)
             .await;
 
-        // Reset block proposal, as that field pertains to the block that
-        // was just set as new tip. Also reset set of exported block proposals.
+        // Reset block proposal-related data as it pertains to the previous tip,
+        // not the new tip.
         self.mining_state.block_proposal = BlockProposal::none();
         self.mining_state.exported_block_proposals.clear();
+        self.mining_state.composer_work = None;
 
         debug!("Done setting new tip.");
         Ok(update_jobs)
@@ -3451,16 +3496,15 @@ impl GlobalState {
         proof: ProofCollection,
         upgrade_incentive: UpgradeIncentive,
     ) -> Result<ProofCollectionToSingleProof> {
-        let msa_lookup_result = self
+        let Some(transaction_msa) = self
             .chain
             .archival_state()
-            .old_mutator_set_and_mutator_set_update_to_tip(
+            .ancestor_mutator_set(
                 kernel.mutator_set_hash,
                 SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE,
             )
-            .await;
-
-        let Some((transaction_msa, _)) = msa_lookup_result else {
+            .await
+        else {
             bail!("Could not find mutator set update for update job");
         };
 
@@ -3487,27 +3531,36 @@ impl GlobalState {
         old_proof: NeptuneProof,
         upgrade_incentive: UpgradeIncentive,
     ) -> Result<UpdateMutatorSetDataJob> {
+        let inputs = old_kernel
+            .inputs
+            .iter()
+            .map(|removal_record| removal_record.absolute_indices)
+            .collect::<Vec<_>>();
         let msa_lookup_result = self
             .chain
             .archival_state()
-            .old_mutator_set_and_mutator_set_update_to_tip(
+            .catch_up_to_tip(
                 old_kernel.mutator_set_hash,
+                &inputs,
                 SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE,
             )
             .await;
 
-        let Some((old_msa, mutator_set_update)) = msa_lookup_result else {
+        let Some((old_msa, catch_up)) = msa_lookup_result else {
             bail!("Could not find mutator set update for update job");
         };
 
-        ensure!(!mutator_set_update.is_empty(), "No update needed");
+        ensure!(
+            old_msa.hash() != catch_up.new_mutator_set.hash(),
+            "No update needed"
+        );
 
         let consensus_rule_set = self.consensus_rule_set();
         Ok(UpdateMutatorSetDataJob::new(
             old_kernel,
             old_proof,
             old_msa,
-            mutator_set_update,
+            catch_up,
             upgrade_incentive,
             consensus_rule_set,
         ))
@@ -3719,7 +3772,8 @@ mod tests {
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::wallet::wallet_status::WalletStatusExportFormat;
-    use crate::tests::shared::blocks::fake_valid_successor_for_tests;
+    use crate::tests::shared::blocks::fake_valid_block_proposal_successor_for_test;
+    use crate::tests::shared::blocks::guess_for_tests;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::globalstate::state_with_premine_and_self_mined_blocks;
     use crate::tests::shared::mock_tx::send_coins;
@@ -6002,19 +6056,26 @@ mod tests {
         .await
         .unwrap();
 
-        let block_1 = Block::compose(
+        let (mut block_1, _) = Block::compose(
             genesis_block.clone(),
             block_transaction,
             in_seven_months,
+            alice
+                .lock_guard()
+                .await
+                .composer_witness(&genesis_block)
+                .await
+                .unwrap(),
             TritonVmJobQueue::get_instance(),
             TritonVmProofJobOptions::default_with_network(network),
         )
         .await
         .unwrap();
+        guess_for_tests(&mut block_1, &alice).await;
 
         assert!(
             block_1
-                .is_valid(&genesis_block, in_seven_months, network)
+                .is_valid_proposal(&genesis_block, in_seven_months, network)
                 .await
         );
 
@@ -6243,16 +6304,26 @@ mod tests {
 
         // We can't check confirmability of transaction since its records are now packed.
         // So we produce a block instead and validate it.
-        let block_2 = Block::compose(
+        let (block_2, _) = Block::compose(
             block_1.clone(),
             block_transaction2,
             in_eight_months,
+            alice
+                .lock_guard()
+                .await
+                .composer_witness(&block_1)
+                .await
+                .unwrap(),
             TritonVmJobQueue::get_instance(),
             TritonVmProofJobOptions::default_with_network(network),
         )
         .await
         .unwrap();
-        assert!(block_2.is_valid(&block_1, in_eight_months, network).await);
+        assert!(
+            block_2
+                .is_valid_proposal(&block_1, in_eight_months, network)
+                .await
+        );
 
         assert_eq!(4, block_2.kernel.body.transaction_kernel.inputs.len());
         assert_eq!(7, block_2.kernel.body.transaction_kernel.outputs.len());
@@ -6273,8 +6344,13 @@ mod tests {
         let genesis_block = Block::genesis(network);
         let now = genesis_block.kernel.header.timestamp + Timestamp::hours(1);
 
-        let block1 =
-            fake_valid_successor_for_tests(&genesis_block, now, Default::default(), network).await;
+        let block1 = fake_valid_block_proposal_successor_for_test(
+            &genesis_block,
+            now,
+            Default::default(),
+            network,
+        )
+        .await;
 
         global_state_lock.set_new_tip(block1).await.unwrap();
 
@@ -6284,7 +6360,7 @@ mod tests {
                 .await
                 .chain
                 .tip()
-                .is_valid(&genesis_block, now, network)
+                .is_valid_proposal(&genesis_block, now, network)
                 .await,
             "light state tip must be a valid block"
         );
@@ -6296,7 +6372,7 @@ mod tests {
                 .archival_state()
                 .get_tip()
                 .await
-                .is_valid(&genesis_block, now, network)
+                .is_valid_proposal(&genesis_block, now, network)
                 .await,
             "archival state tip must be a valid block"
         );
@@ -7340,10 +7416,16 @@ mod tests {
                 )
                 .await
                 .unwrap();
-                let block_1 = Block::compose(
-                    genesis_block,
+                let (block_1, _) = Block::compose(
+                    genesis_block.clone(),
                     block_1_tx,
                     seven_months_post_launch,
+                    alice_state_lock
+                        .lock_guard()
+                        .await
+                        .composer_witness(&genesis_block)
+                        .await
+                        .unwrap(),
                     TritonVmJobQueue::get_instance(),
                     TritonVmProofJobOptions::default_with_network(network),
                 )

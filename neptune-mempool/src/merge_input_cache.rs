@@ -3,6 +3,8 @@ use std::collections::HashSet;
 use std::collections::VecDeque;
 
 use get_size2::GetSize;
+use neptune_consensus::transaction::Transaction;
+use neptune_consensus::transaction::TransactionProof;
 use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
 use neptune_consensus::transaction::validity::neptune_proof::NeptuneProof;
 
@@ -18,6 +20,15 @@ pub(super) struct MergeInputCacheElement {
     pub(super) tx_kernel: TransactionKernel,
     pub(super) single_proof: NeptuneProof,
     pub(super) upgrade_priority: UpgradePriority,
+}
+
+impl MergeInputCacheElement {
+    pub(super) fn transaction(&self) -> Transaction {
+        Transaction {
+            kernel: self.tx_kernel.clone(),
+            proof: TransactionProof::SingleProof(self.single_proof.clone()),
+        }
+    }
 }
 
 /// The mempools cache of transactions that conflict with transactions in the
@@ -64,6 +75,26 @@ impl MergeInputCache {
     #[cfg(any(test, feature = "test-helpers"))]
     pub(super) fn len(&self) -> usize {
         self.tx_dictionary.len()
+    }
+
+    /// The cached transactions this transaction was merged from, directly or
+    /// through other merges: those whose inputs are all among its inputs.
+    pub(super) fn parts_of(
+        &self,
+        tx_kernel: &TransactionKernel,
+    ) -> impl Iterator<Item = &MergeInputCacheElement> {
+        let index_sets: HashSet<_> = tx_kernel
+            .inputs
+            .iter()
+            .map(|input| input.absolute_indices)
+            .collect();
+        self.tx_dictionary.values().filter(move |element| {
+            element
+                .tx_kernel
+                .inputs
+                .iter()
+                .all(|input| index_sets.contains(&input.absolute_indices))
+        })
     }
 
     pub(super) fn pop_oldest(&mut self) -> Option<MergeInputCacheElement> {

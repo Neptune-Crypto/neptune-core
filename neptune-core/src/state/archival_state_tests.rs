@@ -38,6 +38,7 @@ pub(super) mod tests {
     use crate::application::config::cli_args::Args;
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
+    use crate::tests::shared::blocks::guess_for_tests;
     use crate::tests::shared::files::unit_test_data_directory;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
     use crate::tests::shared::mock_genesis_wallet_state;
@@ -373,7 +374,7 @@ pub(super) mod tests {
                 .ams()
                 .hash()
                 .await,
-            "get_mutator_set_update_to_tip must leave the mutator set unchanged."
+            "catch_up_to_tip must leave the mutator set unchanged."
         );
 
         // Verify that both active and inactive SWBF are non-empty.
@@ -615,15 +616,22 @@ pub(super) mod tests {
         .unwrap();
         println!("Generated block transaction");
 
-        let block_1 = Block::compose(
+        let (mut block_1, _) = Block::compose(
             genesis_block.clone(),
             block_tx,
             in_seven_months,
+            alice
+                .lock_guard()
+                .await
+                .composer_witness(&genesis_block)
+                .await
+                .unwrap(),
             TritonVmJobQueue::get_instance(),
             TritonVmProofJobOptions::default_with_network(network),
         )
         .await
         .unwrap();
+        guess_for_tests(&mut block_1, &alice).await;
         println!("Generated block");
 
         // Verify validity, without requiring valid PoW.
@@ -880,10 +888,16 @@ pub(super) mod tests {
         )
         .await
         .unwrap();
-        let block_2 = Block::compose(
+        let (block_2, _) = Block::compose(
             block_1.clone(),
             block_tx2,
             in_seven_months + network.minimum_block_time(),
+            alice
+                .lock_guard()
+                .await
+                .composer_witness(&block_1)
+                .await
+                .unwrap(),
             TritonVmJobQueue::get_instance(),
             TritonVmProofJobOptions::default_with_network(network),
         )
@@ -895,7 +909,11 @@ pub(super) mod tests {
         // Sanity checks
         assert_eq!(4, block_2.kernel.body.transaction_kernel.inputs.len());
         assert_eq!(7, block_2.kernel.body.transaction_kernel.outputs.len());
-        assert!(block_2.is_valid(&block_1, in_seven_months, network).await);
+        assert!(
+            block_2
+                .is_valid_proposal(&block_1, in_seven_months, network)
+                .await
+        );
 
         // Expect incoming UTXOs
         {
@@ -1043,8 +1061,6 @@ pub(super) mod tests {
     /// archival state
     mod recover {}
 
-    /// Verify that `get_mutator_set_update_to_tip` returns Some(ms_update), and
-    /// that the returned MS update produces the current MSA tip.
     async fn positive_prop_ms_update_to_tip(
         past_msa: &MutatorSetAccumulator,
         archival_state: &mut ArchivalState,
@@ -1055,14 +1071,20 @@ pub(super) mod tests {
             .ams()
             .accumulator()
             .await;
-        let mut new_msa = past_msa.to_owned();
-        assert!(archival_state
-            .get_mutator_set_update_to_tip(&new_msa, search_depth)
+        let inputs = archival_state.get_tip().await.kernel.removal_index_sets();
+        let (old_msa, catch_up) = archival_state
+            .catch_up_to_tip(past_msa.hash(), &inputs, search_depth)
             .await
-            .unwrap()
-            .apply_to_accumulator(&mut new_msa)
-            .is_ok());
-        assert_eq!(tip_msa, new_msa);
+            .unwrap();
+        assert_eq!(*past_msa, old_msa);
+        assert_eq!(tip_msa, catch_up.new_mutator_set);
+        assert!(catch_up
+            .aocl_successor_proof(&past_msa.aocl)
+            .verify(&past_msa.aocl, &tip_msa.aocl));
+        assert_eq!(inputs.len(), catch_up.new_inputs.len());
+        for record in &catch_up.new_inputs {
+            assert!(record.validate(&tip_msa));
+        }
     }
 
     mod import_blocks_tests {}

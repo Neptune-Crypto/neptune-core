@@ -2747,7 +2747,10 @@ impl PeerLoopHandler {
 
                 // Is the proposal valid?
                 let network = self.global_state_lock.cli().network;
-                if !new_proposal.is_valid(&tip, self.now(), network).await {
+                if !new_proposal
+                    .is_valid_proposal(&tip, self.now(), network)
+                    .await
+                {
                     self.punish(NegativePeerSanction::InvalidBlockProposal)
                         .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
@@ -3848,9 +3851,11 @@ mod tests {
 
     mod blocks {
         use itertools::Itertools;
+        use neptune_consensus::block::proof_of_work_puzzle::ProofOfWorkPuzzle;
 
         use super::*;
         use crate::tests::shared::blocks::fake_valid_block_proposal_successor_for_test;
+        use crate::tests::shared::blocks::guesser_reveal_empty_swbfi;
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
@@ -3936,7 +3941,7 @@ mod tests {
             Ok(())
         }
 
-        /// Return two blocks:
+        /// Returns two blocks:
         /// - one with invalid PoW
         /// - one with valid PoW
         async fn pow_related_blocks(network: Network, predecessor: &Block) -> (Block, Block) {
@@ -3956,7 +3961,10 @@ mod tests {
             assert!(!invalid_pow.has_proof_of_work(network, predecessor.header()));
 
             let mut block_with_valid_gamma_pow = block.clone();
-            block_with_valid_gamma_pow.satisfy_pow(difficulty, ConsensusRuleSet::HardforkGamma);
+            let reveal = guesser_reveal_empty_swbfi(predecessor, &block, network).await;
+            let pow = ProofOfWorkPuzzle::new(block, difficulty, reveal)
+                .solve(ConsensusRuleSet::HardforkGamma);
+            block_with_valid_gamma_pow.set_header_pow(pow);
 
             (invalid_pow, block_with_valid_gamma_pow)
         }
@@ -8209,6 +8217,7 @@ mod tests {
     }
 
     mod tip_with_parent_accumulator {
+        use neptune_consensus::block::block_validation_error::BlockValidationError;
         use neptune_p2p::peer::peer_info::pseudorandom_peer_id;
 
         use super::*;
@@ -8268,6 +8277,23 @@ mod tests {
             assert_eq!(
                 block2.body().transaction_kernel().mutator_set_hash,
                 parent_accumulator.hash()
+            );
+            let now = block2.header().timestamp;
+            let parent = block2
+                .validate_tip(&parent_accumulator, now, network)
+                .await
+                .unwrap();
+            assert!(block2.has_proof_of_work_against(network, parent.timestamp, parent.difficulty));
+            // Another mutator set changes the claims the block must contain.
+            assert_eq!(
+                Err(BlockValidationError::AppendixMissingClaim),
+                block2
+                    .validate_tip(
+                        &genesis.mutator_set_accumulator_after().unwrap(),
+                        now,
+                        network
+                    )
+                    .await
             );
             let response =
                 PeerMessage::TipWithParentAccumulator(Box::new(BlockWithParentAccumulator {

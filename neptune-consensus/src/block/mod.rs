@@ -55,10 +55,22 @@ use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
+use tracing::info;
 use tracing::warn;
 use validity::block_primitive_witness::BlockPrimitiveWitness;
 use validity::block_program::BlockProgram;
 use validity::block_proof_witness::BlockProofWitness;
+use validity::knows_mutator_set::KnowsMutatorSet;
+use validity::knows_mutator_set::KnowsMutatorSetWitness;
+use validity::predecessor_is_valid::ParentBlockInfo;
+use validity::predecessor_is_valid::PredecessorIsValid;
+use validity::predecessor_is_valid::PredecessorIsValidWitness;
+use validity::swbf_update::aggregation::SwbfUpdateAggregation;
+use validity::swbf_update::leaf::CorrectSwbfUpdateWitness;
+use validity::swbf_update::removal_index_commitment::RemovalIndexCommitment;
+use validity::swbf_update::swbfi_peaks_after_removals::SwbfiPeaksAfterRemovals;
+use validity::swbf_update::ClaimOutput;
+use validity::swbfi_reveal::guesser_reveal_is_valid;
 
 use super::transaction::transaction_kernel::TransactionKernelProxy;
 use super::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -76,6 +88,7 @@ use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 use crate::proof_abstractions::verifier::verify;
+use crate::proof_abstractions::SecretWitness;
 use crate::transaction::transaction_kernel::TransactionLustrationError;
 use crate::transaction::validity::neptune_proof::Proof;
 
@@ -88,6 +101,9 @@ use crate::transaction::validity::neptune_proof::Proof;
 /// restriction on the number of announcements also makes it feasible for
 /// wallets to scan through all.
 pub(crate) const MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS: usize = 1 << 14;
+
+/// The hash of each network's genesis block, computed once.
+static GENESIS_DIGESTS: OnceLock<std::sync::Mutex<Vec<(Network, Digest)>>> = OnceLock::new();
 
 /// Duration of timelock for half of all mining rewards.
 ///
@@ -113,6 +129,44 @@ pub enum BlockProof {
     #[default]
     Invalid,
     SingleProof(Proof),
+}
+
+impl BlockProof {
+    /// First word of the encoding of [`Self::SingleProof`].
+    pub const SINGLE_PROOF_DISCRIMINANT: u64 = 2;
+
+    /// Number of words the encoding of [`Self::SingleProof`] puts before the
+    /// actual proof's encoding: discriminant and the proof's length.
+    pub const SINGLE_PROOF_PREFIX_LEN: u64 = 2;
+}
+
+/// Witness data required for consensus-required claims activated with hard fork
+/// epsilon.
+#[derive(Debug, Clone)]
+pub struct ComposerWitness {
+    pub knows_ams: KnowsMutatorSetWitness,
+    pub prev_block_transaction_mutator_set: MutatorSetAccumulator,
+
+    /// Peaks of the inactive SWBF after the predecessor's removals, before
+    /// its additions.
+    pub prev_block_swbfi_peaks_after_removals: Vec<Digest>,
+
+    /// What the composer proved for an earlier proposal on the same
+    /// predecessor, to build on.
+    pub previous: Option<ComposerProofs>,
+}
+
+/// The claims a composer proved for a proposal, with their proofs, for the
+/// next proposal on the same predecessor to build on.
+#[derive(Debug, Clone)]
+pub struct ComposerProofs {
+    /// The composer's claim to know the mutator set after the predecessor.
+    /// None where the rules do not ask for it.
+    pub knows_mutator_set: Option<(Claim, Proof)>,
+
+    /// The root of the SWBF update tree over the block transaction's first
+    /// inputs, as many as the root's output counts.
+    pub swbf_update: (Claim, Proof),
 }
 
 /// Public fields of `Block` are read-only, enforced by #[readonly::make].
@@ -216,19 +270,95 @@ impl PartialEq for Block {
 impl Eq for Block {}
 
 impl Block {
+    /// The composer's witness is required from hard fork epsilon on where
+    /// the network proves. Returns the block along with proofs built for it
+    /// such that later proposals built on the same block can reuse expensive
+    /// to produce proofs.
     pub async fn block_template_from_block_primitive_witness(
         primitive_witness: BlockPrimitiveWitness,
         timestamp: Timestamp,
+        composer_witness: Option<ComposerWitness>,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
-    ) -> anyhow::Result<Block> {
+    ) -> anyhow::Result<(Block, Option<ComposerProofs>)> {
         let network = proof_job_options.job_settings.network;
         let body = primitive_witness.body().to_owned();
         let header = primitive_witness.header(timestamp, network.target_block_interval());
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, header.height);
+        let mut proven = vec![];
+        let mut composer_proofs = None;
+        if consensus_rule_set.requires_predecessor_claim() && !network.use_mock_proof() {
+            let composer_witness = composer_witness.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "a block at height {} needs the composer's witness",
+                    header.height
+                )
+            })?;
+            let (previous_knows_mutator_set, previous_swbf_update) = composer_witness
+                .previous
+                .map(|previous| (previous.knows_mutator_set, Some(previous.swbf_update)))
+                .unwrap_or_default();
+            let knows_mutator_set = if consensus_rule_set.miners_must_prove_ams_knowledge(network) {
+                Some(match previous_knows_mutator_set {
+                    Some(proven) => proven,
+                    None => {
+                        Self::prove_knows_mutator_set(
+                            composer_witness.knows_ams,
+                            consensus_rule_set,
+                            triton_vm_job_queue.clone(),
+                            proof_job_options.clone(),
+                        )
+                        .await?
+                    }
+                })
+            } else {
+                None
+            };
+            proven.extend(knows_mutator_set.clone());
+            proven.push(
+                Self::prove_predecessor_is_valid(
+                    &primitive_witness.predecessor_block,
+                    &body,
+                    composer_witness.prev_block_transaction_mutator_set,
+                    composer_witness.prev_block_swbfi_peaks_after_removals,
+                    triton_vm_job_queue.clone(),
+                    proof_job_options.clone(),
+                )
+                .await?,
+            );
+            let swbf_update = Self::prove_swbf_update(
+                &body,
+                &primitive_witness.predecessor_block,
+                header.height,
+                previous_swbf_update,
+                triton_vm_job_queue.clone(),
+                proof_job_options.clone(),
+            )
+            .await?;
+            proven.push(swbf_update.clone());
+            composer_proofs = Some(ComposerProofs {
+                knows_mutator_set,
+                swbf_update,
+            });
+        }
+        let parent_digest = primitive_witness.predecessor_block.hash();
+        let parent_mutator_set = primitive_witness
+            .predecessor_block
+            .mutator_set_accumulator_after()?;
         let (appendix, proof) = {
-            let block_proof_witness = BlockProofWitness::produce(primitive_witness);
+            let block_proof_witness = BlockProofWitness::produce(primitive_witness, proven);
             let appendix = block_proof_witness.appendix();
-            let consensus_rule_set = ConsensusRuleSet::infer_from(network, header.height);
+            let required = BlockAppendix::consensus_claims(
+                &body,
+                header.height,
+                parent_digest,
+                &parent_mutator_set,
+                network,
+            );
+            anyhow::ensure!(
+                required.iter().all(|claim| appendix.find(claim).is_some()),
+                "the appendix must hold the claims the rules require"
+            );
             let claim = BlockProgram::claim(&body, &appendix, consensus_rule_set);
 
             let proof = ProofBuilder::new()
@@ -243,16 +373,150 @@ impl Block {
             (appendix, BlockProof::SingleProof(proof))
         };
 
-        Ok(Block::new(header, body, appendix, proof))
+        Ok((Block::new(header, body, appendix, proof), composer_proofs))
+    }
+
+    /// The claim that the predecessor is valid, with its proof, for a block
+    /// with this body.
+    async fn prove_predecessor_is_valid(
+        predecessor: &Block,
+        body: &BlockBody,
+        prev_block_transaction_mutator_set: MutatorSetAccumulator,
+        prev_block_swbfi_peaks_after_removals: Vec<Digest>,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
+        proof_job_options: TritonVmProofJobOptions,
+    ) -> anyhow::Result<(Claim, Proof)> {
+        let network = proof_job_options.job_settings.network;
+        let program = PredecessorIsValid::new();
+        let claim = PredecessorIsValid::claim_about(predecessor, body.mast_hash(), network);
+        let witness =
+            PredecessorIsValidWitness::new(predecessor, body, prev_block_transaction_mutator_set)
+                .with_swbfi_peaks_after_removals(prev_block_swbfi_peaks_after_removals);
+        info!("Proving that the predecessor is valid");
+        let proof = ProofBuilder::new()
+            .program(program.program())
+            .claim(claim.clone())
+            .nondeterminism(|| witness.nondeterminism(&program, network))
+            .job_queue(triton_vm_job_queue)
+            .proof_job_options(proof_job_options)
+            .build()
+            .await?;
+        Ok((claim, proof))
+    }
+
+    /// The composer's claim to know the mutator set after the predecessor,
+    /// with its proof.
+    async fn prove_knows_mutator_set(
+        witness: KnowsMutatorSetWitness,
+        consensus_rule_set: ConsensusRuleSet,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
+        proof_job_options: TritonVmProofJobOptions,
+    ) -> anyhow::Result<(Claim, Proof)> {
+        let claim = witness
+            .claim()
+            .about_version(consensus_rule_set.triton_proof_version().version());
+        info!("Proving knowledge of the mutator set after the predecessor");
+        let proof = ProofBuilder::new()
+            .program(KnowsMutatorSet.program())
+            .claim(claim.clone())
+            .nondeterminism(|| witness.nondeterminism())
+            .job_queue(triton_vm_job_queue)
+            .proof_job_options(proof_job_options)
+            .build()
+            .await?;
+        Ok((claim, proof))
+    }
+
+    /// The SWBF update root claim of a block with this body on this
+    /// predecessor, with its proof. Given the root of an earlier proposal's
+    /// tree, over the body's first inputs, the tree is extended by the
+    /// inputs after those instead of proven from the start.
+    ///
+    /// Proof verifies the leaf proofs [`CorrectSwbfUpdateWitness::leaves`], and
+    /// guarantees to meet the required proof complexity.
+    async fn prove_swbf_update(
+        body: &BlockBody,
+        predecessor: &Block,
+        height: BlockHeight,
+        previous_root: Option<(Claim, Proof)>,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
+        proof_job_options: TritonVmProofJobOptions,
+    ) -> anyhow::Result<(Claim, Proof)> {
+        let network = proof_job_options.job_settings.network;
+        let floor = ConsensusRuleSet::infer_from(network, height).min_swbf_padded_rows(network);
+        let inputs = &body.transaction_kernel.inputs;
+        let mutator_set = predecessor.mutator_set_accumulator_after()?;
+        let start = std::time::Instant::now();
+        let prove = |claim, program, nondeterminism| {
+            let proof = ProofBuilder::new()
+                .program(program)
+                .claim(claim)
+                .nondeterminism(move || nondeterminism)
+                .job_queue(triton_vm_job_queue.clone())
+                .proof_job_options(proof_job_options.clone())
+                .build();
+            async { proof.await.map(tasm_lib::triton_vm::proof::Proof::from) }
+        };
+        let (claim, proof) = match previous_root {
+            Some((root_claim, root_proof)) => {
+                let covered = ClaimOutput::try_parse(&root_claim.output).ok_or_else(|| {
+                    anyhow::anyhow!("the root must have the SWBF update claim's layout")
+                })?;
+                let allow_big_chunks = ConsensusRuleSet::HardforkDelta.allow_big_chunks();
+                let unpacked = RemovalRecordList::try_unpack(inputs.clone(), allow_big_chunks)?;
+                let (covered_inputs, gained) = unpacked.split_at(covered.count);
+                let gained = RemovalRecordList::pack(gained.to_vec(), allow_big_chunks);
+                let after_covered = SwbfiPeaksAfterRemovals::try_apply_removals(
+                    &RemovalRecordList::pack(covered_inputs.to_vec(), allow_big_chunks),
+                    &mutator_set,
+                )
+                .ok_or_else(|| anyhow::anyhow!("the covered inputs must be removable"))?;
+                info!(
+                    "Extending the SWBF update tree over {} inputs by {} inputs",
+                    covered.count,
+                    unpacked.len() - covered.count
+                );
+                let leaves = CorrectSwbfUpdateWitness::appended_leaves(
+                    &gained,
+                    &after_covered,
+                    covered.last_leaf_index.value() + 1,
+                );
+                SwbfUpdateAggregation::new()
+                    .extend(
+                        (root_claim, root_proof.into()),
+                        covered_inputs,
+                        &leaves,
+                        prove,
+                    )
+                    .await?
+            }
+            None => {
+                info!(
+                    "Sizing the SWBF update tree for {} inputs at a floor of {floor} padded rows; \
+                     one VM trace per leaf",
+                    inputs.len()
+                );
+                let leaves = CorrectSwbfUpdateWitness::leaves(inputs, &mutator_set, floor);
+                info!(
+                    "Proving the SWBF update tree: {} leaves and {} aggregations",
+                    leaves.len(),
+                    leaves.len() - 1
+                );
+                SwbfUpdateAggregation::new().tree(&leaves, prove).await?
+            }
+        };
+        info!("SWBF update tree proven in {:.0?}", start.elapsed());
+        Ok((claim, Proof::from(proof)))
     }
 
     async fn make_block_template_with_valid_proof(
         predecessor: Block,
         transaction: BlockTransaction,
         block_timestamp: Timestamp,
+        composer_witness: Option<ComposerWitness>,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
-    ) -> anyhow::Result<Block> {
+    ) -> anyhow::Result<(Block, Option<ComposerProofs>)> {
         let new_height = predecessor.header().height.next();
         let network = proof_job_options.job_settings.network;
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, new_height);
@@ -278,6 +542,7 @@ impl Block {
         Self::block_template_from_block_primitive_witness(
             primitive_witness,
             block_timestamp,
+            composer_witness,
             triton_vm_job_queue,
             proof_job_options,
         )
@@ -286,18 +551,22 @@ impl Block {
 
     /// Compose a block.
     ///
-    /// Create a block with valid block proof, but without proof-of-work.
+    /// Create a block with valid block proof, but without proof-of-work. The
+    /// composer's witness is required from hard fork epsilon on where the
+    /// network proves.
     pub async fn compose(
         predecessor: Block,
         transaction: BlockTransaction,
         block_timestamp: Timestamp,
+        composer_witness: Option<ComposerWitness>,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
-    ) -> anyhow::Result<Block> {
+    ) -> anyhow::Result<(Block, Option<ComposerProofs>)> {
         Self::make_block_template_with_valid_proof(
             predecessor,
             transaction,
             block_timestamp,
+            composer_witness,
             triton_vm_job_queue,
             proof_job_options,
         )
@@ -454,6 +723,22 @@ impl Block {
             .unwrap_or_else(NativeCurrencyAmount::zero)
     }
 
+    /// The hash of the network's genesis block, computed once.
+    pub fn genesis_digest(network: Network) -> Digest {
+        let digests = GENESIS_DIGESTS.get_or_init(Default::default);
+        let known = digests
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(known, _)| *known == network)
+            .map(|(_, digest)| *digest);
+        known.unwrap_or_else(|| {
+            let digest = Self::genesis(network).hash();
+            digests.lock().unwrap().push((network, digest));
+            digest
+        })
+    }
+
     pub fn genesis(network: Network) -> Self {
         let premine_distribution = Self::premine_distribution();
         let total_premine_amount = premine_distribution
@@ -529,7 +814,32 @@ impl Block {
     /// proof of work; that must be done separately by the caller, for instance
     /// by calling [`Self::has_proof_of_work`].
     pub async fn is_valid(&self, previous_block: &Block, now: Timestamp, network: Network) -> bool {
-        match self.validate(previous_block, now, network).await {
+        self.is_valid_as(previous_block, now, network, true).await
+    }
+
+    /// Verify a block proposal: like [`Self::is_valid`], but the guesser's
+    /// reveal in the proof-of-work field is not checked, as only the guesser
+    /// should populate this value.
+    pub async fn is_valid_proposal(
+        &self,
+        previous_block: &Block,
+        now: Timestamp,
+        network: Network,
+    ) -> bool {
+        self.is_valid_as(previous_block, now, network, false).await
+    }
+
+    async fn is_valid_as(
+        &self,
+        previous_block: &Block,
+        now: Timestamp,
+        network: Network,
+        guessed: bool,
+    ) -> bool {
+        match self
+            .validate_as(previous_block, now, network, guessed)
+            .await
+        {
             Ok(_) => true,
             Err(e) => {
                 warn!("{e}");
@@ -551,52 +861,129 @@ impl Block {
         now: Timestamp,
         network: Network,
     ) -> Result<(), BlockValidationError> {
+        self.validate_as(previous_block, now, network, true).await
+    }
+
+    /// Verify a block proposal and return detailed error: like
+    /// [`Self::validate`], but the guesser's reveal in the proof-of-work field
+    /// is not checked, as only the guesser should populate this value.
+    pub async fn validate_proposal(
+        &self,
+        previous_block: &Block,
+        now: Timestamp,
+        network: Network,
+    ) -> Result<(), BlockValidationError> {
+        self.validate_as(previous_block, now, network, false).await
+    }
+
+    /// Verify a block without knowledge of its parent, and return a detailed
+    /// error on failure.
+    ///
+    /// The mutator set after the parent must be provided. Everything else
+    /// relating to the parent is read from the block's claim about its
+    /// predecessor.
+    pub async fn validate_tip(
+        &self,
+        parent_mutator_set: &MutatorSetAccumulator,
+        now: Timestamp,
+        network: Network,
+    ) -> Result<ParentBlockInfo, BlockValidationError> {
+        let predecessor_claim = PredecessorIsValid::required_claim(
+            self.body().mast_hash(),
+            self.header().height,
+            network,
+        );
+        let parent = self
+            .appendix()
+            .find(&predecessor_claim)
+            .and_then(|claim| PredecessorIsValid::parse_output(&claim.output))
+            .ok_or(BlockValidationError::AppendixMissingClaim)?;
+        self.validate_except_proof(&parent, parent_mutator_set, None, now, network, true)?;
+
+        // 1.c) 1.d)
+        self.validate_proof(network).await?;
+
+        Ok(parent)
+    }
+
+    /// `guessed` says whether the guesser has filled the proof-of-work field.
+    async fn validate_as(
+        &self,
+        previous_block: &Block,
+        now: Timestamp,
+        network: Network,
+        guessed: bool,
+    ) -> Result<(), BlockValidationError> {
+        // 0.a)
+        if previous_block.header().height.next() != self.header().height {
+            return Err(BlockValidationError::BlockHeight);
+        }
+
+        let parent_mutator_set = previous_block.mutator_set_accumulator_after()?;
+        self.validate_except_proof(
+            &ParentBlockInfo::of_block(previous_block),
+            &parent_mutator_set,
+            Some(&previous_block.body().block_mmr_accumulator),
+            now,
+            network,
+            guessed,
+        )?;
+
+        // 1.c) 1.d)
+        self.validate_proof(network).await
+    }
+
+    /// Every rule except the block's proof.
+    fn validate_except_proof(
+        &self,
+        parent: &ParentBlockInfo,
+        parent_mutator_set: &MutatorSetAccumulator,
+        parent_block_mmr_accumulator: Option<&MmrAccumulator>,
+        now: Timestamp,
+        network: Network,
+        guessed: bool,
+    ) -> Result<(), BlockValidationError> {
         // Note that there is a correspondence between the logic here and the
         // error types in `BlockValidationError`.
 
         let new_height = self.header().height;
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, new_height);
-
-        // 0.a)
-        if previous_block.kernel.header.height.next() != new_height {
+        let Some(parent_height) = new_height.previous() else {
             return Err(BlockValidationError::BlockHeight);
-        }
+        };
 
         // 0.b)
-        if previous_block.hash() != self.kernel.header.prev_block_digest {
+        if parent.hash != self.kernel.header.prev_block_digest {
             return Err(BlockValidationError::PrevBlockDigest);
         }
 
         // 0.c)
-        let mut mmra = previous_block.kernel.body.block_mmr_accumulator.clone();
-        mmra.append(previous_block.hash());
-        if mmra != self.kernel.body.block_mmr_accumulator {
-            return Err(BlockValidationError::BlockMmrUpdate);
+        if let Some(parent_block_mmr_accumulator) = parent_block_mmr_accumulator {
+            let mut mmra = parent_block_mmr_accumulator.clone();
+            mmra.append(parent.hash);
+            if mmra != self.kernel.body.block_mmr_accumulator {
+                return Err(BlockValidationError::BlockMmrUpdate);
+            }
         }
 
         // 0.d)
-        if previous_block.kernel.header.timestamp + network.minimum_block_time()
-            > self.kernel.header.timestamp
-        {
+        if parent.timestamp + network.minimum_block_time() > self.kernel.header.timestamp {
             return Err(BlockValidationError::MinimumBlockTime);
         }
 
         // 0.e)
-        let expected_difficulty = if Self::should_reset_difficulty(
-            network,
-            self.header().timestamp,
-            previous_block.header().timestamp,
-        ) {
-            network.genesis_difficulty()
-        } else {
-            difficulty_control(
-                self.header().timestamp,
-                previous_block.header().timestamp,
-                previous_block.header().difficulty,
-                network.target_block_interval(),
-                previous_block.header().height,
-            )
-        };
+        let expected_difficulty =
+            if Self::should_reset_difficulty(network, self.header().timestamp, parent.timestamp) {
+                network.genesis_difficulty()
+            } else {
+                difficulty_control(
+                    self.header().timestamp,
+                    parent.timestamp,
+                    parent.difficulty,
+                    network.target_block_interval(),
+                    parent_height,
+                )
+            };
 
         let new_difficulty = self.kernel.header.difficulty;
         if new_difficulty != expected_difficulty {
@@ -605,19 +992,28 @@ impl Block {
 
         // 0.f)
         let delta_difficulty = if consensus_rule_set.use_parent_difficulty() {
-            previous_block.header().difficulty
+            parent.difficulty
         } else {
             new_difficulty
         };
-        let expected_cumulative_proof_of_work =
-            previous_block.header().cumulative_proof_of_work + delta_difficulty;
+        let expected_cumulative_proof_of_work = parent.cumulative_proof_of_work + delta_difficulty;
         if self.header().cumulative_proof_of_work != expected_cumulative_proof_of_work {
             return Err(BlockValidationError::CumulativeProofOfWork);
         }
 
-        // Everything that does not depend on the predecessor, including the
+        // Everything that does not depend on the predecessor, except the
         // block's proof.
-        self.solo_validate(now, network).await?;
+        self.solo_validate_without_proof(now, network)?;
+
+        // 1.a) 1.b)
+        let required_claims = BlockAppendix::consensus_claims(
+            self.body(),
+            new_height,
+            parent.hash,
+            parent_mutator_set,
+            network,
+        );
+        self.validate_appendix(&required_claims)?;
 
         // 2.a)
         let inputs = RemovalRecordList::try_unpack(
@@ -627,15 +1023,17 @@ impl Block {
         .map_err(BlockValidationError::from)?;
 
         // 2.b)
-        let msa_before = previous_block.mutator_set_accumulator_after()?;
+        let msa_before = parent_mutator_set.clone();
         for removal_record in &inputs {
             if !msa_before.can_remove(removal_record) {
                 return Err(BlockValidationError::RemovalRecordsValidity);
             }
         }
 
-        // 2.t)
-        if msa_before.hash() != self.body().transaction_kernel.mutator_set_hash {
+        // 2.t) mutator set matches parent commitment, and transaction.
+        if msa_before.hash() != parent.mutator_set_hash
+            || msa_before.hash() != self.body().transaction_kernel.mutator_set_hash
+        {
             return Err(BlockValidationError::TransactionMutatorSetMismatch);
         }
 
@@ -643,6 +1041,11 @@ impl Block {
             inputs.clone(),
             self.body().transaction_kernel.outputs.clone(),
         );
+        let hash_after_removals = SwbfiPeaksAfterRemovals::try_apply_removals(
+            &self.body().transaction_kernel.inputs,
+            &msa_before,
+        )
+        .map(|after_removals| after_removals.hash());
         let mut msa = msa_before;
         let ms_update_result = mutator_set_update.apply_to_accumulator(&mut msa);
 
@@ -654,6 +1057,21 @@ impl Block {
         // 2.e)
         if msa.hash() != self.body().mutator_set_accumulator.hash() {
             return Err(BlockValidationError::MutatorSetUpdateIntegrity);
+        }
+        if consensus_rule_set.requires_predecessor_claim() {
+            let swbf_claim = required_claims
+                .last()
+                .expect("the SWBF update claim comes last");
+            self.validate_swbf_update_claim(
+                swbf_claim,
+                hash_after_removals,
+                consensus_rule_set.min_swbf_padded_rows(network),
+            )?;
+
+            // 2.v)
+            if guessed && consensus_rule_set.miners_must_prove_ams_knowledge(network) {
+                self.validate_guesser_reveal(&parent_mutator_set.swbf_inactive)?;
+            }
         }
 
         let first_lustration_block = ConsensusRuleSet::first_lustration_block(network);
@@ -690,7 +1108,7 @@ impl Block {
                 }
                 LustrationRule::Updated { initial_counter } => {
                     // 2.n)
-                    let Ok(parent) = previous_block.header().pow.lustration_status() else {
+                    let Some(parent) = parent.lustration_status else {
                         return Err(BlockValidationError::BadLustrationCounterEncodingOfParent);
                     };
 
@@ -910,13 +1328,72 @@ impl Block {
     /// Validate the proof of a block, an that the proof relates to the expected
     /// appendices.
     pub async fn validate_block_proof(&self, network: Network) -> Result<(), BlockValidationError> {
-        let consensus_rule_set = ConsensusRuleSet::infer_from(network, self.header().height);
+        let required_claims = BlockAppendix::consensus_claims_without_parent(
+            self.body(),
+            self.header().height,
+            network,
+        );
+        self.validate_appendix(&required_claims)?;
+        self.validate_proof(network).await
+    }
 
+    /// The aggregated SWBF update claim about the block's transaction on the
+    /// mutator set after its parent, as the program checks it for a parent:
+    /// present, with leaf proofs reaching the floor, covering every input,
+    /// committing to the inputs' index sets, and ending on the mutator set
+    /// the removals leave.
+    fn validate_swbf_update_claim(
+        &self,
+        shape: &Claim,
+        hash_after_removals: Option<Digest>,
+        min_swbf_padded_rows: u64,
+    ) -> Result<(), BlockValidationError> {
+        let claim = self
+            .appendix()
+            .find(shape)
+            .ok_or(BlockValidationError::AppendixMissingClaim)?;
+        let output = ClaimOutput::try_parse(&claim.output)
+            .ok_or(BlockValidationError::MutatorSetUpdateIntegrity)?;
+        // 2.w)
+        if output.padded_rows.value() < min_swbf_padded_rows {
+            return Err(BlockValidationError::SwbfUpdateBelowWorkFloor);
+        }
+
+        // 2.x)
+        let inputs = &self.body().transaction_kernel.inputs;
+        if output.count != inputs.len() || output.peaks != RemovalIndexCommitment::peaks(inputs) {
+            return Err(BlockValidationError::RemovalIndexCommitmentMismatch);
+        }
+
+        // 2.e)
+        if Some(output.mutator_set_hash) != hash_after_removals {
+            return Err(BlockValidationError::MutatorSetUpdateIntegrity);
+        }
+        Ok(())
+    }
+
+    /// 2.v) The proof-of-work field reveals the sampled leaf of the inactive
+    /// SWBF after the parent.
+    pub fn validate_guesser_reveal(
+        &self,
+        parent_swbfi: &MmrAccumulator,
+    ) -> Result<(), BlockValidationError> {
+        if guesser_reveal_is_valid(self.header(), parent_swbfi) {
+            Ok(())
+        } else {
+            Err(BlockValidationError::GuesserSwbfiReveal)
+        }
+    }
+
+    /// The appendix holds the required claims, by program, version and
+    /// input, and not too many.
+    fn validate_appendix(&self, required_claims: &[Claim]) -> Result<(), BlockValidationError> {
         // 1.a)
-        for required_claim in BlockAppendix::consensus_claims(self.body(), consensus_rule_set) {
-            if !self.appendix().contains(&required_claim) {
-                return Err(BlockValidationError::AppendixMissingClaim);
-            }
+        if !required_claims
+            .iter()
+            .all(|claim| self.appendix().find(claim).is_some())
+        {
+            return Err(BlockValidationError::AppendixMissingClaim);
         }
 
         // 1.b)
@@ -924,6 +1401,11 @@ impl Block {
             return Err(BlockValidationError::AppendixTooLarge);
         }
 
+        Ok(())
+    }
+
+    /// The proof is a single proof, and it verifies.
+    async fn validate_proof(&self, network: Network) -> Result<(), BlockValidationError> {
         // 1.c)
         let BlockProof::SingleProof(block_proof) = &self.proof else {
             return Err(BlockValidationError::ProofQuality);
@@ -963,26 +1445,38 @@ impl Block {
     /// may be either the parent block's difficulty, or the block's own
     /// difficulty. Returns true if the target is met.
     pub fn has_proof_of_work(&self, network: Network, previous_block_header: &BlockHeader) -> bool {
+        self.has_proof_of_work_against(
+            network,
+            previous_block_header.timestamp,
+            previous_block_header.difficulty,
+        )
+    }
+
+    /// Like [`Self::has_proof_of_work`], given the parent's timestamp and
+    /// difficulty, all it reads of the parent's header.
+    pub fn has_proof_of_work_against(
+        &self,
+        network: Network,
+        parent_timestamp: Timestamp,
+        parent_difficulty: Difficulty,
+    ) -> bool {
         // enforce network difficulty-reset-interval if present. Note that *no*
         // pow checks are enforced in this case, not even Merkle authentication
         // path checks. Consequently, very little memory is required to produce
         // blocks on networks that reset difficulty.
-        if Self::should_reset_difficulty(
-            network,
-            self.header().timestamp,
-            previous_block_header.timestamp,
-        ) && self.header().difficulty == network.genesis_difficulty()
+        if Self::should_reset_difficulty(network, self.header().timestamp, parent_timestamp)
+            && self.header().difficulty == network.genesis_difficulty()
         {
             return true;
         }
 
         // Reject values that the difficulty control mechanism can never
         // produce, rather than dividing by zero.
-        if previous_block_header.difficulty < Difficulty::MINIMUM {
+        if parent_difficulty < Difficulty::MINIMUM {
             return false;
         }
 
-        let parent_threshold = previous_block_header.difficulty.target();
+        let parent_threshold = parent_difficulty.target();
         if network.allows_mock_pow() && self.is_valid_mock_pow(parent_threshold) {
             return true;
         }
@@ -1364,6 +1858,7 @@ mod test_support {
 
     use super::*;
     use crate::block::proof_of_work_puzzle::ProofOfWorkPuzzle;
+    use crate::block::test_helpers::block_mmra_with_num_leafs;
     use crate::proof_abstractions::triton_vm_job_queue::vm_job_queue;
     use crate::transaction::transaction_kernel::TransactionKernelModifier;
 
@@ -1412,6 +1907,63 @@ mod test_support {
             self.unset_digest();
         }
 
+        /// A fake genesis block with the specified height, for building a chain
+        /// from there.
+        ///
+        /// The mutator set after it contains only the genesis outputs, so the
+        /// archival mutator set is known.
+        pub fn fake_genesis_at_height(network: Network, height: BlockHeight) -> Self {
+            let genesis = Self::genesis(network);
+            let body = BlockBody::new(
+                genesis.body().transaction_kernel.clone(),
+                genesis.body().mutator_set_accumulator.clone(),
+                genesis.body().lock_free_mmr_accumulator.clone(),
+                block_mmra_with_num_leafs(height.value(), vec![]),
+            );
+            let mut header = *genesis.header();
+            header.height = height;
+            header.difficulty = Difficulty::MINIMUM;
+            if let Some(counter) = ConsensusRuleSet::lustration_counter_initial(network, height) {
+                header.pow.set_lustration_status(LustrationStatus {
+                    counter,
+                    max_lustrating_aocl_leaf_index: body.max_aocl_leaf_index(),
+                });
+            }
+
+            // A block built on a parent past activation looks for the parent's
+            // claim of knowing the mutator set.
+            let rules = ConsensusRuleSet::infer_from(network, height);
+            let activation = ConsensusRuleSet::knows_mutator_set_activation_height(network);
+            let claims = if rules.miners_must_prove_ams_knowledge(network) && height >= activation {
+                vec![KnowsMutatorSet::claim(
+                    header.prev_block_digest,
+                    &MutatorSetAccumulator::default(),
+                    activation,
+                    rules,
+                )]
+            } else {
+                vec![]
+            };
+
+            Self::new(
+                header,
+                body,
+                BlockAppendix::new(claims),
+                BlockProof::Genesis,
+            )
+        }
+
+        /// Name this block the network's genesis block for the rest of the
+        /// process: the claims a block built on it must contain refer to it.
+        pub fn name_as_genesis(&self, network: Network) {
+            let mut digests = GENESIS_DIGESTS
+                .get_or_init(Default::default)
+                .lock()
+                .unwrap();
+            digests.retain(|(known, _)| *known != network);
+            digests.push((network, self.hash()));
+        }
+
         /// Produce two fake blocks, parent and child.
         pub async fn fake_block_pair_genesis_and_child_from_witness(
             primitive_witness: BlockPrimitiveWitness,
@@ -1419,11 +1971,14 @@ mod test_support {
             let mut fake_genesis = primitive_witness.predecessor_block().to_owned();
             fake_genesis.proof = BlockProof::Genesis;
             let block_timestamp = primitive_witness.transaction().kernel.timestamp;
-            let fake_child = Self::block_template_from_block_primitive_witness(
+            let job_options =
+                TritonVmProofJobOptions::default_with_network(primitive_witness.network);
+            let (fake_child, _) = Self::block_template_from_block_primitive_witness(
                 primitive_witness,
                 block_timestamp,
+                None,
                 vm_job_queue(),
-                TritonVmProofJobOptions::default(),
+                job_options,
             )
             .await
             .unwrap();
@@ -1451,7 +2006,7 @@ mod test_support {
                 "Don't use high difficulty in test. Got: {difficulty}"
             );
 
-            let puzzle = ProofOfWorkPuzzle::new(self.clone(), difficulty);
+            let puzzle = ProofOfWorkPuzzle::new(self.clone(), difficulty, None);
             let valid_pow = puzzle.solve(consensus_rule_set);
 
             self.set_header_pow(valid_pow);
@@ -1549,6 +2104,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::block::pow::Pow;
     use crate::block::test_helpers::invalid_empty_block;
+    use crate::block::validity::knows_mutator_set::KnowsMutatorSet;
+    use crate::block::validity::swbf_update::aggregation::SwbfUpdateAggregation;
+    use crate::block::validity::swbfi_reveal::tests::revealing_header_and_swbfi;
     use crate::consensus_rule_set::TX_BACKDATING_LIMIT;
     use crate::proof_abstractions::test_runtime::shared_tokio_runtime;
     use crate::transaction::announcement::Announcement;
@@ -1558,6 +2116,27 @@ pub(crate) mod tests {
     use crate::transaction::validity::neptune_proof::NeptuneProof;
     use crate::type_scripts::native_currency::NativeCurrency;
     use crate::type_scripts::TypeScript;
+
+    impl Block {
+        /// Every rule of [`Block::validate`] except the block's proof and the
+        /// guesser's reveal, for tests on blocks with neither.
+        pub(crate) fn validate_without_proof_or_reveal(
+            &self,
+            previous_block: &Block,
+            now: Timestamp,
+            network: Network,
+        ) -> Result<(), BlockValidationError> {
+            let parent_mutator_set = previous_block.mutator_set_accumulator_after()?;
+            self.validate_except_proof(
+                &ParentBlockInfo::of_block(previous_block),
+                &parent_mutator_set,
+                Some(&previous_block.body().block_mmr_accumulator),
+                now,
+                network,
+                false,
+            )
+        }
+    }
 
     #[test]
     fn all_genesis_blocks_have_unique_sender_randomnesses() {
@@ -1605,6 +2184,242 @@ pub(crate) mod tests {
             Err(BlockValidationError::AppendixMissingClaim),
             block1.solo_validate(now, network).await,
             "a well-formed block must be rejected by its proof, not before"
+        );
+    }
+
+    #[test]
+    fn appendix_needs_the_predecessor_claim_under_epsilon() {
+        let network = Network::Testnet(42);
+        let genesis = Block::genesis(network);
+        let mut block1 = invalid_empty_block(&genesis, network);
+        let height = block1.header().height;
+        assert!(ConsensusRuleSet::infer_from(network, height).requires_predecessor_claim());
+        let required =
+            BlockAppendix::consensus_claims_without_parent(block1.body(), height, network);
+        let [transaction_claim, predecessor_shape] = required.as_slice() else {
+            panic!("the transaction claim and the predecessor claim are required");
+        };
+        let predecessor_claim =
+            PredecessorIsValid::claim_about(&genesis, block1.body().mast_hash(), network);
+        assert_eq!(
+            predecessor_shape.program_digest,
+            predecessor_claim.program_digest
+        );
+        assert_eq!(predecessor_shape.input, predecessor_claim.input);
+
+        block1.set_appendix(BlockAppendix::new(vec![transaction_claim.clone()]));
+        assert_eq!(
+            Err(BlockValidationError::AppendixMissingClaim),
+            block1.validate_appendix(&required)
+        );
+        let claims = vec![transaction_claim.clone(), predecessor_claim];
+        block1.set_appendix(BlockAppendix::new(claims));
+        assert_eq!(Ok(()), block1.validate_appendix(&required));
+
+        // Main net is on delta at height 1: the transaction claim suffices.
+        let network = Network::Main;
+        let genesis = Block::genesis(network);
+        let mut block1 = invalid_empty_block(&genesis, network);
+        let height = block1.header().height;
+        assert!(!ConsensusRuleSet::infer_from(network, height).requires_predecessor_claim());
+        let required =
+            BlockAppendix::consensus_claims_without_parent(block1.body(), height, network);
+        assert_eq!(1, required.len());
+        block1.set_appendix(BlockAppendix::new(required.clone()));
+        assert_eq!(Ok(()), block1.validate_appendix(&required));
+    }
+
+    /// The composer's claim to know the mutator set after the parent is
+    /// required where the rules require reveals, which the mock-proof
+    /// networks' do not.
+    #[test]
+    fn mutator_set_claim_is_required_where_reveals_are() {
+        let required_claims = |network: Network| {
+            let genesis = Block::genesis(network);
+            let block1 = invalid_empty_block(&genesis, network);
+            let height = block1.header().height;
+            let mutator_set = genesis.mutator_set_accumulator_after().unwrap();
+            let sample_claim = KnowsMutatorSet::claim(
+                genesis.hash(),
+                &mutator_set,
+                ConsensusRuleSet::knows_mutator_set_activation_height(network),
+                ConsensusRuleSet::infer_from(network, height),
+            );
+            let required = BlockAppendix::consensus_claims(
+                block1.body(),
+                height,
+                genesis.hash(),
+                &mutator_set,
+                network,
+            );
+            (required, sample_claim)
+        };
+
+        let (required, sample_claim) = required_claims(Network::Testnet(42));
+        assert!(required.contains(&sample_claim));
+        assert_eq!(4, required.len());
+
+        let (required, sample_claim) = required_claims(Network::RegTest);
+        assert!(!required.contains(&sample_claim));
+        assert_eq!(3, required.len());
+    }
+
+    /// 2.v) The guesser's reveal of the inactive SWBF after the parent, at
+    /// the sampled leaf; vacuous for an empty one.
+    #[test]
+    fn guesser_reveal_is_checked() {
+        let mut rng = StdRng::seed_from_u64(0);
+        let height = 3;
+        let (header, swbfi) = revealing_header_and_swbfi(&mut rng, height, 11);
+        let network = Network::Main;
+        let mut block = invalid_empty_block(&Block::genesis(network), network);
+        block.kernel_mut().header = header;
+        assert_eq!(Ok(()), block.validate_guesser_reveal(&swbfi));
+
+        let (_, path) = header.pow.swbfi_reveal(height as usize);
+        let mut pow = header.pow;
+        pow.set_swbfi_reveal(rng.random(), &path);
+        block.set_header_pow(pow);
+        assert_eq!(
+            Err(BlockValidationError::GuesserSwbfiReveal),
+            block.validate_guesser_reveal(&swbfi)
+        );
+        assert_eq!(
+            Ok(()),
+            block.validate_guesser_reveal(&MmrAccumulator::init(vec![], 0))
+        );
+    }
+
+    /// The SWBF root claim about the block's transaction on the mutator set
+    /// after its parent: on the floor, covering the inputs, committing to
+    /// them, ending where the removals leave the set.
+    #[test]
+    fn swbf_root_claim_is_checked_under_epsilon() {
+        let network = Network::Testnet(42);
+        let genesis = Block::genesis(network);
+        let block1 = invalid_empty_block(&genesis, network);
+        let height = block1.header().height;
+        let floor = ConsensusRuleSet::infer_from(network, height).min_swbf_padded_rows(network);
+        assert!(floor > 0);
+        let mutator_set = genesis.mutator_set_accumulator_after().unwrap();
+        let inputs = &block1.body().transaction_kernel.inputs;
+        let hash_after_removals = SwbfiPeaksAfterRemovals::try_apply_removals(inputs, &mutator_set)
+            .map(|after_removals| after_removals.hash());
+        let required = BlockAppendix::consensus_claims(
+            block1.body(),
+            height,
+            genesis.hash(),
+            &mutator_set,
+            network,
+        );
+        let shape = required.last().unwrap();
+        let check =
+            |block: &Block| block.validate_swbf_update_claim(shape, hash_after_removals, floor);
+        let with_claim = |claim: Claim| {
+            let mut block = block1.clone();
+            block.set_appendix(BlockAppendix::new(vec![claim]));
+            block
+        };
+        let root_claim = |mutator_set: &MutatorSetAccumulator, padded_rows| {
+            SwbfUpdateAggregation::root_claim_without_proofs(inputs, mutator_set, padded_rows)
+        };
+        let with_output = |output: &ClaimOutput| {
+            let mut claim = root_claim(&mutator_set, floor);
+            claim.output = output.encode();
+            claim
+        };
+        let good = ClaimOutput::try_parse(&root_claim(&mutator_set, floor).output).unwrap();
+
+        assert_eq!(
+            Err(BlockValidationError::AppendixMissingClaim),
+            check(&block1)
+        );
+        assert_eq!(Ok(()), check(&with_claim(root_claim(&mutator_set, floor))));
+        assert_eq!(
+            Err(BlockValidationError::SwbfUpdateBelowWorkFloor),
+            check(&with_claim(root_claim(&mutator_set, floor - 1)))
+        );
+        let mut other_set = mutator_set.clone();
+        other_set.aocl.append(Digest::default());
+        assert_eq!(
+            Err(BlockValidationError::AppendixMissingClaim),
+            check(&with_claim(root_claim(&other_set, floor)))
+        );
+        let more_inputs = ClaimOutput {
+            count: good.count + 1,
+            ..good.clone()
+        };
+        assert_eq!(
+            Err(BlockValidationError::RemovalIndexCommitmentMismatch),
+            check(&with_claim(with_output(&more_inputs)))
+        );
+        let other_end = ClaimOutput {
+            mutator_set_hash: Digest::default(),
+            ..good.clone()
+        };
+        assert_eq!(
+            Err(BlockValidationError::MutatorSetUpdateIntegrity),
+            check(&with_claim(with_output(&other_end)))
+        );
+        let mut truncated = root_claim(&mutator_set, floor);
+        truncated.output.pop();
+        assert_eq!(
+            Err(BlockValidationError::MutatorSetUpdateIntegrity),
+            check(&with_claim(truncated))
+        );
+    }
+
+    #[test]
+    fn swbf_root_claim_over_a_duplicated_input_is_refused() {
+        let network = Network::Testnet(42);
+        let genesis = Block::genesis(network);
+        let mut rng = StdRng::seed_from_u64(0);
+        let mut record = || RemovalRecord {
+            absolute_indices: AbsoluteIndexSet::new(std::array::from_fn(|_| {
+                rng.random_range(0..u128::from(neptune_mutator_set::shared::WINDOW_SIZE))
+            })),
+            target_chunks: ChunkDictionary::empty(),
+        };
+        let (a, b) = (record(), record());
+        let mut block1 = invalid_empty_block(&genesis, network);
+        block1.set_transaction_kernel(
+            TransactionKernelModifier::default()
+                .inputs(RemovalRecordList::pack(vec![a.clone(), b.clone()], true))
+                .modify(block1.body().transaction_kernel.clone()),
+        );
+        let height = block1.header().height;
+        let floor = ConsensusRuleSet::infer_from(network, height).min_swbf_padded_rows(network);
+        let mutator_set = genesis.mutator_set_accumulator_after().unwrap();
+        let required = BlockAppendix::consensus_claims(
+            block1.body(),
+            height,
+            genesis.hash(),
+            &mutator_set,
+            network,
+        );
+        let shape = required.last().unwrap();
+        let claim_over = |inputs: &[RemovalRecord]| {
+            let mut claim = shape.clone();
+            claim.output = ClaimOutput {
+                padded_rows: bfe!(floor),
+                count: inputs.len(),
+                mutator_set_hash: Digest::default(),
+                last_leaf_index: bfe!(0),
+                peaks: RemovalIndexCommitment::peaks(inputs),
+            }
+            .encode();
+            claim
+        };
+        let check = |claim: Claim| {
+            let mut block = block1.clone();
+            block.set_appendix(BlockAppendix::new(vec![claim]));
+            block.validate_swbf_update_claim(shape, Some(Digest::default()), floor)
+        };
+
+        assert_eq!(Ok(()), check(claim_over(&[a.clone(), b])));
+        assert_eq!(
+            Err(BlockValidationError::RemovalIndexCommitmentMismatch),
+            check(claim_over(&[a.clone(), a]))
         );
     }
 
@@ -1894,19 +2709,19 @@ pub(crate) mod tests {
         ) {
             let (block, now) = block_rejected_only_by_its_proof(arbitrary_block);
             let network = Network::Main;
-            let consensus_rule_set = ConsensusRuleSet::infer_from(network, block.header().height);
 
             // Give the block the appendix its body calls for, so that validation
-            // gets past 1.a and reaches the proof itself, then hand it a proof that
-            // attests to nothing.
-            let appendix = BlockAppendix::new(BlockAppendix::consensus_claims(
+            // gets past 1.a and reaches the proof itself, then hand it a bad
+            // proof.
+            let claims = BlockAppendix::consensus_claims_without_parent(
                 block.body(),
-                consensus_rule_set,
-            ));
+                block.header().height,
+                network,
+            );
             let block = Block::new(
                 *block.header(),
                 block.body().to_owned(),
-                appendix,
+                BlockAppendix::new(claims),
                 BlockProof::SingleProof(NeptuneProof::invalid()),
             );
 
@@ -2087,10 +2902,13 @@ pub(crate) mod tests {
         let parent_target = genesis.header().difficulty.target();
 
         // Only loop over non-memory hard PoW algorithms since the memory-hard
-        // are too expensive for tests.
+        // are too expensive for tests. The guesser's reveal belongs to the
+        // block's validity, not to the proof of work, so none is set.
         for consensus_rule_set in [
             ConsensusRuleSet::HardforkBeta,
             ConsensusRuleSet::HardforkGamma,
+            ConsensusRuleSet::HardforkDelta,
+            ConsensusRuleSet::SoftforkEpsilon,
         ] {
             let mut invalid_block = invalid_empty_block(&genesis, network);
             let mast_auth_paths = invalid_block.pow_mast_paths();
@@ -2104,9 +2922,14 @@ pub(crate) mod tests {
             let version = invalid_block.header().version;
 
             let valid_pow = loop {
-                if let Some(valid_pow) =
-                    Pow::guess(&mast_auth_paths, rng.random(), target, None, Some(version))
-                {
+                if let Some(valid_pow) = Pow::guess(
+                    &mast_auth_paths,
+                    rng.random(),
+                    target,
+                    None,
+                    Some(version),
+                    None,
+                ) {
                     break valid_pow;
                 }
             };

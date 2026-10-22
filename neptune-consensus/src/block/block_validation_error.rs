@@ -6,7 +6,8 @@ use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
 /// invalid.
 ///
 /// Conversely, defines what it means for a block to be "valid".
-#[derive(Debug, Clone, Copy, thiserror::Error, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, thiserror::Error, PartialEq, Eq, strum::EnumDiscriminants)]
+#[strum_discriminants(name(BlockValidationRule))]
 pub enum BlockValidationError {
     // 0. `previous_block` is consistent with current block
     ///   0.a) Block height is previous plus one
@@ -51,6 +52,12 @@ pub enum BlockValidationError {
     ///   1.f) Version field consistent
     #[error("Version in pow field and in header must match")]
     VersionMismatch,
+    ///   1.h) The children of an aggregated SWBF update claim must chain: The
+    ///        right child must continue where the left stopped. Checked as part
+    ///        of proof verification, not on the host machine. The host machine
+    ///        only checks the root proof.
+    #[error("SWBF update claims must chain across adjacent input ranges")]
+    SwbfUpdateChaining,
 
     // 2. The transaction is valid.
     ///   2.a) Unpack the transaction's inputs (removal records). This operation
@@ -143,10 +150,37 @@ pub enum BlockValidationError {
     /// do not have that guarantee.
     #[error("Block timestamp must not exceed transaction-retirement value")]
     TransactionRetired,
+
+    /// 2.v) The guesser's proof-of-work field reveals a leaf of the first
+    ///      Merkle tree of the inactive SWBF, at the position sampled by the
+    ///      parent's hash and the guesser's receiver data.
+    #[error("Proof-of-work field must reveal the sampled leaf of the inactive SWBF")]
+    GuesserSwbfiReveal,
+
+    /// 2.w) The leaf proofs of the SWBF update claim must contain a certain
+    ///      amount of proving complexity. This is to incentivize composers to
+    ///      pick up transactions with many inputs. The metric is the padded
+    ///      height of the proofs of the leaf program execution in the SWBF
+    ///      update tree.
+    #[error("SWBF update leaf proofs must meet the work floor")]
+    SwbfUpdateBelowWorkFloor,
+
+    /// 2.x) The removal records' index sets are the ones the SWBF update
+    ///      claim commits to.
+    #[error("Removal records must match the claim's index commitment")]
+    RemovalIndexCommitmentMismatch,
 }
 
 impl From<RemovalRecordListUnpackError> for BlockValidationError {
     fn from(_: RemovalRecordListUnpackError) -> Self {
         Self::RemovalRecordsUnpackFailure
+    }
+}
+
+impl BlockValidationRule {
+    /// The error ID reported by Triton VM's crash if this rule is not
+    /// satisfied.
+    pub(in crate::block) fn error_id(self) -> i128 {
+        1_000_700 + self as i128
     }
 }
