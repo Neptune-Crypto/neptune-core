@@ -1052,9 +1052,8 @@ impl MainLoopHandler {
                         let have_block = state
                             .chain
                             .archival_state()
-                            .get_block_header(block_digest)
-                            .await
-                            .is_some();
+                            .block_is_stored(block_digest)
+                            .await;
                         have_block
                             && state
                                 .chain

@@ -1369,6 +1369,15 @@ impl ArchivalState {
         Some(parent.expect("Indicated block must exist"))
     }
 
+    /// Whether the block identified by digest is stored, or is the genesis
+    /// block.
+    ///
+    /// This is the most performant way to do this check.
+    pub async fn block_is_stored(&self, block_digest: Digest) -> bool {
+        let key = bincode::serialize(&BlockIndexKey::Block(block_digest)).unwrap();
+        self.block_index_db.get_u8(key).await.is_some() || block_digest == self.genesis_block.hash()
+    }
+
     /// Get the header of the block identified by digest.
     ///
     /// Returns `None` if no block with this digest is known. Returns the

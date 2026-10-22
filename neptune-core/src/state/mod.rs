@@ -3599,12 +3599,11 @@ impl GlobalState {
                     );
                 }
 
-                let block_is_new = self
+                let block_is_new = !self
                     .chain
                     .archival_state()
-                    .get_block_header(block.hash())
-                    .await
-                    .is_none();
+                    .block_is_stored(block.hash())
+                    .await;
                 if !block_is_new {
                     warn!(
                         "Attempted to process a block from {} \
