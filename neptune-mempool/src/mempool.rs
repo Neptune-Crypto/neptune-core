@@ -10,6 +10,7 @@
 //! are interested in the transaction with either the highest or the lowest 'fee
 //! density'.
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::hash_map::RandomState;
@@ -233,14 +234,15 @@ pub struct Mempool {
 
 /// The quality a mempool member or arrival occupies in the mempool's
 /// replacement hierarchy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum ContestTier {
     /// primitive-witness backed, either link transaction or regular transaction.
     Witness,
 
-    /// One proving step away from block eligibility. Proof collection or
-    /// LinkTx.
+    /// One proving step away from block eligibility: a proof collection.
     Intermediate,
+
+    /// Backed by a single proof, as a standard transaction or as a link.
     SingleProof,
 }
 
@@ -254,7 +256,7 @@ impl AnyTx {
             },
             AnyTx::Link(link_tx) => {
                 if link_tx.proof.is_proof() {
-                    ContestTier::Intermediate
+                    ContestTier::SingleProof
                 } else {
                     ContestTier::Witness
                 }
@@ -285,24 +287,40 @@ fn outbids(new: NativeCurrencyAmount, conflicts: &HashMap<TransactionKernelId, &
         && new >= existing.min().unwrap_or(NativeCurrencyAmount::zero())
 }
 
-/// Whether an arrival replaces its conflicts on proof quality alone,
-/// irrespective of fees.
+/// How an arrival compares to its conflicts on proof quality alone,
+/// irrespective of fees. `Greater` replaces them, `Less` never does, since a
+/// conflict closer to block inclusion is strictly better, and `Equal` leaves
+/// the decision to fees.
 ///
 /// Considers both the proofs proximity to block inclusion and sync status.
-fn new_tx_wins_by_quality(
+fn quality_contest(
     new_tier: ContestTier,
     new_txid: TransactionKernelId,
     new_tx_mutator_set_hash: Digest,
     conflicts: &HashMap<TransactionKernelId, &AnyTx>,
     current_msa_hash: Digest,
-) -> bool {
-    match new_tier {
+) -> Ordering {
+    // If *any* of the conflicts have higher quality, don't admit the new
+    // transaction.
+    if conflicts
+        .values()
+        .any(|existing_tx| existing_tx.contest_tier() > new_tier)
+    {
+        return Ordering::Less;
+    }
+
+    let wins = match new_tier {
+        // If new tier is witness then only replace if it is synced and
+        // conflicts are not.
         ContestTier::Witness => conflicts.values().all(|existing_tx| {
             existing_tx.contest_tier() == ContestTier::Witness
                 && existing_tx.kernel().mutator_set_hash != current_msa_hash
                 && new_tx_mutator_set_hash == current_msa_hash
         }),
         ContestTier::Intermediate => {
+            // If new tier is intermediate, only replace if conflicts are all
+            // of the witness kind, or if conflicts all conflicts are
+            // intermediate and not synced.
             conflicts
                 .values()
                 .all(|x| x.contest_tier() == ContestTier::Witness)
@@ -312,17 +330,22 @@ fn new_tx_wins_by_quality(
                         && new_tx_mutator_set_hash == current_msa_hash
                 })
         }
-        ContestTier::SingleProof => conflicts.iter().any(|(conflicting_txkid, conflicting_tx)| {
-            // A proof-backed link only yields on quality to its own fixed
-            // form (same txid); any other single proof must outbid it on fee
-            // density.
-            let concedes_tier = match conflicting_tx {
+        ContestTier::SingleProof => conflicts.iter().all(|(conflicting_txkid, conflicting_tx)| {
+            // If new tier is single-proof, replace if all conflicts are of
+            // lower quality, or if there is only one conflict and the new tx is
+            // just the synced form of it.
+            let new_tx_wins_on_quality = match conflicting_tx {
                 AnyTx::Link(link_tx) => !link_tx.proof.is_proof(),
                 AnyTx::Standard(_) => conflicting_tx.contest_tier() != ContestTier::SingleProof,
             };
-            concedes_tier
+            new_tx_wins_on_quality
                 || *conflicting_txkid == new_txid && new_tx_mutator_set_hash == current_msa_hash
         }),
+    };
+    if wins {
+        Ordering::Greater
+    } else {
+        Ordering::Equal
     }
 }
 
@@ -1094,7 +1117,7 @@ impl Mempool {
             TransactionProof::ProofCollection(_) => ContestTier::Intermediate,
             TransactionProof::SingleProof(_) => ContestTier::SingleProof,
         };
-        let new_tx_has_higher_proof_quality = new_tx_wins_by_quality(
+        let quality = quality_contest(
             new_tier,
             txid,
             new_tx.kernel.mutator_set_hash,
@@ -1114,7 +1137,11 @@ impl Mempool {
             })
             .collect_vec();
         if has_conflicts {
-            let should_replace_conflict = new_tx_has_higher_proof_quality || outbids_conflicts;
+            let should_replace_conflict = match quality {
+                Ordering::Greater => true,
+                Ordering::Equal => outbids_conflicts,
+                Ordering::Less => false,
+            };
             if should_replace_conflict {
                 for (conflicting_txid, single_proof) in conflicts {
                     let e = self.remove(conflicting_txid).unwrap_or_else(|| {
@@ -1147,7 +1174,8 @@ impl Mempool {
             } else {
                 debug!(
                     "Attempted to insert transaction into mempool but it does \
-                     not outbid the transactions it conflicts with."
+                     not outbid the transactions it conflicts with, or is proven \
+                     worse."
                 );
                 return events;
             }
@@ -1273,18 +1301,21 @@ impl Mempool {
         }
 
         let new_tier = if new_link.proof.is_proof() {
-            ContestTier::Intermediate
+            ContestTier::SingleProof
         } else {
             ContestTier::Witness
         };
-        let quality_win = same_id_win
-            || new_tx_wins_by_quality(
+        let quality = if same_id_win {
+            Ordering::Greater
+        } else {
+            quality_contest(
                 new_tier,
                 txid,
                 new_link.kernel.kernel.mutator_set_hash,
                 &conflicts,
                 self.tip_mutator_set_hash,
-            );
+            )
+        };
         let new_link_fee_density = new_link.fee_density();
         let has_conflicts = !conflicts.is_empty();
         let outbids_conflicts = outbids(new_link.kernel.kernel.fee, &conflicts);
@@ -1300,10 +1331,16 @@ impl Mempool {
 
         let mut events = vec![];
         if has_conflicts {
-            if !(quality_win || outbids_conflicts) {
+            let should_replace_conflict = match quality {
+                Ordering::Greater => true,
+                Ordering::Equal => outbids_conflicts,
+                Ordering::Less => false,
+            };
+            if !should_replace_conflict {
                 debug!(
                     "Attempted to insert link transaction into mempool but it does \
-                     not outbid the transactions it conflicts with."
+                     not outbid the transactions it conflicts with, or is proven \
+                     worse."
                 );
                 return events;
             }
@@ -2318,6 +2355,52 @@ mod tests {
         mempool.insert(fair, UpgradePriority::Irrelevant);
         assert_eq!(1, mempool.len());
         assert!(mempool.contains(fair_txid));
+    }
+
+    #[test_strategy::proptest(cases = 4)]
+    fn proof_collection_never_replaces_a_single_proof(
+        #[strategy(PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 3, 9))]
+        primitive_witness: PrimitiveWitness,
+    ) {
+        use neptune_consensus::transaction::validity::neptune_proof::NeptuneProof;
+        use proptest::prop_assert;
+        use proptest::prop_assert_eq;
+
+        // Simulate insertion of PC, then SP, then PC.
+        let part = Transaction {
+            kernel: primitive_witness.kernel,
+            proof: TransactionProof::ProofCollection(ProofCollection::invalid()),
+        };
+        let sp = Transaction {
+            kernel: TransactionKernelModifier::default()
+                .merge_bit(true)
+                .fee(NativeCurrencyAmount::zero())
+                .clone_modify(&part.kernel),
+            proof: TransactionProof::SingleProof(NeptuneProof::invalid()),
+        };
+        let mutator_set_hash = part.kernel.mutator_set_hash;
+
+        let mut mempool = Mempool::new(
+            ByteSize::gb(1),
+            TxProvingCapability::SingleProof,
+            &Block::genesis(Network::Main),
+        );
+        mempool.set_tip_mutator_set_hash(mutator_set_hash);
+        mempool.insert(part.clone(), UpgradePriority::Irrelevant);
+        mempool.insert(sp.clone(), UpgradePriority::Irrelevant);
+        prop_assert_eq!(1, mempool.len());
+
+        let pc = Transaction {
+            kernel: TransactionKernelModifier::default()
+                .fee(part.kernel.fee + NativeCurrencyAmount::coins(1))
+                .clone_modify(&part.kernel),
+            proof: TransactionProof::ProofCollection(ProofCollection::invalid()),
+        };
+        for replacement in [part, pc] {
+            mempool.insert(replacement, UpgradePriority::Irrelevant);
+            prop_assert_eq!(1, mempool.len());
+            prop_assert!(mempool.get(sp.txid()).is_some());
+        }
     }
 
     #[test]
