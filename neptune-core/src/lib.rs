@@ -297,7 +297,11 @@ pub async fn initialize(
     task_join_handles.push(actor_handle);
 
     // Tell libp2p network Actor to listen up.
-    let own_listen_addresses = cli_args.own_listen_addresses();
+    let own_listen_addresses = if cli_args.refuses_incoming() {
+        vec![]
+    } else {
+        cli_args.own_listen_addresses()
+    };
     debug!(
         "own_listen_address: {}",
         own_listen_addresses.iter().join("; ")
@@ -311,7 +315,8 @@ pub async fn initialize(
         }
     }
 
-    // Bind socket to port on this machine, to handle incoming connections from peers
+    // Bind socket to port on this machine, to handle incoming legacy
+    // connections.
     let incoming_peer_listener = if let Some(incoming_peer_listener) = cli_args.own_listen_port() {
         let ret = TcpListener::bind((cli_args.peer_listen_addr, incoming_peer_listener))
            .await

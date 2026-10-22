@@ -191,7 +191,8 @@ The following network-related flags or arguments are available when starting `ne
 
  - `--peer <SocketAddr or Multiaddr>` if the port is different from 9798, this flag instructs the `NetworkActor` to ensure that there is always a connection to the given peer, now called a *sticky peer*. Connections are made over libp2p only: an address on the legacy port 9798 is not dialed, and a warning is logged instead.
  - `--ban <SocketAddr or Multiaddr>` instructs the `NetworkActor` to disconnect from the given peers, in addition to the peers in the black list. No changes are made to the black list.
- - *Only partially supported:* `--restrict-peers-to-list` is intended to restrict blockchain peer loops to peers specified via `--peer`. At present it only applies to incoming connections over the legacy network stack; the `NetworkActor` ignores it.
+ - `--no-incoming` instructs both network stacks to listen on no port, the `NetworkActor` to reserve no relay slots, and refuses peer loops over connections that peers opened. Outgoing connections are unaffected.
+ - `--restrict-peers-to-list` implies `--no-incoming` and restricts peer loops to the peers specified via `--peer`; the `NetworkActor` dials no other peers and takes no part in peer discovery.
  - `--max-num-peers <number>` (default 10) sets the maximum number of peers; see [Resource Management](#resource-management).
  - `--max-connections-per-ip <number>` (default 4) caps the number of peers accepted from one IP address. Multiple nodes can legitimately share an IP, for instance behind NAT.
  - `--max-connections-per-prefix <number>` (default 8) caps the number of inbound connections accepted from one address prefix (/24 for IPv4, /64 for IPv6).

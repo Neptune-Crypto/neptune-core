@@ -112,15 +112,21 @@ pub struct Args {
 
     /// Only connect to the peers specified by --peer.
     ///
-    /// Presently only enforced for incoming connections over the legacy
-    /// network stack; the libp2p network actor ignores this flag.
+    /// Implies --no-incoming. Dials no other peers and takes no part in peer
+    /// discovery.
     #[arg(long)]
     pub restrict_peers_to_list: bool,
 
-    /// Maximum number of peers to accept connections from.
+    /// Accept no incoming connections: listen on no port, reserve no relay
+    /// slots, and run no peer loop over a connection a peer opened. Outgoing
+    /// connections are unaffected.
+    #[arg(long)]
+    pub no_incoming: bool,
+
+    /// Maximum number of peers to run peer loops with.
     ///
     /// Will not prevent outgoing connections made with `--peer`.
-    /// Set this value to 0 to refuse all incoming connections.
+    /// Set this value to 0 to refuse all peer loops but those.
     #[clap(
         long,
         default_value = "10",
@@ -874,7 +880,12 @@ impl Args {
 
     /// Indicates if all incoming peer connections are disallowed.
     pub(crate) fn disallow_all_incoming_peer_connections(&self) -> bool {
-        self.max_num_peers.is_zero()
+        self.max_num_peers.is_zero() || self.refuses_incoming()
+    }
+
+    /// Whether to accept no incoming connections at all.
+    pub(crate) fn refuses_incoming(&self) -> bool {
+        self.no_incoming || self.restrict_peers_to_list
     }
 
     /// Return the port that peer can connect on. None if incoming connections

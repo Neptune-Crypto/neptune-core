@@ -413,8 +413,9 @@ impl NetworkActor {
         let max_established_per_peer = 3;
         let source_limits = config.source_limits;
 
-        // Configure autoNAT
-        let neuter_autonat = !config.external_addresses().is_empty();
+        // Configure autoNAT.
+        let neuter_autonat =
+            !config.external_addresses().is_empty() || global_state_lock.cli().refuses_incoming();
 
         let mut autonat_config = libp2p::autonat::Config::default();
         if config.network.is_reg_test() {
@@ -494,7 +495,12 @@ impl NetworkActor {
                 let store = libp2p::kad::store::MemoryStore::new(local_peer_id);
                 let mut kademlia =
                     libp2p::kad::Behaviour::with_config(local_peer_id, store, kad_config);
-                kademlia.set_mode(Some(libp2p::kad::Mode::Server));
+                let kademlia_mode = if global_state_lock.cli().refuses_incoming() {
+                    libp2p::kad::Mode::Client
+                } else {
+                    libp2p::kad::Mode::Server
+                };
+                kademlia.set_mode(Some(kademlia_mode));
 
                 let upnp = libp2p::upnp::tokio::Behaviour::default();
 
@@ -630,6 +636,11 @@ impl NetworkActor {
     }
     /// Fetch a list of suitable peers from the address book and dial them.
     pub(crate) fn dial_initial_peers(&mut self) {
+        // Sticky peers are not dialed here.
+        if self.global_state_lock.cli().restrict_peers_to_list {
+            return;
+        }
+
         let initial_peers = self
             .address_book
             .select_initial_peers(10)
@@ -721,6 +732,10 @@ impl NetworkActor {
 
                 // Re-launch a crawl with Kademlia
                 _ = refresh_kademlia_crawl.tick() => {
+                    if self.global_state_lock.cli().restrict_peers_to_list {
+                        continue;
+                    }
+
                     // Trigger the "One-Hop" crawl we documented earlier.
                     // Asks our current neighbors: "Who is new in the network?"
                     if let Err(e) = self.swarm.behaviour_mut().kademlia.bootstrap() {
@@ -1341,6 +1356,9 @@ impl NetworkActor {
                     })
                 };
                 for addr in info.listen_addrs {
+                    if self.global_state_lock.cli().restrict_peers_to_list {
+                        break;
+                    }
                     if self.accepts_local_addresses || is_global(&addr) {
                         self.swarm
                             .behaviour_mut()
@@ -1691,9 +1709,17 @@ impl NetworkActor {
             return;
         }
 
+        // Non-sticky connections may be refused by configuration
+        let is_sticky = address.values().any(|a| self.sticky_peers.contains_key(a));
+        let cli = self.global_state_lock.cli();
+        if !is_sticky && (cli.restrict_peers_to_list || inbound && cli.refuses_incoming()) {
+            tracing::debug!(peer = %peer_id, "Closing connection: peer loops with this peer are refused by configuration.");
+            self.swarm.close_connection(connection_id);
+            return;
+        }
+
         // Refuse a peer loop beyond the limit, but keep the connection: it
         // serves Identify and Kademlia until it idles out.
-        let is_sticky = address.values().any(|a| self.sticky_peers.contains_key(a));
         if !is_sticky && self.upgraded_peers.lock().unwrap().len() >= self.max_num_peers {
             tracing::debug!(peer = %peer_id, "Refusing peer loop: maximum number of peers reached.");
             let mut peer_stream = bridge_libp2p_stream(stream, encoding);
@@ -2220,6 +2246,10 @@ impl NetworkActor {
     /// instance if there are not enough active connections without on-going
     /// relay commitments.
     fn request_peer_relays(&mut self, num_relays: usize) {
+        if self.global_state_lock.cli().refuses_incoming() {
+            return;
+        }
+
         let num_relays = num_relays.min(Self::MAX_RELAYS.saturating_sub(self.relays.len()));
         if num_relays == 0 {
             return;
@@ -2362,7 +2392,7 @@ impl NetworkActor {
         };
 
         // On the 1st connection, bootstrap kademlia in order to find new peers.
-        if num_upgraded_peers == 1 {
+        if num_upgraded_peers == 1 && !self.global_state_lock.cli().restrict_peers_to_list {
             tracing::debug!("First peer connected. Triggering initial DHT bootstrap.");
             self.swarm.behaviour_mut().kademlia.bootstrap().ok();
         }
@@ -2821,19 +2851,18 @@ mod tests {
             force_relay_reservation: bool,
         ) -> Self {
             let config = NetworkConfig::default().with_external_addresses(external_addresses);
-            Self::start_with(keypair, config, force_relay_reservation).await
+            let cli = cli_args::Args::default();
+            Self::start_with(keypair, config, cli, force_relay_reservation).await
         }
 
         async fn start_with(
             keypair: Keypair,
             config: NetworkConfig,
+            cli: cli_args::Args,
             force_relay_reservation: bool,
         ) -> Self {
             let network = Network::RegTest;
-            let cli = cli_args::Args {
-                network,
-                ..Default::default()
-            };
+            let cli = cli_args::Args { network, ..cli };
             let global_state_lock =
                 mock_genesis_global_state(0, WalletEntropy::new_random(), cli).await;
             let (peer_to_main_tx, peer_to_main_rx) = mpsc::channel(16);
@@ -3063,7 +3092,8 @@ mod tests {
         let config = NetworkConfig::default()
             .with_max_num_peers(1)
             .with_external_addresses(vec![address.clone()]);
-        let mut node = TestNode::start_with(Keypair::generate_ed25519(), config, false).await;
+        let cli = cli_args::Args::default();
+        let mut node = TestNode::start_with(Keypair::generate_ed25519(), config, cli, false).await;
         node.command(NetworkActorCommand::Listen(address.clone()))
             .await;
         let mut peer = TestNode::start(Keypair::generate_ed25519(), vec![], false).await;
@@ -3095,7 +3125,8 @@ mod tests {
         let config = NetworkConfig::default()
             .with_max_num_peers(1)
             .with_external_addresses(vec![full_address.clone()]);
-        let mut full = TestNode::start_with(Keypair::generate_ed25519(), config, false).await;
+        let cli = cli_args::Args::default();
+        let mut full = TestNode::start_with(Keypair::generate_ed25519(), config, cli, false).await;
         full.command(NetworkActorCommand::Listen(full_address.clone()))
             .await;
         let block = invalid_empty_block(&Block::genesis(network), network);
@@ -3135,6 +3166,82 @@ mod tests {
         full.task.abort();
         peer.task.abort();
         newcomer.task.abort();
+    }
+
+    #[tokio::test]
+    async fn node_refusing_incoming_refuses_inbound_peer_loops() {
+        let address = free_localhost_tcp_address();
+        let cli = cli_args::Args {
+            no_incoming: true,
+            ..Default::default()
+        };
+        let config = NetworkConfig::default().with_external_addresses(vec![address.clone()]);
+        let mut node = TestNode::start_with(Keypair::generate_ed25519(), config, cli, false).await;
+        node.command(NetworkActorCommand::Listen(address.clone()))
+            .await;
+
+        // The refused connection is closed too fast to observe, so dial a
+        // few times and look for what must not happen.
+        let dialer = TestNode::start(Keypair::generate_ed25519(), vec![], false).await;
+        for _ in 0..5 {
+            dialer
+                .command(NetworkActorCommand::Dial(address.clone()))
+                .await;
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+        node.assert_no_peer_loop_for(Duration::from_secs(1)).await;
+        assert_eq!(0, node.overview().await.connection_count);
+
+        node.task.abort();
+        dialer.task.abort();
+    }
+
+    #[tokio::test]
+    async fn restricted_node_runs_loops_with_listed_peers_only() {
+        let listed_address = free_localhost_tcp_address();
+        let mut listed = TestNode::start(
+            Keypair::generate_ed25519(),
+            vec![listed_address.clone()],
+            false,
+        )
+        .await;
+        listed
+            .command(NetworkActorCommand::Listen(listed_address.clone()))
+            .await;
+        let other_address = free_localhost_tcp_address();
+        let other = TestNode::start(
+            Keypair::generate_ed25519(),
+            vec![other_address.clone()],
+            false,
+        )
+        .await;
+        other
+            .command(NetworkActorCommand::Listen(other_address.clone()))
+            .await;
+
+        let cli = cli_args::Args {
+            restrict_peers_to_list: true,
+            ..Default::default()
+        };
+        let config = NetworkConfig::default().with_cli_peers(vec![listed_address.clone()]);
+        let mut node = TestNode::start_with(Keypair::generate_ed25519(), config, cli, false).await;
+        node.dial_until_connected(listed_address, 1).await;
+        node.wait_for_peer_loops(1).await;
+        listed.wait_for_peer_loops(1).await;
+
+        // The unlisted peer's connection is closed too fast to observe, so
+        // dial a few times and look for what must not happen.
+        for _ in 0..5 {
+            node.command(NetworkActorCommand::Dial(other_address.clone()))
+                .await;
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+        node.assert_no_peer_loop_for(Duration::from_secs(1)).await;
+        assert_eq!(1, node.overview().await.connection_count);
+
+        node.task.abort();
+        listed.task.abort();
+        other.task.abort();
     }
 
     #[tokio::test]

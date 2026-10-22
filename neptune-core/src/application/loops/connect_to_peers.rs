@@ -108,20 +108,6 @@ pub(crate) fn precheck_incoming_connection_is_allowed(
             None => connecting_ip,
         },
     };
-    if cli.restrict_peers_to_list {
-        let allowed_ips: Vec<std::net::IpAddr> = cli
-            .peers
-            .iter()
-            .filter_map(multiaddr_to_socketaddr)
-            .map(|p| p.ip())
-            .collect();
-        let is_allowed = allowed_ips.contains(&connecting_ip);
-        if !is_allowed {
-            debug!("Rejecting incoming connection from unlisted peer {connecting_ip} due to --restrict-peers-to-list",);
-            return false;
-        }
-    }
-
     if cli.banned_ips().contains(&connecting_ip) {
         debug!("Rejecting incoming connection because it's explicitly banned");
         return false;
@@ -668,17 +654,19 @@ mod tests {
 
         cli.restrict_peers_to_list = true;
         assert!(
-            precheck_incoming_connection_is_allowed(&cli, socket_address.ip()),
-            "Incoming allowed when restricted to peers list and incoming is specified peer"
-        );
-
-        cli.peers.clear();
-        assert!(
             !precheck_incoming_connection_is_allowed(&cli, socket_address.ip()),
-            "Incoming disallowed when restricted to peers and not peer"
+            "Incoming disallowed when restricted to peers list, even for a listed peer"
         );
 
         cli.restrict_peers_to_list = false;
+        cli.no_incoming = true;
+        assert!(
+            !precheck_incoming_connection_is_allowed(&cli, socket_address.ip()),
+            "Incoming disallowed when no incoming connections are accepted"
+        );
+
+        cli.no_incoming = false;
+        cli.peers.clear();
         cli.bans.push(Multiaddr::from(socket_address.ip()));
         assert!(
             !precheck_incoming_connection_is_allowed(&cli, socket_address.ip()),
