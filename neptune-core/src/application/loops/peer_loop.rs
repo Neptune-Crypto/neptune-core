@@ -3260,6 +3260,11 @@ impl PeerLoopHandler {
             PeerStanding::new(cli_args.peer_tolerance)
         };
 
+        // Refuse a peer in bad standing, unless the operator listed it.
+        if standing.is_bad() && !cli_args.peers.contains(&self.peer_address) {
+            bail!("Refusing peer in bad standing: {}", self.peer_address);
+        }
+
         // Add peer to peer map
         let peer_connection_info = PeerConnectionInfo::new(
             self.peer_handshake_data.listen_port,
@@ -4254,6 +4259,57 @@ mod tests {
                 .await;
             assert!(result.is_err(), "second peer from the IP must be refused");
             assert_eq!(1, state_lock.peers().len());
+
+            Ok(())
+        }
+
+        /// A peer whose stored standing is bad is refused before it enters
+        /// the peer map, unless the operator listed it.
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn peer_in_bad_standing_is_refused_at_insertion() -> Result<()> {
+            let network = Network::Main;
+            let address: std::net::SocketAddr = "253.4.5.1:28011".parse()?;
+            let (peer_broadcast_tx, _from_main_rx, to_main_tx, _to_main_rx, _, _, state_lock, hsd) =
+                get_test_genesis_setup(0, cli_args::Args::default_with_network(network)).await?;
+            let mut standing = PeerStanding::new(state_lock.cli().peer_tolerance);
+            while !standing.is_bad() {
+                let _ =
+                    standing.sanction(PeerSanction::Negative(NegativePeerSanction::OversizedBlock));
+            }
+            state_lock
+                .peers()
+                .store_standing(address.ip(), standing)
+                .await;
+
+            let handler = |state: GlobalStateLock| {
+                PeerLoopHandler::new(
+                    to_main_tx.clone(),
+                    state,
+                    pseudorandom_peer_id(&address),
+                    socketaddr_to_multiaddr(address),
+                    hsd,
+                    true,
+                )
+            };
+            let bye = || Mock::new(vec![Action::Read(PeerMessage::Bye)]);
+            let refused = handler(state_lock.clone())
+                .run_wrapper(bye(), peer_broadcast_tx.subscribe())
+                .await;
+            assert!(refused.is_err(), "a peer in bad standing must be refused");
+            assert_eq!(0, state_lock.peers().len());
+
+            // Listed by the operator, the same peer is admitted.
+            let mut listed = state_lock.clone();
+            listed
+                .set_cli(cli_args::Args {
+                    peers: vec![socketaddr_to_multiaddr(address)],
+                    ..cli_args::Args::default_with_network(network)
+                })
+                .await;
+            handler(listed)
+                .run_wrapper(bye(), peer_broadcast_tx.subscribe())
+                .await?;
 
             Ok(())
         }
