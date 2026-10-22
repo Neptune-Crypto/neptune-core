@@ -165,11 +165,12 @@ pub struct Args {
 
     /// Whether to act as bootstrapper node.
     ///
-    /// Bootstrapper nodes ensure that the maximum number of peers is never
-    /// reached by disconnecting from existing peers when the maximum is about
-    /// to be reached. As a result, they will respond with high likelihood to
-    /// incoming connection requests -- in contrast to regular nodes, which
-    /// refuse incoming connections when the max is reached.
+    /// A bootstrapper node that has reached the maximum number of peers makes
+    /// room for a newcomer by disconnecting from an existing peer. As a result,
+    /// it responds with high likelihood to incoming connection requests -- in
+    /// contrast to regular nodes, which refuse incoming connections when the
+    /// max is reached. Each network stack disconnects only from its own peers,
+    /// and never from peers given with `--peer`.
     #[clap(long)]
     pub(crate) bootstrap: bool,
 

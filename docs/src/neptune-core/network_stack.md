@@ -166,6 +166,8 @@ In the `NetworkStack` (the libp2p `NetworkBehaviour`), each subprotocol serves a
 
 The total number of connections is limited by the command-line argument `--max-num-peers` which defaults to 10. This limit is enforced by the `NetworkActor` (as opposed to by some subprotocol like connection-limits) in order to prioritize sticky peers and own dialing attempts.
 
+A node started with `--bootstrap` does not refuse a direct inbound newcomer for lack of room. Instead, the `NetworkActor` disconnects as many existing peers as needed, usually one. It picks them from its inbound peers, or from its outbound peers if it has no inbound ones, and never picks a sticky peer. Among those, it picks the youngest peer of the network group with the most peers (`/16` for IPv4, `/32` for IPv6), as Bitcoin Core's inbound eviction does: a flood of newcomers then evicts its own connections first, and the peers that were there first keep their place. Turnover among young peers is what a bootstrap node is for, since a newcomer only needs a few round trips to learn about the network through Identify and Kademlia. The legacy network stack, when bootstrapping, disconnects from its longest-lived legacy peer instead; neither stack disconnects the other's peers.
+
 To prevent memory-based DoS attacks without impacting the Mempool's growth, Neptune Cash avoids process-wide memory limits. Instead, it uses Yamux Auto-Tuning and a strict cap on sub-streams (`set_max_num_streams(256)`) to ensure that a single malicious peer cannot exhaust the node's resources by opening thousands of idle streams.
 
 ## 5. Persistence
@@ -182,6 +184,7 @@ The following network-related flags or arguments are available when starting `ne
 
  - `--peer <SocketAddr or Multiaddr>` if the port is different from 9798, this flag instructs the `NetworkActor` to ensure that there is always a connection to the given peer, now called a *sticky peer*. If the port is 9798, then this peer is passed to the legacy network stack.
  - `--ban <SocketAddr or Multiaddr>` instructs the `NetworkActor` to disconnect from the given peers, in addition to the peers in the black list. No changes are made to the black list.
+ - `--bootstrap` instructs the `NetworkActor` to make room for newcomers when it has reached `--max-num-peers`, by disconnecting existing peers; see *Resource Management* above.
  - *Not presently supported:* `--restrict-peers-to-list` instructs the `NetworkActor` to only upgrade peers specified via `--peer` to blockchain peer loops.
  - *Not presently supported:* `--max-connections-per-ip <number>` instructs the `NetworkActor` to reject connections to different `PeerId`s living at the same IP in excess of the given number.
  - `--quic-port` instructs the `NetworkActor` on which port to listen for UDP connections.
