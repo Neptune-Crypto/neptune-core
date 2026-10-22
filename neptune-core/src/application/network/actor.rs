@@ -3133,6 +3133,7 @@ mod tests {
         event_rx: mpsc::UnboundedReceiver<NetworkEvent>,
         main_to_peer: broadcast::Sender<MainToPeerTask>,
         _peer_to_main_rx: mpsc::Receiver<PeerTaskToMain>,
+        global_state_lock: GlobalStateLock,
         task: JoinHandle<Result<(), ActorError>>,
     }
 
@@ -3142,11 +3143,19 @@ mod tests {
             external_addresses: Vec<Multiaddr>,
             force_relay_reservation: bool,
         ) -> Self {
+            let config = NetworkConfig::default().with_external_addresses(external_addresses);
+            let cli = cli_args::Args::default();
+            Self::start_with(keypair, config, cli, force_relay_reservation).await
+        }
+
+        async fn start_with(
+            keypair: Keypair,
+            config: NetworkConfig,
+            cli: cli_args::Args,
+            force_relay_reservation: bool,
+        ) -> Self {
             let network = Network::RegTest;
-            let cli = cli_args::Args {
-                network,
-                ..Default::default()
-            };
+            let cli = cli_args::Args { network, ..cli };
             let global_state_lock =
                 mock_genesis_global_state(0, WalletEntropy::new_random(), cli).await;
             let (peer_to_main_tx, peer_to_main_rx) = mpsc::channel(16);
@@ -3154,12 +3163,11 @@ mod tests {
             let main_to_peer = main_to_peer_broadcast_tx.clone();
             let (channels, command_tx, event_rx) =
                 NetworkActorChannels::setup(peer_to_main_tx, main_to_peer_broadcast_tx);
-            let config = NetworkConfig::default()
+            let config = config
                 .with_network(network)
-                .with_subdirectory(unit_test_path())
-                .with_external_addresses(external_addresses);
+                .with_subdirectory(unit_test_path());
             let peer_id = keypair.public().to_peer_id();
-            let mut actor = NetworkActor::new(keypair, channels, global_state_lock, config)
+            let mut actor = NetworkActor::new(keypair, channels, global_state_lock.clone(), config)
                 .expect("test actor must build");
             actor.force_relay_reservation = force_relay_reservation;
 
@@ -3169,7 +3177,25 @@ mod tests {
                 event_rx,
                 main_to_peer,
                 _peer_to_main_rx: peer_to_main_rx,
+                global_state_lock,
                 task: tokio::spawn(actor.run()),
+            }
+        }
+
+        /// Poll the peers this node runs a peer loop with until `done`
+        /// accepts them.
+        async fn wait_for_peers(&self, what: &str, done: impl Fn(&HashSet<PeerId>) -> bool) {
+            let deadline = Instant::now() + Duration::from_secs(60);
+            loop {
+                let peers = self
+                    .global_state_lock
+                    .peers()
+                    .with_connected(|connected| connected.keys().copied().collect());
+                if done(&peers) {
+                    return;
+                }
+                assert!(Instant::now() < deadline, "timed out waiting until {what}");
+                tokio::time::sleep(Duration::from_millis(250)).await;
             }
         }
 
@@ -3432,5 +3458,78 @@ mod tests {
 
         dialer.task.abort();
         reserved.task.abort();
+    }
+
+    /// A node at its real peer limit of two, with an older and a younger
+    /// peer, and the address it listens on.
+    async fn full_node(bootstrap: bool) -> (TestNode, TestNode, TestNode, Multiaddr) {
+        let max_num_peers = 2;
+        let config = NetworkConfig::default()
+            .with_max_num_peers(max_num_peers)
+            .with_bootstrap(bootstrap);
+        let cli = cli_args::Args {
+            max_num_peers,
+            bootstrap,
+            ..Default::default()
+        };
+        let node = TestNode::start_with(Keypair::generate_ed25519(), config, cli, false).await;
+        let address = free_localhost_tcp_address();
+        node.command(NetworkActorCommand::Listen(address.clone()))
+            .await;
+
+        let older = TestNode::start(Keypair::generate_ed25519(), vec![], false).await;
+        older.dial_until_connected(address.clone(), 1).await;
+        node.wait_for_peers("the older peer is admitted", |peers| {
+            peers.contains(&older.peer_id)
+        })
+        .await;
+        let younger = TestNode::start(Keypair::generate_ed25519(), vec![], false).await;
+        younger.dial_until_connected(address.clone(), 1).await;
+        node.wait_for_peers("the node is full", |peers| peers.len() == max_num_peers)
+            .await;
+
+        (node, older, younger, address)
+    }
+
+    /// A full bootstrap node admits a newcomer by evicting its youngest peer.
+    #[tokio::test]
+    async fn full_bootstrap_node_admits_newcomer() {
+        let (node, older, younger, address) = full_node(true).await;
+
+        let newcomer = TestNode::start(Keypair::generate_ed25519(), vec![], false).await;
+        newcomer.dial_until_connected(address, 1).await;
+        node.wait_for_peers("the newcomer replaces the younger peer", |peers| {
+            peers.contains(&newcomer.peer_id)
+                && peers.contains(&older.peer_id)
+                && !peers.contains(&younger.peer_id)
+        })
+        .await;
+
+        for test_node in [node, older, younger, newcomer] {
+            test_node.task.abort();
+        }
+    }
+
+    /// A full regular node turns a newcomer away and keeps its peers.
+    #[tokio::test]
+    async fn full_regular_node_rejects_newcomer() {
+        let (node, older, younger, address) = full_node(false).await;
+
+        let newcomer = TestNode::start(Keypair::generate_ed25519(), vec![], false).await;
+        for _ in 0..5 {
+            newcomer
+                .command(NetworkActorCommand::Dial(address.clone()))
+                .await;
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+        let peers = node
+            .global_state_lock
+            .peers()
+            .with_connected(|connected| connected.keys().copied().collect::<HashSet<_>>());
+        assert_eq!(HashSet::from([older.peer_id, younger.peer_id]), peers);
+
+        for test_node in [node, older, younger, newcomer] {
+            test_node.task.abort();
+        }
     }
 }
