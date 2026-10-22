@@ -250,9 +250,11 @@ async fn new_blocks_at_block_height_100_000_on(network: Network) {
     let num_blocks_with_many_outputs = 3;
     for _ in 0..num_blocks_with_many_outputs {
         now += Timestamp::hours(1);
-        // Inputs this early look like lustration candidates to the wallet.
-        let lustrating = InputSelectionPolicy::default().set_lustration_acceptance(true);
-        let tx = tx_with_n_outputs(bob.clone(), 24, now, Some(lustrating), None, None)
+        // Deterministic inputs bc test
+        let input_policy = InputSelectionPolicy::default()
+            .prioritize(InputSelectionPriority::ByUtxoSize(SortOrder::Ascending))
+            .set_lustration_acceptance(true);
+        let tx = tx_with_n_outputs(bob.clone(), 24, now, Some(input_policy), None, None)
             .await
             .unwrap();
         let next_block = compose_and_guess_for_tests(&bob, vec![tx.transaction.into()], now).await;
@@ -354,16 +356,20 @@ async fn blocks_across_epsilon_activation_on_main_net() {
         .unwrap();
 
     // A transaction proven under delta stays in the mempool across the
-    // activation, and the first block of epsilon confirms it. Inputs this
-    // early look like lustration candidates to the wallet.
+    // activation, and the first block of epsilon confirms it.
     now += Timestamp::hours(1);
-    let lustrating = InputSelectionPolicy::default().set_lustration_acceptance(true);
-    let straddling = tx_with_n_outputs(bob.clone(), 1, now, Some(lustrating), None, None)
+    let input_policy = InputSelectionPolicy::default()
+        .prioritize(InputSelectionPriority::ByUtxoSize(SortOrder::Ascending))
+        .set_lustration_acceptance(true);
+    let survives_fork = tx_with_n_outputs(bob.clone(), 1, now, Some(input_policy), None, None)
         .await
         .unwrap();
     bob.lock_guard_mut()
         .await
-        .mempool_insert((*straddling.transaction).clone(), UpgradePriority::Critical)
+        .mempool_insert(
+            (*survives_fork.transaction).clone(),
+            UpgradePriority::Critical,
+        )
         .await;
     let (first_epsilon_block, epsilon_composer_utxos) = mine_to_own_wallet(bob.clone(), now).await;
     assert!(
@@ -415,7 +421,7 @@ async fn blocks_across_epsilon_activation_on_main_net() {
     for _ in 0..3 {
         now += Timestamp::hours(1);
         let predecessor = bob.lock_guard().await.chain.tip().to_owned();
-        let tx = tx_with_n_outputs(bob.clone(), 24, now, Some(lustrating), None, None)
+        let tx = tx_with_n_outputs(bob.clone(), 24, now, Some(input_policy), None, None)
             .await
             .unwrap();
         let block = compose_and_guess_for_tests(&bob, vec![tx.transaction.into()], now).await;
