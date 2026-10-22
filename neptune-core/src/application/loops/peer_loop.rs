@@ -7401,7 +7401,7 @@ mod tests {
                 };
                 let mut setup = genesis_setup(cli).await;
                 let mut peer_handshake_data = setup.peer_loop_handler.peer_handshake_data;
-                peer_handshake_data.extra_data = HandshakeData::extra_data(peer_relays);
+                peer_handshake_data.extra_data = HandshakeData::extra_data(peer_relays, false);
                 setup.peer_loop_handler = PeerLoopHandler::new(
                     setup.to_main_tx.clone(),
                     setup.peer_loop_handler.global_state_lock.clone(),

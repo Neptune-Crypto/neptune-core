@@ -116,6 +116,11 @@ pub struct Args {
     #[arg(long)]
     pub restrict_peers_to_list: bool,
 
+    /// Do not serve this node's archival mutator set to peers that request
+    /// it. Serving is announced in the handshake.
+    #[arg(long)]
+    pub no_serve_archival_mutator_set: bool,
+
     /// Accept no incoming connections: listen on no port, reserve no relay
     /// slots, and run no peer loop over a connection a peer opened. Outgoing
     /// connections are unaffected.
