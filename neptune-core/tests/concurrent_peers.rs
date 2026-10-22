@@ -39,7 +39,6 @@ async fn peer_activity_does_not_stall_any_loop() -> anyhow::Result<()> {
     let mut base_args = GenesisNode::default_args().await;
     base_args.tx_proving_capability = Some(TxProvingCapability::SingleProof);
     base_args.sync_mode_threshold = 10;
-    base_args.peer_maintenance_interval = Duration::from_secs(3);
     let mut all_args = GenesisNode::instance_args_for_cluster(
         &GenesisNode::cluster_id(None),
         NUM_NODES,

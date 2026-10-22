@@ -2973,14 +2973,10 @@ impl PeerLoopHandler {
 
                 peer.send(PeerMessage::Bye).await?;
 
-                self.register_peer_disconnection();
-
                 Ok(DISCONNECT_CONNECTION)
             }
             MainToPeerTask::DisconnectAll() => {
                 peer.send(PeerMessage::Bye).await?;
-
-                self.register_peer_disconnection();
 
                 Ok(DISCONNECT_CONNECTION)
             }
@@ -3367,16 +3363,6 @@ impl PeerLoopHandler {
         // feature to have for testing purposes.
         peer_loop_result
     }
-
-    /// Register graceful peer disconnection in the global state.
-    ///
-    /// See also [`Peers::register_disconnection`](crate::state::peers::Peers::register_disconnection).
-    fn register_peer_disconnection(&self) {
-        let peer_id = self.peer_handshake_data.instance_id;
-        self.global_state_lock
-            .peers()
-            .register_disconnection(peer_id, SystemTime::now());
-    }
 }
 
 #[cfg(test)]
@@ -3717,41 +3703,6 @@ mod tests {
             state_lock.peers().len(),
             "peer map length must be back to 2 after goodbye"
         );
-
-        Ok(())
-    }
-
-    #[traced_test]
-    #[apply(shared_tokio_runtime)]
-    async fn node_does_not_record_disconnection_time_when_peer_initiates_disconnect() -> Result<()>
-    {
-        let args = cli_args::Args::default();
-        let network = args.network;
-        let (from_main_tx, from_main_rx, to_main_tx, to_main_rx, _, _, state_lock, _) =
-            get_test_genesis_setup(0, args).await?;
-
-        let peer_address_sa = get_dummy_socket_address(0);
-        let peer_address = socketaddr_to_multiaddr(peer_address_sa);
-        let peer_handshake_data = get_dummy_handshake_data_for_genesis(network);
-        let peer_id = peer_handshake_data.instance_id;
-        let mut peer_loop_handler = PeerLoopHandler::new(
-            to_main_tx,
-            state_lock.clone(),
-            pseudorandom_peer_id(&peer_address_sa),
-            peer_address,
-            peer_handshake_data,
-            true,
-        );
-        let mock = Mock::new(vec![Action::Read(PeerMessage::Bye)]);
-        peer_loop_handler.run_wrapper(mock, from_main_rx).await?;
-
-        assert!(state_lock
-            .peers()
-            .last_disconnection_time(peer_id)
-            .is_none());
-
-        drop(to_main_rx);
-        drop(from_main_tx);
 
         Ok(())
     }

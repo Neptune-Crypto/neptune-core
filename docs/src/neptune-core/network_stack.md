@@ -198,7 +198,6 @@ The following network-related flags or arguments are available when starting `ne
  - `--max-connections-per-prefix <number>` (default 8) caps the number of inbound connections accepted from one address prefix (/24 for IPv4, /64 for IPv6).
  - `--max-connection-attempts-per-ip-per-minute <number>` (default 6) caps the rate of inbound connection attempts from one IP, refused attempts included.
  - `--disable-relay-server` stops the node from offering relay reservations to peers behind NATs. The node can still use other nodes as relays.
- - `--bootstrap` makes the node act as a bootstrapper for legacy peers: an incoming connection over the legacy network stack is accepted even when the peer limit is reached, and the longest-lived peer (other than those given with `--peer`) is disconnected to make room. The `NetworkActor` does not presently honor this flag; it advertises it in the handshake only.
  - `--quic-port` instructs the `NetworkActor` on which port to listen for UDP connections.
  - `--tcp-port` instructs the `NetworkActor` on which port to listen for TCP connections.
  - `--peer-listen-addr` instructs the `NetworkActor` on which IP to listen for connections.

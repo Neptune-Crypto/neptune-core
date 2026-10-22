@@ -7,10 +7,8 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::net::IpAddr;
-use std::sync::Mutex;
 use std::sync::PoisonError;
 use std::sync::RwLock;
-use std::time::SystemTime;
 
 use anyhow::Result;
 use libp2p::PeerId;
@@ -18,7 +16,6 @@ use neptune_database::create_db_if_missing;
 use neptune_database::NeptuneLevelDb;
 use neptune_database::WriteBatchAsync;
 use neptune_p2p::peer::peer_info::PeerInfo;
-use neptune_p2p::peer::InstanceId;
 use neptune_p2p::peer::PeerSanction;
 use neptune_p2p::peer::PeerStanding;
 use neptune_p2p::peer::StandingExceedsBanThreshold;
@@ -33,12 +30,6 @@ pub type PeerMap = HashMap<PeerId, PeerInfo>;
 /// duration of a closure. The standings database needs no lock.
 pub struct Peers {
     connected: RwLock<PeerMap>,
-
-    /// Times of graceful disconnections that this node initiated, by the
-    /// disconnected peer's instance ID. Consulted before reconnecting to a
-    /// peer. Disconnections initiated by the peer, or abrupt ones, are not
-    /// recorded.
-    disconnection_times: Mutex<HashMap<InstanceId, SystemTime>>,
 
     // Storing IP addresses is, according to this answer, not a violation of
     // GDPR: https://law.stackexchange.com/a/28609/45846
@@ -57,7 +48,6 @@ impl Peers {
     pub(crate) fn new(standings: NeptuneLevelDb<IpAddr, PeerStanding>) -> Self {
         Self {
             connected: RwLock::new(PeerMap::new()),
-            disconnection_times: Mutex::new(HashMap::new()),
             standings,
         }
     }
@@ -175,28 +165,12 @@ impl Peers {
     pub(crate) async fn flush(&self) {
         self.standings.clone().flush().await;
     }
-
-    /// Register the time of a graceful disconnection from a peer that this
-    /// node initiated.
-    pub(crate) fn register_disconnection(&self, id: InstanceId, time: SystemTime) {
-        self.disconnection_times
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(id, time);
-    }
-
-    /// When this node last disconnected gracefully from the peer, if ever.
-    pub(crate) fn last_disconnection_time(&self, id: InstanceId) -> Option<SystemTime> {
-        self.disconnection_times
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(&id)
-            .copied()
-    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::time::SystemTime;
+
     use neptune_p2p::peer::NegativePeerSanction;
     use neptune_wallet::wallet_entropy::WalletEntropy;
 

@@ -2,7 +2,6 @@ pub(crate) mod network_event_handler;
 pub mod proof_upgrader;
 
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::net::IpAddr;
 use std::process::Command;
 use std::process::Stdio;
@@ -34,7 +33,6 @@ use neptune_p2p::peer::transaction_notification::TransactionNotification;
 use neptune_primitives::timestamp::Timestamp;
 use proof_upgrader::get_upgrade_task_from_mempool;
 use proof_upgrader::UpgradeJob;
-use rand::prelude::IteratorRandom;
 use tasm_lib::prelude::Digest;
 use tokio::net::TcpListener;
 use tokio::select;
@@ -45,7 +43,6 @@ use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 use tokio::time;
-use tokio::time::Instant;
 use tokio::time::MissedTickBehavior;
 use tracing::debug;
 use tracing::error;
@@ -1096,56 +1093,6 @@ impl MainLoopHandler {
         Ok(())
     }
 
-    /// If necessary, disconnect from peers.
-    ///
-    /// While a reasonable effort is made to never have more connections than
-    /// [`max_num_peers`](crate::application::config::cli_args::Args::max_num_peers),
-    /// this is not guaranteed.
-    ///
-    /// Never disconnects peers listed as CLI arguments.
-    fn prune_peers(&self) {
-        // copy the connected peers; don't hold the lock
-        let cli_args = self.global_state_lock.cli();
-        let connected_peers = self
-            .global_state_lock
-            .peers()
-            .snapshot()
-            .into_iter()
-            .collect_vec();
-
-        let num_peers = connected_peers.len();
-        let max_num_peers = cli_args.max_num_peers;
-        if num_peers <= max_num_peers {
-            debug!("No need to prune any peer connections.");
-            return;
-        }
-        warn!("Connected to {num_peers} peers, which exceeds the maximum ({max_num_peers}).");
-
-        // If all connections are outbound, it's OK to exceed the max.
-        if connected_peers
-            .iter()
-            .all(|(_, p)| p.connection_is_outbound())
-        {
-            warn!("Not disconnecting from any peer because all connections are outbound.");
-            return;
-        }
-
-        let num_peers_to_disconnect = num_peers - max_num_peers;
-        let cli_peers = cli_args.peers.iter().collect::<HashSet<_>>();
-        let peers_to_disconnect = connected_peers
-            .into_iter()
-            .filter(|(_, peer)| !cli_peers.contains(&peer.address()))
-            .sample(&mut rand::rng(), num_peers_to_disconnect);
-        match peers_to_disconnect.len() {
-            0 => warn!("Not disconnecting from any peer because of manual override."),
-            i => info!("Disconnecting from {i} peers."),
-        }
-        for (peer_id, _) in peers_to_disconnect {
-            let pmsg = MainToPeerTask::Disconnect(peer_id);
-            self.main_to_peer_broadcast(pmsg);
-        }
-    }
-
     /// Scheduled task for upgrading the proofs of transactions in the mempool.
     ///
     /// Will either perform a merge of two transactions supported with single
@@ -1295,15 +1242,6 @@ impl MainLoopHandler {
         // is almost certainly a no-op.
         // Similarly, tasks performing network operations (e.g., peer discovery)
         // should probably not try to “catch up” if some ticks were missed.
-
-        // Don't run peer maintenance immediately at startup since the
-        // initial connections may not have been established yet.
-        let peer_maintenance_period = self.global_state_lock.cli().peer_maintenance_interval;
-        let mut peer_maintenance_interval = time::interval_at(
-            Instant::now() + peer_maintenance_period,
-            peer_maintenance_period,
-        );
-        peer_maintenance_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         let mut block_sync_interval = time::interval(SYNC_REQUEST_INTERVAL);
         block_sync_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -1500,15 +1438,6 @@ impl MainLoopHandler {
                         continue;
                     };
                     main_loop_state.maybe_sync_loop = self.handle_sync_loop_message(sync_loop_msg, sync_loop).await;
-                }
-
-                // Keep the number of peers as configured. Connecting to peers
-                // is handled by the libp2p actor.
-                _ = peer_maintenance_interval.tick() => {
-                    log_slow_scope!(fn_name!() + "::select::peer_maintenance_interval");
-
-                    debug!("Timer: peer maintenance job");
-                    self.prune_peers();
                 }
 
                 // Clean up mempool: remove stale / too old transactions
@@ -2934,74 +2863,6 @@ mod tests {
                 },
                 other => panic!("Must have sent transaction notification to peer loop after successful proof upgrade. Got:\n{other:?}"),
             }
-        }
-    }
-
-    mod peer_discovery {
-        use super::*;
-
-        #[apply(shared_tokio_runtime)]
-        #[traced_test]
-        async fn prune_peers_too_many_connections() {
-            let num_init_peers_outgoing = 10;
-            let num_init_peers_incoming = 4;
-            let TestSetup {
-                mut main_loop_handler,
-                mut main_to_peer_rx,
-                ..
-            } = setup(
-                num_init_peers_outgoing,
-                num_init_peers_incoming,
-                cli_args::Args::default(),
-            )
-            .await;
-
-            let mocked_cli = cli_args::Args {
-                max_num_peers: num_init_peers_outgoing as usize,
-                ..Default::default()
-            };
-
-            main_loop_handler
-                .global_state_lock
-                .set_cli(mocked_cli)
-                .await;
-
-            main_loop_handler.prune_peers();
-            assert_eq!(4, main_to_peer_rx.len());
-            for _ in 0..4 {
-                let peer_msg = main_to_peer_rx.recv().await.unwrap();
-                assert!(matches!(peer_msg, MainToPeerTask::Disconnect(_)))
-            }
-        }
-
-        #[apply(shared_tokio_runtime)]
-        #[traced_test]
-        async fn prune_peers_not_too_many_connections() {
-            let num_init_peers_outgoing = 10;
-            let num_init_peers_incoming = 1;
-            let TestSetup {
-                mut main_loop_handler,
-                main_to_peer_rx,
-                ..
-            } = setup(
-                num_init_peers_outgoing,
-                num_init_peers_incoming,
-                cli_args::Args::default(),
-            )
-            .await;
-
-            let mocked_cli = cli_args::Args {
-                max_num_peers: 200,
-                ..Default::default()
-            };
-
-            main_loop_handler
-                .global_state_lock
-                .set_cli(mocked_cli)
-                .await;
-
-            main_loop_handler.prune_peers();
-            assert!(main_to_peer_rx.is_empty());
         }
     }
 
