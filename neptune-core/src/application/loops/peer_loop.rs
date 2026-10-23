@@ -16,6 +16,7 @@ use futures::stream::TryStreamExt;
 use futures::FutureExt;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
+use neptune_archive::archival_state::ArchivalState;
 use neptune_consensus::block::block_header::BlockHeader;
 use neptune_consensus::block::block_header::BlockHeaderWithBlockHashWitness;
 use neptune_consensus::block::block_header::HeaderToBlockHashWitness;
@@ -33,12 +34,16 @@ use neptune_mempool::tx_admission;
 use neptune_mempool::tx_admission::TxAdmissionError;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_mutator_set::removal_record::RemovalRecordValidityError;
+use neptune_mutator_set::shared::NUM_TRIALS;
 use neptune_p2p::peer::handshake_data::HandshakeData;
 use neptune_p2p::peer::peer_block_notifications::PeerBlockNotification;
 use neptune_p2p::peer::peer_info::PeerConnectionInfo;
 use neptune_p2p::peer::peer_info::PeerInfo;
 use neptune_p2p::peer::transfer_block::TransferBlock;
 use neptune_p2p::peer::transfer_link_tx::TransferLinkTx;
+use neptune_p2p::peer::ArchivalMutatorSetDownload;
+use neptune_p2p::peer::ArchivalMutatorSetFrame;
+use neptune_p2p::peer::ArchivalMutatorSetRequest;
 use neptune_p2p::peer::BlockProposalRequest;
 use neptune_p2p::peer::BlockRequestBatch;
 use neptune_p2p::peer::BlockWithParentAccumulator;
@@ -53,6 +58,7 @@ use neptune_p2p::peer::PositivePeerSanction;
 use neptune_p2p::peer::SyncChallenge;
 use neptune_p2p::peer::TransferConnectionStatus;
 use neptune_p2p::peer::ValidatedBlockRequestByHeight;
+use neptune_p2p::peer::ARCHIVAL_MUTATOR_SET_FRAME_BYTES;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::mast_hash::MastHash;
 use neptune_primitives::timestamp::Timestamp;
@@ -140,6 +146,20 @@ fn is_transport_error(err: &(dyn std::error::Error + 'static)) -> bool {
 #[derive(Debug, thiserror::Error)]
 #[error("peer refused the connection: {0:?}")]
 pub(crate) struct PeerRefused(pub(crate) ConnectionRefusedReason);
+
+/// The most hashes, as a power of two, this node spends on a request for a
+/// peer's archival mutator set, whatever the peer announces.
+const MAX_ARCHIVAL_MUTATOR_SET_WORK: u8 = 27;
+
+/// The most bytes a streamed archival mutator set can take with the leaf
+/// counts of the given accumulator: the AOCL leafs, the chunks with their
+/// removal indices, of which each addition can cause at most `NUM_TRIALS`,
+/// plus the window and the sync label.
+fn archival_mutator_set_max_stream_len(expected: &MutatorSetAccumulator) -> u64 {
+    let additions = expected.aocl.num_leafs();
+    let chunks = expected.swbf_inactive.num_leafs();
+    (41 + 4 * u64::from(NUM_TRIALS)) * additions + 16 * chunks + 4 * 1024 * 1024
+}
 
 /// Handles messages from peers via TCP
 ///
@@ -1182,6 +1202,152 @@ impl PeerLoopHandler {
             PeerMessage::TipWithParentAccumulator(_) => {
                 // This node never requests one.
                 debug!("Ignoring unsolicited tip with parent accumulator");
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            PeerMessage::ArchivalMutatorSetRequest(request) => {
+                log_slow_scope!(fn_name!() + "::PeerMessage::ArchivalMutatorSetRequest");
+
+                if self.global_state_lock.cli().no_serve_archival_mutator_set {
+                    debug!("Not serving the archival mutator set");
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                let work = self.global_state_lock.cli().archival_mutator_set_work();
+                let requester = self.peer_handshake_data.instance_id;
+                let server = self.global_state_lock.lock_guard().await.net.instance_id;
+                if !request.meets(requester, server, ArchivalMutatorSetRequest::target(work)) {
+                    self.punish(NegativePeerSanction::ArchivalMutatorSetRequest(1))
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                info!("Serving archival mutator set. Taking snapshot.");
+                let snapshot = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .chain
+                    .archival_state()
+                    .snapshot_mutator_set(request.block_hash)
+                    .await?;
+                let Some((path, total_len)) = snapshot else {
+                    debug!(
+                        "Not serving the archival mutator set as of {}: not synced to it",
+                        request.block_hash
+                    );
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                };
+
+                info!("Snapshot completed. Now serving.");
+
+                // Punishment is relative to total size of the AMS.
+                let frames = ArchivalMutatorSetRequest::num_frames(total_len);
+                self.punish(NegativePeerSanction::ArchivalMutatorSetRequest(frames))
+                    .await?;
+                if request.offset >= total_len {
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+                let len = std::cmp::min(
+                    total_len - request.offset,
+                    ARCHIVAL_MUTATOR_SET_FRAME_BYTES as u64,
+                );
+                let bytes =
+                    ArchivalState::read_stream_frame(&path, request.offset, len as usize).await?;
+                let frame = ArchivalMutatorSetFrame {
+                    block_hash: request.block_hash,
+                    total_len,
+                    offset: request.offset,
+                    bytes,
+                };
+                peer.send(PeerMessage::ArchivalMutatorSet(Box::new(frame)))
+                    .await?;
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            PeerMessage::ArchivalMutatorSet(frame) => {
+                log_slow_scope!(fn_name!() + "::PeerMessage::ArchivalMutatorSet");
+
+                let Some(download) = peer_state_info.archival_mutator_set_download else {
+                    debug!("Ignoring unsolicited archival mutator set frame");
+                    self.punish(NegativePeerSanction::UnwantedMessage).await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                };
+                if frame.block_hash != download.block_hash
+                    || frame.offset != download.next_offset
+                    || frame.bytes.len() > ARCHIVAL_MUTATOR_SET_FRAME_BYTES
+                {
+                    warn!("Ignoring archival mutator set frame that does not fit the download");
+                    self.punish(NegativePeerSanction::UnwantedMessage).await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // The accumulator after the block is what the set must match,
+                // and it bounds the set's size.
+                let expected = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .chain
+                    .mutator_set_after_by_block_hash(frame.block_hash)
+                    .await;
+                let Some(expected) = expected else {
+                    warn!("Dropping archival mutator set download: block unknown");
+                    peer_state_info.archival_mutator_set_download = None;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                };
+                if frame.total_len > archival_mutator_set_max_stream_len(&expected) {
+                    warn!("Archival mutator set larger than the block allows");
+                    peer_state_info.archival_mutator_set_download = None;
+                    self.punish(NegativePeerSanction::InvalidArchivalMutatorSet)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                let received = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .chain
+                    .archival_state()
+                    .receive_mutator_set_frame(frame.block_hash, frame.offset, &frame.bytes)
+                    .await?;
+                info!("Received share of archival mutator set");
+
+                if received < frame.total_len {
+                    peer_state_info.archival_mutator_set_download =
+                        Some(ArchivalMutatorSetDownload {
+                            next_offset: received,
+                            ..download
+                        });
+                    let request = ArchivalMutatorSetRequest {
+                        block_hash: download.block_hash,
+                        nonce: download.nonce,
+                        offset: received,
+                    };
+                    peer.send(PeerMessage::ArchivalMutatorSetRequest(request))
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                info!("Received full archival mutator set. Now validating.");
+                peer_state_info.archival_mutator_set_download = None;
+                let valid = self
+                    .global_state_lock
+                    .lock_guard_mut()
+                    .await
+                    .chain
+                    .archival_state_mut()
+                    .import_mutator_set(frame.block_hash, expected)
+                    .await?;
+                if !valid {
+                    warn!("Archival mutator set received from peer does not validate");
+                    self.punish(NegativePeerSanction::InvalidArchivalMutatorSet)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+                info!(
+                    "Adopted the archival mutator set as of block {} from peer",
+                    frame.block_hash
+                );
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::BlockNotificationRequest => {
@@ -2906,6 +3072,48 @@ impl PeerLoopHandler {
                     debug!("Sending {}", notification.get_type());
                     peer.send(notification).await?;
                 }
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            MainToPeerTask::RequestArchivalMutatorSet {
+                target_peer,
+                block_hash,
+            } => {
+                log_slow_scope!(fn_name!() + "::MainToPeerTask::RequestArchivalMutatorSet");
+                if target_peer != self.peer_id {
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                let Some(work) = self.peer_handshake_data.archival_mutator_set_work() else {
+                    warn!("Peer announces no archival mutator set ticket work; not asking");
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                };
+                if work > MAX_ARCHIVAL_MUTATOR_SET_WORK {
+                    warn!("Peer wants 2^{work} hashes for its archival mutator set; not asking");
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // Keep node responsive while finding the nonce.
+                let requester = self.global_state_lock.lock_guard().await.net.instance_id;
+                let server = self.peer_handshake_data.instance_id;
+                let target = ArchivalMutatorSetRequest::target(work);
+                let request = tokio::task::spawn_blocking(move || {
+                    ArchivalMutatorSetRequest::solve(
+                        block_hash,
+                        0,
+                        requester,
+                        server,
+                        target,
+                        Digest::default(),
+                    )
+                })
+                .await?;
+                peer_state_info.archival_mutator_set_download = Some(ArchivalMutatorSetDownload {
+                    block_hash,
+                    nonce: request.nonce,
+                    next_offset: 0,
+                });
+                peer.send(PeerMessage::ArchivalMutatorSetRequest(request))
+                    .await?;
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             MainToPeerTask::RequestBlockByHeight {
@@ -6569,6 +6777,449 @@ mod tests {
         }
     }
 
+    mod archival_mutator_set {
+        use neptune_archive::archival_state::ArchivalState;
+        use neptune_p2p::peer::ArchivalMutatorSetFrame;
+        use neptune_p2p::peer::ArchivalMutatorSetRequest;
+        use tasm_lib::prelude::Tip5;
+
+        use super::block_proposals::genesis_setup;
+        use super::block_proposals::TestSetup;
+        use super::*;
+
+        const NETWORK: Network = Network::RegTest;
+
+        /// Four blocks on genesis, the same every time, enough outputs for
+        /// the inactive filter to hold chunks.
+        async fn blocks() -> [Block; 4] {
+            fake_valid_sequence_of_blocks_for_tests(
+                &Block::genesis(NETWORK),
+                Timestamp::hours(1),
+                StdRng::seed_from_u64(5550020).random(),
+                NETWORK,
+            )
+            .await
+        }
+
+        /// A node that applied the blocks, and the first frame it serves for
+        /// the last of them.
+        async fn serving_node(cli: cli_args::Args) -> (TestSetup, ArchivalMutatorSetFrame) {
+            let mut setup = genesis_setup(cli).await;
+            for block in blocks().await {
+                setup
+                    .peer_loop_handler
+                    .global_state_lock
+                    .set_new_tip(block)
+                    .await
+                    .unwrap();
+            }
+            let tip_hash = setup
+                .peer_loop_handler
+                .global_state_lock
+                .lock_guard()
+                .await
+                .chain
+                .tip_hash();
+            let frames = frames_of(&setup, tip_hash, 1).await;
+            assert_eq!(1, frames.len(), "the set fits one frame");
+            (setup, frames[0].clone())
+        }
+
+        /// The set of `setup` as of `block_hash`, cut into `parts` frames.
+        async fn frames_of(
+            setup: &TestSetup,
+            block_hash: Digest,
+            parts: u64,
+        ) -> Vec<ArchivalMutatorSetFrame> {
+            let (path, total_len) = setup
+                .peer_loop_handler
+                .global_state_lock
+                .lock_guard()
+                .await
+                .chain
+                .archival_state()
+                .snapshot_mutator_set(block_hash)
+                .await
+                .unwrap()
+                .unwrap();
+            let frame_len = usize::try_from(total_len.div_ceil(parts)).unwrap();
+            let mut frames = vec![];
+            let mut offset = 0;
+            while offset < total_len {
+                let bytes = ArchivalState::read_stream_frame(&path, offset, frame_len)
+                    .await
+                    .unwrap();
+                frames.push(ArchivalMutatorSetFrame {
+                    block_hash,
+                    total_len,
+                    offset,
+                    bytes: bytes.clone(),
+                });
+                offset += bytes.len() as u64;
+            }
+            frames
+        }
+
+        /// A request to `setup` that meets its target.
+        async fn request_from(setup: &TestSetup, block_hash: Digest) -> ArchivalMutatorSetRequest {
+            let work = setup
+                .peer_loop_handler
+                .global_state_lock
+                .cli()
+                .archival_mutator_set_work();
+            ArchivalMutatorSetRequest::solve(
+                block_hash,
+                0,
+                setup.peer_loop_handler.peer_handshake_data.instance_id,
+                own_instance_id(setup).await,
+                ArchivalMutatorSetRequest::target(work),
+                Digest::default(),
+            )
+        }
+
+        async fn own_instance_id(setup: &TestSetup) -> neptune_p2p::peer::InstanceId {
+            setup
+                .peer_loop_handler
+                .global_state_lock
+                .lock_guard()
+                .await
+                .net
+                .instance_id
+        }
+
+        fn standing(setup: &TestSetup) -> i32 {
+            setup
+                .peer_loop_handler
+                .global_state_lock
+                .peers()
+                .with_connected(|connected| {
+                    connected[&setup.peer_loop_handler.peer_id]
+                        .standing
+                        .standing
+                })
+        }
+
+        /// A node that stored the blocks without applying them, as a node
+        /// syncing without the set would, connected to a peer that serves
+        /// its set for no work.
+        async fn receiving_node() -> TestSetup {
+            let mut setup = genesis_setup(cli_args::Args::default_with_network(NETWORK)).await;
+            setup.peer_loop_handler.peer_handshake_data.extra_data =
+                HandshakeData::extra_data(true, true, 0);
+            for block in blocks().await {
+                setup
+                    .peer_loop_handler
+                    .global_state_lock
+                    .lock_guard_mut()
+                    .await
+                    .chain
+                    .archival_state_mut()
+                    .write_block_not_tip(&block)
+                    .await
+                    .unwrap();
+            }
+            setup
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn the_set_is_served_once_and_adopted_after_validation() {
+            let (mut sender, frame) =
+                serving_node(cli_args::Args::default_with_network(NETWORK)).await;
+            let tip_hash = frame.block_hash;
+            let request = request_from(&sender, tip_hash).await;
+            let sender_standing_before = standing(&sender);
+
+            // One download costs 500; a second one bans before it is served.
+            let mock = Mock::new(vec![
+                Action::Read(PeerMessage::ArchivalMutatorSetRequest(request)),
+                Action::Write(PeerMessage::ArchivalMutatorSet(Box::new(frame.clone()))),
+                Action::Read(PeerMessage::ArchivalMutatorSetRequest(request)),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let banned = sender
+                .peer_loop_handler
+                .run(
+                    mock,
+                    sender.from_main_rx.resubscribe(),
+                    &mut sender.peer_state,
+                )
+                .await;
+            assert!(banned.is_err(), "the second download must ban");
+            assert!(standing(&sender) <= sender_standing_before - 1000);
+
+            // The receiver asks, gets the frame, validates and adopts.
+            let mut receiver = receiving_node().await;
+            let receiver_standing_before = standing(&receiver);
+            let expected = blocks().await[3].mutator_set_accumulator_after().unwrap();
+            let own_request = ArchivalMutatorSetRequest::solve(
+                tip_hash,
+                0,
+                own_instance_id(&receiver).await,
+                receiver.peer_loop_handler.peer_handshake_data.instance_id,
+                ArchivalMutatorSetRequest::target(0),
+                Digest::default(),
+            );
+            let mut receiver_mock = Mock::new(vec![
+                Action::Write(PeerMessage::ArchivalMutatorSetRequest(own_request)),
+                Action::Read(PeerMessage::ArchivalMutatorSet(Box::new(frame))),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let target_peer = receiver.peer_loop_handler.peer_id;
+            receiver
+                .peer_loop_handler
+                .handle_main_task_message(
+                    MainToPeerTask::RequestArchivalMutatorSet {
+                        target_peer,
+                        block_hash: tip_hash,
+                    },
+                    &mut receiver_mock,
+                    &mut receiver.peer_state,
+                )
+                .await
+                .unwrap();
+            receiver
+                .peer_loop_handler
+                .run(
+                    receiver_mock,
+                    receiver.from_main_rx.resubscribe(),
+                    &mut receiver.peer_state,
+                )
+                .await
+                .unwrap();
+
+            let state = receiver
+                .peer_loop_handler
+                .global_state_lock
+                .lock_guard()
+                .await;
+            let set = &state.chain.archival_state().archival_mutator_set;
+            assert_eq!(tip_hash, set.get_sync_label());
+            assert_eq!(expected.hash(), set.ams().accumulator().await.hash());
+            assert_eq!(
+                receiver_standing_before,
+                standing(&receiver),
+                "an honest download is not punished"
+            );
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn a_set_in_several_frames_is_asked_for_frame_by_frame_and_adopted() {
+            let (sender, _frame) =
+                serving_node(cli_args::Args::default_with_network(NETWORK)).await;
+            let tip_hash = blocks().await[3].hash();
+            let frames = frames_of(&sender, tip_hash, 3).await;
+            assert_eq!(3, frames.len());
+
+            // A download that died earlier left a file behind.
+            let mut receiver = receiving_node().await;
+            receiver
+                .peer_loop_handler
+                .global_state_lock
+                .lock_guard()
+                .await
+                .chain
+                .archival_state()
+                .receive_mutator_set_frame(tip_hash, 0, b"left behind")
+                .await
+                .unwrap();
+
+            let first_request = ArchivalMutatorSetRequest::solve(
+                tip_hash,
+                0,
+                own_instance_id(&receiver).await,
+                receiver.peer_loop_handler.peer_handshake_data.instance_id,
+                ArchivalMutatorSetRequest::target(0),
+                Digest::default(),
+            );
+            let mut actions = vec![];
+            for frame in frames {
+                let request = ArchivalMutatorSetRequest {
+                    offset: frame.offset,
+                    ..first_request
+                };
+                actions.push(Action::Write(PeerMessage::ArchivalMutatorSetRequest(
+                    request,
+                )));
+                actions.push(Action::Read(PeerMessage::ArchivalMutatorSet(Box::new(
+                    frame,
+                ))));
+            }
+            actions.push(Action::Read(PeerMessage::Bye));
+            let mut mock = Mock::new(actions);
+            let target_peer = receiver.peer_loop_handler.peer_id;
+            receiver
+                .peer_loop_handler
+                .handle_main_task_message(
+                    MainToPeerTask::RequestArchivalMutatorSet {
+                        target_peer,
+                        block_hash: tip_hash,
+                    },
+                    &mut mock,
+                    &mut receiver.peer_state,
+                )
+                .await
+                .unwrap();
+            receiver
+                .peer_loop_handler
+                .run(
+                    mock,
+                    receiver.from_main_rx.resubscribe(),
+                    &mut receiver.peer_state,
+                )
+                .await
+                .unwrap();
+
+            let expected = blocks().await[3].mutator_set_accumulator_after().unwrap();
+            let state = receiver
+                .peer_loop_handler
+                .global_state_lock
+                .lock_guard()
+                .await;
+            let set = &state.chain.archival_state().archival_mutator_set;
+            assert_eq!(tip_hash, set.get_sync_label());
+            assert_eq!(expected.hash(), set.ams().accumulator().await.hash());
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn a_tampered_set_bans_the_sender_and_changes_nothing() {
+            let (_sender, mut frame) =
+                serving_node(cli_args::Args::default_with_network(NETWORK)).await;
+            let tip_hash = frame.block_hash;
+            let middle = frame.bytes.len() / 2;
+            frame.bytes[middle] ^= 0xff;
+
+            let mut receiver = receiving_node().await;
+            let genesis_hash = Block::genesis(NETWORK).hash();
+            let own_request = ArchivalMutatorSetRequest::solve(
+                tip_hash,
+                0,
+                own_instance_id(&receiver).await,
+                receiver.peer_loop_handler.peer_handshake_data.instance_id,
+                ArchivalMutatorSetRequest::target(0),
+                Digest::default(),
+            );
+            let mut mock = Mock::new(vec![
+                Action::Write(PeerMessage::ArchivalMutatorSetRequest(own_request)),
+                Action::Read(PeerMessage::ArchivalMutatorSet(Box::new(frame))),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let target_peer = receiver.peer_loop_handler.peer_id;
+            receiver
+                .peer_loop_handler
+                .handle_main_task_message(
+                    MainToPeerTask::RequestArchivalMutatorSet {
+                        target_peer,
+                        block_hash: tip_hash,
+                    },
+                    &mut mock,
+                    &mut receiver.peer_state,
+                )
+                .await
+                .unwrap();
+            let banned = receiver
+                .peer_loop_handler
+                .run(
+                    mock,
+                    receiver.from_main_rx.resubscribe(),
+                    &mut receiver.peer_state,
+                )
+                .await;
+            assert!(banned.is_err(), "an invalid set must ban");
+            assert!(standing(&receiver) <= -1000);
+
+            let state = receiver
+                .peer_loop_handler
+                .global_state_lock
+                .lock_guard()
+                .await;
+            let set = &state.chain.archival_state().archival_mutator_set;
+            assert_eq!(genesis_hash, set.get_sync_label());
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn one_frame_costs_the_whole_download() {
+            let (mut sender, frame) =
+                serving_node(cli_args::Args::default_with_network(NETWORK)).await;
+            let standing_before = standing(&sender);
+            let request = request_from(&sender, frame.block_hash).await;
+            let mock = Mock::new(vec![
+                Action::Read(PeerMessage::ArchivalMutatorSetRequest(request)),
+                Action::Write(PeerMessage::ArchivalMutatorSet(Box::new(frame))),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            sender
+                .peer_loop_handler
+                .run(
+                    mock,
+                    sender.from_main_rx.resubscribe(),
+                    &mut sender.peer_state,
+                )
+                .await
+                .unwrap();
+            assert_eq!(standing_before - 500, standing(&sender));
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn a_peer_that_wants_too_much_work_is_not_asked() {
+            let mut receiver = receiving_node().await;
+            receiver.peer_loop_handler.peer_handshake_data.extra_data =
+                HandshakeData::extra_data(true, true, MAX_ARCHIVAL_MUTATOR_SET_WORK + 1);
+            let mut mock = Mock::new(vec![]);
+            let target_peer = receiver.peer_loop_handler.peer_id;
+            receiver
+                .peer_loop_handler
+                .handle_main_task_message(
+                    MainToPeerTask::RequestArchivalMutatorSet {
+                        target_peer,
+                        block_hash: Block::genesis(NETWORK).hash(),
+                    },
+                    &mut mock,
+                    &mut receiver.peer_state,
+                )
+                .await
+                .unwrap();
+            assert!(receiver.peer_state.archival_mutator_set_download.is_none());
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn a_ticket_below_the_target_costs_a_whole_download_and_serves_nothing() {
+            let mut cli = cli_args::Args::default_with_network(NETWORK);
+            cli.archival_mutator_set_work = Some(10);
+            let (mut sender, frame) = serving_node(cli).await;
+            let standing_before = standing(&sender);
+
+            // Walk the nonce on from a solution until it misses the target.
+            let mut request = request_from(&sender, frame.block_hash).await;
+            let requester = sender.peer_loop_handler.peer_handshake_data.instance_id;
+            let server = own_instance_id(&sender).await;
+            let target = ArchivalMutatorSetRequest::target(10);
+            while request.meets(requester, server, target) {
+                request.nonce = Tip5::hash(&request.nonce);
+            }
+
+            let mock = Mock::new(vec![
+                Action::Read(PeerMessage::ArchivalMutatorSetRequest(request)),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            sender
+                .peer_loop_handler
+                .run(
+                    mock,
+                    sender.from_main_rx.resubscribe(),
+                    &mut sender.peer_state,
+                )
+                .await
+                .unwrap();
+            assert_eq!(standing_before - 500, standing(&sender));
+        }
+    }
+
     mod transactions {
         use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
         use neptune_consensus::proof_abstractions::triton_vm_job_queue::vm_job_queue;
@@ -7401,7 +8052,7 @@ mod tests {
                 };
                 let mut setup = genesis_setup(cli).await;
                 let mut peer_handshake_data = setup.peer_loop_handler.peer_handshake_data;
-                peer_handshake_data.extra_data = HandshakeData::extra_data(peer_relays);
+                peer_handshake_data.extra_data = HandshakeData::extra_data(peer_relays, false, 0);
                 setup.peer_loop_handler = PeerLoopHandler::new(
                     setup.to_main_tx.clone(),
                     setup.peer_loop_handler.global_state_lock.clone(),

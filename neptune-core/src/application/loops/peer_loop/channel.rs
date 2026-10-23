@@ -23,6 +23,14 @@ pub(crate) enum MainToPeerTask {
         target_peer: PeerId,
         height: BlockHeight,
     },
+
+    /// Ask one peer for its archival mutator set as of a block. Reserved for
+    /// nodes that sync without downloading all blocks.
+    #[allow(dead_code)]
+    RequestArchivalMutatorSet {
+        target_peer: PeerId,
+        block_hash: Digest,
+    },
     RequestBlockNotification,
 
     /// sanction a peer for failing to respond to sync request
@@ -69,6 +77,7 @@ impl MainToPeerTask {
         match self {
             MainToPeerTask::Block(_) => "block",
             MainToPeerTask::RequestBlockByHeight { .. } => "req block by height",
+            MainToPeerTask::RequestArchivalMutatorSet { .. } => "req archival mutator set",
             MainToPeerTask::PeerSynchronizationTimeout(_) => "peer sync timeout",
             MainToPeerTask::TransactionNotification(_) => "transaction notification",
             MainToPeerTask::LinkTxNotification(_) => "link tx notification",
@@ -90,6 +99,7 @@ impl MainToPeerTask {
             MainToPeerTask::Block(_) => true,
             MainToPeerTask::BlockProposalNotification(_) => true,
             MainToPeerTask::RequestBlockByHeight { .. } => true,
+            MainToPeerTask::RequestArchivalMutatorSet { .. } => true,
             MainToPeerTask::PeerSynchronizationTimeout(_) => true,
             MainToPeerTask::TransactionNotification(_) => true,
             MainToPeerTask::LinkTxNotification(_) => true,

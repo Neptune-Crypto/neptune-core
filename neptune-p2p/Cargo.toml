@@ -33,6 +33,7 @@ anyhow = { version = "1.0", features = ["backtrace"] }
 arbitrary = { version = "1.4.1", features = ["derive"], optional = true }
 arraystring = { version = "0.3.0", features = ["serde-traits"] }
 itertools = "0.14"
+rayon = "1.10"
 libp2p-identity = "0.3.0"
 multiaddr = "0.19.0"
 multihash = "0.19.5"

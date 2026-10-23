@@ -210,6 +210,18 @@ impl DataDirectory {
             .join(Path::new(MUTATOR_SET_DIRECTORY_NAME))
     }
 
+    /// Where snapshots of the mutator set database are kept while peers
+    /// download them.
+    pub fn mutator_set_snapshot_dir_path(&self) -> PathBuf {
+        self.database_dir_path().join("mutator_set_snapshot")
+    }
+
+    /// Where a mutator set received from a peer is kept until it is
+    /// validated and adopted.
+    pub fn mutator_set_import_dir_path(&self) -> PathBuf {
+        self.database_dir_path().join("mutator_set_import")
+    }
+
     ///////////////////////////////////////////////////////////////////////////
     ///
     /// The archival block MMR database directory path

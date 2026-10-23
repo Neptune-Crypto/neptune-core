@@ -93,6 +93,19 @@ const TX_RELAY_FLAG_POSITION: usize = 0;
 const NO_TX_RELAY: char = '0';
 const TX_RELAY: char = '1';
 
+/// Flag bits at this position, encoded as `'0'` plus the bits, so that up to
+/// four flags share one character and it stays printable.
+const FLAG_BITS_POSITION: usize = 1;
+const FLAG_BITS_BASE: u8 = b'0';
+
+/// Set if the node serves its archival mutator set on request.
+const AMS_SERVING_BIT: u8 = 0x01;
+
+/// The hashes, as a power of two, a request for the node's archival mutator
+/// set must represent, at this position, encoded as `'0'` plus the power.
+const AMS_WORK_POSITION: usize = 2;
+const AMS_WORK_BASE: u8 = b'0';
+
 /// Datastruct defining the handshake peers exchange when establishing a new
 /// connection.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -139,20 +152,49 @@ pub enum HandshakeValidationError {
 }
 
 impl HandshakeData {
-    /// The flags of a node that does or does not relay transactions.
-    pub fn extra_data(relay_transactions: bool) -> ExtraDataString {
+    /// Flags describing node behavior.
+    ///
+    /// Whether transactions are relayed, whether archival mutator sets are
+    /// served, and what the proof-of-work cost for serving it is.
+    pub fn extra_data(
+        relay_transactions: bool,
+        serves_archival_mutator_set: bool,
+        archival_mutator_set_work: u8,
+    ) -> ExtraDataString {
         let tx_relay_flag = if relay_transactions {
             TX_RELAY
         } else {
             NO_TX_RELAY
         };
-        ExtraDataString::from_chars([tx_relay_flag])
+        let mut flag_bits = FLAG_BITS_BASE;
+        if serves_archival_mutator_set {
+            flag_bits |= AMS_SERVING_BIT;
+        }
+        let work = char::from(AMS_WORK_BASE + archival_mutator_set_work);
+        ExtraDataString::from_chars([tx_relay_flag, char::from(flag_bits), work])
     }
 
     /// Whether the peer accepts transactions and their announcements. It
     /// announces and serves its own transactions either way.
     pub fn relays_transactions(&self) -> bool {
         self.extra_data.chars().nth(TX_RELAY_FLAG_POSITION) != Some(NO_TX_RELAY)
+    }
+
+    /// Whether the peer serves its archival mutator set on request. Peers
+    /// that predate the flag do not.
+    pub fn serves_archival_mutator_set(&self) -> bool {
+        match self.extra_data.chars().nth(FLAG_BITS_POSITION) {
+            Some(flag_bits) if flag_bits.is_ascii() => flag_bits as u8 & AMS_SERVING_BIT != 0,
+            _ => false,
+        }
+    }
+
+    /// The hashes, as a power of two, the peer wants a ticket for its
+    /// archival mutator set to represent. `None` from peers that predate
+    /// the field.
+    pub fn archival_mutator_set_work(&self) -> Option<u8> {
+        let work = self.extra_data.chars().nth(AMS_WORK_POSITION)?;
+        u8::try_from(work).ok()?.checked_sub(AMS_WORK_BASE)
     }
 
     /// Determine whether two handshakes are compatible, up to everything that
@@ -351,9 +393,9 @@ mod tests {
     fn tx_relay_flag_is_the_first_character_of_the_extra_data(
         #[strategy(HandshakeData::arbitrary())] mut handshake: HandshakeData,
     ) {
-        handshake.extra_data = HandshakeData::extra_data(true);
+        handshake.extra_data = HandshakeData::extra_data(true, false, 0);
         prop_assert!(handshake.relays_transactions());
-        handshake.extra_data = HandshakeData::extra_data(false);
+        handshake.extra_data = HandshakeData::extra_data(false, false, 0);
         prop_assert!(!handshake.relays_transactions());
 
         // Peers that predate the flag send no extra data.
@@ -373,6 +415,33 @@ mod tests {
                 extra_data
             );
         }
+    }
+
+    #[test]
+    fn flags_round_trip() {
+        use proptest::strategy::Strategy;
+        use proptest::strategy::ValueTree;
+        use proptest::test_runner::TestRunner;
+
+        let mut runner = TestRunner::deterministic();
+        let mut handshake = HandshakeData::arbitrary()
+            .new_tree(&mut runner)
+            .unwrap()
+            .current();
+        for relays in [false, true] {
+            for serves in [false, true] {
+                for work in [0, 26, 63] {
+                    handshake.extra_data = HandshakeData::extra_data(relays, serves, work);
+                    assert_eq!(relays, handshake.relays_transactions());
+                    assert_eq!(serves, handshake.serves_archival_mutator_set());
+                    assert_eq!(Some(work), handshake.archival_mutator_set_work());
+                }
+            }
+        }
+
+        // Peers that predate the field announce no work.
+        handshake.extra_data = ExtraDataString::from_chars("10".chars());
+        assert_eq!(None, handshake.archival_mutator_set_work());
     }
 
     #[test]
