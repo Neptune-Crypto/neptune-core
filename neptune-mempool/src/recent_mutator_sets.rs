@@ -170,6 +170,16 @@ impl RecentMutatorSets {
             .map(|position| &self.entries[position].mutator_set)
     }
 
+    /// Return the mutator set after the specified block.
+    pub fn mutator_set_by_block_digest(&self, block_hash: Digest) -> Option<MutatorSetAccumulator> {
+        let position = self
+            .entries
+            .iter()
+            .position(|entry| entry.block_hash == block_hash)?;
+
+        Some(self.entries[position].mutator_set.to_owned())
+    }
+
     /// Bring removal records forward from the mutator set with the given
     /// hash to the tip. The caller must have validated them against the
     /// former. The returned records validate against the tip and are all
@@ -337,6 +347,10 @@ mod tests {
             assert_eq!(expected, window.depth_of(msh(block)), "block {i}");
             assert_eq!(expected.is_some(), window.contains(msh(block)));
             assert_eq!(expected.is_some(), window.mutator_set(msh(block)).is_some());
+            assert_eq!(
+                expected.is_some(),
+                window.mutator_set_by_block_digest(block.hash()).is_some()
+            );
         }
     }
 
