@@ -117,6 +117,36 @@ impl BlockchainState {
         self.light_state().recent_mutator_sets()
     }
 
+    /// Return the mutator set after the specified block has been applied.
+    pub async fn mutator_set_after_by_block_hash(
+        &self,
+        block_hash: Digest,
+    ) -> Option<MutatorSetAccumulator> {
+        // First look in light state.
+        if let Some(msa) = self
+            .light_state()
+            .recent_mutator_sets()
+            .mutator_set_by_block_digest(block_hash)
+        {
+            return Some(msa);
+        }
+
+        // Then look in archival state, if one such is maintained
+        if !self.is_archival_node() {
+            return None;
+        }
+
+        self.archival_state()
+            .get_block(block_hash)
+            .await
+            .expect("Reading from archival state must work")
+            .map(|block| {
+                block
+                    .mutator_set_accumulator_after()
+                    .expect("Stored block must have valid MS after")
+            })
+    }
+
     /// Block height of current tip.
     pub fn tip_height(&self) -> BlockHeight {
         self.tip().header().height
