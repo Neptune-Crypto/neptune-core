@@ -284,6 +284,11 @@ impl Drop for DbIntMut {
 
                 // now we own the `Arc`, so we can drop it, and `DB` with it.
                 if let Some(db_arc) = db_opt {
+                    // Leave the files to the last handle; a clone is
+                    // dropped after every asynchronous write.
+                    if Arc::strong_count(&db_arc) > 1 {
+                        return;
+                    }
                     drop(db_arc);
                 }
             }

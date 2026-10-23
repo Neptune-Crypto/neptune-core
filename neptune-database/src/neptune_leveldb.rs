@@ -118,6 +118,26 @@ where
         self.database.put_u8(key, value).unwrap()
     }
 
+    fn iter_u8(&self) -> impl Iterator<Item = (Vec<u8>, Vec<u8>)> + '_ {
+        self.database.iter(&ReadOptions::new())
+    }
+
+    fn batch_write_u8(&mut self, entries: &[(Vec<u8>, Vec<u8>)]) {
+        let batch = WriteBatch::new();
+        for (key, value) in entries {
+            batch.put(key, value);
+        }
+        self.database.write(&batch, true).unwrap();
+    }
+
+    fn batch_delete_u8(&mut self, keys: &[Vec<u8>]) {
+        let batch = WriteBatch::new();
+        for key in keys {
+            batch.delete(key);
+        }
+        self.database.write(&batch, true).unwrap();
+    }
+
     fn batch_write(&mut self, entries: WriteBatchAsync<Key, Value>) {
         let batch = WriteBatch::new();
         for op in entries.0 {
@@ -243,26 +263,70 @@ where
         }))
     }
 
-    /// Open or create a new or existing database asynchronously
-    pub async fn new(db_path: &Path, options: &Options) -> Result<Self> {
+    /// Open or create a new or existing database asynchronously.
+    pub fn new(
+        db_path: &Path,
+        options: &Options,
+    ) -> impl std::future::Future<Output = Result<Self>> + Send + use<Key, Value> {
+        // The options are converted before the future is made, so that the
+        // future is `Send` although `Options` holds raw pointers.
         let options_async = OptionsAsync::from(options);
         let path = db_path.to_path_buf();
-        debug!(
-            "Attempting to open new wallet database from: {}",
-            path.to_string_lossy()
-        );
+        async move {
+            debug!(
+                "Attempting to open new wallet database from: {}",
+                path.to_string_lossy()
+            );
 
-        let db =
-            task::spawn_blocking(move || NeptuneLevelDbInternal::new(&path, &options_async.into()))
-                .await??;
+            let db = task::spawn_blocking(move || {
+                NeptuneLevelDbInternal::new(&path, &options_async.into())
+            })
+            .await??;
 
-        Ok(Self(db))
+            Ok(Self(db))
+        }
     }
 
     /// Get database value asynchronously
     pub async fn get(&self, key: Key) -> Option<Value> {
         let inner = self.0.clone();
         task::spawn_blocking(move || inner.get(key)).await.unwrap()
+    }
+
+    /// Every key-value pair as stored, one at a time. Blocks on the
+    /// database, so use it from a blocking context.
+    pub fn iter_u8(&self) -> impl Iterator<Item = (Vec<u8>, Vec<u8>)> + '_ {
+        self.0.iter_u8()
+    }
+
+    /// Overwrites the current database with that of `source`.
+    ///
+    /// Done in batches such that memory consumption stays small. Blocking.
+    pub fn replace_contents_blocking(&mut self, source: &Self) {
+        const BATCH: usize = 4096;
+
+        // Delete
+        let snapshot = self.0.clone();
+        let mut keys = Vec::with_capacity(BATCH);
+        for (key, _) in snapshot.iter_u8() {
+            keys.push(key);
+            if keys.len() == BATCH {
+                self.0.batch_delete_u8(&keys);
+                keys.clear();
+            }
+        }
+        self.0.batch_delete_u8(&keys);
+
+        // Write
+        let mut pairs = Vec::with_capacity(BATCH);
+        for pair in source.iter_u8() {
+            pairs.push(pair);
+            if pairs.len() == BATCH {
+                self.0.batch_write_u8(&pairs);
+                pairs.clear();
+            }
+        }
+        self.0.batch_write_u8(&pairs);
     }
 
     pub async fn get_u8(&self, key: Vec<u8>) -> Option<Vec<u8>> {

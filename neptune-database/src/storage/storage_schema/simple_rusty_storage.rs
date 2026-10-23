@@ -98,11 +98,7 @@ impl SimpleRustyStorage {
         );
     }
 
-    /// Obtain a reference to the underlying db. For tests only.
-    ///
-    /// Exposed cross-crate (e.g. neptune-core's migration tests) via the
-    /// `test-helpers` feature; not part of the normal public API.
-    #[cfg(any(test, feature = "test-helpers"))]
+    /// Obtain a reference to the underlying db.
     pub fn db(&self) -> &NeptuneLevelDb<RustyKey, RustyValue> {
         &self.db
     }
