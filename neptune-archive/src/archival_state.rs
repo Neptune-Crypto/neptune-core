@@ -2,7 +2,9 @@ use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ops::DerefMut;
+use std::path::Path;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use anyhow::Result;
 use anyhow::bail;
@@ -139,6 +141,163 @@ impl ArchivalState {
         .await?;
 
         Ok(block_index)
+    }
+
+    /// The snapshot of the archival mutator set as of `block_hash`, as a
+    /// stream file, with its length.
+    ///
+    /// Made now if state is synced to that block and the snapshot doesn't
+    /// exist yet. `None` if either isn't satisfied. Snapshots of old blocks
+    /// are deleted.
+    pub async fn snapshot_mutator_set(&self, block_hash: Digest) -> Result<Option<(PathBuf, u64)>> {
+        /// Numbers the partial files, one per writer.
+        static SNAPSHOT_WRITERS: std::sync::atomic::AtomicU64 =
+            std::sync::atomic::AtomicU64::new(0);
+
+        const DELETE_OLD_SNAPSHOT_THRESHOLD: Duration = Duration::from_secs(45 * 60);
+        let dir = self.data_dir.mutator_set_snapshot_dir_path();
+        DataDirectory::create_dir_if_not_exists(&dir).await?;
+        let path = dir.join(format!("{}.bin", block_hash.to_hex()));
+        if let Ok(metadata) = tokio::fs::metadata(&path).await {
+            return Ok(Some((path, metadata.len())));
+        }
+
+        if self.archival_mutator_set.get_sync_label() != block_hash {
+            return Ok(None);
+        }
+
+        let mut stale = tokio::fs::read_dir(&dir).await?;
+        while let Some(entry) = stale.next_entry().await? {
+            let deprecated = entry
+                .metadata()
+                .await?
+                .modified()?
+                .elapsed()
+                .is_ok_and(|age| age > DELETE_OLD_SNAPSHOT_THRESHOLD);
+            if deprecated {
+                tokio::fs::remove_file(entry.path()).await?;
+            }
+        }
+
+        // Stream the archive into a file that becomes visible only when it is
+        // completed. Another peer loop may be doing the same at the same
+        // time; each writes its own file, and the last rename wins.
+        let writer = SNAPSHOT_WRITERS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let db = self.archival_mutator_set.db();
+        let partial = path.with_extension(format!("partial-{writer}"));
+        let destination = partial.clone();
+        let written = tokio::task::spawn_blocking(move || {
+            let mut writer = std::io::BufWriter::new(std::fs::File::create(&destination)?);
+            let written = RustyArchivalMutatorSet::write_leafs(&db, &mut writer)?;
+            std::io::Write::flush(&mut writer)?;
+            Ok::<u64, std::io::Error>(written)
+        })
+        .await??;
+        tokio::fs::rename(&partial, &path).await?;
+        Ok(Some((path, written)))
+    }
+
+    /// Up to `len` bytes of a stream file from `offset`.
+    pub async fn read_stream_frame(path: &Path, offset: u64, len: usize) -> Result<Vec<u8>> {
+        let mut file = tokio::fs::File::open(path).await?;
+        file.seek(SeekFrom::Start(offset)).await?;
+        let mut bytes = vec![0u8; len];
+        let mut read = 0;
+        while read < len {
+            let n = tokio::io::AsyncReadExt::read(&mut file, &mut bytes[read..]).await?;
+            if n == 0 {
+                break;
+            }
+            read += n;
+        }
+        bytes.truncate(read);
+        Ok(bytes)
+    }
+
+    /// Append a received frame of a mutator set stream to the import file
+    /// for `block_hash`, which must be `offset` bytes long. Returns the new
+    /// length.
+    pub async fn receive_mutator_set_frame(
+        &self,
+        block_hash: Digest,
+        offset: u64,
+        bytes: &[u8],
+    ) -> Result<u64> {
+        let dir = self.data_dir.mutator_set_import_dir_path();
+        DataDirectory::create_dir_if_not_exists(&dir).await?;
+        let path = dir.join(format!("{}.bin", block_hash.to_hex()));
+        // A frame at offset 0 starts the import over, whatever a download
+        // that died left behind.
+        if offset == 0 {
+            tokio::fs::write(&path, bytes).await?;
+            return Ok(bytes.len() as u64);
+        }
+        let mut file = tokio::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .await?;
+        let current_len = file.metadata().await?.len();
+        ensure!(
+            current_len == offset,
+            "frame at offset {offset} does not continue the {current_len} bytes received"
+        );
+        file.write_all(bytes).await?;
+        Ok(current_len + bytes.len() as u64)
+    }
+
+    /// Adopt the mutator set received for `block_hash` if it validates
+    /// against `expected`, the accumulator after that block. The set is
+    /// rebuilt in a database of its own first and only then copied over
+    /// the live set. The import directory is removed either way.
+    pub async fn import_mutator_set(
+        &mut self,
+        block_hash: Digest,
+        expected: MutatorSetAccumulator,
+    ) -> Result<bool> {
+        let dir = self.data_dir.mutator_set_import_dir_path();
+        let stream_path = dir.join(format!("{}.bin", block_hash.to_hex()));
+        let candidate_db_path = dir.join("candidate");
+
+        // The candidate is rebuilt from the stream in a database of its
+        // own, in a task of its own so that malformed data panics nothing
+        // else. The file is local, so reading it blocks only briefly.
+        let open = {
+            let options = create_db_if_missing();
+            NeptuneLevelDb::new(&candidate_db_path, &options)
+        };
+        let mut candidate = RustyArchivalMutatorSet::connect(open.await?).await;
+        candidate.restore_or_new().await;
+        let rebuilt = tokio::spawn(async move {
+            let mut reader = std::io::BufReader::new(std::fs::File::open(&stream_path)?);
+            candidate.read_leafs(&mut reader).await?;
+            let valid = candidate.get_sync_label() == block_hash
+                && candidate.ams().accumulator().await.hash() == expected.hash();
+            Ok::<_, std::io::Error>(valid.then(|| candidate.db()))
+        })
+        .await;
+        let valid_db = match rebuilt {
+            Ok(Ok(valid_db)) => valid_db,
+            Ok(Err(error)) => {
+                warn!("Received archival mutator set does not decode: {error}");
+                None
+            }
+            Err(_) => {
+                warn!("Rebuilding the received archival mutator set panicked");
+                None
+            }
+        };
+        let valid = valid_db.is_some();
+        if let Some(candidate_db) = valid_db {
+            let mut live = self.archival_mutator_set.db();
+            let reconnect = live.clone();
+            tokio::task::spawn_blocking(move || live.replace_contents_blocking(&candidate_db))
+                .await?;
+            self.archival_mutator_set = RustyArchivalMutatorSet::connect(reconnect).await;
+            self.archival_mutator_set.restore_or_new().await;
+        }
+        tokio::fs::remove_dir_all(&dir).await?;
+        Ok(valid)
     }
 
     /// Initialize an `ArchivalMutatorSet` by opening or creating its databases.
@@ -2522,6 +2681,92 @@ mod tests {
         let _rams = ArchivalState::initialize_mutator_set(&data_dir)
             .await
             .unwrap();
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn mutator_set_stream_is_served_and_received_in_frames() {
+        let network = Network::Main;
+        let mut archival_state = make_test_archival_state(network, false).await;
+        let genesis = Block::genesis(network);
+        let (path, total_len) = archival_state
+            .snapshot_mutator_set(genesis.hash())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            archival_state
+                .snapshot_mutator_set(random())
+                .await
+                .unwrap()
+                .is_none(),
+            "only the block the set is synced to"
+        );
+
+        // Frames of any size reassemble the stream, and nothing lies beyond
+        // its end.
+        let frame_len = usize::try_from(total_len.div_ceil(3)).unwrap();
+        let mut frames = vec![];
+        let mut offset = 0;
+        while offset < total_len {
+            let bytes = ArchivalState::read_stream_frame(&path, offset, frame_len)
+                .await
+                .unwrap();
+            offset += bytes.len() as u64;
+            frames.push(bytes);
+        }
+        assert_eq!(3, frames.len());
+        assert_eq!(tokio::fs::read(&path).await.unwrap(), frames.concat());
+        assert!(
+            ArchivalState::read_stream_frame(&path, total_len, frame_len)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+
+        // A frame at offset 0 starts over what a dead download left; a frame
+        // that does not continue the file is refused.
+        archival_state
+            .receive_mutator_set_frame(genesis.hash(), 0, b"left behind")
+            .await
+            .unwrap();
+        let mut received = 0;
+        for frame in &frames {
+            assert!(
+                archival_state
+                    .receive_mutator_set_frame(genesis.hash(), received + 1, frame)
+                    .await
+                    .is_err()
+            );
+            received = archival_state
+                .receive_mutator_set_frame(genesis.hash(), received, frame)
+                .await
+                .unwrap();
+        }
+        assert_eq!(total_len, received);
+
+        // What was served is adopted.
+        let expected = genesis.mutator_set_accumulator_after().unwrap();
+        assert!(
+            archival_state
+                .import_mutator_set(genesis.hash(), expected.clone())
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            expected.hash(),
+            archival_state
+                .archival_mutator_set
+                .ams()
+                .accumulator()
+                .await
+                .hash()
+        );
+        assert!(
+            !tokio::fs::try_exists(archival_state.data_dir.mutator_set_import_dir_path())
+                .await
+                .unwrap()
+        );
     }
 
     #[traced_test]
