@@ -464,7 +464,11 @@ impl NetworkActor {
         };
 
         // Configure Kademlia
-        let kad_config = libp2p::kad::Config::new(Self::kademlia_protocol(network));
+        // The default 16 KiB packet limit rejects most FIND_NODE responses:
+        // peers behind relays accumulate many circuit addresses, and observed
+        // responses on mainnet reach 50 KB.
+        let mut kad_config = libp2p::kad::Config::new(Self::kademlia_protocol(network));
+        kad_config.set_max_packet_size(256 * 1024);
 
         // Build Swarm
         let upgraded_peers = Arc::new(Mutex::new(HashSet::new()));
