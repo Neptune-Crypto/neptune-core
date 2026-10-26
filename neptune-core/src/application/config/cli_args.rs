@@ -116,6 +116,17 @@ pub struct Args {
     #[arg(long)]
     pub restrict_peers_to_list: bool,
 
+    /// Do not serve this node's archival mutator set to peers that request
+    /// it. Serving is announced in the handshake.
+    #[arg(long)]
+    pub no_serve_archival_mutator_set: bool,
+
+    /// Hashes, as a power of two, a peer must spend on a request to download
+    /// this node's archival mutator set. Announced in the handshake. Defaults
+    /// to a value per network.
+    #[arg(long, value_parser = clap::value_parser!(u8).range(..=63))]
+    pub archival_mutator_set_work: Option<u8>,
+
     /// Accept no incoming connections: listen on no port, reserve no relay
     /// slots, and run no peer loop over a connection a peer opened. Outgoing
     /// connections are unaffected.
@@ -891,6 +902,13 @@ impl Args {
             job_settings: ProverJobSettings::from(self),
             cancel_job_rx: None,
         }
+    }
+
+    /// Hashes, as a power of two, a peer must spend on a request to download
+    /// this node's archival mutator set.
+    pub fn archival_mutator_set_work(&self) -> u8 {
+        let default = if self.network.use_mock_proof() { 0 } else { 26 };
+        self.archival_mutator_set_work.unwrap_or(default)
     }
 
     /// Get the proving capability CLI argument or estimate it if it is not set.

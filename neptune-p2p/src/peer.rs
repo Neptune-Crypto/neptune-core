@@ -1,3 +1,4 @@
+pub mod archival_mutator_set_request;
 pub mod handshake_data;
 pub mod link_tx_notification;
 pub mod peer_block_notifications;
@@ -13,6 +14,9 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use std::time::SystemTime;
 
+use archival_mutator_set_request::ArchivalMutatorSetDownload;
+use archival_mutator_set_request::ArchivalMutatorSetFrame;
+use archival_mutator_set_request::ArchivalMutatorSetRequest;
 use handshake_data::HandshakeData;
 use itertools::Itertools;
 use link_tx_notification::LinkTxNotification;
@@ -141,6 +145,15 @@ pub enum NegativePeerSanction {
 
     /// More block requests than the node serves one peer per minute.
     ExcessiveBlockRequests,
+
+    /// A frame of the archival mutator set was requested. Carries the number
+    /// of frames the whole set takes, so that one download costs the same
+    /// whatever its size, and a second one within the standing window bans the
+    /// peer.
+    ArchivalMutatorSetRequest(u64),
+
+    /// The archival mutator set the peer sent does not validate.
+    InvalidArchivalMutatorSet,
 }
 
 /// The reason for improving a peer's standing
@@ -205,6 +218,11 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::InvalidSyncCoverage => -100,
             NegativePeerSanction::StalledRequest => -1,
             NegativePeerSanction::ExcessiveBlockRequests => -1,
+            NegativePeerSanction::InvalidArchivalMutatorSet => -1000,
+            NegativePeerSanction::ArchivalMutatorSetRequest(frames) => {
+                let frames = u32::try_from(std::cmp::max(frames, 1)).unwrap_or(u32::MAX);
+                -i32::try_from(500_u32.div_ceil(frames)).unwrap_or(i32::MAX)
+            }
         }
     }
 }
@@ -586,6 +604,13 @@ pub enum PeerMessage {
 
     /// Response to [`PeerMessage::TipWithParentAccumulatorRequest`].
     TipWithParentAccumulator(Box<BlockWithParentAccumulator>),
+
+    /// Request one frame of the receiver's archival mutator set as of a
+    /// block, paid for with proof of work. Punished on receipt.
+    ArchivalMutatorSetRequest(ArchivalMutatorSetRequest),
+
+    /// Response to [`PeerMessage::ArchivalMutatorSetRequest`].
+    ArchivalMutatorSet(Box<ArchivalMutatorSetFrame>),
     // New variants must be added here at the bottom to be backwards compatible.
 }
 
@@ -626,13 +651,15 @@ impl PeerMessageKind {
             | Self::LinkTxNotification
             | Self::LinkTxRequest
             | Self::BlockNotificationWithPowWitness
-            | Self::TipWithParentAccumulatorRequest => 64 * KIB,
+            | Self::TipWithParentAccumulatorRequest
+            | Self::ArchivalMutatorSetRequest => 64 * KIB,
             Self::BlockRequestBatch | Self::PeerListResponse | Self::SyncCoverage => 2 * MIB,
             Self::Block
             | Self::BlockProposal
             | Self::ValidatedBlock
             | Self::TipWithParentAccumulator => 20 * MIB,
             Self::LinkTx => 64 * MIB,
+            Self::ArchivalMutatorSet => 65 * MIB,
             Self::Transaction | Self::SyncChallengeResponse => 270 * MIB,
             Self::BlockResponseBatch => return None,
         };
@@ -655,6 +682,8 @@ impl PeerMessage {
             PeerMessage::BlockRequestByHeight(_) => "block req by height",
             PeerMessage::BlockRequestByHash(_) => "block req by hash",
             PeerMessage::TipWithParentAccumulatorRequest => "tip with parent accumulator req",
+            PeerMessage::ArchivalMutatorSetRequest(_) => "archival mutator set req",
+            PeerMessage::ArchivalMutatorSet(_) => "archival mutator set",
             PeerMessage::BlockRequestBatch(_) => "block req batch",
             PeerMessage::BlockResponseBatch(_) => "block resp batch",
             PeerMessage::Transaction(_) => "send",
@@ -691,6 +720,8 @@ impl PeerMessage {
             PeerMessage::BlockRequestByHeight(_) => false,
             PeerMessage::BlockRequestByHash(_) => false,
             PeerMessage::TipWithParentAccumulatorRequest => false,
+            PeerMessage::ArchivalMutatorSetRequest(_) => false,
+            PeerMessage::ArchivalMutatorSet(_) => false,
             PeerMessage::BlockRequestBatch(_) => false,
             PeerMessage::BlockResponseBatch(_) => true,
             PeerMessage::Transaction(_) => false,
@@ -727,6 +758,8 @@ impl PeerMessage {
             PeerMessage::BlockRequestByHeight(_) => false,
             PeerMessage::BlockRequestByHash(_) => false,
             PeerMessage::TipWithParentAccumulatorRequest => false,
+            PeerMessage::ArchivalMutatorSetRequest(_) => true,
+            PeerMessage::ArchivalMutatorSet(_) => false,
             PeerMessage::BlockRequestBatch(_) => false,
             PeerMessage::BlockResponseBatch(_) => false,
             PeerMessage::Transaction(_) => true,
@@ -764,6 +797,8 @@ impl PeerMessage {
             PeerMessage::BlockRequestByHeight(_) => true,
             PeerMessage::BlockRequestByHash(_) => true,
             PeerMessage::TipWithParentAccumulatorRequest => true,
+            PeerMessage::ArchivalMutatorSetRequest(_) => true,
+            PeerMessage::ArchivalMutatorSet(_) => true,
             PeerMessage::BlockRequestBatch(_) => true,
             PeerMessage::BlockResponseBatch(_) => true,
             PeerMessage::UnableToSatisfyBatchRequest => true,
@@ -797,6 +832,9 @@ pub struct MutablePeerState {
     pub fork_reconciliation_blocks: Vec<Block>,
     pub sync_challenge: Option<IssuedSyncChallenge>,
 
+    /// Set when an archival mutator set is being downloaded from this peer.
+    pub archival_mutator_set_download: Option<ArchivalMutatorSetDownload>,
+
     /// Timestamp for the last successful sync challenge response.
     ///
     /// Used to prevent issuing multiple sync challenges in short succession.
@@ -809,6 +847,7 @@ impl MutablePeerState {
             highest_shared_block_height: block_height,
             fork_reconciliation_blocks: vec![],
             sync_challenge: None,
+            archival_mutator_set_download: None,
             successful_sync_challenge_response_time: None,
         }
     }
@@ -1211,6 +1250,8 @@ impl rand::distr::Distribution<NegativePeerSanction> for rand::distr::StandardUn
             41 => NegativePeerSanction::InvalidSyncCoverage,
             42 => NegativePeerSanction::StalledRequest,
             43 => NegativePeerSanction::ExcessiveBlockRequests,
+            44 => NegativePeerSanction::ArchivalMutatorSetRequest(rng.random_range(1..=100)),
+            45 => NegativePeerSanction::InvalidArchivalMutatorSet,
 
             _ => unreachable!(),
         }
@@ -1285,16 +1326,36 @@ mod tests {
     use super::*;
 
     #[test]
+    fn archival_mutator_set_request_sanctions_sum_to_the_whole_download() {
+        for frames in 1..=100u64 {
+            let per_frame = NegativePeerSanction::ArchivalMutatorSetRequest(frames).severity();
+            let whole = per_frame * i32::try_from(frames).unwrap();
+            assert!(whole <= -500, "{frames} frames cost {whole}");
+            assert!(whole > -500 - i32::try_from(frames).unwrap());
+        }
+        assert_eq!(
+            -500,
+            NegativePeerSanction::ArchivalMutatorSetRequest(0).severity()
+        );
+    }
+
+    #[test]
     fn message_kinds_are_the_tags_on_the_wire() {
         let messages = [
             PeerMessage::Bye,
             PeerMessage::BlockRequestByHeight(BlockHeight::genesis()),
             PeerMessage::TipWithParentAccumulatorRequest,
+            PeerMessage::ArchivalMutatorSetRequest(ArchivalMutatorSetRequest {
+                block_hash: Digest::default(),
+                nonce: Digest::default(),
+                offset: 0,
+            }),
         ];
         let expected = [
             PeerMessageKind::Bye,
             PeerMessageKind::BlockRequestByHeight,
             PeerMessageKind::TipWithParentAccumulatorRequest,
+            PeerMessageKind::ArchivalMutatorSetRequest,
         ];
         for (message, kind) in messages.into_iter().zip(expected) {
             let bincode = bincode::DefaultOptions::new().serialize(&message).unwrap();

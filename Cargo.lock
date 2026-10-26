@@ -3742,6 +3742,7 @@ dependencies = [
 name = "neptune-archival-mutator-set"
 version = "0.19.2"
 dependencies = [
+ "bincode",
  "itertools",
  "macro_rules_attr",
  "neptune-archival-mmr",
@@ -4107,6 +4108,7 @@ dependencies = [
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.10.3",
+ "rayon",
  "semver",
  "serde",
  "serde_json",
