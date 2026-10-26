@@ -138,11 +138,19 @@ impl RustyArchivalMutatorSet {
         Ok(written)
     }
 
-    /// Build an archival mutator set from the output of [`Self::write_leafs`].
+    /// Build an archival mutator set from the output of [`Self::write_leafs`],
+    /// stopping as soon as it holds more AOCL leafs or chunks than allowed.
     ///
     /// Own archival mutator set must be empty when this is done.
-    pub async fn read_leafs(&mut self, reader: &mut impl BufRead) -> io::Result<()> {
+    pub async fn read_leafs(
+        &mut self,
+        reader: &mut impl BufRead,
+        max_aocl_leafs: u64,
+        max_chunks: u64,
+    ) -> io::Result<()> {
         let mut since_persist = 0;
+        let mut aocl_leafs = 0;
+        let mut chunks = 0;
         let mut tag = [0u8];
         loop {
             match reader.read_exact(&mut tag) {
@@ -152,10 +160,18 @@ impl RustyArchivalMutatorSet {
             }
             match tag[0] {
                 Self::AOCL_LEAF => {
+                    aocl_leafs += 1;
+                    if aocl_leafs > max_aocl_leafs {
+                        return Err(io::Error::other("more AOCL leafs than allowed"));
+                    }
                     let leaf = bincode::deserialize_from(&mut *reader).map_err(io::Error::other)?;
                     self.ams_mut().aocl.append(leaf).await;
                 }
                 Self::CHUNK => {
+                    chunks += 1;
+                    if chunks > max_chunks {
+                        return Err(io::Error::other("more chunks than allowed"));
+                    }
                     let chunk: Chunk =
                         bincode::deserialize_from(&mut *reader).map_err(io::Error::other)?;
                     self.ams_mut()
@@ -403,14 +419,32 @@ mod tests {
 
         let mut stream = Vec::new();
         RustyArchivalMutatorSet::write_leafs(&rms.db(), &mut stream).unwrap();
+        let num_chunks = rms.ams().chunks.len().await;
         let mut copy = empty_rusty_mutator_set().await;
         copy.restore_or_new().await;
-        copy.read_leafs(&mut std::io::Cursor::new(&stream))
-            .await
-            .unwrap();
+        copy.read_leafs(
+            &mut std::io::Cursor::new(&stream),
+            num_additions as u64,
+            num_chunks,
+        )
+        .await
+        .unwrap();
         assert_eq!(expected.hash(), copy.ams().accumulator().await.hash());
         assert_eq!(rms.get_sync_label(), copy.get_sync_label());
-        assert_eq!(rms.ams().chunks.len().await, copy.ams().chunks.len().await);
+        assert_eq!(num_chunks, copy.ams().chunks.len().await);
+
+        // One leaf or chunk more than allowed stops the read.
+        for (max_leafs, max_chunks) in [
+            (num_additions as u64 - 1, num_chunks),
+            (num_additions as u64, num_chunks - 1),
+        ] {
+            let mut bounded = empty_rusty_mutator_set().await;
+            bounded.restore_or_new().await;
+            assert!(bounded
+                .read_leafs(&mut std::io::Cursor::new(&stream), max_leafs, max_chunks)
+                .await
+                .is_err());
+        }
 
         // One bit flipped in the first leaf changes the hash.
         let first_leaf = bincode::serialize(&rms.ams().aocl.get_leaf_async(0).await).unwrap();
@@ -422,7 +456,11 @@ mod tests {
         let mut tampered = empty_rusty_mutator_set().await;
         tampered.restore_or_new().await;
         tampered
-            .read_leafs(&mut std::io::Cursor::new(&stream))
+            .read_leafs(
+                &mut std::io::Cursor::new(&stream),
+                num_additions as u64,
+                num_chunks,
+            )
             .await
             .unwrap();
         assert_ne!(expected.hash(), tampered.ams().accumulator().await.hash());

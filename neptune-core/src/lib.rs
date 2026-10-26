@@ -274,6 +274,7 @@ pub async fn initialize(
         cli_args.incognito,
         cli_args.new_identity,
     )?;
+    global_state_lock.lock_guard_mut().await.net.own_peer_id = identity.public().to_peer_id();
     let (channels, network_command_tx, network_event_rx) = NetworkActorChannels::setup(
         peer_task_to_main_tx.clone(),
         main_to_peer_broadcast_tx.clone(),

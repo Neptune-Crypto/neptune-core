@@ -159,6 +159,14 @@ impl ArchivalState {
         DataDirectory::create_dir_if_not_exists(&dir).await?;
         let path = dir.join(format!("{}.bin", block_hash.to_hex()));
         if let Ok(metadata) = tokio::fs::metadata(&path).await {
+            // Keep a snapshot that is being read from being deleted as old.
+            let file = tokio::fs::OpenOptions::new()
+                .append(true)
+                .open(&path)
+                .await?;
+            file.into_std()
+                .await
+                .set_modified(std::time::SystemTime::now())?;
             return Ok(Some((path, metadata.len())));
         }
 
@@ -270,7 +278,13 @@ impl ArchivalState {
         candidate.restore_or_new().await;
         let rebuilt = tokio::spawn(async move {
             let mut reader = std::io::BufReader::new(std::fs::File::open(&stream_path)?);
-            candidate.read_leafs(&mut reader).await?;
+            candidate
+                .read_leafs(
+                    &mut reader,
+                    expected.aocl.num_leafs(),
+                    expected.swbf_inactive.num_leafs(),
+                )
+                .await?;
             let valid = candidate.get_sync_label() == block_hash
                 && candidate.ams().accumulator().await.hash() == expected.hash();
             Ok::<_, std::io::Error>(valid.then(|| candidate.db()))
@@ -2681,6 +2695,40 @@ mod tests {
         let _rams = ArchivalState::initialize_mutator_set(&data_dir)
             .await
             .unwrap();
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn a_served_snapshot_counts_as_new() {
+        let network = Network::Main;
+        let archival_state = make_test_archival_state(network, false).await;
+        let genesis_hash = Block::genesis(network).hash();
+        let (path, _) = archival_state
+            .snapshot_mutator_set(genesis_hash)
+            .await
+            .unwrap()
+            .unwrap();
+        let two_hours_ago =
+            std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 60 * 60);
+        std::fs::File::options()
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(two_hours_ago)
+            .unwrap();
+
+        archival_state
+            .snapshot_mutator_set(genesis_hash)
+            .await
+            .unwrap()
+            .unwrap();
+        let age = std::fs::metadata(&path)
+            .unwrap()
+            .modified()
+            .unwrap()
+            .elapsed()
+            .unwrap();
+        assert!(age < std::time::Duration::from_secs(60));
     }
 
     #[traced_test]

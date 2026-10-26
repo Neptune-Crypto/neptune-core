@@ -1,5 +1,6 @@
 use std::time::SystemTime;
 
+use libp2p::PeerId;
 use neptune_consensus::block::block_header::BlockHeader;
 use neptune_p2p::peer::InstanceId;
 use neptune_primitives::block_height::BlockHeight;
@@ -113,6 +114,9 @@ pub struct NetworkingState {
     /// Read-only value set at random during startup.
     pub instance_id: InstanceId,
 
+    /// The node's libp2p identity, set once at startup.
+    pub own_peer_id: PeerId,
+
     /// If set to `true`, no blocks, block proposals, or transactions will be
     /// sent from this client, or accepted from peers.
     /// Only the RPC server may update this flag.
@@ -125,6 +129,7 @@ impl NetworkingState {
             sync_anchor: None,
             sync_status: SyncStatus::Unknown,
             instance_id: rng().random(),
+            own_peer_id: PeerId::random(),
             freeze: false,
         }
     }
