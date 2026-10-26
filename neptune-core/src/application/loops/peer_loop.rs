@@ -3084,11 +3084,11 @@ impl PeerLoopHandler {
                 }
 
                 let Some(work) = self.peer_handshake_data.archival_mutator_set_work() else {
-                    warn!("Peer announces no archival mutator set ticket work; not asking");
+                    warn!("Peer does not serve archival mutator set. Not asking.");
                     return Ok(KEEP_CONNECTION_ALIVE);
                 };
                 if work > MAX_ARCHIVAL_MUTATOR_SET_WORK {
-                    warn!("Peer wants 2^{work} hashes for its archival mutator set; not asking");
+                    warn!("Peer wants 2^{work} hashes for archival mutator set. Not asking.");
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
@@ -6905,7 +6905,7 @@ mod tests {
         async fn receiving_node() -> TestSetup {
             let mut setup = genesis_setup(cli_args::Args::default_with_network(NETWORK)).await;
             setup.peer_loop_handler.peer_handshake_data.extra_data =
-                HandshakeData::extra_data(true, true, 0);
+                HandshakeData::extra_data(true, Some(0));
             for block in blocks().await {
                 setup
                     .peer_loop_handler
@@ -7168,7 +7168,7 @@ mod tests {
         async fn a_peer_that_wants_too_much_work_is_not_asked() {
             let mut receiver = receiving_node().await;
             receiver.peer_loop_handler.peer_handshake_data.extra_data =
-                HandshakeData::extra_data(true, true, MAX_ARCHIVAL_MUTATOR_SET_WORK + 1);
+                HandshakeData::extra_data(true, Some(MAX_ARCHIVAL_MUTATOR_SET_WORK + 1));
             let mut mock = Mock::new(vec![]);
             let target_peer = receiver.peer_loop_handler.peer_id;
             receiver
@@ -8052,7 +8052,7 @@ mod tests {
                 };
                 let mut setup = genesis_setup(cli).await;
                 let mut peer_handshake_data = setup.peer_loop_handler.peer_handshake_data;
-                peer_handshake_data.extra_data = HandshakeData::extra_data(peer_relays, false, 0);
+                peer_handshake_data.extra_data = HandshakeData::extra_data(peer_relays, None);
                 setup.peer_loop_handler = PeerLoopHandler::new(
                     setup.to_main_tx.clone(),
                     setup.peer_loop_handler.global_state_lock.clone(),

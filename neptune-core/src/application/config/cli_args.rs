@@ -121,7 +121,7 @@ pub struct Args {
     #[arg(long)]
     pub no_serve_archival_mutator_set: bool,
 
-    /// Hashes, as a power of two, a peer must spend on a ticket to download
+    /// Hashes, as a power of two, a peer must spend on a request to download
     /// this node's archival mutator set. Announced in the handshake. Defaults
     /// to a value per network.
     #[arg(long, value_parser = clap::value_parser!(u8).range(..=63))]
@@ -904,7 +904,7 @@ impl Args {
         }
     }
 
-    /// Hashes, as a power of two, a peer must spend on a ticket to download
+    /// Hashes, as a power of two, a peer must spend on a request to download
     /// this node's archival mutator set.
     pub fn archival_mutator_set_work(&self) -> u8 {
         let default = if self.network.use_mock_proof() { 0 } else { 26 };

@@ -2109,8 +2109,8 @@ impl GlobalState {
             timestamp: SystemTime::now(),
             extra_data: HandshakeData::extra_data(
                 !self.cli().blocks_only,
-                self.chain.is_archival_node() && !self.cli().no_serve_archival_mutator_set,
-                self.cli().archival_mutator_set_work(),
+                (self.chain.is_archival_node() && !self.cli().no_serve_archival_mutator_set)
+                    .then(|| self.cli().archival_mutator_set_work()),
             ),
         }
     }
