@@ -2095,6 +2095,8 @@ impl GlobalState {
 
     pub(crate) fn get_own_handshakedata(&self) -> HandshakeData {
         let listen_port = self.cli().own_listen_port();
+        let relay_transactions = !self.cli().blocks_only;
+        let serve_ams = self.chain.is_archival_node() && !self.cli().no_serve_archival_mutator_set;
         HandshakeData {
             tip_header: *self.chain.tip().header(),
             listen_port,
@@ -2108,9 +2110,8 @@ impl GlobalState {
             is_bootstrapper_node: false,
             timestamp: SystemTime::now(),
             extra_data: HandshakeData::extra_data(
-                !self.cli().blocks_only,
-                (self.chain.is_archival_node() && !self.cli().no_serve_archival_mutator_set)
-                    .then(|| self.cli().archival_mutator_set_work()),
+                relay_transactions,
+                serve_ams.then(|| self.cli().archival_mutator_set_work()),
             ),
         }
     }

@@ -146,8 +146,7 @@ pub enum HandshakeValidationError {
 }
 
 impl HandshakeData {
-    /// Flags describing node behavior: whether transactions are relayed,
-    /// and the ticket work for the archival mutator set if it is served.
+    /// Flags describing node behavior
     pub fn extra_data(
         relay_transactions: bool,
         archival_mutator_set_work: Option<u8>,
