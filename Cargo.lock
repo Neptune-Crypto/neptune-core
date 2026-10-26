@@ -494,9 +494,9 @@ checksum = "d86b93f97252c47b41663388e6d155714a9d0c398b99f1005cbc5f978b29f445"
 
 [[package]]
 name = "bfieldcodec_derive"
-version = "0.7.1"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4f7308e7d82c44dc1acb583abc3d2fc9c6453920312ef98a1c29ced05512a62"
+checksum = "31eeed2785c999e20b91158a336954133e24d7b90d6881f094b7662d27159cfe"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7227,9 +7227,9 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "twenty-first"
-version = "3.0.0"
+version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94fc33f2bb02d443dfb444a5181d8e2361295e59e8c8f84772d1572697221c1b"
+checksum = "ef2ed50b45bcb3256ed1720c73cb17f4a6779c9a4f8e972f344cb097abdf1f08"
 dependencies = [
  "arbitrary",
  "bfieldcodec_derive",
