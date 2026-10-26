@@ -1,5 +1,59 @@
 Note: (!) indicates a breaking change.
 
+## [0.19.3](https://github.com/Neptune-Crypto/neptune-core/compare/v0.19.2..v0.19.3) - 2026-10-26
+
+### ✨ Features
+
+- *(networking)* Allow DHT distribution when node is fully connected ([9bdef5e7](https://github.com/Neptune-Crypto/neptune-core/commit/9bdef5e7))
+- *(network)* Add --no-incoming, activate --restrict-peers-to-list in libp2p ([59a5848e](https://github.com/Neptune-Crypto/neptune-core/commit/59a5848e))
+- *(network)* Announce AMS sharing in handshake ([aa5146a4](https://github.com/Neptune-Crypto/neptune-core/commit/aa5146a4))
+- *(database)* Overwrite existing database with another one ([578ba42a](https://github.com/Neptune-Crypto/neptune-core/commit/578ba42a))
+- *(archival-mutator-set)* Functionality for sending and receiving AMS ([5d31d535](https://github.com/Neptune-Crypto/neptune-core/commit/5d31d535))
+- *(state)* Lookup mutator set accumulator from block digest ([13f66ec7](https://github.com/Neptune-Crypto/neptune-core/commit/13f66ec7))
+- *(network)* Communicate archival mutator set pow requirement in handshake ([7e795ff1](https://github.com/Neptune-Crypto/neptune-core/commit/7e795ff1))
+
+### 🐛 Bug Fixes
+
+- *(network)* Treat an IPv4-mapped IPv6 address as its IPv4 address ([31ed9a04](https://github.com/Neptune-Crypto/neptune-core/commit/31ed9a04))
+- *(p2p)* Cap list preallocation at a megabyte, not the announced length ([743b33b6](https://github.com/Neptune-Crypto/neptune-core/commit/743b33b6))
+- *(peer_loop)* Do not validate a block that is already stored ([4b684c5f](https://github.com/Neptune-Crypto/neptune-core/commit/4b684c5f))
+- *(mempool)* Never let a proof collection replace a single proof tx ([aac0abdd](https://github.com/Neptune-Crypto/neptune-core/commit/aac0abdd))
+- *(network)* Count block proposal and tip towards block serving limit ([504d18e2](https://github.com/Neptune-Crypto/neptune-core/commit/504d18e2))
+- *(network)* Ask the gateway first whether to accept a connection ([f4fd3aea](https://github.com/Neptune-Crypto/neptune-core/commit/f4fd3aea))
+- *(network)* Close connections whose handshake spawns no peer loop ([2a207f99](https://github.com/Neptune-Crypto/neptune-core/commit/2a207f99))
+- *(network)* Refuse bad-standing peers in run_wrapper ([5dc47c09](https://github.com/Neptune-Crypto/neptune-core/commit/5dc47c09))
+
+### 🚀 Performance
+
+- *(Archival)* Add function to check if block is stored ([c19d9f79](https://github.com/Neptune-Crypto/neptune-core/commit/c19d9f79))
+
+### 📚 Documentation
+
+- *(mining)* Clarify deprecation of memory-hardness ([87a5bf82](https://github.com/Neptune-Crypto/neptune-core/commit/87a5bf82))
+- Bring documentation in line with current code ([f7200c0c](https://github.com/Neptune-Crypto/neptune-core/commit/f7200c0c))
+- Fix stale code comments and CLI help text ([810d3e0e](https://github.com/Neptune-Crypto/neptune-core/commit/810d3e0e))
+- *(succinctness)* Explain succinctness ([4a8cf117](https://github.com/Neptune-Crypto/neptune-core/commit/4a8cf117))
+
+### ♻️ Refactor
+
+- *(mempool)* Run mutator set update last ([ac8f0a9d](https://github.com/Neptune-Crypto/neptune-core/commit/ac8f0a9d))
+- *(network)* Delete deprecated reconnect-cooldown functionality ([7b5d8426](https://github.com/Neptune-Crypto/neptune-core/commit/7b5d8426))
+
+### ⚙️ Miscellaneous
+
+- Merge([#987](https://github.com/Neptune-Crypto/neptune-core/issues/987)): Docs -- Mining, Bring Up-To-Date, Succinctness ([82a33a04](https://github.com/Neptune-Crypto/neptune-core/commit/82a33a04))
+- Cargo update ([db304e79](https://github.com/Neptune-Crypto/neptune-core/commit/db304e79))
+- Cargo update ([d71f1324](https://github.com/Neptune-Crypto/neptune-core/commit/d71f1324))
+
+### 🪢 Merge
+
+- Merge([#990](https://github.com/Neptune-Crypto/neptune-core/issues/990)): Neptune-Crypto/thv/share-ams ([b4701200](https://github.com/Neptune-Crypto/neptune-core/commit/b4701200))
+
+### 🙏 Acknowledgements
+
+- Thanks to sahad 0057 for reporting the issues fixed in [4b684c5f](https://github.com/Neptune-Crypto/neptune-core/commit/4b684c5f), [aac0abdd](https://github.com/Neptune-Crypto/neptune-core/commit/aac0abdd), [ac8f0a9d](https://github.com/Neptune-Crypto/neptune-core/commit/ac8f0a9d) and [504d18e2](https://github.com/Neptune-Crypto/neptune-core/commit/504d18e2).
+
+
 ## [0.19.2](https://github.com/Neptune-Crypto/neptune-core/compare/v0.19.1..v0.19.2) - 2026-10-16
 
 ### 🐛 Bug Fixes
