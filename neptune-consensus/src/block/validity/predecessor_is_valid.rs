@@ -361,20 +361,28 @@ impl ParentBlockInfo {
         }
     }
 
-    /// The claim's output.
+    /// The claim's output. An absent lustration status takes the width of
+    /// one, so that the fields after it keep the offsets
+    /// [`PredecessorIsValid::parse_output`] reads them at.
     pub fn encode(&self) -> Vec<BFieldElement> {
-        [
+        let output = [
             self.hash.values().to_vec(),
             self.lustration_status
                 .map(|status| status.encode())
-                .unwrap_or_default(),
+                .unwrap_or_else(|| vec![bfe!(0); LustrationStatus::static_length().unwrap()]),
             vec![self.timestamp.0],
             self.cumulative_proof_of_work.encode(),
             self.difficulty.encode(),
             self.mutator_set_hash.values().to_vec(),
             self.work_since_activation.encode(),
         ]
-        .concat()
+        .concat();
+        assert_eq!(
+            PredecessorIsValid::output_len(),
+            output.len(),
+            "Claim's output length must have expected value"
+        );
+        output
     }
 }
 
@@ -469,6 +477,11 @@ impl PredecessorIsValid {
         Self::output_mutator_set_offset() + Digest::LEN
     }
 
+    /// Number of words in the claim's output.
+    fn output_len() -> usize {
+        Self::output_work_since_activation_offset() + ProofOfWork::static_length().unwrap()
+    }
+
     /// The previous block as a claim's output describes it. None if the
     /// output does not have the layout [`Self::claim`] gives it.
     pub fn parse_output(output: &[BFieldElement]) -> Option<ParentBlockInfo> {
@@ -477,7 +490,7 @@ impl PredecessorIsValid {
         let difficulty_offset = Self::output_difficulty_offset();
         let mutator_set_offset = Self::output_mutator_set_offset();
         let work_offset = Self::output_work_since_activation_offset();
-        if output.len() != work_offset + ProofOfWork::static_length().unwrap() {
+        if output.len() != Self::output_len() {
             return None;
         }
         Some(ParentBlockInfo {
@@ -6853,10 +6866,7 @@ ones):
             let claim = own_claim(&skipping(), &prev_block, &next_body, &next_header);
             let offset = PredecessorIsValid::output_mutator_set_offset();
             let work_offset = PredecessorIsValid::output_work_since_activation_offset();
-            assert_eq!(
-                work_offset + ProofOfWork::static_length().unwrap(),
-                claim.output.len()
-            );
+            assert_eq!(PredecessorIsValid::output_len(), claim.output.len());
             assert_eq!(
                 prev_block
                     .mutator_set_accumulator_after()
