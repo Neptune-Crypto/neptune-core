@@ -1,8 +1,11 @@
 pub(crate) mod guesser_configuration;
 pub mod mock_block_generator;
 use std::cmp::max;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
+use std::time::Instant;
 
 use anyhow::bail;
 use anyhow::Result;
@@ -325,15 +328,29 @@ fn guess_worker(
         Some(version),
     );
 
+    let num_guesses = AtomicU64::new(0);
+    let guessing_started = Instant::now();
     let guess_result = pool.install(|| {
         rayon::iter::repeat(0)
             .map_init(
-                || rng_seed.map_or_else(std_rng_from_thread_rng, StdRng::seed_from_u64),
-                |rng, _i| guess_nonce_iteration(&guesser, rng, &sender),
+                || {
+                    let rng = rng_seed.map_or_else(std_rng_from_thread_rng, StdRng::seed_from_u64);
+                    (rng, 0u64)
+                },
+                |(rng, uncounted), _i| {
+                    guess_nonce_iteration(&guesser, rng, &sender, uncounted, &num_guesses)
+                },
             )
             .find_any(|r| !r.block_not_found())
             .unwrap()
     });
+
+    let seconds_guessing = guessing_started.elapsed().as_secs_f64();
+    let num_guesses = num_guesses.load(Ordering::Relaxed);
+    info!(
+        "Guessed {num_guesses} times in {seconds_guessing:.1} s: {:.2} MH/s",
+        num_guesses as f64 / seconds_guessing / 1e6
+    );
 
     let pow = match guess_result {
         GuessNonceResult::Cancelled => {
@@ -394,9 +411,18 @@ fn guess_nonce_iteration(
     guesser: &BlockGuesser,
     rng: &mut rand::rngs::StdRng,
     sender: &oneshot::Sender<NewBlockFound>,
+    uncounted_guesses: &mut u64,
+    num_guesses: &AtomicU64,
 ) -> GuessNonceResult {
     // As many roots as the CPU hashes side by side.
     let roots: [Digest; 8] = rng.random();
+
+    // Count the thread's guesses in bulk, to keep the shared counter cold.
+    *uncounted_guesses += roots.len() as u64;
+    if *uncounted_guesses >= 1 << 13 {
+        num_guesses.fetch_add(*uncounted_guesses, Ordering::Relaxed);
+        *uncounted_guesses = 0;
+    }
 
     // Check every N guesses if task has been cancelled.
     if roots[0].values()[0].raw_u64().trailing_zeros() >= 19 && sender.is_canceled() {
@@ -1209,11 +1235,21 @@ pub(crate) mod tests {
             lustration_status,
             Some(version),
         );
+        let num_guesses = AtomicU64::new(0);
         let num_iterations_run =
             rayon::iter::IntoParallelIterator::into_par_iter(0..num_iterations_launched)
-                .map_init(std_rng_from_thread_rng, |prng, _i| {
-                    guess_nonce_iteration(&guesser, prng, &worker_task_tx);
-                })
+                .map_init(
+                    || (std_rng_from_thread_rng(), 0u64),
+                    |(prng, uncounted), _i| {
+                        guess_nonce_iteration(
+                            &guesser,
+                            prng,
+                            &worker_task_tx,
+                            uncounted,
+                            &num_guesses,
+                        );
+                    },
+                )
                 .count();
         drop(worker_task_rx);
 
