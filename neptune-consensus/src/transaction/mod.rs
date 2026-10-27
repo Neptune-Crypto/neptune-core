@@ -252,7 +252,6 @@ pub(crate) mod tests {
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::block::mutator_set_update::MutatorSetUpdate;
     use crate::proof_abstractions::test_runtime::shared_tokio_runtime;
     use crate::transaction::test_helpers::make_mock_transaction;
     use crate::transaction::utxo_triple::UtxoTriple;
