@@ -1572,7 +1572,8 @@ impl TritonProgram for PredecessorIsValid {
                 dup 0 addi {amount_size} read_mem {amount_size} pop 1
                 // _ *w [prev_block_hash] *coinbase [coinbase]
 
-                dup 10 {&read_prev_block_height}
+                push {prev_epoch_alloc.read_address()} read_mem 1 pop 1
+                dup 11 {&read_prev_block_height}
                 call {block_subsidy}
                 // _ *w [prev_block_hash] *coinbase [coinbase] [block_subsidy]
 
@@ -2845,7 +2846,7 @@ mod tests {
 
                 // 2.g)
                 if let Some(coinbase) = prev_transaction_kernel.coinbase {
-                    assert!(coinbase <= Block::block_subsidy(witness.prev_block_header.height));
+                    assert!(coinbase <= prev_epoch.block_subsidy(witness.prev_block_header.height));
                 }
 
                 // 2.h)
@@ -3161,6 +3162,8 @@ mod tests {
             transaction_backdating_threshold: consensus_rule_set
                 .transaction_backdating_threshold()
                 .unwrap(),
+            speedup_log2: bfe!(0),
+            equivalent_height_offset: bfe!(0),
             lustration_counter_initial: lustration_counter_initial(),
             resets_lustration_status: bfe!(0),
             min_swbf_padded_rows: bfe!(2 << FIXTURE_LEAF_LOG2_PADDED_HEIGHT),
@@ -6127,6 +6130,46 @@ ones):
                     );
                 }
             }
+        }
+
+        #[test]
+        fn a_speedup_epoch_halves_the_subsidy() {
+            // Blocks come twice as fast from two blocks past activation on.
+            let height = activation_height().value() + 2;
+            let speedup = Epoch {
+                height: BlockHeight::from(height).into(),
+                speedup_log2: bfe!(1),
+                equivalent_height_offset: bfe!(height - (height >> 1)),
+                ..activation_epoch()
+            };
+            let halved = EpochTable::new(&[activation_epoch(), speedup]);
+            let subsidy = Block::block_subsidy(height.into());
+            let kernel_with_coinbase = |coinbase| {
+                TransactionKernelModifier::default()
+                    .coinbase(Some(coinbase))
+                    .modify(transaction_kernel_and_proof().0.clone())
+            };
+
+            let (prev_block, next_body, next_header) = prev_block_with_transaction_kernel_at_height(
+                kernel_with_coinbase(subsidy.half()),
+                &halved,
+                height,
+            );
+            assert_accepts_with_epochs(&skipping(), &prev_block, &next_body, &next_header, &halved);
+
+            let (prev_block, next_body, next_header) = prev_block_with_transaction_kernel_at_height(
+                kernel_with_coinbase(subsidy),
+                &halved,
+                height,
+            );
+            assert_rejects_with_epochs(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                &halved,
+                BlockValidationRule::CoinbaseTooBig.error_id(),
+            );
         }
 
         #[test]

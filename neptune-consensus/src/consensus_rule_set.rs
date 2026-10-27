@@ -299,6 +299,8 @@ impl ConsensusRuleSet {
             transaction_backdating_threshold: rule_set
                 .transaction_backdating_threshold()
                 .expect("epsilon limits backdating"),
+            speedup_log2: bfe!(0),
+            equivalent_height_offset: bfe!(0),
             lustration_counter_initial: initial_counter,
             resets_lustration_status: bfe!(u64::from(epoch_resets_lustration)),
             min_swbf_padded_rows: bfe!(rule_set.min_swbf_padded_rows(network)),
@@ -750,6 +752,8 @@ pub(crate) mod tests {
             max_num_announcements: bfe!(1 << 14),
             max_block_size: bfe!(1_000_000),
             transaction_backdating_threshold: Timestamp::days(3),
+            speedup_log2: bfe!(0),
+            equivalent_height_offset: bfe!(0),
             lustration_counter_initial: NativeCurrencyAmount::coins(8_717_568),
             resets_lustration_status: bfe!(0),
             min_swbf_padded_rows: bfe!(1u64 << 23),

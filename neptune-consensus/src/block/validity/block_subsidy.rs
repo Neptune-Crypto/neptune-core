@@ -1,18 +1,23 @@
 use neptune_primitives::block_height::BLOCKS_PER_GENERATION;
 use neptune_primitives::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
 use tasm_lib::arithmetic::i128::shift_right::ShiftRight as I128ShiftRight;
+use tasm_lib::arithmetic::u64::add::Add as U64Add;
+use tasm_lib::arithmetic::u64::shift_right::ShiftRight as U64ShiftRight;
 use tasm_lib::data_type::DataType;
+use tasm_lib::field;
 use tasm_lib::prelude::BasicSnippet;
 use tasm_lib::prelude::Library;
 use tasm_lib::triton_vm::prelude::*;
 
+use super::epoch_table::Epoch;
 use crate::block::INITIAL_BLOCK_SUBSIDY;
 
-/// The block subsidy at the given block height, as `Block::block_subsidy`
-/// computes: the initial subsidy halved once per generation.
+/// The block subsidy at the given block height under the epoch, as
+/// `Epoch::block_subsidy` computes: the original schedule's subsidy at the
+/// block's equivalent height, halved once more per speedup.
 ///
 /// ```text
-/// BEFORE: _ height
+/// BEFORE: _ *epoch height
 /// AFTER:  _ [block_subsidy: i128]
 /// ```
 #[derive(Debug, Copy, Clone)]
@@ -20,7 +25,10 @@ pub(super) struct BlockSubsidy;
 
 impl BasicSnippet for BlockSubsidy {
     fn parameters(&self) -> Vec<(DataType, String)> {
-        vec![(DataType::Bfe, "height".to_string())]
+        vec![
+            (DataType::VoidPointer, "*epoch".to_string()),
+            (DataType::Bfe, "height".to_string()),
+        ]
     }
 
     fn return_values(&self) -> Vec<(DataType, String)> {
@@ -32,44 +40,58 @@ impl BasicSnippet for BlockSubsidy {
     }
 
     fn code(&self, library: &mut Library) -> Vec<LabelledInstruction> {
+        let u64_shift_right = library.import(Box::new(U64ShiftRight));
+        let u64_add = library.import(Box::new(U64Add));
         let i128_shift_right = library.import(Box::new(I128ShiftRight));
+        let read_log2_speedup = triton_asm!({&field!(Epoch::speedup_log2)} read_mem 1 pop 1);
 
         triton_asm!(
-            // BEFORE: _ height
+            // BEFORE: _ *epoch height
             // AFTER:  _ [block_subsidy: i128]
             {self.entrypoint()}:
-                addi {NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT} split
-                // _ hi lo
+                split
+                dup 2 {&read_log2_speedup}
+                call {u64_shift_right}
+                // _ *epoch [height >> speedup]
+
+                dup 2 {&field!(Epoch::equivalent_height_offset)} read_mem 1 pop 1 split
+                call {u64_add}
+                push 0 push {NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT}
+                call {u64_add}
+                // _ *epoch hi lo
 
                 push {BLOCKS_PER_GENERATION} swap 1 div_mod pop 1
-                // _ hi generation_of_lo
+                // _ *epoch hi generation_of_lo
+
+                dup 2 {&read_log2_speedup} add
+                // _ *epoch hi halvings_of_lo
 
                 dup 0 push 127 lt
-                // _ hi generation_of_lo (127 < generation_of_lo)
+                // _ *epoch hi halvings_of_lo (127 < halvings_of_lo)
 
                 dup 0 push 127 mul place 2 push 0 eq mul add
-                // _ hi min(generation_of_lo, 127)
+                // _ *epoch hi min(halvings_of_lo, 127)
 
                 pick 1 push 0 eq
-                // _ min(generation_of_lo, 127) (hi == 0)
+                // _ *epoch min(halvings_of_lo, 127) (hi == 0)
 
                 dup 0 push 0 eq
-                // _ min(generation_of_lo, 127) (hi == 0) (hi != 0)
+                // _ *epoch min(halvings_of_lo, 127) (hi == 0) (hi != 0)
 
                 push 127 mul
-                // _ min(generation_of_lo, 127) (hi == 0) ((hi != 0) * 127)
+                // _ *epoch min(halvings_of_lo, 127) (hi == 0) ((hi != 0) * 127)
 
                 place 2
-                // _ ((hi != 0) * 127) min(generation_of_lo, 127) (hi == 0)
+                // _ *epoch ((hi != 0) * 127) min(halvings_of_lo, 127) (hi == 0)
 
                 mul
-                // _ ((hi != 0) * 127) (min(generation_of_lo, 127) * (hi == 0))
+                // _ *epoch ((hi != 0) * 127) (min(halvings_of_lo, 127) * (hi == 0))
 
                 add
-                // _ hi == 0 ? min(generation_of_lo, 127) : 127
-                // _ min(num_generations, 127)
-                // _ shift_amount <-- rename
+                // _ *epoch (hi == 0 ? min(halvings_of_lo, 127) : 127)
+                // _ *epoch shift_amount
 
+                pick 1 pop 1
                 {&INITIAL_BLOCK_SUBSIDY.push_to_stack()}
                 pick 4
                 // _ [initial_block_subsidy] shift_amount
@@ -86,17 +108,27 @@ impl BasicSnippet for BlockSubsidy {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use neptune_primitives::block_height::BlockHeight;
+    use neptune_primitives::block_height::BLOCKS_PER_GENERATION;
     use num_traits::Zero;
+    use tasm_lib::memory::encode_to_memory;
+    use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
     use tasm_lib::triton_vm::vm::VM;
 
     use super::*;
     use crate::block::Block;
     use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
-    fn block_subsidy_in_vm(height: u64) -> NativeCurrencyAmount {
+    /// An epoch without speedup, whose schedule is the one
+    /// `Block::block_subsidy` hardcodes.
+    fn epoch() -> Epoch {
+        Epoch::default()
+    }
+
+    fn block_subsidy_in_vm_under(epoch: &Epoch, height: u64) -> NativeCurrencyAmount {
         let mut library = Library::new();
         let block_subsidy = library.import(Box::new(BlockSubsidy));
         let program = Program::new(&triton_asm!(
+            push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
             read_io 1
             call {block_subsidy}
             {&DataType::I128.write_value_to_stdout()}
@@ -105,9 +137,81 @@ mod tests {
         ));
 
         let input = PublicInput::new(vec![bfe!(height)]);
-        let output = VM::run(program, input, NonDeterminism::default()).unwrap();
+        let mut nondeterminism = NonDeterminism::default();
+        encode_to_memory(
+            &mut nondeterminism.ram,
+            FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+            epoch,
+        );
+        let output = VM::run(program, input, nondeterminism).unwrap();
 
         *NativeCurrencyAmount::decode(&output).unwrap()
+    }
+
+    fn block_subsidy_in_vm(height: u64) -> NativeCurrencyAmount {
+        block_subsidy_in_vm_under(&epoch(), height)
+    }
+
+    #[test]
+    fn speedup_halves_the_subsidy_and_stretches_the_generations() {
+        // Blocks come four times as fast from height 1000 on, so the
+        // equivalent height of 1000 is 1000 and grows by one per four blocks.
+        let epoch = Epoch {
+            speedup_log2: bfe!(2),
+            equivalent_height_offset: bfe!(750),
+            ..Epoch::default()
+        };
+        let quarter = |amount: NativeCurrencyAmount| amount.half().half();
+        for height in [1_000, 1_001, 1 << 20, (1 << 32) + 7, 1 << 40] {
+            let equivalent = BlockHeight::from(750 + (height >> 2));
+            let expected = quarter(Block::block_subsidy(equivalent));
+            assert_eq!(
+                expected,
+                epoch.block_subsidy(height.into()),
+                "height {height}"
+            );
+            assert_eq!(expected, block_subsidy_in_vm_under(&epoch, height));
+        }
+        let first_halving = 4 * (BLOCKS_PER_GENERATION - NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT - 750);
+        assert_eq!(
+            quarter(INITIAL_BLOCK_SUBSIDY),
+            epoch.block_subsidy((first_halving - 1).into())
+        );
+        assert_eq!(
+            quarter(INITIAL_BLOCK_SUBSIDY).half(),
+            epoch.block_subsidy(first_halving.into())
+        );
+    }
+
+    #[test]
+    fn simple_speedup() {
+        let single = Epoch::default();
+        for height in 1u64..20 {
+            let expected = NativeCurrencyAmount::coins(128);
+            let in_vm = block_subsidy_in_vm_under(&single, height);
+            assert_eq!(expected, in_vm);
+        }
+
+        // At block height 40, the block target interval is halved. The block
+        // subsidy must also be halved.
+        let double = Epoch {
+            speedup_log2: bfe!(1),
+            equivalent_height_offset: bfe!(20),
+            ..Epoch::default()
+        };
+
+        for height in 40u64..50 {
+            let expected = NativeCurrencyAmount::coins(64);
+            let in_vm = block_subsidy_in_vm_under(&double, height);
+            assert_eq!(expected, in_vm);
+        }
+
+        // And the block subsidy stays half the original longer than the blocks
+        // per generation constant would dictate.
+        assert_eq!(
+            NativeCurrencyAmount::coins(64),
+            block_subsidy_in_vm_under(&double, BLOCKS_PER_GENERATION + 2000)
+        );
     }
 
     #[test]
