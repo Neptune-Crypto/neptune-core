@@ -605,7 +605,7 @@ impl MainLoopHandler {
 
                 // Ensure proposal validity before sharing
                 if !block
-                    .is_valid_proposal(
+                    .is_valid(
                         &current_tip,
                         block.header().timestamp,
                         self.global_state_lock.cli().network,

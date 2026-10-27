@@ -295,9 +295,7 @@ async fn fake_genesis_on_main_net_accepts_a_successor() {
     let now = successor.header().timestamp;
     assert_eq!(
         Err(BlockValidationError::ProofQuality),
-        successor
-            .validate_proposal(&fake_genesis, now, network)
-            .await
+        successor.validate(&fake_genesis, now, network).await
     );
 
     let mut bob = mock_genesis_global_state_with_block(

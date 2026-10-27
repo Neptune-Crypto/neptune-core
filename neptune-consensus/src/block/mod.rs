@@ -70,7 +70,6 @@ use validity::swbf_update::leaf::CorrectSwbfUpdateWitness;
 use validity::swbf_update::removal_index_commitment::RemovalIndexCommitment;
 use validity::swbf_update::swbfi_peaks_after_removals::SwbfiPeaksAfterRemovals;
 use validity::swbf_update::ClaimOutput;
-use validity::swbfi_reveal::guesser_reveal_is_valid;
 
 use super::transaction::transaction_kernel::TransactionKernelProxy;
 use super::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -822,66 +821,13 @@ impl Block {
     /// proof of work; that must be done separately by the caller, for instance
     /// by calling [`Self::has_proof_of_work`].
     pub async fn is_valid(&self, previous_block: &Block, now: Timestamp, network: Network) -> bool {
-        self.is_valid_as(previous_block, now, network, true).await
-    }
-
-    /// Verify a block proposal: like [`Self::is_valid`], but the guesser's
-    /// reveal in the proof-of-work field is not checked, as only the guesser
-    /// should populate this value.
-    pub async fn is_valid_proposal(
-        &self,
-        previous_block: &Block,
-        now: Timestamp,
-        network: Network,
-    ) -> bool {
-        self.is_valid_as(previous_block, now, network, false).await
-    }
-
-    async fn is_valid_as(
-        &self,
-        previous_block: &Block,
-        now: Timestamp,
-        network: Network,
-        guessed: bool,
-    ) -> bool {
-        match self
-            .validate_as(previous_block, now, network, guessed)
-            .await
-        {
+        match self.validate(previous_block, now, network).await {
             Ok(_) => true,
             Err(e) => {
                 warn!("{e}");
                 false
             }
         }
-    }
-
-    /// Verify a block against previous block and return detailed error
-    ///
-    /// This method assumes that the previous block is valid.
-    ///
-    /// Note that this function does **not** check that the block has enough
-    /// proof of work; that must be done separately by the caller, for instance
-    /// by calling [`Self::has_proof_of_work`].
-    pub async fn validate(
-        &self,
-        previous_block: &Block,
-        now: Timestamp,
-        network: Network,
-    ) -> Result<(), BlockValidationError> {
-        self.validate_as(previous_block, now, network, true).await
-    }
-
-    /// Verify a block proposal and return detailed error: like
-    /// [`Self::validate`], but the guesser's reveal in the proof-of-work field
-    /// is not checked, as only the guesser should populate this value.
-    pub async fn validate_proposal(
-        &self,
-        previous_block: &Block,
-        now: Timestamp,
-        network: Network,
-    ) -> Result<(), BlockValidationError> {
-        self.validate_as(previous_block, now, network, false).await
     }
 
     /// Verify a block without knowledge of its parent, and return a detailed
@@ -906,7 +852,7 @@ impl Block {
             .find(&predecessor_claim)
             .and_then(|claim| PredecessorIsValid::parse_output(&claim.output))
             .ok_or(BlockValidationError::AppendixMissingClaim)?;
-        self.validate_except_proof(&parent, parent_mutator_set, None, now, network, true)?;
+        self.validate_except_proof(&parent, parent_mutator_set, None, now, network)?;
 
         // 1.c) 1.d)
         self.validate_proof(network).await?;
@@ -914,13 +860,18 @@ impl Block {
         Ok(parent)
     }
 
-    /// `guessed` says whether the guesser has filled the proof-of-work field.
-    async fn validate_as(
+    /// Verify a block against previous block and return detailed error
+    ///
+    /// This method assumes that the previous block is valid.
+    ///
+    /// Note that this function does **not** check that the block has enough
+    /// proof of work; that must be done separately by the caller, for instance
+    /// by calling [`Self::has_proof_of_work`].
+    pub async fn validate(
         &self,
         previous_block: &Block,
         now: Timestamp,
         network: Network,
-        guessed: bool,
     ) -> Result<(), BlockValidationError> {
         // 0.a)
         if previous_block.header().height.next() != self.header().height {
@@ -934,7 +885,6 @@ impl Block {
             Some(&previous_block.body().block_mmr_accumulator),
             now,
             network,
-            guessed,
         )?;
 
         // 1.c) 1.d)
@@ -949,7 +899,6 @@ impl Block {
         parent_block_mmr_accumulator: Option<&MmrAccumulator>,
         now: Timestamp,
         network: Network,
-        guessed: bool,
     ) -> Result<(), BlockValidationError> {
         // Note that there is a correspondence between the logic here and the
         // error types in `BlockValidationError`.
@@ -1075,11 +1024,6 @@ impl Block {
                 hash_after_removals,
                 consensus_rule_set.min_swbf_padded_rows(network),
             )?;
-
-            // 2.v)
-            if guessed && consensus_rule_set.miners_must_prove_ams_knowledge(network) {
-                self.validate_guesser_reveal(&parent_mutator_set.swbf_inactive)?;
-            }
         }
 
         let first_lustration_block = ConsensusRuleSet::first_lustration_block(network);
@@ -1378,19 +1322,6 @@ impl Block {
             return Err(BlockValidationError::MutatorSetUpdateIntegrity);
         }
         Ok(())
-    }
-
-    /// 2.v) The proof-of-work field reveals the sampled leaf of the inactive
-    /// SWBF after the parent.
-    pub fn validate_guesser_reveal(
-        &self,
-        parent_swbfi: &MmrAccumulator,
-    ) -> Result<(), BlockValidationError> {
-        if guesser_reveal_is_valid(self.header(), parent_swbfi) {
-            Ok(())
-        } else {
-            Err(BlockValidationError::GuesserSwbfiReveal)
-        }
     }
 
     /// The appendix holds the required claims, by program, version and
@@ -2014,7 +1945,7 @@ mod test_support {
                 "Don't use high difficulty in test. Got: {difficulty}"
             );
 
-            let puzzle = ProofOfWorkPuzzle::new(self.clone(), difficulty, None);
+            let puzzle = ProofOfWorkPuzzle::new(self.clone(), difficulty);
             let valid_pow = puzzle.solve(consensus_rule_set);
 
             self.set_header_pow(valid_pow);
@@ -2107,7 +2038,6 @@ pub(crate) mod tests {
     use crate::block::test_helpers::invalid_empty_block;
     use crate::block::validity::knows_mutator_set::KnowsMutatorSet;
     use crate::block::validity::swbf_update::aggregation::SwbfUpdateAggregation;
-    use crate::block::validity::swbfi_reveal::tests::revealing_header_and_swbfi;
     use crate::consensus_rule_set::TX_BACKDATING_LIMIT;
     use crate::proof_abstractions::test_runtime::shared_tokio_runtime;
     use crate::transaction::announcement::Announcement;
@@ -2119,9 +2049,9 @@ pub(crate) mod tests {
     use crate::type_scripts::TypeScript;
 
     impl Block {
-        /// Every rule of [`Block::validate`] except the block's proof and the
-        /// guesser's reveal, for tests on blocks with neither.
-        pub(crate) fn validate_without_proof_or_reveal(
+        /// Every rule of [`Block::validate`] except the block's proof, for
+        /// tests on blocks without one.
+        pub(crate) fn validate_without_proof(
             &self,
             previous_block: &Block,
             now: Timestamp,
@@ -2134,7 +2064,6 @@ pub(crate) mod tests {
                 Some(&previous_block.body().block_mmr_accumulator),
                 now,
                 network,
-                false,
             )
         }
     }
@@ -2231,10 +2160,10 @@ pub(crate) mod tests {
     }
 
     /// The composer's claim to know the mutator set after the parent is
-    /// required where the rules require reveals, which the mock-proof
-    /// networks' do not.
+    /// required where the rules require it, which the mock-proof networks'
+    /// do not.
     #[test]
-    fn mutator_set_claim_is_required_where_reveals_are() {
+    fn mutator_set_claim_is_required_where_rules_require_it() {
         let required_claims = |network: Network| {
             let genesis = Block::genesis(network);
             let block1 = invalid_empty_block(&genesis, network);
@@ -2263,32 +2192,6 @@ pub(crate) mod tests {
         let (required, sample_claim) = required_claims(Network::RegTest);
         assert!(!required.contains(&sample_claim));
         assert_eq!(3, required.len());
-    }
-
-    /// 2.v) The guesser's reveal of the inactive SWBF after the parent, at
-    /// the sampled leaf; vacuous for an empty one.
-    #[test]
-    fn guesser_reveal_is_checked() {
-        let mut rng = StdRng::seed_from_u64(0);
-        let height = 3;
-        let (header, swbfi) = revealing_header_and_swbfi(&mut rng, height, 11);
-        let network = Network::Main;
-        let mut block = invalid_empty_block(&Block::genesis(network), network);
-        block.kernel_mut().header = header;
-        assert_eq!(Ok(()), block.validate_guesser_reveal(&swbfi));
-
-        let (_, path) = header.pow.swbfi_reveal(height as usize);
-        let mut pow = header.pow;
-        pow.set_swbfi_reveal(rng.random(), &path);
-        block.set_header_pow(pow);
-        assert_eq!(
-            Err(BlockValidationError::GuesserSwbfiReveal),
-            block.validate_guesser_reveal(&swbfi)
-        );
-        assert_eq!(
-            Ok(()),
-            block.validate_guesser_reveal(&MmrAccumulator::init(vec![], 0))
-        );
     }
 
     /// The SWBF root claim about the block's transaction on the mutator set
@@ -2903,8 +2806,7 @@ pub(crate) mod tests {
         let parent_target = genesis.header().difficulty.target();
 
         // Only loop over non-memory hard PoW algorithms since the memory-hard
-        // are too expensive for tests. The guesser's reveal belongs to the
-        // block's validity, not to the proof of work, so none is set.
+        // are too expensive for tests.
         for consensus_rule_set in [
             ConsensusRuleSet::HardforkBeta,
             ConsensusRuleSet::HardforkGamma,
@@ -2923,14 +2825,9 @@ pub(crate) mod tests {
             let version = invalid_block.header().version;
 
             let valid_pow = loop {
-                if let Some(valid_pow) = Pow::guess(
-                    &mast_auth_paths,
-                    rng.random(),
-                    target,
-                    None,
-                    Some(version),
-                    None,
-                ) {
+                if let Some(valid_pow) =
+                    Pow::guess(&mast_auth_paths, rng.random(), target, None, Some(version))
+                {
                     break valid_pow;
                 }
             };

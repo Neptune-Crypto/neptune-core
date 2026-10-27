@@ -909,11 +909,7 @@ pub(super) mod tests {
         // Sanity checks
         assert_eq!(4, block_2.kernel.body.transaction_kernel.inputs.len());
         assert_eq!(7, block_2.kernel.body.transaction_kernel.outputs.len());
-        assert!(
-            block_2
-                .is_valid_proposal(&block_1, in_seven_months, network)
-                .await
-        );
+        assert!(block_2.is_valid(&block_1, in_seven_months, network).await);
 
         // Expect incoming UTXOs
         {

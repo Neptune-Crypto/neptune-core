@@ -22,11 +22,9 @@ Built in `neptune-consensus`, gated by the epoch table, not activated.
   archival mutator set can check them for double spends; the data is
   stripped when a kernel enters a block.
 - **e'_1)** `KnowsMutatorSet`: a claim that the composer holds two chunks
-  and one AOCL leaf sampled by the parent's hash. **e'_2)** the guesser
-  reveals a leaf of the inactive SWBF's first tree in the PoW field. Both
-  about the mutator set after the parent; checked by the program for the
-  parent. The reveal shows hash and path are obtainable; the claim shows
-  possession of the samples.
+  and one AOCL leaf sampled by the parent's hash, about the mutator set
+  after the parent; checked by the program for the parent. **e'_2)**, the
+  guesser's reveal, was removed on 2026-10-27; see its section.
 - **Epoch table**: per-network parameters, matched exactly; a change is an
   appending hard fork. New rules soft-fork as extension claims (last
   section).
@@ -51,10 +49,9 @@ and mutator set claims alongside the tree, about 45 s. Block time 588 s.
 Application integration, in commit order. Done: the per-network epoch
 table and `HardforkEpsilon`; the host requires the predecessor claim, the
 SWBF root claim and the mutator set claim in the tip and checks the root's
-output and the guesser's reveal; archival helpers supply the composer's
-witness and the guesser's reveal; the composer proves the SWBF tree, the
-mutator set claim and the predecessor claim, sequentially through the job
-queue, and the mine loop fills the guesser's reveal once per proposal.
+output; archival helpers supply the composer's witness; the composer proves
+the SWBF tree, the mutator set claim and the predecessor claim, sequentially
+through the job queue.
 
 Done 2026-10-13: the archival mutator set applies and reverts a block's
 removals from the inputs' index sets alone, `batch_remove` and
@@ -173,7 +170,7 @@ capacity instead, and the proofs run in parallel.
 | e1) Drop chunk data in block entirely | 250k / 105k | 8 | 8 alone; block size with c or d | as c or d | hard, rules only, blocks shrink |
 | e2) Keep chunk data in block, don't validate | 250k / 105k | 8 | 8 | as e1 | hard, rules only, no benefit over e1 |
 | e'_1) Composer proves knowledge of the mutator set after the parent: two chunks, one AOCL leaf | one small claim per block, built; a claim search and two bags of peaks in `PredecessorIsValid` | unchanged | unchanged | one | hard, appendix rule; epoch-gated |
-| e'_2) Guesser reveals a leaf of the inactive SWBF's first tree with its path | one path walk per block in `PredecessorIsValid`, built | unchanged | unchanged | none | hard, header rules; epoch-gated |
+| e'_2) Guesser reveals a leaf of the inactive SWBF's first tree with its path | one path walk per block in `PredecessorIsValid`, built then removed | unchanged | unchanged | none | hard, header rules; soft-forkable later |
 | e'') Composer reveals the samples outright | not assessed; e'_1) as built makes it moot | | | | |
 | f) Merkle-tree chunks in the SWBF | 21k tallest table (u32) per input, measured | ~100 | 100 alone; block size with d | ~10 leaves + ~9 aggregations with d, plus the window slide in `PredecessorIsValid` | hard, mutator set redesign |
 | g) Micro-optimisations | 420k / 146k | 5 | 5 | not reachable | none |
@@ -408,8 +405,12 @@ it from archival state and proves it.
 
 ### e'_2) Guesser proves knowledge of the archival mutator set
 
-Implemented 2026-10-07, `validity/swbfi_reveal.rs` with accessors on the PoW
-field, same epoch flag. The guesser reveals a leaf of the **first** Merkle
+Implemented 2026-10-07 and removed 2026-10-27 before activation, on review:
+it bound guess-only pools to the archival mutator set at the cost of a
+header rule in `PredecessorIsValid`, and the PoW field's path words stay
+free, so it can return as a soft fork. As built, in `validity/swbfi_reveal.rs`
+with accessors on the PoW field, gated by the same epoch flag, since
+removed: the guesser reveals a leaf of the **first** Merkle
 tree, the tallest, of the inactive SWBF after the parent, the state a guesser
 holds before any proposal arrives, so a proposal needs no processing to be
 guessed on; with its authentication path, at index
@@ -431,11 +432,10 @@ there, so the walk splits after 31 levels, the rest of the sample's bits
 shifted down. A tree taller than 54 levels, that is more than 2^54 chunks, is
 revealed from the node 54 levels below the root on the sampled leaf's path,
 at the sample's bits above the levels left out.
-Host side, `guesser_reveal_is_valid(header, swbfi)` is the same check as an MMR
-membership proof against the first peak, for the tip. Wired 2026-10-09: the
-mining loop reads the reveal from archival state once per proposal and sets
-it on every guess, and the puzzle and block template endpoints hand it to
-external guessers for the address they are requested for.
+Host side, `guesser_reveal_is_valid(header, swbfi)` was the same check as an
+MMR membership proof against the first peak, for the tip; the mining loop
+read the reveal from archival state once per proposal, and the puzzle and
+block template endpoints handed it to external guessers.
 
 ### e'') Composer reveals knowledge of the archival mutator set
 
@@ -992,7 +992,7 @@ required, since it is the only proof verifier, and the new program activates
 no earlier than it. Upgrading such a program stacks the old one for as long
 as old nodes require it, at the cost of its own proof only. A tip's header
 cannot be bound by any claim, since proofs precede guessing, so header rules
-are checked for the parent, as the guesser's reveal is.
+are checked for the parent, as the guesser's reveal was.
 
 Parameters do not. The epoch table exists so that a fork need not rewrite
 the program and so that networks can differ, not so that a block can change

@@ -47,12 +47,6 @@ pub struct Epoch {
     /// nothing. Zero for no floor.
     pub min_swbf_padded_rows: BFieldElement,
 
-    /// Whether a block must reveal the mutator set after its parent: the
-    /// guesser a leaf of the inactive SWBF's first Merkle tree in the
-    /// proof-of-work field, the composer two chunks and an AOCL leaf through
-    /// a claim in the appendix. 1 if so, 0 otherwise.
-    pub requires_mutator_set_reveals: BFieldElement,
-
     /// The digest of the program a block's proof attests.
     pub block_program_digest: Digest,
 

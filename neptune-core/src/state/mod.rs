@@ -6083,7 +6083,7 @@ mod tests {
 
         assert!(
             block_1
-                .is_valid_proposal(&genesis_block, in_seven_months, network)
+                .is_valid(&genesis_block, in_seven_months, network)
                 .await
         );
 
@@ -6327,11 +6327,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(
-            block_2
-                .is_valid_proposal(&block_1, in_eight_months, network)
-                .await
-        );
+        assert!(block_2.is_valid(&block_1, in_eight_months, network).await);
 
         assert_eq!(4, block_2.kernel.body.transaction_kernel.inputs.len());
         assert_eq!(7, block_2.kernel.body.transaction_kernel.outputs.len());
@@ -6368,7 +6364,7 @@ mod tests {
                 .await
                 .chain
                 .tip()
-                .is_valid_proposal(&genesis_block, now, network)
+                .is_valid(&genesis_block, now, network)
                 .await,
             "light state tip must be a valid block"
         );
@@ -6380,7 +6376,7 @@ mod tests {
                 .archival_state()
                 .get_tip()
                 .await
-                .is_valid_proposal(&genesis_block, now, network)
+                .is_valid(&genesis_block, now, network)
                 .await,
             "archival state tip must be a valid block"
         );

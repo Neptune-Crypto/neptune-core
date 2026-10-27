@@ -123,11 +123,10 @@ pub enum ConsensusRuleSet {
     /// Succinct block validation.
     ///
     /// A block must prove the `PredecessorIsValid` claim, the SWBF update
-    /// claim, and a claim proving knowledge of the mutator set. The guesser
-    /// must reveal an SWBF leaf to prove access to the archival mutator set.
+    /// claim, and a claim proving knowledge of the mutator set.
     ///
     /// A soft fork because adding more required claims is accepted by old
-    /// nodes, and because the guesser reveal goes into previously unbound data.
+    /// nodes.
     SoftforkEpsilon,
 }
 
@@ -224,7 +223,7 @@ impl ConsensusRuleSet {
     }
 
     /// Whether a block must carry the `PredecessorIsValid` claim about its
-    /// parent, and the claims and reveal that come with it.
+    /// parent, and the claims that come with it.
     pub fn requires_predecessor_claim(&self) -> bool {
         match self {
             ConsensusRuleSet::Reboot
@@ -303,9 +302,6 @@ impl ConsensusRuleSet {
             lustration_counter_initial: initial_counter,
             resets_lustration_status: bfe!(u64::from(epoch_resets_lustration)),
             min_swbf_padded_rows: bfe!(rule_set.min_swbf_padded_rows(network)),
-            requires_mutator_set_reveals: bfe!(u64::from(
-                rule_set.miners_must_prove_ams_knowledge(network)
-            )),
             block_program_digest: BlockProgram.hash(),
             single_proof_digest: SingleProof::new(rule_set).hash(),
             swbf_aggregation_digest: SwbfUpdateAggregation::new().hash(),
@@ -718,7 +714,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn epsilon_sets_the_floor_and_the_reveals_per_network() {
+    fn epsilon_sets_the_floor_and_the_knowledge_claim_per_network() {
         let delta = ConsensusRuleSet::HardforkDelta;
         let epsilon = ConsensusRuleSet::SoftforkEpsilon;
         assert_eq!(0, delta.min_swbf_padded_rows(Network::Main));
@@ -757,7 +753,6 @@ pub(crate) mod tests {
             lustration_counter_initial: NativeCurrencyAmount::coins(8_717_568),
             resets_lustration_status: bfe!(0),
             min_swbf_padded_rows: bfe!(1u64 << 23),
-            requires_mutator_set_reveals: bfe!(1),
             block_program_digest: BlockProgram.hash(),
             single_proof_digest: SingleProof::new(ConsensusRuleSet::SoftforkEpsilon).hash(),
             swbf_aggregation_digest: SwbfUpdateAggregation::new().hash(),
@@ -797,10 +792,6 @@ pub(crate) mod tests {
             assert_eq!(
                 bfe!(rule_set.min_swbf_padded_rows(network)),
                 epoch.min_swbf_padded_rows
-            );
-            assert_eq!(
-                bfe!(u64::from(rule_set.miners_must_prove_ams_knowledge(network))),
-                epoch.requires_mutator_set_reveals
             );
         }
     }

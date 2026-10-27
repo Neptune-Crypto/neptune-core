@@ -113,10 +113,7 @@ async fn disallow_double_spends_across_blocks() {
     block3.set_appendix(BlockAppendix::new(claims));
     assert_eq!(
         BlockValidationError::RemovalRecordsValidity,
-        block3
-            .validate_proposal(&block2, later, network)
-            .await
-            .unwrap_err(),
+        block3.validate(&block2, later, network).await.unwrap_err(),
         "Double-spending block must be invalid."
     );
 }

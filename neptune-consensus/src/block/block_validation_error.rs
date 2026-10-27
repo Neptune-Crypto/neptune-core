@@ -151,12 +151,6 @@ pub enum BlockValidationError {
     #[error("Block timestamp must not exceed transaction-retirement value")]
     TransactionRetired,
 
-    /// 2.v) The guesser's proof-of-work field reveals a leaf of the first
-    ///      Merkle tree of the inactive SWBF, at the position sampled by the
-    ///      parent's hash and the guesser's receiver data.
-    #[error("Proof-of-work field must reveal the sampled leaf of the inactive SWBF")]
-    GuesserSwbfiReveal,
-
     /// 2.w) The leaf proofs of the SWBF update claim must contain a certain
     ///      amount of proving complexity. This is to incentivize composers to
     ///      pick up transactions with many inputs. The metric is the padded

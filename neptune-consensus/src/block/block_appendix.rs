@@ -89,7 +89,7 @@ impl BlockAppendix {
     /// Every claim a block's appendix must hold, by program, version and
     /// input, given its parent's hash and the mutator set after it: those
     /// above, and from hard fork epsilon on the composer's claim to know
-    /// that mutator set, where the rules require reveals, and the SWBF
+    /// that mutator set, where the rules require it, and the SWBF
     /// update claim about the transaction on it.
     pub fn consensus_claims(
         block_body: &BlockBody,

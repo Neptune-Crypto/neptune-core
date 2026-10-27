@@ -345,7 +345,6 @@ fn guess_worker(
         override_timestamp: now,
         override_version,
         guess_rate,
-        swbfi_reveal,
     } = guessing_configuration;
 
     let now = now.unwrap_or(Timestamp::now());
@@ -445,7 +444,6 @@ fn guess_worker(
         threshold,
         lustration_status,
         Some(version),
-        swbfi_reveal.as_ref(),
     );
 
     let num_guesses = AtomicU64::new(0);
@@ -977,18 +975,9 @@ pub(crate) async fn mine(
                 .await
                 .mining_rewards_address();
 
-            let (latest_block_header, swbfi_reveal) = {
-                let state = global_state_lock.lock_guard().await;
-                let swbfi_reveal = state
-                    .chain
-                    .guesser_swbfi_reveal(
-                        proposal.header(),
-                        &guesser_address.clone().into(),
-                        network,
-                    )
-                    .await;
-                (state.chain.tip().header().to_owned(), swbfi_reveal)
-            };
+            let latest_block_header = global_state_lock
+                .lock(|s| s.chain.tip().header().to_owned())
+                .await;
             let guesser_task = guess_nonce(
                 network,
                 proposal,
@@ -1001,7 +990,6 @@ pub(crate) async fn mine(
                     override_timestamp: None,
                     override_version: cli_args.guesser_version.map(BFieldElement::new),
                     guess_rate: guess_rate.clone(),
-                    swbfi_reveal,
                 },
             );
 
@@ -1395,7 +1383,6 @@ pub(crate) mod tests {
             threshold,
             lustration_status,
             Some(version),
-            None,
         );
         let num_guesses = AtomicU64::new(0);
         let num_iterations_run =
@@ -1699,7 +1686,7 @@ pub(crate) mod tests {
             .unwrap();
             assert!(
                 block_1_empty_mempool
-                    .is_valid_proposal(&genesis_block, now, network)
+                    .is_valid(&genesis_block, now, network)
                     .await,
                 "Block template created by miner with empty mempool must be valid"
             );
@@ -1755,7 +1742,7 @@ pub(crate) mod tests {
             .unwrap();
             assert!(
                 block_1_nonempty_mempool
-                    .is_valid_proposal(&genesis_block, now + Timestamp::seconds(2), network)
+                    .is_valid(&genesis_block, now + Timestamp::seconds(2), network)
                     .await,
                 "Block template created by miner with non-empty mempool must be valid"
             );
@@ -1797,9 +1784,7 @@ pub(crate) mod tests {
         .await
         .unwrap();
         let (mut block_1, _) = receiver_1.await.unwrap().unwrap();
-        let validation_result = block_1
-            .validate_proposal(&genesis_block, mocked_now, network)
-            .await;
+        let validation_result = block_1.validate(&genesis_block, mocked_now, network).await;
         assert!(validation_result.is_ok(), "{:?}", validation_result);
 
         assert!(
@@ -1822,11 +1807,7 @@ pub(crate) mod tests {
         .await
         .unwrap();
         let (block_2, _) = receiver_2.await.unwrap().unwrap();
-        assert!(
-            block_2
-                .is_valid_proposal(&block_1, mocked_now, network)
-                .await
-        );
+        assert!(block_2.is_valid(&block_1, mocked_now, network).await);
     }
 
     #[traced_test]
@@ -1857,7 +1838,7 @@ pub(crate) mod tests {
         .unwrap();
         assert!(
             first
-                .is_valid_proposal(&genesis_block, now + Timestamp::seconds(2), network)
+                .is_valid(&genesis_block, now + Timestamp::seconds(2), network)
                 .await
         );
         assert!(first.body().transaction_kernel.inputs.is_empty());
@@ -1912,7 +1893,7 @@ pub(crate) mod tests {
                 .unwrap();
         assert!(
             second
-                .is_valid_proposal(&genesis_block, now + Timestamp::seconds(2), network)
+                .is_valid(&genesis_block, now + Timestamp::seconds(2), network)
                 .await
         );
         let block_kernel = &second.body().transaction_kernel;
@@ -2027,7 +2008,7 @@ pub(crate) mod tests {
         let (block_1, _) = receiver_1.await.unwrap().unwrap();
         assert!(
             block_1
-                .is_valid_proposal(&genesis_block, block1_timestamp, network)
+                .is_valid(&genesis_block, block1_timestamp, network)
                 .await
         );
     }
@@ -2101,7 +2082,6 @@ pub(crate) mod tests {
                 override_timestamp: None,
                 override_version: None,
                 guess_rate: Arc::default(),
-                swbfi_reveal: None,
             },
             None,
         );
@@ -2183,7 +2163,6 @@ pub(crate) mod tests {
                 override_timestamp: None,
                 override_version: None,
                 guess_rate: Arc::default(),
-                swbfi_reveal: None,
             },
             None,
         );
@@ -2343,7 +2322,6 @@ pub(crate) mod tests {
                     override_timestamp: None,
                     override_version: None,
                     guess_rate: Arc::default(),
-                    swbfi_reveal: None,
                 },
                 Some(target_block_interval),
             );
@@ -2899,7 +2877,6 @@ pub(crate) mod tests {
                     override_timestamp: Some(block_time),
                     override_version: None,
                     guess_rate: Arc::default(),
-                    swbfi_reveal: None,
                 },
                 None,
             );
@@ -2970,7 +2947,6 @@ pub(crate) mod tests {
                     override_timestamp: Some(block_time),
                     override_version: Some(BFieldElement::new(7)),
                     guess_rate: Arc::default(),
-                    swbfi_reveal: None,
                 },
                 None,
             );
@@ -3023,7 +2999,6 @@ pub(crate) mod tests {
                     override_timestamp: Some(now),
                     override_version: None,
                     guess_rate: Arc::default(),
-                    swbfi_reveal: None,
                 },
                 None,
             );
