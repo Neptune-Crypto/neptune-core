@@ -879,8 +879,13 @@ impl Block {
         }
 
         let parent_mutator_set = previous_block.mutator_set_accumulator_after()?;
+        let parent_work = PredecessorIsValid::new().parent_work_since_activation(
+            previous_block,
+            ConsensusRuleSet::epoch_table(network).activation_height(),
+            Block::genesis_digest(network),
+        );
         self.validate_except_proof(
-            &ParentBlockInfo::of_block(previous_block),
+            &ParentBlockInfo::of_block(previous_block, parent_work),
             &parent_mutator_set,
             Some(&previous_block.body().block_mmr_accumulator),
             now,
@@ -2058,8 +2063,13 @@ pub(crate) mod tests {
             network: Network,
         ) -> Result<(), BlockValidationError> {
             let parent_mutator_set = previous_block.mutator_set_accumulator_after()?;
+            let parent_work = PredecessorIsValid::new().parent_work_since_activation(
+                previous_block,
+                ConsensusRuleSet::epoch_table(network).activation_height(),
+                Block::genesis_digest(network),
+            );
             self.validate_except_proof(
-                &ParentBlockInfo::of_block(previous_block),
+                &ParentBlockInfo::of_block(previous_block, parent_work),
                 &parent_mutator_set,
                 Some(&previous_block.body().block_mmr_accumulator),
                 now,
