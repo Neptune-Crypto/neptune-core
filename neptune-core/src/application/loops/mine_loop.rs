@@ -8,12 +8,10 @@ use anyhow::bail;
 use anyhow::Result;
 use block_header::BlockHeader;
 use futures::channel::oneshot;
+use neptune_consensus::block::block_header::BlockGuesser;
 use neptune_consensus::block::block_header::BlockPow;
 use neptune_consensus::block::block_transaction::BlockOrRegularTransaction;
 use neptune_consensus::block::block_transaction::BlockTransaction;
-use neptune_consensus::block::pow::LustrationStatus;
-use neptune_consensus::block::pow::Pow;
-use neptune_consensus::block::pow::PowMastPaths;
 use neptune_consensus::block::*;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_consensus::proof_abstractions::error::CreateProofError;
@@ -41,7 +39,6 @@ use rand::RngExt;
 use rand::SeedableRng;
 use rayon::iter::ParallelIterator;
 use rayon::ThreadPoolBuilder;
-use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 use tokio::select;
 use tokio::sync::mpsc;
@@ -317,21 +314,22 @@ fn guess_worker(
     };
 
     let version = block.header().version;
+    let nonce = rng_seed
+        .map_or_else(std_rng_from_thread_rng, StdRng::seed_from_u64)
+        .random();
+    let guesser = BlockGuesser::new(
+        mast_auth_paths,
+        nonce,
+        threshold,
+        lustration_status,
+        Some(version),
+    );
 
     let guess_result = pool.install(|| {
         rayon::iter::repeat(0)
             .map_init(
                 || rng_seed.map_or_else(std_rng_from_thread_rng, StdRng::seed_from_u64),
-                |rng, _i| {
-                    guess_nonce_iteration(
-                        &mast_auth_paths,
-                        threshold,
-                        lustration_status,
-                        rng,
-                        &sender,
-                        Some(version),
-                    )
-                },
+                |rng, _i| guess_nonce_iteration(&guesser, rng, &sender),
             )
             .find_any(|r| !r.block_not_found())
             .unwrap()
@@ -346,7 +344,7 @@ fn guess_worker(
         GuessNonceResult::BlockNotFound => unreachable!(),
     };
 
-    info!("Found valid block with nonce ({:x}).", pow.nonce);
+    info!("Found valid block with root ({:x}).", pow.root);
 
     block.set_header_pow(*pow);
 
@@ -390,33 +388,22 @@ impl GuessNonceResult {
     }
 }
 
-/// Run a single iteration of the mining loop.
+/// Run a single iteration of the mining loop: one guess at the root.
 #[inline]
 fn guess_nonce_iteration(
-    mast_auth_paths: &PowMastPaths,
-    threshold: Digest,
-    lustration_status: Option<LustrationStatus>,
+    guesser: &BlockGuesser,
     rng: &mut rand::rngs::StdRng,
     sender: &oneshot::Sender<NewBlockFound>,
-    version: Option<BFieldElement>,
 ) -> GuessNonceResult {
-    let nonce: Digest = rng.random();
+    let root: Digest = rng.random();
 
     // Check every N guesses if task has been cancelled.
-    if nonce.values()[0].raw_u64().trailing_zeros() >= 16 && sender.is_canceled() {
+    if root.values()[0].raw_u64().trailing_zeros() >= 19 && sender.is_canceled() {
         debug!("Guesser was cancelled.");
         return GuessNonceResult::Cancelled;
     }
 
-    let result = Pow::guess(
-        mast_auth_paths,
-        nonce,
-        threshold,
-        lustration_status,
-        version,
-    );
-
-    match result {
+    match guesser.guess(root) {
         Some(pow) => GuessNonceResult::NonceFound { pow: Box::new(pow) },
         None => GuessNonceResult::BlockNotFound,
     }
@@ -1214,17 +1201,17 @@ pub(crate) mod tests {
         let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
         let lustration_status = block.header().pow.lustration_status().ok();
         let version = block.header().version;
+        let guesser = BlockGuesser::new(
+            mast_auth_paths,
+            rng.random(),
+            threshold,
+            lustration_status,
+            Some(version),
+        );
         let num_iterations_run =
             rayon::iter::IntoParallelIterator::into_par_iter(0..num_iterations_launched)
                 .map_init(std_rng_from_thread_rng, |prng, _i| {
-                    guess_nonce_iteration(
-                        &mast_auth_paths,
-                        threshold,
-                        lustration_status,
-                        prng,
-                        &worker_task_tx,
-                        Some(version),
-                    );
+                    guess_nonce_iteration(&guesser, prng, &worker_task_tx);
                 })
                 .count();
         drop(worker_task_rx);
