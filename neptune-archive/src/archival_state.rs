@@ -40,7 +40,6 @@ use neptune_mutator_set::commit;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_mutator_set::removal_record::RemovalRecord;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
-use neptune_mutator_set::removal_record::chunk::Chunk;
 use neptune_primitives::block_height::BLOCKS_PER_GENERATION;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
@@ -2569,39 +2568,31 @@ impl ArchivalState {
         self.assert_synced_to(tip_hash);
         let ams = self.archival_mutator_set.ams();
         let msa = ams.accumulator().await;
-        let (chunk_indices, aocl_index) = sampled_leafs(
-            tip_hash,
-            msa.swbf_inactive.num_leafs(),
-            msa.aocl.num_leafs(),
-        );
-        let mut chunks = [Chunk::empty_chunk(), Chunk::empty_chunk()];
-        let mut chunk_paths = [vec![], vec![]];
-        for (slot, index) in chunk_indices.into_iter().flatten().enumerate() {
+        let mut chunks = vec![];
+        let mut chunk_paths = vec![];
+        for index in sampled_leafs(tip_hash, msa.swbf_inactive.num_leafs()) {
             let (path, chunk) = ams
                 .get_chunk_and_auth_path(index)
                 .await
                 .expect("sampled chunk must be in the SWBF");
-            chunks[slot] = chunk;
-            chunk_paths[slot] = path.authentication_path;
+            chunks.push(chunk);
+            chunk_paths.push(path.authentication_path);
         }
-        let (aocl_leaf, aocl_path) = match aocl_index {
-            Some(index) => (
-                ams.aocl.get_leaf_async(index).await,
-                ams.aocl
-                    .prove_membership_async(index)
-                    .await
-                    .authentication_path,
-            ),
-            None => (Digest::default(), vec![]),
-        };
+        let mut aocl_leafs = vec![];
+        let mut aocl_paths = vec![];
+        for index in sampled_leafs(tip_hash, msa.aocl.num_leafs()) {
+            aocl_leafs.push(ams.aocl.get_leaf_async(index).await);
+            let path = ams.aocl.prove_membership_async(index).await;
+            aocl_paths.push(path.authentication_path);
+        }
         KnowsMutatorSetWitness::new(
             current_tip,
             &msa,
             ConsensusRuleSet::knows_mutator_set_activation_height(self.network),
             chunks,
             chunk_paths,
-            aocl_leaf,
-            aocl_path,
+            aocl_leafs,
+            aocl_paths,
         )
     }
 }

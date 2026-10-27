@@ -47,13 +47,13 @@ activation height.
 |---|---:|---:|---:|---:|---:|
 | witness audit | 3,944 | 2,933 | 333 | 0 | 11 |
 | hash previous block's body and transaction kernel | 4,508 | 3,005 | 7,513 | 4,508 | 0 |
-| 2.c inputs unique | 286 | 196 | 17 | 0 | 224 |
+| rules_for_mined_parent | 286 | 196 | 17 | 0 | 226 |
 | mutator set after previous block (guesser fee; claim output) | -22 | -28 | -15 | -6 | -4 |
 | **epoch section (sum of the indented rows)** | 2,713 | 2,045 | 186 | 25 | 3,277 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.t transaction and witness mutator set hashes | -9 | -14 | -5 | -6 | 0 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.a to 2.e mutator set update (sum of the indented rows) | 1,792 | 1,343 | 136 | 31 | 1,674 |
 | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;MMR peaks over the inputs' index sets | 451 | 360 | 101 | 42 | 104 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2.e window, peaks, additions and comparison | 1,340 | 982 | 34 | -12 | 1,569 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2.e window, peaks, additions and comparison | 1,340 | 982 | 34 | -12 | 1,570 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.o to 2.r lustration update | 929 | 716 | 55 | 0 | 1,602 |
 
 
@@ -63,7 +63,7 @@ activation height.
 |---|---:|---:|---:|---:|---:|
 | witness audit | 70 | 48 | 4 | 0 | -3 |
 | hash previous block's body and transaction kernel | 28 | 19 | 47 | 28 | 0 |
-| 2.c inputs unique | 286 | 196 | 17 | 0 | 216 |
+| rules_for_mined_parent | 286 | 196 | 17 | 0 | 215 |
 | mutator set after previous block (guesser fee; claim output) | -22 | -28 | -15 | -6 | -4 |
 | **epoch section (sum of the indented rows)** | 2,713 | 2,045 | 186 | 25 | 3,277 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.t transaction and witness mutator set hashes | -9 | -14 | -5 | -6 | 0 |
@@ -79,7 +79,6 @@ activation height.
 |---|---:|---:|---:|---:|---:|
 | witness audit | 0 | 0 | 0 | 0 | 10 |
 | hash previous block's body and transaction kernel | 2 | 1 | 4 | 2 | 0 |
-| proof of work (minimum difficulty, hash under target) | 0 | 0 | 0 | 0 | 1 |
 | mutator set after previous block (guesser fee; claim output) | 4 | 3 | 0 | 0 | 1 |
 | **epoch section (sum of the indented rows)** | 334 | 259 | 50 | 7 | 157 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.t transaction and witness mutator set hashes | 0 | 0 | 0 | 0 | 1 |
@@ -92,7 +91,7 @@ activation height.
 |---|---:|---:|---:|---:|---:|
 | witness audit | 42 | 30 | 3 | 0 | 9 |
 | hash previous block's body and transaction kernel | 61 | 41 | 103 | 61 | 1 |
-| 2.o/2.u announcement scan | 42 | 34 | 6 | 0 | 0 |
+| rules_for_mined_parent | 42 | 34 | 6 | 0 | 0 |
 
 ### Lustration
 
@@ -103,12 +102,10 @@ lustration announcement, against the same inputs without lustration:
 |---|---:|---:|---:|---:|---:|
 | witness audit | 42 | 30 | 3 | 0 | 90 |
 | hash previous block's body and transaction kernel | 42 | 28 | 69 | 42 | 13 |
-| proof of work (minimum difficulty, hash under target) | 0 | 0 | 0 | 0 | 46 |
-| 2.o/2.u announcement scan | 94 | 66 | 14 | 0 | 4 |
+| previous block's hash (header MAST, appendix, proof) | 0 | 0 | 0 | 0 | -5 |
+| rules_for_mined_parent | 94 | 66 | 14 | 0 | -9 |
 | 2.m lustration status parses | 0 | 0 | 0 | 0 | 111 |
-| **epoch section (sum of the indented rows)** | 9,006 | 6,332 | 976 | 272 | 9,271 |
-| &nbsp;&nbsp;&nbsp;&nbsp;2.a to 2.e mutator set update (sum of the indented rows) | 0 | 0 | 0 | 0 | -5 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2.e window, peaks, additions and comparison | 0 | 0 | 0 | 0 | -5 |
+| **epoch section (sum of the indented rows)** | 9,006 | 6,332 | 976 | 272 | 9,276 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.o to 2.r lustration update | 9,006 | 6,332 | 976 | 272 | 9,260 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.l max announcements | 0 | 0 | 0 | 0 | -16 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.s counter below initial value | 0 | 0 | 0 | 0 | 32 |
@@ -121,52 +118,43 @@ ones):
 |---|---:|---:|---:|---:|---:|
 | witness audit | 42 | 30 | 3 | 0 | -3 |
 | hash previous block's body and transaction kernel | 21 | 14 | 36 | 21 | 0 |
-| 2.o/2.u announcement scan | 68 | 50 | 10 | 0 | 2 |
+| rules_for_mined_parent | 68 | 50 | 10 | 0 | 2 |
 | **epoch section (sum of the indented rows)** | 4,503 | 3,166 | 488 | 136 | 4,454 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2.e window, peaks, additions and comparison | 0 | 0 | 0 | 0 | 1 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.o to 2.r lustration update | 4,503 | 3,166 | 488 | 136 | 4,455 |
 
 ## Full profiles
 
 ### 2 inputs
 
-Previous block of 16557 words: 2 inputs with 84 packed chunks and 0 of 90 indices in the active window, 0 outputs, 1 announcements of 0 words in total. Padded height 2^18 (262,144); program table height 134,340.
+Previous block of 16682 words: 2 inputs with 84 packed chunks and 0 of 90 indices in the active window, 0 outputs, 1 announcements of 0 words in total. Padded height 2^18 (262,144); program table height 135,180.
 
 | check | processor | op_stack | ram | hash | u32 |
 |---|---:|---:|---:|---:|---:|
 | own program digest | 6 | 5 | 0 | 0 | 0 |
-| witness audit | 9,063 | 6,724 | 752 | 0 | 1,217 |
+| witness audit | 9,063 | 6,724 | 752 | 0 | 1,247 |
 | authenticate next block's MMR accumulator (leaf for 0.a, 0.c) | 237 | 188 | 49 | 49 | 33 |
 | hash previous block's body and transaction kernel | 11,915 | 8,450 | 16,281 | 9,786 | 255 |
-| previous block's hash (header MAST, appendix, proof) | 2,215 | 1,919 | 744 | 553 | 102 |
-| 0.a height | 94 | 70 | 12 | 0 | 17 |
+| previous block's hash (header MAST, appendix, proof) | 2,293 | 1,971 | 869 | 631 | 103 |
+| 0.a height | 98 | 82 | 17 | 0 | 17 |
 | 0.c block MMR update | 674 | 542 | 180 | 74 | 183 |
-| 1.f version in PoW | 77 | 56 | 10 | 0 | 0 |
-| proof of work (minimum difficulty, hash under target) | 2,816 | 2,548 | 605 | 0 | 2,559 |
-| 1.b appendix size | 26 | 18 | 3 | 0 | 10 |
-| 1.a transaction claim in appendix | 422 | 372 | 66 | 38 | 46 |
-| 2.g coinbase within subsidy | 58 | 42 | 7 | 0 | 0 |
-| 2.h coinbase non-negative | 58 | 42 | 7 | 0 | 0 |
-| 2.i fee non-negative | 69 | 54 | 11 | 0 | 33 |
-| 2.c inputs unique | 515 | 364 | 40 | 0 | 407 |
-| mutator set after previous block (guesser fee; claim output) | 3,384 | 3,472 | 1,390 | 561 | 1,126 |
-| 2.o/2.u announcement scan | 181 | 138 | 23 | 0 | 35 |
+| read epoch table | 738 | 496 | 238 | 0 | 0 |
+| epoch in force | 48 | 32 | 1 | 0 | 36 |
+| rules_for_mined_parent | 4,239 | 3,638 | 778 | 38 | 3,198 |
+| mutator set after previous block (guesser fee; claim output) | 3,384 | 3,472 | 1,390 | 561 | 1,131 |
 | 2.m lustration status parses | 85 | 74 | 10 | 0 | 81 |
-| read epoch table | 378 | 256 | 118 | 0 | 0 |
 | activation height comparison | 12 | 7 | 0 | 0 | 17 |
-| **epoch section (sum of the indented rows)** | 17,453 | 15,264 | 3,991 | 1,578 | 8,846 |
-| &nbsp;&nbsp;&nbsp;&nbsp;epoch in force | 48 | 32 | 1 | 0 | 17 |
-| &nbsp;&nbsp;&nbsp;&nbsp;find own claim in appendix | 2,048 | 1,734 | 558 | 0 | 11 |
+| **epoch section (sum of the indented rows)** | 20,139 | 17,278 | 4,255 | 2,178 | 8,876 |
+| &nbsp;&nbsp;&nbsp;&nbsp;find own claim in appendix | 4,802 | 3,790 | 816 | 600 | 17 |
 | &nbsp;&nbsp;&nbsp;&nbsp;0.b parent digest | 44 | 48 | 14 | 0 | 0 |
 | &nbsp;&nbsp;&nbsp;&nbsp;0.d minimum block time | 63 | 46 | 7 | 0 | 124 |
-| &nbsp;&nbsp;&nbsp;&nbsp;0.e difficulty | 2,139 | 2,022 | 502 | 0 | 436 |
+| &nbsp;&nbsp;&nbsp;&nbsp;0.e difficulty | 2,151 | 2,030 | 502 | 0 | 469 |
 | &nbsp;&nbsp;&nbsp;&nbsp;0.f cumulative PoW | 130 | 104 | 25 | 0 | 190 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.t transaction and witness mutator set hashes | 1,024 | 1,340 | 404 | 481 | 30 |
-| &nbsp;&nbsp;&nbsp;&nbsp;2.a to 2.e mutator set update (sum of the indented rows) | 9,019 | 7,754 | 2,245 | 1,097 | 4,067 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;find SWBF update claim in appendix | 238 | 186 | 36 | 0 | 0 |
+| &nbsp;&nbsp;&nbsp;&nbsp;2.a to 2.e mutator set update (sum of the indented rows) | 9,025 | 7,764 | 2,257 | 1,097 | 4,075 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;find SWBF update claim in appendix | 240 | 194 | 48 | 0 | 0 |
 | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;MMR peaks over the inputs' index sets | 936 | 734 | 191 | 80 | 271 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2.e window, peaks, additions and comparison | 7,120 | 6,264 | 1,934 | 991 | 3,752 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(glue of the mutator set update) | 725 | 570 | 84 | 26 | 44 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2.e window, peaks, additions and comparison | 7,123 | 6,266 | 1,934 | 991 | 3,754 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(glue of the mutator set update) | 726 | 570 | 84 | 26 | 50 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.o to 2.r lustration update | 2,202 | 1,670 | 143 | 0 | 3,621 |
 | &nbsp;&nbsp;&nbsp;&nbsp;1.e block size | 88 | 64 | 11 | 0 | 21 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.f transaction timestamp | 141 | 102 | 14 | 0 | 149 |
@@ -175,49 +163,41 @@ Previous block of 16557 words: 2 inputs with 84 packed chunks and 0 of 90 indice
 | &nbsp;&nbsp;&nbsp;&nbsp;2.l max announcements | 76 | 54 | 10 | 0 | 16 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.s counter below initial value | 105 | 68 | 13 | 0 | 132 |
 | write claim output | 98 | 108 | 31 | 0 | 0 |
-| &nbsp;&nbsp;&nbsp;&nbsp;(glue of the epoch section) | 148 | 100 | 21 | 0 | 0 |
-| (glue of the main program; program attestation in the hash table) | 78 | 57 | 11 | 80,604 | 17 |
-| **total** | 49,914 | 40,770 | 24,341 | 93,243 | 14,984 |
+| &nbsp;&nbsp;&nbsp;&nbsp;(glue of the epoch section) | 110 | 72 | 16 | 0 | 0 |
+| (glue of the main program; program attestation in the hash table) | 145 | 121 | 24 | 81,108 | 0 |
+| **total** | 53,174 | 43,188 | 24,875 | 94,425 | 15,177 |
 
 ### 20 inputs
 
-Previous block of 151804 words: 20 inputs with 826 packed chunks and 0 of 900 indices in the active window, 0 outputs, 1 announcements of 0 words in total. Padded height 2^18 (262,144); program table height 134,340.
+Previous block of 151929 words: 20 inputs with 826 packed chunks and 0 of 900 indices in the active window, 0 outputs, 1 announcements of 0 words in total. Padded height 2^18 (262,144); program table height 135,180.
 
 | check | processor | op_stack | ram | hash | u32 |
 |---|---:|---:|---:|---:|---:|
 | own program digest | 6 | 5 | 0 | 0 | 0 |
-| witness audit | 80,071 | 59,528 | 6,760 | 0 | 1,430 |
+| witness audit | 80,071 | 59,528 | 6,760 | 0 | 1,460 |
 | authenticate next block's MMR accumulator (leaf for 0.a, 0.c) | 237 | 188 | 49 | 49 | 33 |
 | hash previous block's body and transaction kernel | 93,059 | 62,546 | 151,523 | 90,930 | 254 |
-| previous block's hash (header MAST, appendix, proof) | 2,221 | 1,923 | 749 | 559 | 107 |
-| 0.a height | 94 | 70 | 12 | 0 | 17 |
+| previous block's hash (header MAST, appendix, proof) | 2,293 | 1,971 | 874 | 631 | 103 |
+| 0.a height | 98 | 82 | 17 | 0 | 17 |
 | 0.c block MMR update | 674 | 542 | 180 | 74 | 183 |
-| 1.f version in PoW | 77 | 56 | 10 | 0 | 0 |
-| proof of work (minimum difficulty, hash under target) | 2,816 | 2,548 | 605 | 0 | 2,575 |
-| 1.b appendix size | 26 | 18 | 3 | 0 | 10 |
-| 1.a transaction claim in appendix | 422 | 372 | 66 | 38 | 46 |
-| 2.g coinbase within subsidy | 58 | 42 | 7 | 0 | 0 |
-| 2.h coinbase non-negative | 58 | 42 | 7 | 0 | 0 |
-| 2.i fee non-negative | 69 | 54 | 11 | 0 | 33 |
-| 2.c inputs unique | 5,663 | 3,892 | 346 | 0 | 4,441 |
+| read epoch table | 738 | 496 | 238 | 0 | 0 |
+| epoch in force | 48 | 32 | 1 | 0 | 36 |
+| rules_for_mined_parent | 9,387 | 7,166 | 1,084 | 38 | 7,270 |
 | mutator set after previous block (guesser fee; claim output) | 2,988 | 2,968 | 1,118 | 453 | 1,048 |
-| 2.o/2.u announcement scan | 181 | 138 | 23 | 0 | 35 |
 | 2.m lustration status parses | 85 | 74 | 10 | 0 | 81 |
-| read epoch table | 378 | 256 | 118 | 0 | 0 |
 | activation height comparison | 12 | 7 | 0 | 0 | 17 |
-| **epoch section (sum of the indented rows)** | 66,293 | 52,076 | 7,354 | 2,034 | 67,838 |
-| &nbsp;&nbsp;&nbsp;&nbsp;epoch in force | 48 | 32 | 1 | 0 | 17 |
-| &nbsp;&nbsp;&nbsp;&nbsp;find own claim in appendix | 2,048 | 1,734 | 558 | 0 | 12 |
+| **epoch section (sum of the indented rows)** | 68,979 | 54,090 | 7,618 | 2,634 | 67,877 |
+| &nbsp;&nbsp;&nbsp;&nbsp;find own claim in appendix | 4,802 | 3,790 | 816 | 600 | 18 |
 | &nbsp;&nbsp;&nbsp;&nbsp;0.b parent digest | 44 | 48 | 14 | 0 | 0 |
 | &nbsp;&nbsp;&nbsp;&nbsp;0.d minimum block time | 63 | 46 | 7 | 0 | 124 |
-| &nbsp;&nbsp;&nbsp;&nbsp;0.e difficulty | 2,139 | 2,022 | 502 | 0 | 435 |
+| &nbsp;&nbsp;&nbsp;&nbsp;0.e difficulty | 2,151 | 2,030 | 502 | 0 | 468 |
 | &nbsp;&nbsp;&nbsp;&nbsp;0.f cumulative PoW | 130 | 104 | 25 | 0 | 190 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.t transaction and witness mutator set hashes | 862 | 1,088 | 312 | 373 | 32 |
-| &nbsp;&nbsp;&nbsp;&nbsp;2.a to 2.e mutator set update (sum of the indented rows) | 41,282 | 31,930 | 4,710 | 1,661 | 34,206 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;find SWBF update claim in appendix | 238 | 186 | 36 | 0 | 0 |
+| &nbsp;&nbsp;&nbsp;&nbsp;2.a to 2.e mutator set update (sum of the indented rows) | 41,288 | 31,940 | 4,722 | 1,661 | 34,223 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;find SWBF update claim in appendix | 240 | 194 | 48 | 0 | 0 |
 | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;MMR peaks over the inputs' index sets | 9,066 | 7,220 | 2,017 | 848 | 2,149 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2.e window, peaks, additions and comparison | 31,241 | 23,946 | 2,563 | 775 | 32,008 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(glue of the mutator set update) | 737 | 578 | 94 | 38 | 49 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2.e window, peaks, additions and comparison | 31,244 | 23,948 | 2,563 | 775 | 32,019 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(glue of the mutator set update) | 738 | 578 | 94 | 38 | 55 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.o to 2.r lustration update | 18,941 | 14,558 | 1,133 | 0 | 32,474 |
 | &nbsp;&nbsp;&nbsp;&nbsp;1.e block size | 88 | 64 | 11 | 0 | 21 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.f transaction timestamp | 141 | 102 | 14 | 0 | 147 |
@@ -226,13 +206,13 @@ Previous block of 151804 words: 20 inputs with 826 packed chunks and 0 of 900 in
 | &nbsp;&nbsp;&nbsp;&nbsp;2.l max announcements | 76 | 54 | 10 | 0 | 16 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.s counter below initial value | 105 | 68 | 13 | 0 | 132 |
 | write claim output | 98 | 108 | 31 | 0 | 0 |
-| &nbsp;&nbsp;&nbsp;&nbsp;(glue of the epoch section) | 148 | 100 | 21 | 0 | 0 |
-| (glue of the main program; program attestation in the hash table) | 78 | 57 | 11 | 80,604 | 17 |
-| **total** | 255,664 | 187,510 | 168,993 | 174,741 | 78,165 |
+| &nbsp;&nbsp;&nbsp;&nbsp;(glue of the epoch section) | 110 | 72 | 16 | 0 | 0 |
+| (glue of the main program; program attestation in the hash table) | 145 | 121 | 24 | 81,108 | 0 |
+| **total** | 258,918 | 189,924 | 169,527 | 175,917 | 78,379 |
 
 ### 2 chunkless inputs
 
-Previous block of 1235 words: 2 inputs with 0 packed chunks and 0 of 90 indices in the active window, 0 outputs, 1 announcements of 0 words in total. Padded height 2^18 (262,144); program table height 134,340.
+Previous block of 1360 words: 2 inputs with 0 packed chunks and 0 of 90 indices in the active window, 0 outputs, 1 announcements of 0 words in total. Padded height 2^18 (262,144); program table height 135,180.
 
 | check | processor | op_stack | ram | hash | u32 |
 |---|---:|---:|---:|---:|---:|
@@ -240,35 +220,27 @@ Previous block of 1235 words: 2 inputs with 0 packed chunks and 0 of 90 indices 
 | witness audit | 1,027 | 744 | 70 | 0 | 973 |
 | authenticate next block's MMR accumulator (leaf for 0.a, 0.c) | 237 | 188 | 49 | 49 | 33 |
 | hash previous block's body and transaction kernel | 2,735 | 2,330 | 981 | 606 | 248 |
-| previous block's hash (header MAST, appendix, proof) | 2,203 | 1,911 | 722 | 541 | 97 |
-| 0.a height | 94 | 70 | 12 | 0 | 17 |
+| previous block's hash (header MAST, appendix, proof) | 2,281 | 1,963 | 847 | 619 | 98 |
+| 0.a height | 98 | 82 | 17 | 0 | 17 |
 | 0.c block MMR update | 674 | 542 | 180 | 74 | 183 |
-| 1.f version in PoW | 77 | 56 | 10 | 0 | 0 |
-| proof of work (minimum difficulty, hash under target) | 2,816 | 2,548 | 605 | 0 | 2,593 |
-| 1.b appendix size | 26 | 18 | 3 | 0 | 10 |
-| 1.a transaction claim in appendix | 422 | 372 | 66 | 38 | 46 |
-| 2.g coinbase within subsidy | 58 | 42 | 7 | 0 | 0 |
-| 2.h coinbase non-negative | 58 | 42 | 7 | 0 | 0 |
-| 2.i fee non-negative | 69 | 54 | 11 | 0 | 33 |
-| 2.c inputs unique | 515 | 364 | 40 | 0 | 384 |
+| read epoch table | 738 | 496 | 238 | 0 | 0 |
+| epoch in force | 48 | 32 | 1 | 0 | 36 |
+| rules_for_mined_parent | 4,239 | 3,638 | 778 | 38 | 3,220 |
 | mutator set after previous block (guesser fee; claim output) | 3,384 | 3,472 | 1,390 | 561 | 1,131 |
-| 2.o/2.u announcement scan | 181 | 138 | 23 | 0 | 35 |
 | 2.m lustration status parses | 85 | 74 | 10 | 0 | 81 |
-| read epoch table | 378 | 256 | 118 | 0 | 0 |
 | activation height comparison | 12 | 7 | 0 | 0 | 17 |
-| **epoch section (sum of the indented rows)** | 17,245 | 15,100 | 3,955 | 1,578 | 8,841 |
-| &nbsp;&nbsp;&nbsp;&nbsp;epoch in force | 48 | 32 | 1 | 0 | 17 |
-| &nbsp;&nbsp;&nbsp;&nbsp;find own claim in appendix | 1,840 | 1,570 | 522 | 0 | 6 |
+| **epoch section (sum of the indented rows)** | 19,931 | 17,114 | 4,219 | 2,178 | 8,876 |
+| &nbsp;&nbsp;&nbsp;&nbsp;find own claim in appendix | 4,594 | 3,626 | 780 | 600 | 12 |
 | &nbsp;&nbsp;&nbsp;&nbsp;0.b parent digest | 44 | 48 | 14 | 0 | 0 |
 | &nbsp;&nbsp;&nbsp;&nbsp;0.d minimum block time | 63 | 46 | 7 | 0 | 124 |
-| &nbsp;&nbsp;&nbsp;&nbsp;0.e difficulty | 2,139 | 2,022 | 502 | 0 | 436 |
+| &nbsp;&nbsp;&nbsp;&nbsp;0.e difficulty | 2,151 | 2,030 | 502 | 0 | 469 |
 | &nbsp;&nbsp;&nbsp;&nbsp;0.f cumulative PoW | 130 | 104 | 25 | 0 | 190 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.t transaction and witness mutator set hashes | 1,024 | 1,340 | 404 | 481 | 30 |
-| &nbsp;&nbsp;&nbsp;&nbsp;2.a to 2.e mutator set update (sum of the indented rows) | 9,019 | 7,754 | 2,245 | 1,097 | 4,067 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;find SWBF update claim in appendix | 238 | 186 | 36 | 0 | 0 |
+| &nbsp;&nbsp;&nbsp;&nbsp;2.a to 2.e mutator set update (sum of the indented rows) | 9,025 | 7,764 | 2,257 | 1,097 | 4,080 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;find SWBF update claim in appendix | 240 | 194 | 48 | 0 | 0 |
 | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;MMR peaks over the inputs' index sets | 936 | 734 | 191 | 80 | 271 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2.e window, peaks, additions and comparison | 7,120 | 6,264 | 1,934 | 991 | 3,752 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(glue of the mutator set update) | 725 | 570 | 84 | 26 | 44 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2.e window, peaks, additions and comparison | 7,123 | 6,266 | 1,934 | 991 | 3,759 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(glue of the mutator set update) | 726 | 570 | 84 | 26 | 50 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.o to 2.r lustration update | 2,202 | 1,670 | 143 | 0 | 3,621 |
 | &nbsp;&nbsp;&nbsp;&nbsp;1.e block size | 88 | 64 | 11 | 0 | 21 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.f transaction timestamp | 141 | 102 | 14 | 0 | 149 |
@@ -277,13 +249,13 @@ Previous block of 1235 words: 2 inputs with 0 packed chunks and 0 of 90 indices 
 | &nbsp;&nbsp;&nbsp;&nbsp;2.l max announcements | 76 | 54 | 10 | 0 | 16 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.s counter below initial value | 105 | 68 | 13 | 0 | 132 |
 | write claim output | 98 | 108 | 31 | 0 | 0 |
-| &nbsp;&nbsp;&nbsp;&nbsp;(glue of the epoch section) | 148 | 100 | 21 | 0 | 0 |
-| (glue of the main program; program attestation in the hash table) | 78 | 57 | 11 | 80,604 | 17 |
-| **total** | 32,478 | 28,498 | 8,301 | 84,051 | 14,739 |
+| &nbsp;&nbsp;&nbsp;&nbsp;(glue of the epoch section) | 110 | 72 | 16 | 0 | 0 |
+| (glue of the main program; program attestation in the hash table) | 145 | 121 | 24 | 81,108 | 0 |
+| **total** | 35,738 | 30,916 | 8,835 | 85,233 | 14,913 |
 
 ### 20 chunkless inputs
 
-Previous block of 2102 words: 20 inputs with 0 packed chunks and 0 of 900 indices in the active window, 0 outputs, 1 announcements of 0 words in total. Padded height 2^18 (262,144); program table height 134,340.
+Previous block of 2227 words: 20 inputs with 0 packed chunks and 0 of 900 indices in the active window, 0 outputs, 1 announcements of 0 words in total. Padded height 2^18 (262,144); program table height 135,180.
 
 | check | processor | op_stack | ram | hash | u32 |
 |---|---:|---:|---:|---:|---:|
@@ -291,35 +263,27 @@ Previous block of 2102 words: 20 inputs with 0 packed chunks and 0 of 900 indice
 | witness audit | 2,287 | 1,608 | 142 | 0 | 914 |
 | authenticate next block's MMR accumulator (leaf for 0.a, 0.c) | 237 | 188 | 49 | 49 | 33 |
 | hash previous block's body and transaction kernel | 3,251 | 2,674 | 1,843 | 1,122 | 247 |
-| previous block's hash (header MAST, appendix, proof) | 2,209 | 1,915 | 727 | 547 | 102 |
-| 0.a height | 94 | 70 | 12 | 0 | 17 |
+| previous block's hash (header MAST, appendix, proof) | 2,281 | 1,963 | 852 | 619 | 103 |
+| 0.a height | 98 | 82 | 17 | 0 | 17 |
 | 0.c block MMR update | 674 | 542 | 180 | 74 | 183 |
-| 1.f version in PoW | 77 | 56 | 10 | 0 | 0 |
-| proof of work (minimum difficulty, hash under target) | 2,816 | 2,548 | 605 | 0 | 2,587 |
-| 1.b appendix size | 26 | 18 | 3 | 0 | 10 |
-| 1.a transaction claim in appendix | 422 | 372 | 66 | 38 | 46 |
-| 2.g coinbase within subsidy | 58 | 42 | 7 | 0 | 0 |
-| 2.h coinbase non-negative | 58 | 42 | 7 | 0 | 0 |
-| 2.i fee non-negative | 69 | 54 | 11 | 0 | 33 |
-| 2.c inputs unique | 5,663 | 3,892 | 346 | 0 | 4,283 |
+| read epoch table | 738 | 496 | 238 | 0 | 0 |
+| epoch in force | 48 | 32 | 1 | 0 | 36 |
+| rules_for_mined_parent | 9,387 | 7,166 | 1,084 | 38 | 7,106 |
 | mutator set after previous block (guesser fee; claim output) | 2,988 | 2,968 | 1,118 | 453 | 1,048 |
-| 2.o/2.u announcement scan | 181 | 138 | 23 | 0 | 35 |
 | 2.m lustration status parses | 85 | 74 | 10 | 0 | 81 |
-| read epoch table | 378 | 256 | 118 | 0 | 0 |
 | activation height comparison | 12 | 7 | 0 | 0 | 17 |
-| **epoch section (sum of the indented rows)** | 66,085 | 51,912 | 7,318 | 2,034 | 67,838 |
-| &nbsp;&nbsp;&nbsp;&nbsp;epoch in force | 48 | 32 | 1 | 0 | 17 |
-| &nbsp;&nbsp;&nbsp;&nbsp;find own claim in appendix | 1,840 | 1,570 | 522 | 0 | 7 |
+| **epoch section (sum of the indented rows)** | 68,771 | 53,926 | 7,582 | 2,634 | 67,872 |
+| &nbsp;&nbsp;&nbsp;&nbsp;find own claim in appendix | 4,594 | 3,626 | 780 | 600 | 13 |
 | &nbsp;&nbsp;&nbsp;&nbsp;0.b parent digest | 44 | 48 | 14 | 0 | 0 |
 | &nbsp;&nbsp;&nbsp;&nbsp;0.d minimum block time | 63 | 46 | 7 | 0 | 124 |
-| &nbsp;&nbsp;&nbsp;&nbsp;0.e difficulty | 2,139 | 2,022 | 502 | 0 | 435 |
+| &nbsp;&nbsp;&nbsp;&nbsp;0.e difficulty | 2,151 | 2,030 | 502 | 0 | 468 |
 | &nbsp;&nbsp;&nbsp;&nbsp;0.f cumulative PoW | 130 | 104 | 25 | 0 | 190 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.t transaction and witness mutator set hashes | 862 | 1,088 | 312 | 373 | 32 |
-| &nbsp;&nbsp;&nbsp;&nbsp;2.a to 2.e mutator set update (sum of the indented rows) | 41,282 | 31,930 | 4,710 | 1,661 | 34,211 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;find SWBF update claim in appendix | 238 | 186 | 36 | 0 | 0 |
+| &nbsp;&nbsp;&nbsp;&nbsp;2.a to 2.e mutator set update (sum of the indented rows) | 41,288 | 31,940 | 4,722 | 1,661 | 34,223 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;find SWBF update claim in appendix | 240 | 194 | 48 | 0 | 0 |
 | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;MMR peaks over the inputs' index sets | 9,066 | 7,220 | 2,017 | 848 | 2,149 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2.e window, peaks, additions and comparison | 31,241 | 23,946 | 2,563 | 775 | 32,013 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(glue of the mutator set update) | 737 | 578 | 94 | 38 | 49 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2.e window, peaks, additions and comparison | 31,244 | 23,948 | 2,563 | 775 | 32,019 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(glue of the mutator set update) | 738 | 578 | 94 | 38 | 55 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.o to 2.r lustration update | 18,941 | 14,558 | 1,133 | 0 | 32,474 |
 | &nbsp;&nbsp;&nbsp;&nbsp;1.e block size | 88 | 64 | 11 | 0 | 21 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.f transaction timestamp | 141 | 102 | 14 | 0 | 147 |
@@ -328,49 +292,41 @@ Previous block of 2102 words: 20 inputs with 0 packed chunks and 0 of 900 indice
 | &nbsp;&nbsp;&nbsp;&nbsp;2.l max announcements | 76 | 54 | 10 | 0 | 16 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.s counter below initial value | 105 | 68 | 13 | 0 | 132 |
 | write claim output | 98 | 108 | 31 | 0 | 0 |
-| &nbsp;&nbsp;&nbsp;&nbsp;(glue of the epoch section) | 148 | 100 | 21 | 0 | 0 |
-| (glue of the main program; program attestation in the hash table) | 78 | 57 | 11 | 80,604 | 17 |
-| **total** | 87,852 | 69,546 | 12,637 | 84,921 | 77,491 |
+| &nbsp;&nbsp;&nbsp;&nbsp;(glue of the epoch section) | 110 | 72 | 16 | 0 | 0 |
+| (glue of the main program; program attestation in the hash table) | 145 | 121 | 24 | 81,108 | 0 |
+| **total** | 91,106 | 71,960 | 13,171 | 86,097 | 77,657 |
 
 ### 2 inputs, 18 extra outputs
 
-Previous block of 16642 words: 2 inputs with 84 packed chunks and 0 of 90 indices in the active window, 18 outputs, 1 announcements of 0 words in total. Padded height 2^18 (262,144); program table height 134,340.
+Previous block of 16767 words: 2 inputs with 84 packed chunks and 0 of 90 indices in the active window, 18 outputs, 1 announcements of 0 words in total. Padded height 2^18 (262,144); program table height 135,180.
 
 | check | processor | op_stack | ram | hash | u32 |
 |---|---:|---:|---:|---:|---:|
 | own program digest | 6 | 5 | 0 | 0 | 0 |
-| witness audit | 9,063 | 6,724 | 752 | 0 | 1,397 |
+| witness audit | 9,063 | 6,724 | 752 | 0 | 1,427 |
 | authenticate next block's MMR accumulator (leaf for 0.a, 0.c) | 237 | 188 | 49 | 49 | 33 |
 | hash previous block's body and transaction kernel | 11,963 | 8,482 | 16,366 | 9,834 | 258 |
-| previous block's hash (header MAST, appendix, proof) | 2,215 | 1,919 | 744 | 553 | 107 |
-| 0.a height | 94 | 70 | 12 | 0 | 17 |
+| previous block's hash (header MAST, appendix, proof) | 2,293 | 1,971 | 869 | 631 | 108 |
+| 0.a height | 98 | 82 | 17 | 0 | 17 |
 | 0.c block MMR update | 674 | 542 | 180 | 74 | 183 |
-| 1.f version in PoW | 77 | 56 | 10 | 0 | 0 |
-| proof of work (minimum difficulty, hash under target) | 2,816 | 2,548 | 605 | 0 | 2,579 |
-| 1.b appendix size | 26 | 18 | 3 | 0 | 10 |
-| 1.a transaction claim in appendix | 422 | 372 | 66 | 38 | 46 |
-| 2.g coinbase within subsidy | 58 | 42 | 7 | 0 | 0 |
-| 2.h coinbase non-negative | 58 | 42 | 7 | 0 | 0 |
-| 2.i fee non-negative | 69 | 54 | 11 | 0 | 33 |
-| 2.c inputs unique | 515 | 364 | 40 | 0 | 407 |
-| mutator set after previous block (guesser fee; claim output) | 3,467 | 3,532 | 1,398 | 555 | 1,145 |
-| 2.o/2.u announcement scan | 181 | 138 | 23 | 0 | 35 |
+| read epoch table | 738 | 496 | 238 | 0 | 0 |
+| epoch in force | 48 | 32 | 1 | 0 | 36 |
+| rules_for_mined_parent | 4,239 | 3,638 | 778 | 38 | 3,208 |
+| mutator set after previous block (guesser fee; claim output) | 3,467 | 3,532 | 1,398 | 555 | 1,150 |
 | 2.m lustration status parses | 85 | 74 | 10 | 0 | 81 |
-| read epoch table | 378 | 256 | 118 | 0 | 0 |
 | activation height comparison | 12 | 7 | 0 | 0 | 17 |
-| **epoch section (sum of the indented rows)** | 23,467 | 19,926 | 4,895 | 1,718 | 11,689 |
-| &nbsp;&nbsp;&nbsp;&nbsp;epoch in force | 48 | 32 | 1 | 0 | 17 |
-| &nbsp;&nbsp;&nbsp;&nbsp;find own claim in appendix | 2,048 | 1,734 | 558 | 0 | 11 |
+| **epoch section (sum of the indented rows)** | 26,153 | 21,940 | 5,159 | 2,318 | 11,719 |
+| &nbsp;&nbsp;&nbsp;&nbsp;find own claim in appendix | 4,802 | 3,790 | 816 | 600 | 17 |
 | &nbsp;&nbsp;&nbsp;&nbsp;0.b parent digest | 44 | 48 | 14 | 0 | 0 |
 | &nbsp;&nbsp;&nbsp;&nbsp;0.d minimum block time | 63 | 46 | 7 | 0 | 124 |
-| &nbsp;&nbsp;&nbsp;&nbsp;0.e difficulty | 2,139 | 2,022 | 502 | 0 | 436 |
+| &nbsp;&nbsp;&nbsp;&nbsp;0.e difficulty | 2,151 | 2,030 | 502 | 0 | 469 |
 | &nbsp;&nbsp;&nbsp;&nbsp;0.f cumulative PoW | 130 | 104 | 25 | 0 | 190 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.t transaction and witness mutator set hashes | 1,024 | 1,340 | 404 | 481 | 63 |
-| &nbsp;&nbsp;&nbsp;&nbsp;2.a to 2.e mutator set update (sum of the indented rows) | 15,033 | 12,416 | 3,149 | 1,237 | 6,877 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;find SWBF update claim in appendix | 238 | 186 | 36 | 0 | 0 |
+| &nbsp;&nbsp;&nbsp;&nbsp;2.a to 2.e mutator set update (sum of the indented rows) | 15,039 | 12,426 | 3,161 | 1,237 | 6,885 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;find SWBF update claim in appendix | 240 | 194 | 48 | 0 | 0 |
 | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;MMR peaks over the inputs' index sets | 936 | 734 | 191 | 80 | 274 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2.e window, peaks, additions and comparison | 13,134 | 10,926 | 2,838 | 1,131 | 6,559 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(glue of the mutator set update) | 725 | 570 | 84 | 26 | 44 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2.e window, peaks, additions and comparison | 13,137 | 10,928 | 2,838 | 1,131 | 6,561 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(glue of the mutator set update) | 726 | 570 | 84 | 26 | 50 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.o to 2.r lustration update | 2,202 | 1,670 | 143 | 0 | 3,621 |
 | &nbsp;&nbsp;&nbsp;&nbsp;1.e block size | 88 | 64 | 11 | 0 | 21 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.f transaction timestamp | 141 | 102 | 14 | 0 | 149 |
@@ -379,49 +335,41 @@ Previous block of 16642 words: 2 inputs with 84 packed chunks and 0 of 90 indice
 | &nbsp;&nbsp;&nbsp;&nbsp;2.l max announcements | 76 | 54 | 10 | 0 | 16 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.s counter below initial value | 105 | 68 | 13 | 0 | 132 |
 | write claim output | 98 | 108 | 31 | 0 | 0 |
-| &nbsp;&nbsp;&nbsp;&nbsp;(glue of the epoch section) | 148 | 100 | 21 | 0 | 0 |
-| (glue of the main program; program attestation in the hash table) | 78 | 57 | 11 | 80,604 | 17 |
-| **total** | 56,059 | 45,524 | 25,338 | 93,425 | 18,054 |
+| &nbsp;&nbsp;&nbsp;&nbsp;(glue of the epoch section) | 110 | 72 | 16 | 0 | 0 |
+| (glue of the main program; program attestation in the hash table) | 145 | 121 | 24 | 81,108 | 0 |
+| **total** | 59,319 | 47,942 | 25,872 | 94,607 | 18,237 |
 
 ### 2 inputs, 10 announcements of 100 words
 
-Previous block of 17587 words: 2 inputs with 84 packed chunks and 0 of 90 indices in the active window, 0 outputs, 11 announcements of 1000 words in total. Padded height 2^18 (262,144); program table height 134,340.
+Previous block of 17712 words: 2 inputs with 84 packed chunks and 0 of 90 indices in the active window, 0 outputs, 11 announcements of 1000 words in total. Padded height 2^18 (262,144); program table height 135,180.
 
 | check | processor | op_stack | ram | hash | u32 |
 |---|---:|---:|---:|---:|---:|
 | own program digest | 6 | 5 | 0 | 0 | 0 |
-| witness audit | 9,483 | 7,024 | 782 | 0 | 1,307 |
+| witness audit | 9,483 | 7,024 | 782 | 0 | 1,337 |
 | authenticate next block's MMR accumulator (leaf for 0.a, 0.c) | 237 | 188 | 49 | 49 | 33 |
 | hash previous block's body and transaction kernel | 12,533 | 8,862 | 17,311 | 10,404 | 267 |
-| previous block's hash (header MAST, appendix, proof) | 2,215 | 1,919 | 744 | 553 | 102 |
-| 0.a height | 94 | 70 | 12 | 0 | 17 |
+| previous block's hash (header MAST, appendix, proof) | 2,293 | 1,971 | 869 | 631 | 103 |
+| 0.a height | 98 | 82 | 17 | 0 | 17 |
 | 0.c block MMR update | 674 | 542 | 180 | 74 | 183 |
-| 1.f version in PoW | 77 | 56 | 10 | 0 | 0 |
-| proof of work (minimum difficulty, hash under target) | 2,816 | 2,548 | 605 | 0 | 2,568 |
-| 1.b appendix size | 26 | 18 | 3 | 0 | 10 |
-| 1.a transaction claim in appendix | 422 | 372 | 66 | 38 | 46 |
-| 2.g coinbase within subsidy | 58 | 42 | 7 | 0 | 0 |
-| 2.h coinbase non-negative | 58 | 42 | 7 | 0 | 0 |
-| 2.i fee non-negative | 69 | 54 | 11 | 0 | 33 |
-| 2.c inputs unique | 515 | 364 | 40 | 0 | 407 |
-| mutator set after previous block (guesser fee; claim output) | 3,384 | 3,472 | 1,390 | 561 | 1,126 |
-| 2.o/2.u announcement scan | 601 | 478 | 83 | 0 | 43 |
+| read epoch table | 738 | 496 | 238 | 0 | 0 |
+| epoch in force | 48 | 32 | 1 | 0 | 36 |
+| rules_for_mined_parent | 4,659 | 3,978 | 838 | 38 | 3,196 |
+| mutator set after previous block (guesser fee; claim output) | 3,384 | 3,472 | 1,390 | 561 | 1,131 |
 | 2.m lustration status parses | 85 | 74 | 10 | 0 | 81 |
-| read epoch table | 378 | 256 | 118 | 0 | 0 |
 | activation height comparison | 12 | 7 | 0 | 0 | 17 |
-| **epoch section (sum of the indented rows)** | 17,453 | 15,264 | 3,991 | 1,578 | 8,846 |
-| &nbsp;&nbsp;&nbsp;&nbsp;epoch in force | 48 | 32 | 1 | 0 | 17 |
-| &nbsp;&nbsp;&nbsp;&nbsp;find own claim in appendix | 2,048 | 1,734 | 558 | 0 | 11 |
+| **epoch section (sum of the indented rows)** | 20,139 | 17,278 | 4,255 | 2,178 | 8,876 |
+| &nbsp;&nbsp;&nbsp;&nbsp;find own claim in appendix | 4,802 | 3,790 | 816 | 600 | 17 |
 | &nbsp;&nbsp;&nbsp;&nbsp;0.b parent digest | 44 | 48 | 14 | 0 | 0 |
 | &nbsp;&nbsp;&nbsp;&nbsp;0.d minimum block time | 63 | 46 | 7 | 0 | 124 |
-| &nbsp;&nbsp;&nbsp;&nbsp;0.e difficulty | 2,139 | 2,022 | 502 | 0 | 436 |
+| &nbsp;&nbsp;&nbsp;&nbsp;0.e difficulty | 2,151 | 2,030 | 502 | 0 | 469 |
 | &nbsp;&nbsp;&nbsp;&nbsp;0.f cumulative PoW | 130 | 104 | 25 | 0 | 190 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.t transaction and witness mutator set hashes | 1,024 | 1,340 | 404 | 481 | 30 |
-| &nbsp;&nbsp;&nbsp;&nbsp;2.a to 2.e mutator set update (sum of the indented rows) | 9,019 | 7,754 | 2,245 | 1,097 | 4,067 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;find SWBF update claim in appendix | 238 | 186 | 36 | 0 | 0 |
+| &nbsp;&nbsp;&nbsp;&nbsp;2.a to 2.e mutator set update (sum of the indented rows) | 9,025 | 7,764 | 2,257 | 1,097 | 4,075 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;find SWBF update claim in appendix | 240 | 194 | 48 | 0 | 0 |
 | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;MMR peaks over the inputs' index sets | 936 | 734 | 191 | 80 | 271 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2.e window, peaks, additions and comparison | 7,120 | 6,264 | 1,934 | 991 | 3,752 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(glue of the mutator set update) | 725 | 570 | 84 | 26 | 44 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2.e window, peaks, additions and comparison | 7,123 | 6,266 | 1,934 | 991 | 3,754 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(glue of the mutator set update) | 726 | 570 | 84 | 26 | 50 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.o to 2.r lustration update | 2,202 | 1,670 | 143 | 0 | 3,621 |
 | &nbsp;&nbsp;&nbsp;&nbsp;1.e block size | 88 | 64 | 11 | 0 | 21 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.f transaction timestamp | 141 | 102 | 14 | 0 | 149 |
@@ -430,49 +378,41 @@ Previous block of 17587 words: 2 inputs with 84 packed chunks and 0 of 90 indice
 | &nbsp;&nbsp;&nbsp;&nbsp;2.l max announcements | 76 | 54 | 10 | 0 | 16 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.s counter below initial value | 105 | 68 | 13 | 0 | 132 |
 | write claim output | 98 | 108 | 31 | 0 | 0 |
-| &nbsp;&nbsp;&nbsp;&nbsp;(glue of the epoch section) | 148 | 100 | 21 | 0 | 0 |
-| (glue of the main program; program attestation in the hash table) | 78 | 57 | 11 | 80,604 | 17 |
-| **total** | 51,372 | 41,822 | 25,461 | 93,861 | 15,103 |
+| &nbsp;&nbsp;&nbsp;&nbsp;(glue of the epoch section) | 110 | 72 | 16 | 0 | 0 |
+| (glue of the main program; program attestation in the hash table) | 145 | 121 | 24 | 81,108 | 0 |
+| **total** | 54,632 | 44,240 | 25,995 | 95,043 | 15,277 |
 
 ### 2 lustrating inputs
 
-Previous block of 16626 words: 2 inputs with 84 packed chunks and 0 of 90 indices in the active window, 0 outputs, 2 announcements of 66 words in total. Padded height 2^18 (262,144); program table height 134,340.
+Previous block of 16751 words: 2 inputs with 84 packed chunks and 0 of 90 indices in the active window, 0 outputs, 2 announcements of 66 words in total. Padded height 2^18 (262,144); program table height 135,180.
 
 | check | processor | op_stack | ram | hash | u32 |
 |---|---:|---:|---:|---:|---:|
 | own program digest | 6 | 5 | 0 | 0 | 0 |
-| witness audit | 9,105 | 6,754 | 755 | 0 | 1,307 |
+| witness audit | 9,105 | 6,754 | 755 | 0 | 1,337 |
 | authenticate next block's MMR accumulator (leaf for 0.a, 0.c) | 237 | 188 | 49 | 49 | 33 |
 | hash previous block's body and transaction kernel | 11,957 | 8,478 | 16,350 | 9,828 | 268 |
-| previous block's hash (header MAST, appendix, proof) | 2,215 | 1,919 | 744 | 553 | 102 |
-| 0.a height | 94 | 70 | 12 | 0 | 17 |
+| previous block's hash (header MAST, appendix, proof) | 2,293 | 1,971 | 869 | 631 | 98 |
+| 0.a height | 98 | 82 | 17 | 0 | 17 |
 | 0.c block MMR update | 674 | 542 | 180 | 74 | 183 |
-| 1.f version in PoW | 77 | 56 | 10 | 0 | 0 |
-| proof of work (minimum difficulty, hash under target) | 2,816 | 2,548 | 605 | 0 | 2,605 |
-| 1.b appendix size | 26 | 18 | 3 | 0 | 10 |
-| 1.a transaction claim in appendix | 422 | 372 | 66 | 38 | 46 |
-| 2.g coinbase within subsidy | 58 | 42 | 7 | 0 | 0 |
-| 2.h coinbase non-negative | 58 | 42 | 7 | 0 | 0 |
-| 2.i fee non-negative | 69 | 54 | 11 | 0 | 33 |
-| 2.c inputs unique | 515 | 364 | 40 | 0 | 407 |
-| mutator set after previous block (guesser fee; claim output) | 3,384 | 3,472 | 1,390 | 561 | 1,126 |
-| 2.o/2.u announcement scan | 275 | 204 | 37 | 0 | 39 |
+| read epoch table | 738 | 496 | 238 | 0 | 0 |
+| epoch in force | 48 | 32 | 1 | 0 | 36 |
+| rules_for_mined_parent | 4,333 | 3,704 | 792 | 38 | 3,189 |
+| mutator set after previous block (guesser fee; claim output) | 3,384 | 3,472 | 1,390 | 561 | 1,131 |
 | 2.m lustration status parses | 85 | 74 | 10 | 0 | 192 |
-| read epoch table | 378 | 256 | 118 | 0 | 0 |
 | activation height comparison | 12 | 7 | 0 | 0 | 17 |
-| **epoch section (sum of the indented rows)** | 26,459 | 21,596 | 4,967 | 1,850 | 18,117 |
-| &nbsp;&nbsp;&nbsp;&nbsp;epoch in force | 48 | 32 | 1 | 0 | 17 |
-| &nbsp;&nbsp;&nbsp;&nbsp;find own claim in appendix | 2,048 | 1,734 | 558 | 0 | 11 |
+| **epoch section (sum of the indented rows)** | 29,145 | 23,610 | 5,231 | 2,450 | 18,152 |
+| &nbsp;&nbsp;&nbsp;&nbsp;find own claim in appendix | 4,802 | 3,790 | 816 | 600 | 17 |
 | &nbsp;&nbsp;&nbsp;&nbsp;0.b parent digest | 44 | 48 | 14 | 0 | 0 |
 | &nbsp;&nbsp;&nbsp;&nbsp;0.d minimum block time | 63 | 46 | 7 | 0 | 124 |
-| &nbsp;&nbsp;&nbsp;&nbsp;0.e difficulty | 2,139 | 2,022 | 502 | 0 | 436 |
+| &nbsp;&nbsp;&nbsp;&nbsp;0.e difficulty | 2,151 | 2,030 | 502 | 0 | 469 |
 | &nbsp;&nbsp;&nbsp;&nbsp;0.f cumulative PoW | 130 | 104 | 25 | 0 | 190 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.t transaction and witness mutator set hashes | 1,024 | 1,340 | 404 | 481 | 30 |
-| &nbsp;&nbsp;&nbsp;&nbsp;2.a to 2.e mutator set update (sum of the indented rows) | 9,019 | 7,754 | 2,245 | 1,097 | 4,062 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;find SWBF update claim in appendix | 238 | 186 | 36 | 0 | 0 |
+| &nbsp;&nbsp;&nbsp;&nbsp;2.a to 2.e mutator set update (sum of the indented rows) | 9,025 | 7,764 | 2,257 | 1,097 | 4,075 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;find SWBF update claim in appendix | 240 | 194 | 48 | 0 | 0 |
 | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;MMR peaks over the inputs' index sets | 936 | 734 | 191 | 80 | 271 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2.e window, peaks, additions and comparison | 7,120 | 6,264 | 1,934 | 991 | 3,747 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(glue of the mutator set update) | 725 | 570 | 84 | 26 | 44 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2.e window, peaks, additions and comparison | 7,123 | 6,266 | 1,934 | 991 | 3,754 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(glue of the mutator set update) | 726 | 570 | 84 | 26 | 50 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.o to 2.r lustration update | 11,208 | 8,002 | 1,119 | 272 | 12,881 |
 | &nbsp;&nbsp;&nbsp;&nbsp;1.e block size | 88 | 64 | 11 | 0 | 21 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.f transaction timestamp | 141 | 102 | 14 | 0 | 149 |
@@ -481,50 +421,42 @@ Previous block of 16626 words: 2 inputs with 84 packed chunks and 0 of 90 indice
 | &nbsp;&nbsp;&nbsp;&nbsp;2.l max announcements | 76 | 54 | 10 | 0 | 0 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.s counter below initial value | 105 | 68 | 13 | 0 | 164 |
 | write claim output | 98 | 108 | 31 | 0 | 0 |
-| &nbsp;&nbsp;&nbsp;&nbsp;(glue of the epoch section) | 148 | 100 | 21 | 0 | 0 |
-| (glue of the main program; program attestation in the hash table) | 78 | 57 | 11 | 80,604 | 17 |
-| **total** | 59,098 | 47,226 | 25,403 | 93,557 | 24,519 |
+| &nbsp;&nbsp;&nbsp;&nbsp;(glue of the epoch section) | 110 | 72 | 16 | 0 | 0 |
+| (glue of the main program; program attestation in the hash table) | 145 | 121 | 24 | 81,108 | 0 |
+| **total** | 62,358 | 49,644 | 25,937 | 94,739 | 24,653 |
 
 ### 20 lustrating inputs
 
-Previous block of 152521 words: 20 inputs with 826 packed chunks and 0 of 900 indices in the active window, 0 outputs, 20 announcements of 660 words in total. Padded height 2^19 (524,288); program table height 134,340.
+Previous block of 152646 words: 20 inputs with 826 packed chunks and 0 of 900 indices in the active window, 0 outputs, 20 announcements of 660 words in total. Padded height 2^19 (524,288); program table height 135,180.
 
 | check | processor | op_stack | ram | hash | u32 |
 |---|---:|---:|---:|---:|---:|
 | own program digest | 6 | 5 | 0 | 0 | 0 |
-| witness audit | 80,869 | 60,098 | 6,817 | 0 | 1,460 |
+| witness audit | 80,869 | 60,098 | 6,817 | 0 | 1,490 |
 | authenticate next block's MMR accumulator (leaf for 0.a, 0.c) | 237 | 188 | 49 | 49 | 33 |
 | hash previous block's body and transaction kernel | 93,491 | 62,834 | 152,240 | 91,362 | 265 |
-| previous block's hash (header MAST, appendix, proof) | 2,221 | 1,923 | 749 | 559 | 107 |
-| 0.a height | 94 | 70 | 12 | 0 | 17 |
+| previous block's hash (header MAST, appendix, proof) | 2,293 | 1,971 | 874 | 631 | 103 |
+| 0.a height | 98 | 82 | 17 | 0 | 17 |
 | 0.c block MMR update | 674 | 542 | 180 | 74 | 183 |
-| 1.f version in PoW | 77 | 56 | 10 | 0 | 0 |
-| proof of work (minimum difficulty, hash under target) | 2,816 | 2,548 | 605 | 0 | 2,604 |
-| 1.b appendix size | 26 | 18 | 3 | 0 | 10 |
-| 1.a transaction claim in appendix | 422 | 372 | 66 | 38 | 46 |
-| 2.g coinbase within subsidy | 58 | 42 | 7 | 0 | 0 |
-| 2.h coinbase non-negative | 58 | 42 | 7 | 0 | 0 |
-| 2.i fee non-negative | 69 | 54 | 11 | 0 | 33 |
-| 2.c inputs unique | 5,663 | 3,892 | 346 | 0 | 4,441 |
+| read epoch table | 738 | 496 | 238 | 0 | 0 |
+| epoch in force | 48 | 32 | 1 | 0 | 36 |
+| rules_for_mined_parent | 10,705 | 8,132 | 1,278 | 38 | 7,298 |
 | mutator set after previous block (guesser fee; claim output) | 2,988 | 2,968 | 1,118 | 453 | 1,048 |
-| 2.o/2.u announcement scan | 1,499 | 1,104 | 217 | 0 | 82 |
 | 2.m lustration status parses | 85 | 74 | 10 | 0 | 192 |
-| read epoch table | 378 | 256 | 118 | 0 | 0 |
 | activation height comparison | 12 | 7 | 0 | 0 | 17 |
-| **epoch section (sum of the indented rows)** | 156,350 | 115,396 | 17,114 | 4,754 | 157,280 |
-| &nbsp;&nbsp;&nbsp;&nbsp;epoch in force | 48 | 32 | 1 | 0 | 17 |
-| &nbsp;&nbsp;&nbsp;&nbsp;find own claim in appendix | 2,048 | 1,734 | 558 | 0 | 5 |
+| **epoch section (sum of the indented rows)** | 159,036 | 117,410 | 17,378 | 5,354 | 157,320 |
+| &nbsp;&nbsp;&nbsp;&nbsp;find own claim in appendix | 4,802 | 3,790 | 816 | 600 | 11 |
 | &nbsp;&nbsp;&nbsp;&nbsp;0.b parent digest | 44 | 48 | 14 | 0 | 0 |
 | &nbsp;&nbsp;&nbsp;&nbsp;0.d minimum block time | 63 | 46 | 7 | 0 | 124 |
-| &nbsp;&nbsp;&nbsp;&nbsp;0.e difficulty | 2,139 | 2,022 | 502 | 0 | 430 |
+| &nbsp;&nbsp;&nbsp;&nbsp;0.e difficulty | 2,151 | 2,030 | 502 | 0 | 463 |
 | &nbsp;&nbsp;&nbsp;&nbsp;0.f cumulative PoW | 130 | 104 | 25 | 0 | 190 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.t transaction and witness mutator set hashes | 862 | 1,088 | 312 | 373 | 32 |
-| &nbsp;&nbsp;&nbsp;&nbsp;2.a to 2.e mutator set update (sum of the indented rows) | 41,282 | 31,930 | 4,710 | 1,661 | 34,206 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;find SWBF update claim in appendix | 238 | 186 | 36 | 0 | 0 |
+| &nbsp;&nbsp;&nbsp;&nbsp;2.a to 2.e mutator set update (sum of the indented rows) | 41,288 | 31,940 | 4,722 | 1,661 | 34,223 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;find SWBF update claim in appendix | 240 | 194 | 48 | 0 | 0 |
 | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;MMR peaks over the inputs' index sets | 9,066 | 7,220 | 2,017 | 848 | 2,149 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2.e window, peaks, additions and comparison | 31,241 | 23,946 | 2,563 | 775 | 32,008 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(glue of the mutator set update) | 737 | 578 | 94 | 38 | 49 |
-| &nbsp;&nbsp;&nbsp;&nbsp;2.o to 2.r lustration update | 108,998 | 77,878 | 10,893 | 2,720 | 121,912 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2.e window, peaks, additions and comparison | 31,244 | 23,948 | 2,563 | 775 | 32,019 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(glue of the mutator set update) | 738 | 578 | 94 | 38 | 55 |
+| &nbsp;&nbsp;&nbsp;&nbsp;2.o to 2.r lustration update | 108,998 | 77,878 | 10,893 | 2,720 | 121,913 |
 | &nbsp;&nbsp;&nbsp;&nbsp;1.e block size | 88 | 64 | 11 | 0 | 21 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.f transaction timestamp | 141 | 102 | 14 | 0 | 147 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.j max inputs | 93 | 66 | 12 | 0 | 16 |
@@ -532,16 +464,16 @@ Previous block of 152521 words: 20 inputs with 826 packed chunks and 0 of 900 in
 | &nbsp;&nbsp;&nbsp;&nbsp;2.l max announcements | 76 | 54 | 10 | 0 | 0 |
 | &nbsp;&nbsp;&nbsp;&nbsp;2.s counter below initial value | 105 | 68 | 13 | 0 | 164 |
 | write claim output | 98 | 108 | 31 | 0 | 0 |
-| &nbsp;&nbsp;&nbsp;&nbsp;(glue of the epoch section) | 148 | 100 | 21 | 0 | 0 |
-| (glue of the main program; program attestation in the hash table) | 78 | 57 | 11 | 80,604 | 17 |
-| **total** | 348,269 | 252,654 | 179,721 | 177,893 | 167,835 |
+| &nbsp;&nbsp;&nbsp;&nbsp;(glue of the epoch section) | 110 | 72 | 16 | 0 | 0 |
+| (glue of the main program; program attestation in the hash table) | 145 | 121 | 24 | 81,108 | 0 |
+| **total** | 351,523 | 255,068 | 180,255 | 179,069 | 168,002 |
 
 ## Observations
 
-- The mutator-set rules 2.a and 2.e are 18% of the processor rows with
-  2 inputs and 16% with 20.
+- The mutator-set rules 2.a and 2.e are 16% of the processor rows with
+  2 inputs and 15% with 20.
 - The base cost that scales with block size rather than with inputs is hashing
   the body and auditing the witness.
-- The hash rows in the main program's glue, 80,604, are program attestation. The
-  program table's height, 134,340, includes the STARK verifier, which is linked
+- The hash rows in the main program's glue, 81,108, are program attestation. The
+  program table's height, 135,180, includes the STARK verifier, which is linked
   even when rule 1.d is not called.

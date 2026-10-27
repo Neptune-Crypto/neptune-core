@@ -21,9 +21,9 @@ Built in `neptune-consensus`, gated by the epoch table, not activated.
   with. Transactions keep their chunk dictionaries so nodes without an
   archival mutator set can check them for double spends; the data is
   stripped when a kernel enters a block.
-- **e'_1)** `KnowsMutatorSet`: a claim that the composer holds two chunks
-  and one AOCL leaf sampled by the parent's hash, about the mutator set
-  after the parent; checked by the program for the parent. **e'_2)**, the
+- **e'_1)** `KnowsMutatorSet`: a claim that the composer holds one leaf of
+  every Merkle tree of the inactive SWBF and of the AOCL, sampled by the
+  parent's hash, about the mutator set after the parent. **e'_2)**, the
   guesser's reveal, was removed on 2026-10-27; see its section.
 - **Epoch table**: per-network parameters, matched exactly; a change is an
   appending hard fork. New rules soft-fork as extension claims (last
@@ -169,7 +169,7 @@ capacity instead, and the proofs run in parallel.
 | d) Aggregation tree in the appendix | 250k / 105k | 8 per leaf | block size | ~125 leaves + ~124 aggregations, by the composer | soft |
 | e1) Drop chunk data in block entirely | 250k / 105k | 8 | 8 alone; block size with c or d | as c or d | hard, rules only, blocks shrink |
 | e2) Keep chunk data in block, don't validate | 250k / 105k | 8 | 8 | as e1 | hard, rules only, no benefit over e1 |
-| e'_1) Composer proves knowledge of the mutator set after the parent: two chunks, one AOCL leaf | one small claim per block, built; a claim search and two bags of peaks in `PredecessorIsValid` | unchanged | unchanged | one | hard, appendix rule; epoch-gated |
+| e'_1) Composer proves knowledge of the mutator set after the parent: one leaf per tree of each MMR | one small claim per block, built; a claim search and two bags of peaks in `PredecessorIsValid` | unchanged | unchanged | one | hard, appendix rule; epoch-gated |
 | e'_2) Guesser reveals a leaf of the inactive SWBF's first tree with its path | one path walk per block in `PredecessorIsValid`, built then removed | unchanged | unchanged | none | hard, header rules; soft-forkable later |
 | e'') Composer reveals the samples outright | not assessed; e'_1) as built makes it moot | | | | |
 | f) Merkle-tree chunks in the SWBF | 21k tallest table (u32) per input, measured | ~100 | 100 alone; block size with d | ~10 leaves + ~9 aggregations with d, plus the window slide in `PredecessorIsValid` | hard, mutator set redesign |
@@ -379,27 +379,26 @@ fork, larger blocks. Dominated by e1).
 ### e'_1) Composer proves knowledge of the archival mutator set
 
 Implemented 2026-10-07 in the consensus crate, `validity/knows_mutator_set.rs`,
-gated by the epoch flag `requires_mutator_set_reveals`. The block's appendix
+gated per network by `miners_must_prove_ams_knowledge`. The block's appendix
 carries a claim of the program `KnowsMutatorSet`: input the parent's hash and
 the bagged peaks of the AOCL and inactive SWBF after the parent, the mutator
 set the block's transaction is built on (the active window is in the parent's
 body), no output. The program divines the two MMRs, which must bag to the
-input, two chunks and one AOCL leaf with their authentication paths, and
-checks them at the leafs the parent's hash samples: the words of
-`hash_pair(parent_hash, 0)`, the first two modulo the SWBF's leaf count, the
-third modulo the AOCL's, any tree of either, since the composer cannot grind
-the parent's hash. An empty MMR leaves nothing to prove on its side. Three
-samples rather than one because the proof makes them cheap for everyone but
-the composer, and a composer who holds only a fraction of the set fails all
-three with the cube of the odds. `PredecessorIsValid` requires the claim as it
+input, and one leaf per Merkle tree of each, a chunk for the SWBF, with its
+authentication path, at the index the low bits of the first word of the
+parent's hash pick within the tree: the word the difficulty leaves free, and
+not the composer's to grind. Since 2026-10-27 every tree is sampled, where
+before three leafs of any tree were, so a composer must hold a leaf and path
+of every tree, the small trees of recent leafs included; an empty MMR leaves
+nothing to prove. `PredecessorIsValid` requires the claim as it
 requires the SWBF update claim: program digest, version and input length
 first, then the fifteen input words, with both MMRs bagged from the
 transaction's mutator set in memory, which rule 2.t authenticates. The block
 proof covers the claim's proof, and the claim depends on the parent alone, so
 the composer proves it as soon as the parent lands, in parallel with the
 rest. The guarantee is not that the composer holds the whole set, but that
-one without it fetches unpredictable pieces per block from someone who does. Cost: in the claim two chunk hashes and three
-paths, in `PredecessorIsValid` a claim search and two bags of peaks. Wired
+one without it fetches unpredictable pieces per block from someone who does. Cost: in the claim one chunk hash and one path
+per tree, in `PredecessorIsValid` a claim search and two bags of peaks. Wired
 2026-10-09: the host requires the claim in the tip, and the composer builds
 it from archival state and proves it.
 
