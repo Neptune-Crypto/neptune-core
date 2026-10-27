@@ -952,8 +952,15 @@ impl TritonProgram for PredecessorIsValid {
             .version();
 
         let epoch_size = Epoch::static_length().unwrap();
-        // Never written, so all zeros: what an unused epoch looks like.
-        let unused_epoch_alloc = library.kmalloc(epoch_size as u32);
+
+        // The hash of an unused epoch is the hash of the encoding of the
+        // default epoch, which is all zeros.
+        let push_unused_epoch_hash = Tip5::hash_varlen(&Epoch::default().encode())
+            .values()
+            .into_iter()
+            .rev()
+            .flat_map(|word| triton_asm!(push { word }))
+            .collect::<Vec<_>>();
 
         // An epoch is too wide to compare on the stack, so compare the hashes instead.
         let epochs_are_equal = "predecessor_is_valid_epochs_are_equal".to_string();
@@ -1059,7 +1066,9 @@ impl TritonProgram for PredecessorIsValid {
                 dup 4 dup 3 call {epochs_are_equal}
                 // _ *claim_epoch[i] height *epoch[i] tables_agree i epochs_are_equal
 
-                dup 5 push {unused_epoch_alloc.write_address()} call {epochs_are_equal}
+                dup 5 push {epoch_size} call {hash_varlen}
+                {&push_unused_epoch_hash}
+                {&digests_are_equal}
                 // _ *claim_epoch[i] height *epoch[i] tables_agree i epochs_are_equal claim_epoch_is_unused
 
                 dup 5 dup 5 {&field!(Epoch::height)} read_mem 1 pop 1
@@ -5842,6 +5851,34 @@ ones):
                 &next_header,
                 &with_future_epoch,
             );
+        }
+
+        #[test]
+        fn static_memory_is_written_before_it_is_read() {
+            // The prover supplies the initial contents of all memory, so what
+            // the program finds where it never wrote must not matter. The
+            // claim's table is short of the own table's second epoch, which
+            // the program checks against an unused epoch.
+            let (prev_block, next_body, next_header) =
+                unproven_prev_block_and_next_body_and_header(0);
+            let future_epoch = Epoch {
+                height: prev_block.header().height.next().into(),
+                ..activation_epoch()
+            };
+            let epochs = EpochTable::new(&[activation_epoch(), future_epoch]);
+            let program = skipping();
+            let (claim, mut nondeterminism) =
+                claim_and_nondeterminism(&program, &prev_block, &next_body, &next_header, &epochs);
+            let mut rng = StdRng::seed_from_u64(0);
+            for offset in 0..(1u64 << 17) {
+                let address = tasm_lib::library::STATIC_MEMORY_FIRST_ADDRESS - bfe!(offset);
+                nondeterminism.ram.insert(address, rng.random());
+            }
+
+            let output = program
+                .run_tasm(&PublicInput::new(claim.input), nondeterminism)
+                .unwrap();
+            assert_eq!(claim.output, output);
         }
 
         #[test]
