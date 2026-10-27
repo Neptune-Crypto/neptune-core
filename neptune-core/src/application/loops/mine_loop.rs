@@ -395,15 +395,16 @@ fn guess_nonce_iteration(
     rng: &mut rand::rngs::StdRng,
     sender: &oneshot::Sender<NewBlockFound>,
 ) -> GuessNonceResult {
-    let root: Digest = rng.random();
+    // As many roots as the CPU hashes side by side.
+    let roots: [Digest; 8] = rng.random();
 
     // Check every N guesses if task has been cancelled.
-    if root.values()[0].raw_u64().trailing_zeros() >= 19 && sender.is_canceled() {
+    if roots[0].values()[0].raw_u64().trailing_zeros() >= 19 && sender.is_canceled() {
         debug!("Guesser was cancelled.");
         return GuessNonceResult::Cancelled;
     }
 
-    match guesser.guess(root) {
+    match guesser.guess_many(&roots) {
         Some(pow) => GuessNonceResult::NonceFound { pow: Box::new(pow) },
         None => GuessNonceResult::BlockNotFound,
     }

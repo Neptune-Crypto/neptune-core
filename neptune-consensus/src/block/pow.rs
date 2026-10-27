@@ -126,6 +126,32 @@ impl PowMastPaths {
             self.kernel[0],
         )
     }
+
+    /// [`Self::block_hash_from_pow_hash`] for many fields at once, side by
+    /// side in the CPU's lanes where it has them.
+    fn block_hashes_from_pow_hashes(self, pow_hashes: &[Digest]) -> Vec<Digest> {
+        let with_right = |digests: &[Digest], right: Digest| {
+            Tip5::hash_pair_many(&digests.iter().map(|&left| [left, right]).collect_vec())
+        };
+        let hash_each = |digests: &[Digest]| {
+            let encodings = digests.iter().map(|digest| digest.encode()).collect_vec();
+            Tip5::hash_varlen_many(&encodings.iter().map(Vec::as_slice).collect_vec())
+        };
+
+        let header_mast_hashes = with_right(pow_hashes, self.pow[0]);
+        let header_mast_hashes = with_right(&header_mast_hashes, self.pow[1]);
+        let header_mast_hashes = Tip5::hash_pair_many(
+            &header_mast_hashes
+                .iter()
+                .map(|&right| [self.pow[2], right])
+                .collect_vec(),
+        );
+
+        let kernel_mast_hashes = with_right(&hash_each(&header_mast_hashes), self.header[0]);
+        let kernel_mast_hashes = with_right(&kernel_mast_hashes, self.header[1]);
+
+        with_right(&hash_each(&kernel_mast_hashes), self.kernel[0])
+    }
 }
 
 impl<const MERKLE_TREE_HEIGHT: usize> Default for Pow<MERKLE_TREE_HEIGHT> {
@@ -220,8 +246,8 @@ impl<const MERKLE_TREE_HEIGHT: usize> Guesser<MERKLE_TREE_HEIGHT> {
         }
     }
 
-    /// The hash of the block with this root in its proof-of-work field.
-    pub fn block_hash(&self, root: Digest) -> Digest {
+    /// The hash of the proof-of-work field with this root.
+    fn pow_hash(&self, root: Digest) -> Digest {
         let mut last_block = [BFieldElement::new(0); RATE];
         last_block[..RATE - Digest::LEN].copy_from_slice(&self.last_block_head);
         last_block[RATE - Digest::LEN..].copy_from_slice(&root.values());
@@ -230,15 +256,35 @@ impl<const MERKLE_TREE_HEIGHT: usize> Guesser<MERKLE_TREE_HEIGHT> {
         sponge.absorb(last_block);
         // The padding block of an encoding that fills its rate blocks.
         sponge.pad_and_absorb_all(&[]);
-        let pow_hash = Digest::new(sponge.state[..Digest::LEN].try_into().unwrap());
+        Digest::new(sponge.state[..Digest::LEN].try_into().unwrap())
+    }
 
-        self.mast_auth_paths.block_hash_from_pow_hash(pow_hash)
+    /// The hash of the block with this root in its proof-of-work field.
+    pub fn block_hash(&self, root: Digest) -> Digest {
+        self.mast_auth_paths
+            .block_hash_from_pow_hash(self.pow_hash(root))
+    }
+
+    /// The hashes of the blocks with these roots in their proof-of-work
+    /// fields, hashed side by side where the CPU has the lanes for it.
+    pub fn block_hashes(&self, roots: &[Digest]) -> Vec<Digest> {
+        let pow_hashes = roots.iter().map(|&root| self.pow_hash(root)).collect_vec();
+        self.mast_auth_paths
+            .block_hashes_from_pow_hashes(&pow_hashes)
     }
 
     /// The proof-of-work field with this root, if the block hash it gives
     /// meets the target.
     pub fn guess(&self, root: Digest) -> Option<Pow<MERKLE_TREE_HEIGHT>> {
         (self.block_hash(root) <= self.target).then_some(Pow { root, ..self.pow })
+    }
+
+    /// The proof-of-work field with the first of these roots whose block
+    /// hash meets the target, if any.
+    pub fn guess_many(&self, roots: &[Digest]) -> Option<Pow<MERKLE_TREE_HEIGHT>> {
+        let hashes = self.block_hashes(roots);
+        let root = roots[hashes.iter().position(|hash| *hash <= self.target)?];
+        Some(Pow { root, ..self.pow })
     }
 }
 
@@ -562,8 +608,8 @@ pub(crate) mod tests {
             Some(lustration),
             Some(version),
         );
-        for _ in 0..10 {
-            let root: Digest = rng.random();
+        let roots: [Digest; 10] = rng.random();
+        for root in roots {
             let pow = guesser.guess(root).unwrap();
             assert_eq!(root, pow.root);
             assert_eq!(nonce, pow.nonce);
@@ -571,6 +617,11 @@ pub(crate) mod tests {
             assert_eq!(version, pow.version_in_pow());
             assert_eq!(auth_paths.fast_mast_hash(pow), guesser.block_hash(root));
         }
+        assert_eq!(
+            roots.map(|root| guesser.block_hash(root)).to_vec(),
+            guesser.block_hashes(&roots)
+        );
+        assert_eq!(roots[0], guesser.guess_many(&roots).unwrap().root);
 
         let no_hash_meets = Difficulty::from(u32::MAX).target();
         let guesser = Guesser::<POW_MEMORY_TREE_HEIGHT>::new(
@@ -581,6 +632,7 @@ pub(crate) mod tests {
             Some(version),
         );
         assert!(guesser.guess(rng.random()).is_none());
+        assert!(guesser.guess_many(&roots).is_none());
     }
 
     #[test]
