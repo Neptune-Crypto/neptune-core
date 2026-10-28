@@ -236,7 +236,7 @@ fn guess_worker(
 
     let now = now.unwrap_or(Timestamp::now());
 
-    info!(
+    debug!(
         "prev block height: {}, prev block time: {}, now: {}",
         previous_block_header.height, previous_block_header.timestamp, now
     );
@@ -277,7 +277,7 @@ fn guess_worker(
 
     let threshold = target_difficulty.target();
     let threads_to_use = num_guesser_threads.unwrap_or_else(rayon::current_num_threads);
-    info!(
+    debug!(
         "Guessing with {} threads on block {:x} of height {} with {} outputs and difficulty {}. Target: {threshold:x}",
         threads_to_use,
         block.hash(),
@@ -352,15 +352,12 @@ fn guess_worker(
     });
 
     let seconds_guessing = guessing_started.elapsed().as_secs_f64();
-    let num_guesses = num_guesses.load(Ordering::Relaxed);
-    info!(
-        "Guessed {num_guesses} times in {seconds_guessing:.1} s: {:.2} MH/s",
-        num_guesses as f64 / seconds_guessing / 1e6
-    );
+    let guesses_per_second = num_guesses.load(Ordering::Relaxed) as f64 / seconds_guessing;
+    info!("Guessing at {:.2} MH/s", guesses_per_second / 1e6);
 
     let pow = match guess_result {
         GuessNonceResult::Cancelled => {
-            info!("Stopping guessing task",);
+            debug!("Stopping guessing task");
             return;
         }
         GuessNonceResult::NonceFound { pow } => pow,

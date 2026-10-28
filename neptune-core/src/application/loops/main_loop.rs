@@ -980,14 +980,15 @@ impl MainLoopHandler {
                 // validity, since that was done in peer loop.
                 // To ensure atomicity, a write-lock must be held over global
                 // state while we check if this proposal is favorable.
+                let guesser_reward = block
+                    .body()
+                    .total_guesser_reward()
+                    .expect("block received by main loop must have guesser reward");
                 let should_inform_own_miner = {
                     let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
                     let verdict = global_state_mut.favor_incoming_block_proposal(
                         block.header().prev_block_digest,
-                        block
-                            .body()
-                            .total_guesser_reward()
-                            .expect("block received by main loop must have guesser reward"),
+                        guesser_reward,
                     );
                     if let Err(reject_reason) = verdict {
                         warn!("main loop got unfavorable block proposal. Reason: {reject_reason}");
@@ -1008,7 +1009,11 @@ impl MainLoopHandler {
 
                 if should_inform_own_miner {
                     if self.global_state_lock.cli().guess {
-                        info!("Received new favorable block proposal for mining operation.");
+                        let height = block.header().height;
+                        info!(
+                            "Received new favorable block proposal: Height {height}, \
+                         guesser_reward: {guesser_reward}"
+                        );
                     } else {
                         debug!("Received new favorable block proposal");
                     }
