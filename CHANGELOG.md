@@ -1,5 +1,22 @@
 Note: (!) indicates a breaking change.
 
+## [0.19.4](https://github.com/Neptune-Crypto/neptune-core/compare/v0.19.3..v0.19.4) - 2026-10-28
+
+### ✨ Features
+
+- *(guesser)* Add `--guesser-version` to set the block header's version field while guessing ([80c4f585](https://github.com/Neptune-Crypto/neptune-core/commit/80c4f585))
+- *(guesser)* Log the guessing rate ([8d718206](https://github.com/Neptune-Crypto/neptune-core/commit/8d718206))
+- *(guesser)* Show the guessing rate in the dashboard's mining status
+- *(peer)* Request a block proposal notification on connecting, so a guesser starts guessing without waiting for the next composition
+
+### 🚀 Performance
+
+- *(guesser)* Guess by varying the proof-of-work field's root over a cached sponge, eight guesses at a time in AVX-512 lanes where the CPU has them; about 17x the guessing rate of v0.19.3 on a 12-core Zen 5 ([e337fe13](https://github.com/Neptune-Crypto/neptune-core/commit/e337fe13), [c29e9a91](https://github.com/Neptune-Crypto/neptune-core/commit/c29e9a91), [dfe3a3b9](https://github.com/Neptune-Crypto/neptune-core/commit/dfe3a3b9))
+
+### ⚙️ Miscellaneous
+
+- Upgrade to triton-vm v9.0.1 and twenty-first v3.1.1 ([33f92c64](https://github.com/Neptune-Crypto/neptune-core/commit/33f92c64), [f66a2c99](https://github.com/Neptune-Crypto/neptune-core/commit/f66a2c99))
+
 ## [0.19.3](https://github.com/Neptune-Crypto/neptune-core/compare/v0.19.2..v0.19.3) - 2026-10-26
 
 ### ✨ Features
