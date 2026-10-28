@@ -34,6 +34,7 @@ use crate::consensus_rule_set::ConsensusRuleSet;
 pub const BLOCK_HEADER_VERSION: BFieldElement = BFieldElement::new(0);
 
 pub type BlockPow = Pow<{ crate::block::pow::POW_MEMORY_TREE_HEIGHT }>;
+pub type BlockGuesser = crate::block::pow::Guesser<{ crate::block::pow::POW_MEMORY_TREE_HEIGHT }>;
 
 #[derive(
     Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, TasmObject, GetSize,

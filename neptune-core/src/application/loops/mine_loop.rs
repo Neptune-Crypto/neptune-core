@@ -1,19 +1,20 @@
 pub(crate) mod guesser_configuration;
 pub mod mock_block_generator;
 use std::cmp::max;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
+use std::time::Instant;
 
 use anyhow::bail;
 use anyhow::Result;
 use block_header::BlockHeader;
 use futures::channel::oneshot;
+use neptune_consensus::block::block_header::BlockGuesser;
 use neptune_consensus::block::block_header::BlockPow;
 use neptune_consensus::block::block_transaction::BlockOrRegularTransaction;
 use neptune_consensus::block::block_transaction::BlockTransaction;
-use neptune_consensus::block::pow::LustrationStatus;
-use neptune_consensus::block::pow::Pow;
-use neptune_consensus::block::pow::PowMastPaths;
 use neptune_consensus::block::*;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_consensus::proof_abstractions::error::CreateProofError;
@@ -230,6 +231,7 @@ fn guess_worker(
         address: guesser_address,
         override_rng_seed: rng_seed,
         override_timestamp: now,
+        override_version,
     } = guessing_configuration;
 
     let now = now.unwrap_or(Timestamp::now());
@@ -292,6 +294,9 @@ fn guess_worker(
     block.set_difficulty_related_fields(now, new_difficulty, new_cum_pow);
 
     block.set_header_guesser_data(guesser_address.into());
+    if let Some(version) = override_version {
+        block.set_header_version(version);
+    }
 
     assert!(
         !consensus_rule_set.memory_hard_pow(),
@@ -317,25 +322,41 @@ fn guess_worker(
     };
 
     let version = block.header().version;
+    let nonce = rng_seed
+        .map_or_else(std_rng_from_thread_rng, StdRng::seed_from_u64)
+        .random();
+    let guesser = BlockGuesser::new(
+        mast_auth_paths,
+        nonce,
+        threshold,
+        lustration_status,
+        Some(version),
+    );
 
+    let num_guesses = AtomicU64::new(0);
+    let guessing_started = Instant::now();
     let guess_result = pool.install(|| {
         rayon::iter::repeat(0)
             .map_init(
-                || rng_seed.map_or_else(std_rng_from_thread_rng, StdRng::seed_from_u64),
-                |rng, _i| {
-                    guess_nonce_iteration(
-                        &mast_auth_paths,
-                        threshold,
-                        lustration_status,
-                        rng,
-                        &sender,
-                        Some(version),
-                    )
+                || {
+                    let mut rng =
+                        rng_seed.map_or_else(std_rng_from_thread_rng, StdRng::seed_from_u64);
+                    (rng.random::<Digest>(), 0u64)
+                },
+                |(next_root, uncounted), _i| {
+                    guess_nonce_iteration(&guesser, next_root, &sender, uncounted, &num_guesses)
                 },
             )
             .find_any(|r| !r.block_not_found())
             .unwrap()
     });
+
+    let seconds_guessing = guessing_started.elapsed().as_secs_f64();
+    let num_guesses = num_guesses.load(Ordering::Relaxed);
+    info!(
+        "Guessed {num_guesses} times in {seconds_guessing:.1} s: {:.2} MH/s",
+        num_guesses as f64 / seconds_guessing / 1e6
+    );
 
     let pow = match guess_result {
         GuessNonceResult::Cancelled => {
@@ -346,7 +367,7 @@ fn guess_worker(
         GuessNonceResult::BlockNotFound => unreachable!(),
     };
 
-    info!("Found valid block with nonce ({:x}).", pow.nonce);
+    info!("Found valid block with root ({:x}).", pow.root);
 
     block.set_header_pow(*pow);
 
@@ -390,33 +411,38 @@ impl GuessNonceResult {
     }
 }
 
-/// Run a single iteration of the mining loop.
+/// Run a single iteration of the mining loop: one guess at the root.
 #[inline]
 fn guess_nonce_iteration(
-    mast_auth_paths: &PowMastPaths,
-    threshold: Digest,
-    lustration_status: Option<LustrationStatus>,
-    rng: &mut rand::rngs::StdRng,
+    guesser: &BlockGuesser,
+    next_root: &mut Digest,
     sender: &oneshot::Sender<NewBlockFound>,
-    version: Option<BFieldElement>,
+    uncounted_guesses: &mut u64,
+    num_guesses: &AtomicU64,
 ) -> GuessNonceResult {
-    let nonce: Digest = rng.random();
+    // As many roots as the CPU hashes side by side, counting up from the
+    // thread's random start: the hash scrambles them, so they need only
+    // differ.
+    let roots: [Digest; 8] = std::array::from_fn(|_| {
+        let root = *next_root;
+        next_root.0[0] += BFieldElement::new(1);
+        root
+    });
+
+    // Count the thread's guesses in bulk, to keep the shared counter cold.
+    *uncounted_guesses += roots.len() as u64;
+    if *uncounted_guesses >= 1 << 14 {
+        num_guesses.fetch_add(*uncounted_guesses, Ordering::Relaxed);
+        *uncounted_guesses = 0;
+    }
 
     // Check every N guesses if task has been cancelled.
-    if nonce.values()[0].raw_u64().trailing_zeros() >= 16 && sender.is_canceled() {
+    if roots[0].values()[0].raw_u64().trailing_zeros() >= 15 && sender.is_canceled() {
         debug!("Guesser was cancelled.");
         return GuessNonceResult::Cancelled;
     }
 
-    let result = Pow::guess(
-        mast_auth_paths,
-        nonce,
-        threshold,
-        lustration_status,
-        version,
-    );
-
-    match result {
+    match guesser.guess_many(&roots) {
         Some(pow) => GuessNonceResult::NonceFound { pow: Box::new(pow) },
         None => GuessNonceResult::BlockNotFound,
     }
@@ -843,6 +869,7 @@ pub(crate) async fn mine(
                     address: guesser_address,
                     override_rng_seed: None,
                     override_timestamp: None,
+                    override_version: cli_args.guesser_version.map(BFieldElement::new),
                 },
             );
 
@@ -1214,18 +1241,28 @@ pub(crate) mod tests {
         let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
         let lustration_status = block.header().pow.lustration_status().ok();
         let version = block.header().version;
+        let guesser = BlockGuesser::new(
+            mast_auth_paths,
+            rng.random(),
+            threshold,
+            lustration_status,
+            Some(version),
+        );
+        let num_guesses = AtomicU64::new(0);
         let num_iterations_run =
             rayon::iter::IntoParallelIterator::into_par_iter(0..num_iterations_launched)
-                .map_init(std_rng_from_thread_rng, |prng, _i| {
-                    guess_nonce_iteration(
-                        &mast_auth_paths,
-                        threshold,
-                        lustration_status,
-                        prng,
-                        &worker_task_tx,
-                        Some(version),
-                    );
-                })
+                .map_init(
+                    || (std_rng_from_thread_rng().random::<Digest>(), 0u64),
+                    |(next_root, uncounted), _i| {
+                        guess_nonce_iteration(
+                            &guesser,
+                            next_root,
+                            &worker_task_tx,
+                            uncounted,
+                            &num_guesses,
+                        );
+                    },
+                )
                 .count();
         drop(worker_task_rx);
 
@@ -1740,6 +1777,7 @@ pub(crate) mod tests {
                 address: guesser_address,
                 override_rng_seed: None,
                 override_timestamp: None,
+                override_version: None,
             },
             None,
         );
@@ -1819,6 +1857,7 @@ pub(crate) mod tests {
                 address: guesser_key.to_address().into(),
                 override_rng_seed: None,
                 override_timestamp: None,
+                override_version: None,
             },
             None,
         );
@@ -1976,6 +2015,7 @@ pub(crate) mod tests {
                     address: guesser_key.to_address().into(),
                     override_rng_seed: None,
                     override_timestamp: None,
+                    override_version: None,
                 },
                 Some(target_block_interval),
             );
@@ -2529,6 +2569,7 @@ pub(crate) mod tests {
                     address: guesser_key.to_address().into(),
                     override_rng_seed: None,
                     override_timestamp: Some(block_time),
+                    override_version: None,
                 },
                 None,
             );
@@ -2564,5 +2605,50 @@ pub(crate) mod tests {
         }
 
         Ok(())
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn guessing_with_a_seed_is_deterministic() {
+        let network = Network::RegTest;
+        let genesis = Block::genesis(network);
+        let mut rng = StdRng::seed_from_u64(0);
+        let guesser_key = GenerationSpendingKey::derive_from_seed(rng.random());
+        let transaction = make_mock_transaction_with_mutator_set_hash(
+            vec![],
+            vec![],
+            genesis.mutator_set_accumulator_after().unwrap().hash(),
+        );
+        let block_template = MockBlockGenerator::mock_block_from_tx_without_pow(
+            genesis.clone(),
+            BlockTransaction::upgrade(transaction),
+            guesser_key.to_address().into(),
+            network,
+        );
+        let block_time = Timestamp::now();
+
+        let guess = || {
+            let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
+            guess_worker(
+                network,
+                block_template.clone(),
+                *genesis.header(),
+                worker_task_tx,
+                GuessingConfiguration {
+                    num_guesser_threads: Some(4),
+                    address: guesser_key.to_address().into(),
+                    override_rng_seed: Some(55512345),
+                    override_timestamp: Some(block_time),
+                    override_version: Some(BFieldElement::new(7)),
+                },
+                None,
+            );
+            worker_task_rx
+        };
+        let first = guess().await.unwrap().block;
+        let second = guess().await.unwrap().block;
+        assert_eq!(first.header().pow, second.header().pow);
+        assert_eq!(first.hash(), second.hash());
+        assert_eq!(BFieldElement::new(7), first.header().version);
+        first.validate(&genesis, block_time, network).await.unwrap();
     }
 }

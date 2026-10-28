@@ -693,7 +693,7 @@ pub(crate) mod tests {
                     .await
             );
 
-            valid_successor.set_version_consistently(bfe!(5550001));
+            valid_successor.set_header_version(bfe!(5550001));
             assert!(
                 valid_successor
                     .is_valid(&invalid_block, valid_successor.header().timestamp, network)

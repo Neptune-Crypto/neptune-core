@@ -7124,9 +7124,9 @@ dependencies = [
 
 [[package]]
 name = "triton-air"
-version = "9.0.0"
+version = "9.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78c5d94b0749a48dff6a8288e736fb2ed8cab0bceaea370b467c4b6dcbf87670"
+checksum = "5e11957cc2567356d80702c9a6461bbc934cde12f28ab9abe44dbef6fb415c8f"
 dependencies = [
  "arbitrary",
  "itertools",
@@ -7138,9 +7138,9 @@ dependencies = [
 
 [[package]]
 name = "triton-constraint-builder"
-version = "9.0.0"
+version = "9.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "106df42e9928393dbe5ab77caaa213024c078559a6de1bd26497c3449aea5a4d"
+checksum = "b5a2e4d1536f4f019758aac131cd7ef2a631c8f77459a5d06daa577ea41aab22"
 dependencies = [
  "itertools",
  "prettyplease",
@@ -7156,9 +7156,9 @@ dependencies = [
 
 [[package]]
 name = "triton-constraint-circuit"
-version = "9.0.0"
+version = "9.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4e20f03b5f3eff322b459c5d7f404f1e07d2cb99238af5a3a5bc4fcb6e89940"
+checksum = "42704802a387e46aa2d39bf869df8fa4678d8c2a9f6484b22b104b0812e87bbf"
 dependencies = [
  "arbitrary",
  "itertools",
@@ -7171,9 +7171,9 @@ dependencies = [
 
 [[package]]
 name = "triton-isa"
-version = "9.0.0"
+version = "9.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee6f49f05be9bf8ab5b10cdef4cef676db57e930f72866db0757a4445f6e29d5"
+checksum = "88cef36712c962891c52bbe5f78793daefccb2f616374fee6d85a03ff5b136cf"
 dependencies = [
  "arbitrary",
  "get-size2",
@@ -7190,9 +7190,9 @@ dependencies = [
 
 [[package]]
 name = "triton-vm"
-version = "9.0.0"
+version = "9.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc5c2b343f60bdaaff8f5174a237a32609a07cc865713b9b0f1f8f39c8839b58"
+checksum = "6a74420b62092a7aa1a021ec2fcce6456f723165d6d77c009fb4afc5005491bd"
 dependencies = [
  "arbitrary",
  "colored 3.1.1",
@@ -7229,9 +7229,9 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "twenty-first"
-version = "3.0.1"
+version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef2ed50b45bcb3256ed1720c73cb17f4a6779c9a4f8e972f344cb097abdf1f08"
+checksum = "33fbf487eb00d31e5c957491d92a6ef06a8920c44b8a8c40950b67f38d2c3314"
 dependencies = [
  "arbitrary",
  "bfieldcodec_derive",

@@ -16,6 +16,8 @@ use tasm_lib::triton_vm::prelude::BFieldCodec;
 use tasm_lib::twenty_first::bfe_array;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::prelude::MerkleTreeInclusionProof;
+use tasm_lib::twenty_first::tip5::RATE;
+use tasm_lib::twenty_first::util_types::sponge::Sponge;
 
 use crate::block::block_header::BlockHeader;
 use crate::block::block_kernel::BlockKernel;
@@ -103,7 +105,13 @@ impl PowMastPaths {
     ) -> Digest {
         // 39 permutations to get the block hash, when Merkle tree height is
         // 29. num_permutations = 10 + tree height.
-        let header_mast_hash = Tip5::hash_pair(Tip5::hash_varlen(&pow.encode()), self.pow[0]);
+        self.block_hash_from_pow_hash(Tip5::hash_varlen(&pow.encode()))
+    }
+
+    /// The block hash from the hash of the proof-of-work field's encoding:
+    /// eight permutations up the three Merkle trees.
+    fn block_hash_from_pow_hash(self, pow_hash: Digest) -> Digest {
+        let header_mast_hash = Tip5::hash_pair(pow_hash, self.pow[0]);
         let header_mast_hash = Tip5::hash_pair(header_mast_hash, self.pow[1]);
         let header_mast_hash = Tip5::hash_pair(self.pow[2], header_mast_hash);
 
@@ -117,6 +125,31 @@ impl PowMastPaths {
             Tip5::hash_varlen(&kernel_mast_hash.encode()),
             self.kernel[0],
         )
+    }
+
+    /// [`Self::block_hash_from_pow_hash`] for many fields at once, side by
+    /// side in the CPU's lanes where it has them.
+    fn block_hashes_from_pow_hashes<const N: usize>(self, pow_hashes: [Digest; N]) -> Vec<Digest> {
+        let with_right = |digests: &[Digest], right: Digest| {
+            let pairs: [[Digest; 2]; N] = std::array::from_fn(|i| [digests[i], right]);
+            Tip5::hash_pair_many(&pairs)
+        };
+        let hash_each = |digests: &[Digest]| {
+            let values: [[BFieldElement; Digest::LEN]; N] =
+                std::array::from_fn(|i| digests[i].values());
+            let encodings: [&[BFieldElement]; N] = std::array::from_fn(|i| &values[i][..]);
+            Tip5::hash_varlen_many(&encodings)
+        };
+
+        let header_mast_hashes = with_right(&pow_hashes, self.pow[0]);
+        let header_mast_hashes = with_right(&header_mast_hashes, self.pow[1]);
+        let pairs: [[Digest; 2]; N] = std::array::from_fn(|i| [self.pow[2], header_mast_hashes[i]]);
+        let header_mast_hashes = Tip5::hash_pair_many(&pairs);
+
+        let kernel_mast_hashes = with_right(&hash_each(&header_mast_hashes), self.header[0]);
+        let kernel_mast_hashes = with_right(&kernel_mast_hashes, self.header[1]);
+
+        with_right(&hash_each(&kernel_mast_hashes), self.kernel[0])
     }
 }
 
@@ -144,6 +177,131 @@ impl<const MERKLE_TREE_HEIGHT: usize> Display for Pow<MERKLE_TREE_HEIGHT> {
         );
 
         write!(f, "{}", string)
+    }
+}
+
+/// Guesses on one block proposal by varying the root of the proof-of-work
+/// field, the last digest of the field's encoding. The sponge has absorbed
+/// every rate block ahead of the one the root ends, once, so a guess costs
+/// the two permutations that finish the field's hash and the eight from
+/// there to the block hash, not the thirty for the whole field.
+#[derive(Debug, Clone)]
+pub struct Guesser<const MERKLE_TREE_HEIGHT: usize> {
+    mast_auth_paths: PowMastPaths,
+
+    /// The field with everything but the root in place.
+    pow: Pow<MERKLE_TREE_HEIGHT>,
+
+    /// The sponge after the rate blocks ahead of the one the root ends.
+    sponge: Tip5,
+
+    /// That last rate sequence, with the root's words left for the guess.
+    last_rate: [BFieldElement; RATE],
+
+    target: Digest,
+}
+
+impl<const MERKLE_TREE_HEIGHT: usize> Guesser<MERKLE_TREE_HEIGHT> {
+    pub fn new(
+        mast_auth_paths: PowMastPaths,
+        nonce: Digest,
+        target: Digest,
+        lustration_status: Option<LustrationStatus>,
+        version: Option<BFieldElement>,
+    ) -> Self {
+        let mut pow = Pow {
+            nonce,
+            root: Default::default(),
+            path_a: [Digest::default(); MERKLE_TREE_HEIGHT],
+            path_b: [Digest::default(); MERKLE_TREE_HEIGHT],
+        };
+
+        if let Some(lustration) = lustration_status {
+            pow.set_lustration_status(lustration);
+        }
+
+        if let Some(version) = version {
+            pow.set_version_in_pow(version);
+        }
+
+        // The encoding ends with the root and fills its rate blocks exactly.
+        let encoding = pow.encode();
+        assert_eq!(0, encoding.len() % RATE);
+        let last_block_start = encoding.len() - RATE;
+        let mut sponge = Tip5::init();
+        for &block in encoding[..last_block_start].as_chunks::<RATE>().0 {
+            sponge.absorb(block);
+        }
+        let last_rate = encoding[last_block_start..].try_into().unwrap();
+
+        Self {
+            mast_auth_paths,
+            pow,
+            sponge,
+            last_rate,
+            target,
+        }
+    }
+
+    /// The padding block of an encoding that fills its rate blocks.
+    const PADDING_BLOCK: [BFieldElement; RATE] = {
+        let mut block = [BFieldElement::new(0); RATE];
+        block[0] = BFieldElement::new(1);
+        block
+    };
+
+    /// The last rate block of the proof-of-work field with this root.
+    fn last_pow_rate(&self, root: Digest) -> [BFieldElement; RATE] {
+        let mut last_block = self.last_rate;
+        last_block[RATE - Digest::LEN..].copy_from_slice(&root.values());
+        last_block
+    }
+
+    /// The hash of the proof-of-work field with this root.
+    fn pow_hash(&self, root: Digest) -> Digest {
+        let mut sponge = self.sponge.clone();
+        sponge.absorb(self.last_pow_rate(root));
+        sponge.absorb(Self::PADDING_BLOCK);
+        Digest::new(sponge.state[..Digest::LEN].try_into().unwrap())
+    }
+
+    /// The hashes of the proof-of-work fields with these roots, the sponges
+    /// permuted side by side where the CPU has the lanes for it.
+    fn pow_hashes<const N: usize>(&self, roots: &[Digest; N]) -> [Digest; N] {
+        let mut sponges: [Tip5; N] = std::array::from_fn(|_| self.sponge.clone());
+        Tip5::absorb_many(&mut sponges, &roots.map(|root| self.last_pow_rate(root)));
+        Tip5::absorb_many(&mut sponges, &[Self::PADDING_BLOCK; N]);
+        sponges.map(|sponge| Digest::new(sponge.state[..Digest::LEN].try_into().unwrap()))
+    }
+
+    /// The hash of the block with this root in its proof-of-work field.
+    pub fn block_hash(&self, root: Digest) -> Digest {
+        self.mast_auth_paths
+            .block_hash_from_pow_hash(self.pow_hash(root))
+    }
+
+    /// The hashes of the blocks with these roots in their proof-of-work
+    /// fields, hashed side by side where the CPU has the lanes for it.
+    pub fn block_hashes<const N: usize>(&self, roots: &[Digest; N]) -> Vec<Digest> {
+        self.mast_auth_paths
+            .block_hashes_from_pow_hashes(self.pow_hashes(roots))
+    }
+
+    /// The proof-of-work field with this root, if the block hash it gives
+    /// meets the target.
+    pub fn guess(&self, root: Digest) -> Option<Pow<MERKLE_TREE_HEIGHT>> {
+        (self.block_hash(root) <= self.target).then_some(Pow { root, ..self.pow })
+    }
+
+    /// The proof-of-work field with the first of these roots whose block
+    /// hash meets the target, if any.
+    pub fn guess_many<const N: usize>(
+        &self,
+        roots: &[Digest; N],
+    ) -> Option<Pow<MERKLE_TREE_HEIGHT>> {
+        let hashes = self.block_hashes(roots);
+        let root = roots[hashes.iter().position(|hash| *hash <= self.target)?];
+        Some(Pow { root, ..self.pow })
     }
 }
 
@@ -247,27 +405,8 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
         lustration_status: Option<LustrationStatus>,
         version: Option<BFieldElement>,
     ) -> Option<Self> {
-        let mut pow = Pow {
-            nonce,
-            root: Default::default(),
-            path_a: [Digest::default(); MERKLE_TREE_HEIGHT],
-            path_b: [Digest::default(); MERKLE_TREE_HEIGHT],
-        };
-
-        if let Some(lustration) = lustration_status {
-            pow.set_lustration_status(lustration);
-        }
-
-        if let Some(version) = version {
-            pow.set_version_in_pow(version);
-        }
-
-        let pow_digest = mast_auth_paths.fast_mast_hash(pow);
-        if pow_digest > target {
-            None
-        } else {
-            Some(pow)
-        }
+        Guesser::new(*mast_auth_paths, nonce, target, lustration_status, version)
+            .guess(Digest::default())
     }
 
     pub(super) fn validate(
@@ -466,6 +605,51 @@ pub(crate) mod tests {
         }
 
         assert!(iterator.next().is_none());
+    }
+
+    #[test]
+    fn guesser_hashes_as_the_block_does() {
+        let mut rng = StdRng::seed_from_u64(0);
+        let auth_paths: PowMastPaths = rng.random();
+        let lustration = LustrationStatus {
+            counter: NativeCurrencyAmount::coins(3),
+            max_lustrating_aocl_leaf_index: 7,
+        };
+        let version = BFieldElement::new(5);
+        let nonce: Digest = rng.random();
+        let every_hash_meets = Difficulty::from(1u32).target();
+        let guesser = Guesser::<POW_MEMORY_TREE_HEIGHT>::new(
+            auth_paths,
+            nonce,
+            every_hash_meets,
+            Some(lustration),
+            Some(version),
+        );
+        let roots: [Digest; 10] = rng.random();
+        for root in roots {
+            let pow = guesser.guess(root).unwrap();
+            assert_eq!(root, pow.root);
+            assert_eq!(nonce, pow.nonce);
+            assert_eq!(lustration, pow.lustration_status().unwrap());
+            assert_eq!(version, pow.version_in_pow());
+            assert_eq!(auth_paths.fast_mast_hash(pow), guesser.block_hash(root));
+        }
+        assert_eq!(
+            roots.map(|root| guesser.block_hash(root)).to_vec(),
+            guesser.block_hashes(&roots)
+        );
+        assert_eq!(roots[0], guesser.guess_many(&roots).unwrap().root);
+
+        let no_hash_meets = Difficulty::from(u32::MAX).target();
+        let guesser = Guesser::<POW_MEMORY_TREE_HEIGHT>::new(
+            auth_paths,
+            nonce,
+            no_hash_meets,
+            Some(lustration),
+            Some(version),
+        );
+        assert!(guesser.guess(rng.random()).is_none());
+        assert!(guesser.guess_many(&roots).is_none());
     }
 
     #[test]
