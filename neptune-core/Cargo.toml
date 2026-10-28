@@ -154,7 +154,7 @@ tokio = { version = "1.47", features = [
 tokio-serde = { version = "0.8", features = ["bincode", "json"] }
 tokio-util = { version = "0.7", features = ["codec", "rt", "compat"] }
 # direct dependency for its default `jemalloc` allocator feature
-triton-vm = "9.0.0"
+triton-vm = "9.0.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = [
     "std",
