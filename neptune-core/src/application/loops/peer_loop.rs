@@ -8960,13 +8960,13 @@ mod tests {
             let request = PeerMessage::BlockProposalNotificationRequest;
 
             // Nothing to announce without a proposal.
-            let mut stream = Mock::new(vec![]);
+            let mut silent_stream = Mock::new(vec![]);
             setup
                 .peer_loop_handler
-                .handle_peer_message(request.clone(), &mut stream, &mut peer_state)
+                .handle_peer_message(request.clone(), &mut silent_stream, &mut peer_state)
                 .await
                 .unwrap();
-            assert!(stream.is_done());
+            assert!(silent_stream.is_done());
 
             let block1 = fake_valid_block_for_tests(
                 &setup.peer_loop_handler.global_state_lock,
@@ -9000,13 +9000,13 @@ mod tests {
                     ..cli_args::Args::default_with_network(Network::Testnet(42))
                 })
                 .await;
-            let mut stream = Mock::new(vec![]);
+            let mut secret_stream = Mock::new(vec![]);
             setup
                 .peer_loop_handler
-                .handle_peer_message(request, &mut stream, &mut peer_state)
+                .handle_peer_message(request, &mut secret_stream, &mut peer_state)
                 .await
                 .unwrap();
-            assert!(stream.is_done());
+            assert!(secret_stream.is_done());
         }
 
         #[apply(shared_tokio_runtime)]
