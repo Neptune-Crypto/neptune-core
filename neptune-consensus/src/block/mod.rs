@@ -330,6 +330,14 @@ impl Block {
         self.unset_digest();
     }
 
+    /// Set the version field consistently, in the block header, and in the pow
+    /// field of the header.
+    pub fn set_header_version(&mut self, version: BFieldElement) {
+        self.kernel.header.version = version;
+        self.kernel.header.pow.set_version_in_pow(version);
+        self.unset_digest();
+    }
+
     /// Set the lustration status found in the block's header.
     ///
     /// Note: this causes the block digest to change.
@@ -1485,13 +1493,6 @@ mod test_support {
 
             self.unset_digest();
         }
-
-        pub fn set_version_consistently(&mut self, value: BFieldElement) {
-            self.kernel.header.version = value;
-            self.kernel.header.pow.set_version_in_pow(value);
-
-            self.unset_digest();
-        }
     }
 }
 
@@ -1958,7 +1959,7 @@ pub(crate) mod tests {
                 block.body().block_mmr_accumulator.clone(),
             );
             let mut block = Block::new(header, body, block.appendix().clone(), block.proof.clone());
-            block.set_version_consistently(header.version);
+            block.set_header_version(header.version);
 
             (block, header.timestamp)
         }

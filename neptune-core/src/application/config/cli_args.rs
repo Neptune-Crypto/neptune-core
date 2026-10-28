@@ -399,6 +399,11 @@ pub struct Args {
     #[clap(long)]
     pub(crate) guesser_threads: Option<usize>,
 
+    /// If this node guesses, it will set the version field of the header to
+    /// this value. The version field can be used for signaling.
+    #[clap(long)]
+    pub(crate) guesser_version: Option<u64>,
+
     /// Whether to keep the UTXO notifications for composer fees and
     /// proof-upgrader fees off chain.
     ///

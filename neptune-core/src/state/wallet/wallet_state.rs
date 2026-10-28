@@ -3324,6 +3324,7 @@ pub(crate) mod tests {
                     address: guesser_address,
                     override_rng_seed: None,
                     override_timestamp: None,
+                    override_version: None,
                 },
             )
             .await;

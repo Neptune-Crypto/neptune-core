@@ -231,6 +231,7 @@ fn guess_worker(
         address: guesser_address,
         override_rng_seed: rng_seed,
         override_timestamp: now,
+        override_version,
     } = guessing_configuration;
 
     let now = now.unwrap_or(Timestamp::now());
@@ -293,6 +294,9 @@ fn guess_worker(
     block.set_difficulty_related_fields(now, new_difficulty, new_cum_pow);
 
     block.set_header_guesser_data(guesser_address.into());
+    if let Some(version) = override_version {
+        block.set_header_version(version);
+    }
 
     assert!(
         !consensus_rule_set.memory_hard_pow(),
@@ -865,6 +869,7 @@ pub(crate) async fn mine(
                     address: guesser_address,
                     override_rng_seed: None,
                     override_timestamp: None,
+                    override_version: cli_args.guesser_version.map(BFieldElement::new),
                 },
             );
 
@@ -1772,6 +1777,7 @@ pub(crate) mod tests {
                 address: guesser_address,
                 override_rng_seed: None,
                 override_timestamp: None,
+                override_version: None,
             },
             None,
         );
@@ -1851,6 +1857,7 @@ pub(crate) mod tests {
                 address: guesser_key.to_address().into(),
                 override_rng_seed: None,
                 override_timestamp: None,
+                override_version: None,
             },
             None,
         );
@@ -2008,6 +2015,7 @@ pub(crate) mod tests {
                     address: guesser_key.to_address().into(),
                     override_rng_seed: None,
                     override_timestamp: None,
+                    override_version: None,
                 },
                 Some(target_block_interval),
             );
@@ -2561,6 +2569,7 @@ pub(crate) mod tests {
                     address: guesser_key.to_address().into(),
                     override_rng_seed: None,
                     override_timestamp: Some(block_time),
+                    override_version: None,
                 },
                 None,
             );
@@ -2615,7 +2624,7 @@ pub(crate) mod tests {
             guesser_key.to_address().into(),
             network,
         );
-        let block_time = genesis.header().timestamp + Timestamp::minutes(10);
+        let block_time = Timestamp::now();
 
         let guess = || {
             let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
@@ -2629,6 +2638,7 @@ pub(crate) mod tests {
                     address: guesser_key.to_address().into(),
                     override_rng_seed: Some(55512345),
                     override_timestamp: Some(block_time),
+                    override_version: Some(BFieldElement::new(7)),
                 },
                 None,
             );
@@ -2638,5 +2648,7 @@ pub(crate) mod tests {
         let second = guess().await.unwrap().block;
         assert_eq!(first.header().pow, second.header().pow);
         assert_eq!(first.hash(), second.hash());
+        assert_eq!(BFieldElement::new(7), first.header().version);
+        first.validate(&genesis, block_time, network).await.unwrap();
     }
 }
