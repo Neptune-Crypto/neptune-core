@@ -1,3 +1,6 @@
+use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
+
 use neptune_primitives::timestamp::Timestamp;
 use neptune_wallet::address::ReceivingAddress;
 use tasm_lib::triton_vm::prelude::BFieldElement;
@@ -12,4 +15,7 @@ pub(crate) struct GuessingConfiguration {
 
     /// The version to set in the block's header before guessing, if any.
     pub(crate) override_version: Option<BFieldElement>,
+
+    /// Number of guesses per seconds reported by guesser.
+    pub(crate) guess_rate: Arc<AtomicU64>,
 }

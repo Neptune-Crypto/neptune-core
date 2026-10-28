@@ -14,16 +14,23 @@ pub struct GuessingWorkInfo {
     num_outputs: usize,
     total_coinbase: NativeCurrencyAmount,
     pub(crate) total_guesser_fee: NativeCurrencyAmount,
+    /// The guesses per second of the previous guessing run, if there was one.
+    guesses_per_second: Option<u64>,
 }
 
 impl GuessingWorkInfo {
-    pub(crate) fn new(work_start: SystemTime, block: &Block) -> Self {
+    pub(crate) fn new(
+        work_start: SystemTime,
+        block: &Block,
+        guesses_per_second: Option<u64>,
+    ) -> Self {
         Self {
             work_start,
             num_inputs: block.body().transaction_kernel.inputs.len(),
             num_outputs: block.body().transaction_kernel.outputs.len(),
             total_coinbase: block.body().transaction_kernel.coinbase.unwrap_or_default(),
             total_guesser_fee: block.body().transaction_kernel.fee,
+            guesses_per_second,
         }
     }
 }
@@ -101,8 +108,18 @@ impl Display for MiningStatus {
             ),
             _ => String::default(),
         };
+        let rate = match self {
+            MiningStatus::Guessing(GuessingWorkInfo {
+                guesses_per_second: Some(rate),
+                ..
+            }) => format!("; {:.2} MH/s", *rate as f64 / 1e6),
+            _ => String::default(),
+        };
 
-        write!(f, "{work_type_and_duration}{input_output_info}{reward}",)
+        write!(
+            f,
+            "{work_type_and_duration}{input_output_info}{reward}{rate}",
+        )
     }
 }
 
@@ -126,6 +143,7 @@ impl rand::distr::Distribution<MiningStatus> for rand::distr::StandardUniform {
                     num_outputs: rng.random_range(0..10000),
                     total_coinbase: rng.random(),
                     total_guesser_fee: rng.random(),
+                    guesses_per_second: Some(rng.random_range(0..100_000_000)),
                 };
                 MiningStatus::Guessing(guessing_work_info)
             }

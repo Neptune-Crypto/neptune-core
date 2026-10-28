@@ -232,6 +232,7 @@ fn guess_worker(
         override_rng_seed: rng_seed,
         override_timestamp: now,
         override_version,
+        guess_rate,
     } = guessing_configuration;
 
     let now = now.unwrap_or(Timestamp::now());
@@ -353,6 +354,7 @@ fn guess_worker(
 
     let seconds_guessing = guessing_started.elapsed().as_secs_f64();
     let guesses_per_second = num_guesses.load(Ordering::Relaxed) as f64 / seconds_guessing;
+    guess_rate.store(guesses_per_second as u64, Ordering::Relaxed);
     info!("Guessing at {:.2} MH/s", guesses_per_second / 1e6);
 
     let pow = match guess_result {
@@ -770,7 +772,7 @@ pub(crate) async fn mine(
     // Set PoW guessing to restart every N seconds, if it has been started. Only
     // the guesser task may set this to actually resolve, as this will otherwise
     // abort e.g. the composer.
-    const GUESSING_RESTART_INTERVAL_IN_SECONDS: u64 = 20;
+    const GUESSING_RESTART_INTERVAL_IN_SECONDS: u64 = 30;
 
     // we disable the initial sleep when invoked for unit tests.
     #[cfg(not(test))]
@@ -795,6 +797,7 @@ pub(crate) async fn mine(
     let network = cli_args.network;
 
     let guess_restart_interval = Duration::from_secs(GUESSING_RESTART_INTERVAL_IN_SECONDS);
+    let guess_rate = Arc::new(AtomicU64::new(0));
     let infinite = Duration::from_secs(u32::MAX.into());
     let guess_restart_timer = time::sleep(infinite);
     tokio::pin!(guess_restart_timer);
@@ -843,9 +846,10 @@ pub(crate) async fn mine(
                 .expect("Block proposal must be present when guesser threshold is met")
                 .clone();
 
-            // Set guessing info on global state
+            let guesses_per_second =
+                Some(guess_rate.load(Ordering::Relaxed)).filter(|&rate| rate > 0);
             global_state_lock
-                .set_mining_status_to_guessing(&proposal)
+                .set_mining_status_to_guessing(&proposal, guesses_per_second)
                 .await;
 
             let (guesser_address, _) = global_state_lock
@@ -867,6 +871,7 @@ pub(crate) async fn mine(
                     override_rng_seed: None,
                     override_timestamp: None,
                     override_version: cli_args.guesser_version.map(BFieldElement::new),
+                    guess_rate: guess_rate.clone(),
                 },
             );
 
@@ -1775,6 +1780,7 @@ pub(crate) mod tests {
                 override_rng_seed: None,
                 override_timestamp: None,
                 override_version: None,
+                guess_rate: Arc::default(),
             },
             None,
         );
@@ -1855,6 +1861,7 @@ pub(crate) mod tests {
                 override_rng_seed: None,
                 override_timestamp: None,
                 override_version: None,
+                guess_rate: Arc::default(),
             },
             None,
         );
@@ -2013,6 +2020,7 @@ pub(crate) mod tests {
                     override_rng_seed: None,
                     override_timestamp: None,
                     override_version: None,
+                    guess_rate: Arc::default(),
                 },
                 Some(target_block_interval),
             );
@@ -2567,6 +2575,7 @@ pub(crate) mod tests {
                     override_rng_seed: None,
                     override_timestamp: Some(block_time),
                     override_version: None,
+                    guess_rate: Arc::default(),
                 },
                 None,
             );
@@ -2636,6 +2645,7 @@ pub(crate) mod tests {
                     override_rng_seed: Some(55512345),
                     override_timestamp: Some(block_time),
                     override_version: Some(BFieldElement::new(7)),
+                    guess_rate: Arc::default(),
                 },
                 None,
             );

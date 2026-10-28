@@ -3325,6 +3325,7 @@ pub(crate) mod tests {
                     override_rng_seed: None,
                     override_timestamp: None,
                     override_version: None,
+                    guess_rate: Arc::default(),
                 },
             )
             .await;

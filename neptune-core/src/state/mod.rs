@@ -309,10 +309,14 @@ impl GlobalStateLock {
         tracing::debug!("set mining status: inactive");
     }
 
-    /// Indicate if we are guessing
-    pub async fn set_mining_status_to_guessing(&mut self, block: &Block) {
+    /// Indicate if we are guessing and what our hashrate is, if it's available.
+    pub async fn set_mining_status_to_guessing(
+        &mut self,
+        block: &Block,
+        guesses_per_second: Option<u64>,
+    ) {
         let now = SystemTime::now();
-        let block_info = GuessingWorkInfo::new(now, block);
+        let block_info = GuessingWorkInfo::new(now, block, guesses_per_second);
         self.lock_guard_mut().await.mining_state.mining_status = MiningStatus::Guessing(block_info);
         tracing::debug!("set mining status: guessing");
     }

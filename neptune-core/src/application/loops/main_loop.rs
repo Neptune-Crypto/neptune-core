@@ -2944,7 +2944,7 @@ mod tests {
         // proposal, since mine-loop is not running in this test.
         main_loop_handler
             .global_state_lock
-            .set_mining_status_to_guessing(&proposal_0_5)
+            .set_mining_status_to_guessing(&proposal_0_5, None)
             .await;
 
         // Any improvement, must inform mine loop.

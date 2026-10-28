@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use futures::channel::oneshot;
 use neptune_consensus::block::block_transaction::BlockTransaction;
 use neptune_consensus::block::test_helpers::invalid_block_with_transaction;
@@ -83,6 +85,7 @@ pub(crate) async fn next_block(
             override_rng_seed: Some(deterministic_guesser_rng_seed),
             override_timestamp: Some(new_timestamp),
             override_version: None,
+            guess_rate: Arc::default(),
         },
     )
     .await;
