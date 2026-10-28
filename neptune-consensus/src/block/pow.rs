@@ -129,23 +129,22 @@ impl PowMastPaths {
 
     /// [`Self::block_hash_from_pow_hash`] for many fields at once, side by
     /// side in the CPU's lanes where it has them.
-    fn block_hashes_from_pow_hashes(self, pow_hashes: &[Digest]) -> Vec<Digest> {
+    fn block_hashes_from_pow_hashes<const N: usize>(self, pow_hashes: [Digest; N]) -> Vec<Digest> {
         let with_right = |digests: &[Digest], right: Digest| {
-            Tip5::hash_pair_many(&digests.iter().map(|&left| [left, right]).collect_vec())
+            let pairs: [[Digest; 2]; N] = std::array::from_fn(|i| [digests[i], right]);
+            Tip5::hash_pair_many(&pairs)
         };
         let hash_each = |digests: &[Digest]| {
-            let encodings = digests.iter().map(|digest| digest.encode()).collect_vec();
-            Tip5::hash_varlen_many(&encodings.iter().map(Vec::as_slice).collect_vec())
+            let values: [[BFieldElement; Digest::LEN]; N] =
+                std::array::from_fn(|i| digests[i].values());
+            let encodings: [&[BFieldElement]; N] = std::array::from_fn(|i| &values[i][..]);
+            Tip5::hash_varlen_many(&encodings)
         };
 
-        let header_mast_hashes = with_right(pow_hashes, self.pow[0]);
+        let header_mast_hashes = with_right(&pow_hashes, self.pow[0]);
         let header_mast_hashes = with_right(&header_mast_hashes, self.pow[1]);
-        let header_mast_hashes = Tip5::hash_pair_many(
-            &header_mast_hashes
-                .iter()
-                .map(|&right| [self.pow[2], right])
-                .collect_vec(),
-        );
+        let pairs: [[Digest; 2]; N] = std::array::from_fn(|i| [self.pow[2], header_mast_hashes[i]]);
+        let header_mast_hashes = Tip5::hash_pair_many(&pairs);
 
         let kernel_mast_hashes = with_right(&hash_each(&header_mast_hashes), self.header[0]);
         let kernel_mast_hashes = with_right(&kernel_mast_hashes, self.header[1]);
@@ -196,8 +195,8 @@ pub struct Guesser<const MERKLE_TREE_HEIGHT: usize> {
     /// The sponge after the rate blocks ahead of the one the root ends.
     sponge: Tip5,
 
-    /// The words of that rate block ahead of the root.
-    last_block_head: [BFieldElement; RATE - Digest::LEN],
+    /// That last rate sequence, with the root's words left for the guess.
+    last_rate: [BFieldElement; RATE],
 
     target: Digest,
 }
@@ -233,30 +232,46 @@ impl<const MERKLE_TREE_HEIGHT: usize> Guesser<MERKLE_TREE_HEIGHT> {
         for &block in encoding[..last_block_start].as_chunks::<RATE>().0 {
             sponge.absorb(block);
         }
-        let last_block_head = encoding[last_block_start..encoding.len() - Digest::LEN]
-            .try_into()
-            .unwrap();
+        let last_rate = encoding[last_block_start..].try_into().unwrap();
 
         Self {
             mast_auth_paths,
             pow,
             sponge,
-            last_block_head,
+            last_rate,
             target,
         }
     }
 
+    /// The padding block of an encoding that fills its rate blocks.
+    const PADDING_BLOCK: [BFieldElement; RATE] = {
+        let mut block = [BFieldElement::new(0); RATE];
+        block[0] = BFieldElement::new(1);
+        block
+    };
+
+    /// The last rate block of the proof-of-work field with this root.
+    fn last_pow_rate(&self, root: Digest) -> [BFieldElement; RATE] {
+        let mut last_block = self.last_rate;
+        last_block[RATE - Digest::LEN..].copy_from_slice(&root.values());
+        last_block
+    }
+
     /// The hash of the proof-of-work field with this root.
     fn pow_hash(&self, root: Digest) -> Digest {
-        let mut last_block = [BFieldElement::new(0); RATE];
-        last_block[..RATE - Digest::LEN].copy_from_slice(&self.last_block_head);
-        last_block[RATE - Digest::LEN..].copy_from_slice(&root.values());
-
         let mut sponge = self.sponge.clone();
-        sponge.absorb(last_block);
-        // The padding block of an encoding that fills its rate blocks.
-        sponge.pad_and_absorb_all(&[]);
+        sponge.absorb(self.last_pow_rate(root));
+        sponge.absorb(Self::PADDING_BLOCK);
         Digest::new(sponge.state[..Digest::LEN].try_into().unwrap())
+    }
+
+    /// The hashes of the proof-of-work fields with these roots, the sponges
+    /// permuted side by side where the CPU has the lanes for it.
+    fn pow_hashes<const N: usize>(&self, roots: &[Digest; N]) -> [Digest; N] {
+        let mut sponges: [Tip5; N] = std::array::from_fn(|_| self.sponge.clone());
+        Tip5::absorb_many(&mut sponges, &roots.map(|root| self.last_pow_rate(root)));
+        Tip5::absorb_many(&mut sponges, &[Self::PADDING_BLOCK; N]);
+        sponges.map(|sponge| Digest::new(sponge.state[..Digest::LEN].try_into().unwrap()))
     }
 
     /// The hash of the block with this root in its proof-of-work field.
@@ -267,10 +282,9 @@ impl<const MERKLE_TREE_HEIGHT: usize> Guesser<MERKLE_TREE_HEIGHT> {
 
     /// The hashes of the blocks with these roots in their proof-of-work
     /// fields, hashed side by side where the CPU has the lanes for it.
-    pub fn block_hashes(&self, roots: &[Digest]) -> Vec<Digest> {
-        let pow_hashes = roots.iter().map(|&root| self.pow_hash(root)).collect_vec();
+    pub fn block_hashes<const N: usize>(&self, roots: &[Digest; N]) -> Vec<Digest> {
         self.mast_auth_paths
-            .block_hashes_from_pow_hashes(&pow_hashes)
+            .block_hashes_from_pow_hashes(self.pow_hashes(roots))
     }
 
     /// The proof-of-work field with this root, if the block hash it gives
@@ -281,7 +295,10 @@ impl<const MERKLE_TREE_HEIGHT: usize> Guesser<MERKLE_TREE_HEIGHT> {
 
     /// The proof-of-work field with the first of these roots whose block
     /// hash meets the target, if any.
-    pub fn guess_many(&self, roots: &[Digest]) -> Option<Pow<MERKLE_TREE_HEIGHT>> {
+    pub fn guess_many<const N: usize>(
+        &self,
+        roots: &[Digest; N],
+    ) -> Option<Pow<MERKLE_TREE_HEIGHT>> {
         let hashes = self.block_hashes(roots);
         let root = roots[hashes.iter().position(|hash| *hash <= self.target)?];
         Some(Pow { root, ..self.pow })

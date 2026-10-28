@@ -42,6 +42,7 @@ use rand::RngExt;
 use rand::SeedableRng;
 use rayon::iter::ParallelIterator;
 use rayon::ThreadPoolBuilder;
+use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 use tokio::select;
 use tokio::sync::mpsc;
@@ -334,11 +335,12 @@ fn guess_worker(
         rayon::iter::repeat(0)
             .map_init(
                 || {
-                    let rng = rng_seed.map_or_else(std_rng_from_thread_rng, StdRng::seed_from_u64);
-                    (rng, 0u64)
+                    let mut rng =
+                        rng_seed.map_or_else(std_rng_from_thread_rng, StdRng::seed_from_u64);
+                    (rng.random::<Digest>(), 0u64)
                 },
-                |(rng, uncounted), _i| {
-                    guess_nonce_iteration(&guesser, rng, &sender, uncounted, &num_guesses)
+                |(next_root, uncounted), _i| {
+                    guess_nonce_iteration(&guesser, next_root, &sender, uncounted, &num_guesses)
                 },
             )
             .find_any(|r| !r.block_not_found())
@@ -409,23 +411,29 @@ impl GuessNonceResult {
 #[inline]
 fn guess_nonce_iteration(
     guesser: &BlockGuesser,
-    rng: &mut rand::rngs::StdRng,
+    next_root: &mut Digest,
     sender: &oneshot::Sender<NewBlockFound>,
     uncounted_guesses: &mut u64,
     num_guesses: &AtomicU64,
 ) -> GuessNonceResult {
-    // As many roots as the CPU hashes side by side.
-    let roots: [Digest; 8] = rng.random();
+    // As many roots as the CPU hashes side by side, counting up from the
+    // thread's random start: the hash scrambles them, so they need only
+    // differ.
+    let roots: [Digest; 8] = std::array::from_fn(|_| {
+        let root = *next_root;
+        next_root.0[0] += BFieldElement::new(1);
+        root
+    });
 
     // Count the thread's guesses in bulk, to keep the shared counter cold.
     *uncounted_guesses += roots.len() as u64;
-    if *uncounted_guesses >= 1 << 13 {
+    if *uncounted_guesses >= 1 << 14 {
         num_guesses.fetch_add(*uncounted_guesses, Ordering::Relaxed);
         *uncounted_guesses = 0;
     }
 
     // Check every N guesses if task has been cancelled.
-    if roots[0].values()[0].raw_u64().trailing_zeros() >= 19 && sender.is_canceled() {
+    if roots[0].values()[0].raw_u64().trailing_zeros() >= 15 && sender.is_canceled() {
         debug!("Guesser was cancelled.");
         return GuessNonceResult::Cancelled;
     }
@@ -1239,11 +1247,11 @@ pub(crate) mod tests {
         let num_iterations_run =
             rayon::iter::IntoParallelIterator::into_par_iter(0..num_iterations_launched)
                 .map_init(
-                    || (std_rng_from_thread_rng(), 0u64),
-                    |(prng, uncounted), _i| {
+                    || (std_rng_from_thread_rng().random::<Digest>(), 0u64),
+                    |(next_root, uncounted), _i| {
                         guess_nonce_iteration(
                             &guesser,
-                            prng,
+                            next_root,
                             &worker_task_tx,
                             uncounted,
                             &num_guesses,
@@ -2588,5 +2596,47 @@ pub(crate) mod tests {
         }
 
         Ok(())
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn guessing_with_a_seed_is_deterministic() {
+        let network = Network::RegTest;
+        let genesis = Block::genesis(network);
+        let mut rng = StdRng::seed_from_u64(0);
+        let guesser_key = GenerationSpendingKey::derive_from_seed(rng.random());
+        let transaction = make_mock_transaction_with_mutator_set_hash(
+            vec![],
+            vec![],
+            genesis.mutator_set_accumulator_after().unwrap().hash(),
+        );
+        let block_template = MockBlockGenerator::mock_block_from_tx_without_pow(
+            genesis.clone(),
+            BlockTransaction::upgrade(transaction),
+            guesser_key.to_address().into(),
+            network,
+        );
+        let block_time = genesis.header().timestamp + Timestamp::minutes(10);
+
+        let guess = || {
+            let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
+            guess_worker(
+                network,
+                block_template.clone(),
+                *genesis.header(),
+                worker_task_tx,
+                GuessingConfiguration {
+                    num_guesser_threads: Some(4),
+                    address: guesser_key.to_address().into(),
+                    override_rng_seed: Some(55512345),
+                    override_timestamp: Some(block_time),
+                },
+                None,
+            );
+            worker_task_rx
+        };
+        let first = guess().await.unwrap().block;
+        let second = guess().await.unwrap().block;
+        assert_eq!(first.header().pow, second.header().pow);
+        assert_eq!(first.hash(), second.hash());
     }
 }
