@@ -57,6 +57,13 @@ impl VersionString {
         semver::Version::parse(&self).is_ok_and(|version| version > semver::Version::new(0, 19, 0))
     }
 
+    /// Whether a peer of this version understands
+    /// [`PeerMessage::BlockProposalNotificationRequest`](super::PeerMessage::BlockProposalNotificationRequest).
+    /// True for every version above 0.19.3.
+    pub fn answers_block_proposal_notification_requests(self) -> bool {
+        semver::Version::parse(&self).is_ok_and(|version| version > semver::Version::new(0, 19, 3))
+    }
+
     pub fn versions_are_compatible(own: Self, other: Self) -> bool {
         let own = semver::Version::parse(&own)
             .unwrap_or_else(|_| panic!("Must be able to parse own version string. Got: {own}"));
@@ -356,6 +363,21 @@ mod tests {
         }
         for version in ["0.19.0", "0.18.3", "0.19.0-rc.1", "potato", ""] {
             assert!(!VersionString::new_from_str(version).announces_blocks_with_pow());
+        }
+    }
+
+    #[test]
+    fn versions_above_0_19_3_answer_block_proposal_notification_requests() {
+        for version in ["0.19.4", "0.19.4-alpha.1", "0.20.0", "1.0.0"] {
+            assert!(
+                VersionString::new_from_str(version).answers_block_proposal_notification_requests()
+            );
+        }
+        for version in ["0.19.3", "0.19.0", "0.18.3", "0.19.3-rc.1", "potato", ""] {
+            assert!(
+                !VersionString::new_from_str(version)
+                    .answers_block_proposal_notification_requests()
+            );
         }
     }
 

@@ -35,6 +35,7 @@ use neptune_mempool::tx_admission::TxAdmissionError;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_mutator_set::removal_record::RemovalRecordValidityError;
 use neptune_mutator_set::shared::NUM_TRIALS;
+use neptune_p2p::block_proposal_notification::BlockProposalNotification;
 use neptune_p2p::peer::archival_mutator_set_request::AmsRequestParty;
 use neptune_p2p::peer::archival_mutator_set_request::ArchivalMutatorSetDownload;
 use neptune_p2p::peer::archival_mutator_set_request::ArchivalMutatorSetFrame;
@@ -2884,6 +2885,27 @@ impl PeerLoopHandler {
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
+            PeerMessage::BlockProposalNotificationRequest => {
+                if self.global_state_lock.cli().secret_compositions {
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                log_slow_scope!(fn_name!() + "::PeerMessage::BlockProposalNotificationRequest");
+
+                let notification = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .mining_state
+                    .block_proposal
+                    .map(|proposal| BlockProposalNotification::from(proposal));
+                if let Some(notification) = notification {
+                    peer.send(PeerMessage::BlockProposalNotification(notification))
+                        .await?;
+                }
+
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
             PeerMessage::BlockProposalRequest(block_proposal_request) => {
                 if !self.may_serve_blocks(1).await? {
                     return Ok(KEEP_CONNECTION_ALIVE);
@@ -3341,6 +3363,18 @@ impl PeerLoopHandler {
             > own_cumulative_proof_of_work
         {
             peer.send(PeerMessage::BlockNotificationRequest).await?;
+        }
+
+        // A guesser asks for the peer's block proposal, to start guessing
+        // without waiting for the next composition.
+        if self.global_state_lock.cli().guess
+            && self
+                .peer_handshake_data
+                .version
+                .answers_block_proposal_notification_requests()
+        {
+            peer.send(PeerMessage::BlockProposalNotificationRequest)
+                .await?;
         }
 
         // Requests that other peers fail to answer are taken over by this
@@ -8916,6 +8950,63 @@ mod tests {
                     .unwrap();
                 assert!(request_stream.is_done(), "version {version} on request");
             }
+        }
+
+        #[apply(shared_tokio_runtime)]
+        async fn proposal_notification_request_is_answered_from_the_proposal() {
+            let cli = cli_args::Args::default_with_network(Network::Testnet(42));
+            let mut setup = genesis_setup(cli).await;
+            let mut peer_state = MutablePeerState::new(setup.genesis_block.header().height);
+            let request = PeerMessage::BlockProposalNotificationRequest;
+
+            // Nothing to announce without a proposal.
+            let mut stream = Mock::new(vec![]);
+            setup
+                .peer_loop_handler
+                .handle_peer_message(request.clone(), &mut stream, &mut peer_state)
+                .await
+                .unwrap();
+            assert!(stream.is_done());
+
+            let block1 = fake_valid_block_for_tests(
+                &setup.peer_loop_handler.global_state_lock,
+                StdRng::seed_from_u64(5550002).random(),
+            )
+            .await;
+            let notification = PeerMessage::BlockProposalNotification((&block1).into());
+            setup
+                .peer_loop_handler
+                .global_state_lock
+                .lock_guard_mut()
+                .await
+                .mining_state
+                .block_proposal =
+                crate::state::mining::block_proposal::BlockProposal::ForeignComposition(block1);
+
+            let mut stream = Mock::new(vec![Action::Write(notification)]);
+            setup
+                .peer_loop_handler
+                .handle_peer_message(request.clone(), &mut stream, &mut peer_state)
+                .await
+                .unwrap();
+            assert!(stream.is_done());
+
+            // A secret composer keeps its proposal to itself.
+            setup
+                .peer_loop_handler
+                .global_state_lock
+                .set_cli(cli_args::Args {
+                    secret_compositions: true,
+                    ..cli_args::Args::default_with_network(Network::Testnet(42))
+                })
+                .await;
+            let mut stream = Mock::new(vec![]);
+            setup
+                .peer_loop_handler
+                .handle_peer_message(request, &mut stream, &mut peer_state)
+                .await
+                .unwrap();
+            assert!(stream.is_done());
         }
 
         #[apply(shared_tokio_runtime)]

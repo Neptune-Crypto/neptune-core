@@ -611,6 +611,11 @@ pub enum PeerMessage {
 
     /// Response to [`PeerMessage::ArchivalMutatorSetRequest`].
     ArchivalMutatorSet(Box<ArchivalMutatorSetFrame>),
+
+    /// Request a [`PeerMessage::BlockProposalNotification`] of the receiver's
+    /// current block proposal, if it has one. Only peers with a version
+    /// exceeding 0.19.3 understand this message.
+    BlockProposalNotificationRequest,
     // New variants must be added here at the bottom to be backwards compatible.
 }
 
@@ -642,6 +647,7 @@ impl PeerMessageKind {
             | Self::SyncChallenge
             | Self::BlockProposalNotification
             | Self::BlockProposalRequest
+            | Self::BlockProposalNotificationRequest
             | Self::TransactionNotification
             | Self::TransactionRequest
             | Self::PeerListRequest
@@ -695,6 +701,7 @@ impl PeerMessage {
             PeerMessage::ConnectionStatus(_) => "connection status",
             PeerMessage::BlockProposalNotification(_) => "block proposal notification",
             PeerMessage::BlockProposalRequest(_) => "block proposal request",
+            PeerMessage::BlockProposalNotificationRequest => "block proposal notification request",
             PeerMessage::BlockProposal(_) => "block proposal",
             PeerMessage::UnableToSatisfyBatchRequest => "unable to satisfy batch request",
             PeerMessage::SyncChallenge(_) => "sync challenge",
@@ -733,6 +740,7 @@ impl PeerMessage {
             PeerMessage::ConnectionStatus(_) => false,
             PeerMessage::BlockProposalNotification(_) => false,
             PeerMessage::BlockProposalRequest(_) => false,
+            PeerMessage::BlockProposalNotificationRequest => false,
             PeerMessage::BlockProposal(_) => false,
             PeerMessage::UnableToSatisfyBatchRequest => true,
             PeerMessage::SyncChallenge(_) => false,
@@ -771,6 +779,7 @@ impl PeerMessage {
             PeerMessage::ConnectionStatus(_) => false,
             PeerMessage::BlockProposalNotification(_) => true,
             PeerMessage::BlockProposalRequest(_) => true,
+            PeerMessage::BlockProposalNotificationRequest => true,
             PeerMessage::BlockProposal(_) => true,
             PeerMessage::UnableToSatisfyBatchRequest => false,
             PeerMessage::SyncChallenge(_) => false,
@@ -806,6 +815,7 @@ impl PeerMessage {
             PeerMessage::SyncChallengeResponse(_) => true,
             PeerMessage::BlockProposalNotification(_) => true,
             PeerMessage::BlockProposalRequest(_) => true,
+            PeerMessage::BlockProposalNotificationRequest => true,
             PeerMessage::BlockProposal(_) => true,
             PeerMessage::Transaction(_) => true,
             PeerMessage::TransactionNotification(_) => true,
@@ -1350,12 +1360,14 @@ mod tests {
                 nonce: Digest::default(),
                 offset: 0,
             }),
+            PeerMessage::BlockProposalNotificationRequest,
         ];
         let expected = [
             PeerMessageKind::Bye,
             PeerMessageKind::BlockRequestByHeight,
             PeerMessageKind::TipWithParentAccumulatorRequest,
             PeerMessageKind::ArchivalMutatorSetRequest,
+            PeerMessageKind::BlockProposalNotificationRequest,
         ];
         for (message, kind) in messages.into_iter().zip(expected) {
             let bincode = bincode::DefaultOptions::new().serialize(&message).unwrap();
