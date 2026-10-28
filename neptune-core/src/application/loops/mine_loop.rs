@@ -428,17 +428,15 @@ fn guess_nonce_iteration(
         root
     });
 
-    // Count the thread's guesses in bulk, to keep the shared counter cold.
+    // Count the thread's guesses and look for a cancellation every N hashes.
     *uncounted_guesses += roots.len() as u64;
     if *uncounted_guesses >= 1 << 14 {
         num_guesses.fetch_add(*uncounted_guesses, Ordering::Relaxed);
         *uncounted_guesses = 0;
-    }
-
-    // Check every N guesses if task has been cancelled.
-    if roots[0].values()[0].raw_u64().trailing_zeros() >= 15 && sender.is_canceled() {
-        debug!("Guesser was cancelled.");
-        return GuessNonceResult::Cancelled;
+        if sender.is_canceled() {
+            debug!("Guesser was cancelled.");
+            return GuessNonceResult::Cancelled;
+        }
     }
 
     match guesser.guess_many(&roots) {
@@ -2657,5 +2655,58 @@ pub(crate) mod tests {
         assert_eq!(first.hash(), second.hash());
         assert_eq!(BFieldElement::new(7), first.header().version);
         first.validate(&genesis, block_time, network).await.unwrap();
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn guessing_stops_when_the_receiver_is_dropped() {
+        let network = Network::RegTest;
+        let genesis = Block::genesis(network);
+        let mut rng = StdRng::seed_from_u64(0);
+        let guesser_key = GenerationSpendingKey::derive_from_seed(rng.random());
+        let transaction = make_mock_transaction_with_mutator_set_hash(
+            vec![],
+            vec![],
+            genesis.mutator_set_accumulator_after().unwrap().hash(),
+        );
+        let block_template = MockBlockGenerator::mock_block_from_tx_without_pow(
+            genesis.clone(),
+            BlockTransaction::upgrade(transaction),
+            guesser_key.to_address().into(),
+            network,
+        );
+        // A parent whose difficulty keeps the run from finding a block at
+        // once, dated now so the difficulty is not reset.
+        let now = Timestamp::now();
+        let mut genesis_header = *genesis.header();
+        genesis_header.difficulty = Difficulty::new([100_000_000, 0, 0, 0, 0]);
+        genesis_header.timestamp = now;
+
+        let (worker_task_tx, worker_task_rx) = oneshot::channel::<NewBlockFound>();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            guess_worker(
+                network,
+                block_template,
+                genesis_header,
+                worker_task_tx,
+                GuessingConfiguration {
+                    num_guesser_threads: Some(4),
+                    address: guesser_key.to_address().into(),
+                    override_rng_seed: Some(0),
+                    override_timestamp: Some(now),
+                    override_version: None,
+                    guess_rate: Arc::default(),
+                },
+                None,
+            );
+            done_tx.send(()).unwrap();
+        });
+
+        std::thread::sleep(Duration::from_millis(300));
+        drop(worker_task_rx);
+        assert!(
+            done_rx.recv_timeout(Duration::from_secs(5)).is_ok(),
+            "guessing must stop once nobody can receive a block"
+        );
     }
 }
