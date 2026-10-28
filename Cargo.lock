@@ -7229,9 +7229,9 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "twenty-first"
-version = "3.1.0"
+version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10c0126237f3594ad4fd93c547addaac178aea54cc72f1b45d729d9a4ec43823"
+checksum = "33fbf487eb00d31e5c957491d92a6ef06a8920c44b8a8c40950b67f38d2c3314"
 dependencies = [
  "arbitrary",
  "bfieldcodec_derive",
