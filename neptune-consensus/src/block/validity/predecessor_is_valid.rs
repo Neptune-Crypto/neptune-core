@@ -5203,9 +5203,10 @@ mod tests {
             )
         }
 
-        /// Where the profile of the checks is written: next to the workspace
-        /// manifest.
-        const COST_PROFILE_PATH: &str = "../predecessor-is-valid-cost-profile.md";
+        /// Where the profile of the checks is written: in the consensus
+        /// section of the book.
+        const COST_PROFILE_PATH: &str =
+            "../docs/src/consensus/predecessor-is-valid-cost-profile.md";
 
         /// Writes the rows each check of the skipping program adds to the
         /// tables that decide the padded height, for previous blocks whose
