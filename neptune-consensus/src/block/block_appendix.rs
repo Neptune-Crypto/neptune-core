@@ -161,8 +161,8 @@ impl BlockAppendix {
         claims
     }
 
-    /// The claim with this one's program, version and input, if the
-    /// appendix holds one.
+    /// Find a claim from program digest, proof version, and input. Does not
+    /// consider the output.
     pub fn find(&self, shape: &Claim) -> Option<&Claim> {
         self.claims.iter().find(|claim| {
             claim.program_digest == shape.program_digest

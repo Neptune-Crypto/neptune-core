@@ -411,9 +411,13 @@ impl PredecessorIsValid {
         )
     }
 
-    /// The claim a block at this height with this body must carry, by
-    /// program, version and input, under the network's genesis block and
-    /// table. The output is unbound in this context.
+    /// The claim that a block must contain, pertaining to the execution of this
+    /// program.
+    ///
+    /// The returned claim does not set the output since that it the program's
+    /// to set. In other words: The input is the indeterminate, and the output
+    /// is the dependent, dictated by this program and the input to this
+    /// function.
     pub fn required_claim(
         next_block_body_mh: Digest,
         height: BlockHeight,

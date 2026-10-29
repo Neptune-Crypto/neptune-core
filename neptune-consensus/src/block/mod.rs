@@ -842,22 +842,23 @@ impl Block {
         now: Timestamp,
         network: Network,
     ) -> Result<ParentBlockInfo, BlockValidationError> {
-        let predecessor_claim = PredecessorIsValid::required_claim(
+        let required_piv = PredecessorIsValid::required_claim(
             self.body().mast_hash(),
             self.header().height,
             network,
         );
-        let parent = self
+
+        let parent_info = self
             .appendix()
-            .find(&predecessor_claim)
+            .find(&required_piv)
             .and_then(|claim| PredecessorIsValid::parse_output(&claim.output))
             .ok_or(BlockValidationError::AppendixMissingClaim)?;
-        self.validate_except_proof(&parent, parent_mutator_set, None, now, network)?;
+        self.validate_except_proof(&parent_info, parent_mutator_set, None, now, network)?;
 
         // 1.c) 1.d)
         self.validate_proof(network).await?;
 
-        Ok(parent)
+        Ok(parent_info)
     }
 
     /// Verify a block against previous block and return detailed error
