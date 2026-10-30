@@ -1229,6 +1229,11 @@ impl TritonProgram for PredecessorIsValid {
 
                 // The size counts the length word the pointer points at.
                 push {Self::input_len() + 1} eq
+                // _ *claim[i]_si num_claims i program_matches *input input_size_matches
+
+                dup 5 addi 1 {&field_with_size!(Claim::output)}
+                push {Self::output_len() + 1} eq
+                place 1 pop 1 mul
                 // _ *claim[i]_si num_claims i program_matches *input size_matches
 
                 pick 2 mul
@@ -1815,6 +1820,14 @@ impl TritonProgram for PredecessorIsValid {
             // _ *w [prev_block_hash]
         );
 
+        // The kernel's statically sized fields, and the length prefixes of
+        // its four dynamically sized ones.
+        let kernel_static_size = 4
+            + NativeCurrencyAmount::static_length().unwrap()
+            + Timestamp::static_length().unwrap()
+            + Digest::LEN
+            + bool::static_length().unwrap();
+
         // BEFORE: _ *w [prev_block_hash]
         // AFTER:  _ *w [prev_block_hash]
         let rule_1e_prev = triton_asm!(
@@ -1822,7 +1835,34 @@ impl TritonProgram for PredecessorIsValid {
             // _ *w [prev_block_hash] *epoch
 
             dup 6 {&field_with_size!(PredecessorIsValidWitnessMemory::prev_block_body)}
-            pick 1 pop 1
+            // _ *w [prev_block_hash] *epoch *body body_size
+
+            // Crashes unless the size is a u32.
+            dup 0 pop_count pop 1
+
+            // The body's size is its four fields' sizes and their four
+            // length prefixes, and the kernel's size is its fields' sizes
+            // and their length prefixes.
+            dup 1 {&field_with_size!(BlockBody::transaction_kernel)}
+            // _ *w [prev_block_hash] *epoch *body body_size *kernel kernel_size
+
+            dup 1 {&field_with_size!(TransactionKernel::inputs)} pick 1 pop 1
+            dup 2 {&field_with_size!(TransactionKernel::outputs)} pick 1 pop 1
+            dup 3 {&field_with_size!(TransactionKernel::announcements)} pick 1 pop 1
+            dup 4 {&field_with_size!(TransactionKernel::coinbase)} pick 1 pop 1
+            add add add addi {kernel_static_size}
+            dup 1 eq assert error_id {BlockValidationRule::MaxSize.error_id()}
+            place 1 pop 1
+            // _ *w [prev_block_hash] *epoch *body body_size kernel_size
+
+            dup 2 {&field_with_size!(BlockBody::mutator_set_accumulator)} pick 1 pop 1
+            dup 3 {&field_with_size!(BlockBody::lock_free_mmr_accumulator)} pick 1 pop 1
+            dup 4 {&field_with_size!(BlockBody::block_mmr_accumulator)} pick 1 pop 1
+            add add add addi 4
+            // _ *w [prev_block_hash] *epoch *body body_size fields_size
+
+            dup 1 eq assert error_id {BlockValidationRule::MaxSize.error_id()}
+            place 1 pop 1
             // _ *w [prev_block_hash] *epoch body_size
 
             dup 7 {&field_with_size!(PredecessorIsValidWitnessMemory::prev_block_appendix)}
@@ -3016,6 +3056,7 @@ mod tests {
                         claim.program_digest == own_program_digest
                             && claim.version == version
                             && claim.input.len() == Self::input_len()
+                            && claim.output.len() == Self::output_len()
                             && claim.input.starts_with(&expected_input_start)
                             && EpochTable::decode(&claim.input[expected_input_start.len()..])
                                 .is_ok_and(|table| {
@@ -3135,6 +3176,26 @@ mod tests {
                     &witness.prev_block_body.mutator_set_accumulator,
                 );
                 // 1.e)
+                let body = &witness.prev_block_body;
+                assert_eq!(
+                    body.encode().len(),
+                    4 + body.transaction_kernel.encode().len()
+                        + body.mutator_set_accumulator.encode().len()
+                        + body.lock_free_mmr_accumulator.encode().len()
+                        + body.block_mmr_accumulator.encode().len()
+                );
+                let kernel = &body.transaction_kernel;
+                assert_eq!(
+                    kernel.encode().len(),
+                    4 + kernel.inputs.encode().len()
+                        + kernel.outputs.encode().len()
+                        + kernel.announcements.encode().len()
+                        + kernel.coinbase.encode().len()
+                        + kernel.fee.encode().len()
+                        + kernel.timestamp.encode().len()
+                        + kernel.mutator_set_hash.encode().len()
+                        + kernel.merge_bit.encode().len()
+                );
                 assert!(
                     u64::try_from(witness.prev_block_size()).unwrap()
                         <= prev_epoch.max_block_size.value()
@@ -6590,6 +6651,30 @@ ones):
         }
 
         #[test]
+        fn prev_block_whose_own_claim_has_other_output_length_fails() {
+            let prev_prev_block = random_unproven_block(0);
+            let (body, header) = next_body_and_header(&prev_prev_block, 0);
+            let own_claim = own_claim(&skipping(), &prev_prev_block, &body, &header);
+
+            let mut longer = own_claim.clone();
+            longer.output.push(bfe!(0));
+            let mut shorter = own_claim;
+            shorter.output.pop();
+            for claim in [longer, shorter] {
+                let prev_block = unproven_block(header, body.clone(), vec![claim]);
+                let (next_body, next_header) = next_body_and_header(&prev_block, 0);
+
+                assert_rejects(
+                    &skipping(),
+                    &prev_block,
+                    &next_body,
+                    &next_header,
+                    BlockValidationRule::AppendixMissingClaim.error_id(),
+                );
+            }
+        }
+
+        #[test]
         fn prev_block_with_transaction_claim_about_other_kernel_fails() {
             let prev_prev_block = random_unproven_block(0);
             let (body, header) = next_body_and_header(&prev_prev_block, 0);
@@ -7277,6 +7362,6 @@ ones):
 
     test_program_snapshot!(
         PredecessorIsValid::new(),
-        "b419dd22f4692534619e9f2ca0d6060c11be158e9e12a7e4ec3338f199da2ecc1a0a630e25fa21dd"
+        "54e14c7feb71908fc48d46d94e5d79a7ad79938a15297c8fbe39f23561000b188c28b1aae0dceeb5"
     );
 }

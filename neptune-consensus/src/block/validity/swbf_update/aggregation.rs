@@ -679,6 +679,9 @@ impl TritonProgram for SwbfUpdateAggregation {
                 {&field_with_size!(Claim::output)}
                 // _ *claim_output size
 
+                // Crashes unless the count is a u32.
+                dup 1 addi {1 + OUTPUT_COUNT} read_mem 1 pop 1 pop_count pop 1
+
                 dup 1 addi {1 + OUTPUT_NUM_PEAKS} read_mem 1 pop 1
                 // _ *claim_output size num_peaks
 
@@ -729,6 +732,8 @@ pub(in crate::block::validity) mod tests {
     use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
     use neptune_mutator_set::removal_record::RemovalRecord;
     use neptune_primitives::network::Network;
+    use tasm_lib::triton_vm::isa::instruction::InstructionError;
+    use tasm_lib::triton_vm::isa::op_stack::OpStackError;
     use tasm_lib::triton_vm::proof_item::ProofItem;
     use tasm_lib::triton_vm::proof_stream::ProofStream;
     use tasm_lib::triton_vm::vm::VM;
@@ -741,6 +746,7 @@ pub(in crate::block::validity) mod tests {
     use crate::proof_abstractions::tasm::builtins::verify_stark;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
     use crate::proof_abstractions::tasm::program::tests::test_program_snapshot;
+    use crate::proof_abstractions::tasm::program::TritonError;
 
     impl TritonProgramSpecification for SwbfUpdateAggregation {
         fn source(&self) {
@@ -1167,6 +1173,27 @@ pub(in crate::block::validity) mod tests {
         assert_rejects(&witness, None);
     }
 
+    #[test]
+    fn child_counts_beyond_u32_are_rejected() {
+        // The two counts still sum to the number of index set digests.
+        let (mut witness, _) = witness_over_leaves(2, 2, 5);
+        witness.left_claim.output[OUTPUT_COUNT] += bfe!(1_u64 << 32);
+        witness.right_claim.output[OUTPUT_COUNT] -= bfe!(1_u64 << 32);
+        let error = skipping()
+            .run_tasm(
+                &witness.standard_input(),
+                witness.nondeterminism_for(&skipping()),
+            )
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            TritonError::TritonVMPanic(
+                _,
+                InstructionError::OpStackError(OpStackError::FailedU32Conversion(_)),
+            )
+        ));
+    }
+
     /// The tests that need the leaves' proofs in the witness: they run the
     /// variant of this program that verifies them.
     mod require_proof {
@@ -1246,6 +1273,6 @@ pub(in crate::block::validity) mod tests {
 
     test_program_snapshot!(
         SwbfUpdateAggregation::new(),
-        "ff76bed66c3443de8916866c88ec07312ad6465f6d82bc779c79350ebd369acfbe5b5fa1911bcdaf"
+        "b8116639afc35511e993b51eb43360290f937975c83e3645cf96da1557e9bdbe20ed7b405196fd6a"
     );
 }

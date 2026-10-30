@@ -107,9 +107,10 @@ impl ClaimOutput {
         if output.len() != expected_len {
             return None;
         }
+        let count = u32::try_from(output[OUTPUT_COUNT].value()).ok()?;
         Some(Self {
             padded_rows: output[OUTPUT_PADDED_ROWS],
-            count: output[OUTPUT_COUNT].value() as usize,
+            count: usize::try_from(count).ok()?,
             mutator_set_hash: Digest::new(
                 output[OUTPUT_MUTATOR_SET_HASH..OUTPUT_LAST_LEAF_INDEX]
                     .try_into()
