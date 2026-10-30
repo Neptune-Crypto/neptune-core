@@ -4117,13 +4117,25 @@ mod tests {
     /// The tests that need a block proof in the witness: they run the
     /// variant of this program that verifies it.
     mod require_proof {
-        use super::*;
+        use proptest::strategy::Strategy;
+        use proptest::strategy::ValueTree;
+        use proptest::test_runner::TestRunner;
 
-        /// The block with this header and body, whose appendix holds the
+        use super::*;
+        use crate::block::block_transaction::BlockTransaction;
+        use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+        use crate::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
+        use crate::transaction::primitive_witness::PrimitiveWitness;
+        use crate::transaction::validity::single_proof::produce_single_proof;
+        use crate::transaction::Transaction;
+        use crate::transaction::TransactionProof;
+
+        /// The block with this header and body, whose appendix holds this
         /// transaction claim and then these claims, with its proof.
         fn proven_block(
             header: BlockHeader,
             body: BlockBody,
+            transaction_claim: (Claim, NeptuneProof),
             claims: Vec<(Claim, NeptuneProof)>,
         ) -> Block {
             let swbf_claim = swbf_update_claim(&header, &body).map(|_| {
@@ -4149,7 +4161,7 @@ mod tests {
                 (claim, NeptuneProof::from(proof))
             });
             let claims = [
-                vec![transaction_claim_and_proof_for(&body)],
+                vec![transaction_claim],
                 swbf_claim.into_iter().collect(),
                 claims,
             ]
@@ -4166,15 +4178,17 @@ mod tests {
             fixture_grandparent()
         }
 
-        /// The verifying program's claim about the previous block, for the next
-        /// block with this body and header, with its proof from the proof cache.
+        /// The verifying program's claim about the previous block under these
+        /// epochs, for the next block with this body and header, with its
+        /// proof from the proof cache.
         fn own_claim_and_proof(
             prev_block: &Block,
             next_body: &BlockBody,
             next_header: &BlockHeader,
+            epochs: &EpochTable,
         ) -> (Claim, NeptuneProof) {
             let program = PredecessorIsValid::new();
-            let claim = own_claim(&program, prev_block, next_body, next_header);
+            let claim = own_claim_with_epochs(&program, prev_block, next_body, next_header, epochs);
             let witness = PredecessorIsValidWitness::new(
                 prev_block,
                 next_body,
@@ -4183,7 +4197,7 @@ mod tests {
             let proof = load_proof_or_produce_and_save(
                 &claim,
                 program.program(),
-                witness.nondeterminism_under(&program, &epochs()),
+                witness.nondeterminism_under(&program, epochs),
             );
 
             (claim, proof)
@@ -4198,11 +4212,122 @@ mod tests {
             header: BlockHeader,
             seed: u64,
         ) -> Block {
-            let own_claim = own_claim_and_proof(prev_block, &body, &header);
+            let own_claim = own_claim_and_proof(prev_block, &body, &header, &epochs());
             let mut claims = vec![halt_claim_and_proof(), halt_claim_and_proof()];
             claims.insert(own_claim_position(seed), own_claim);
+            let transaction_claim = transaction_claim_and_proof_for(&body);
 
-            proven_block(header, body, claims)
+            proven_block(header, body, transaction_claim, claims)
+        }
+
+        /// The block transaction on the mutator set after this parent that
+        /// pays this coinbase and nothing else: the coinbase transaction
+        /// merged with an empty one, each with its single proof.
+        fn coinbase_only_block_transaction(
+            parent: &Block,
+            coinbase: NativeCurrencyAmount,
+            timestamp: Timestamp,
+        ) -> BlockTransaction {
+            let mutator_set = parent.mutator_set_accumulator_after().unwrap();
+            let primitive_witness = |num_outputs, coinbase| {
+                PrimitiveWitness::arbitrary_given_mutator_set_accumulator_and_inputs(
+                    num_outputs,
+                    0,
+                    coinbase,
+                    vec![],
+                    vec![],
+                    vec![],
+                    vec![],
+                    mutator_set.clone(),
+                    timestamp,
+                )
+                .new_tree(&mut TestRunner::deterministic())
+                .unwrap()
+                .current()
+            };
+
+            let rt = tokio_runtime();
+            let _guard = rt.enter();
+            let options = TritonVmProofJobOptions::default_with_network(Network::Main);
+            let rule_set = ConsensusRuleSet::HardforkDelta;
+            let with_single_proof = |primitive_witness: PrimitiveWitness| {
+                let proof = rt
+                    .block_on(produce_single_proof(
+                        &primitive_witness,
+                        TritonVmJobQueue::get_instance(),
+                        options.clone(),
+                        rule_set,
+                    ))
+                    .unwrap();
+                Transaction {
+                    kernel: primitive_witness.kernel,
+                    proof: TransactionProof::SingleProof(proof),
+                }
+            };
+            let coinbase = with_single_proof(primitive_witness(2, Some(coinbase)));
+            let empty = with_single_proof(primitive_witness(0, None));
+
+            rt.block_on(BlockTransaction::merge(
+                coinbase.into(),
+                empty,
+                [0; 32],
+                TritonVmJobQueue::get_instance(),
+                options,
+                rule_set,
+            ))
+            .unwrap()
+        }
+
+        /// A proven successor of this block whose transaction pays this
+        /// coinbase and nothing else, one target block interval of its epoch
+        /// after its parent, carrying the verifying program's claim under
+        /// these epochs.
+        fn proven_successor_paying(
+            parent: &Block,
+            coinbase: NativeCurrencyAmount,
+            epochs: &EpochTable,
+        ) -> Block {
+            remember_predecessor(parent);
+            let epoch = epochs.in_force_at(parent.header().height.next());
+            let timestamp = parent.header().timestamp + epoch.target_block_interval;
+            let transaction = coinbase_only_block_transaction(parent, coinbase, timestamp);
+            let transaction_claim = (
+                single_proof_claim(
+                    transaction.kernel.mast_hash(),
+                    ConsensusRuleSet::HardforkDelta,
+                ),
+                transaction.proof().clone().into_single_proof(),
+            );
+            let witness = BlockPrimitiveWitness::new(parent.clone(), transaction, Network::Main);
+            let body = witness.body().clone();
+            let header = witness.header(timestamp, epoch.target_block_interval);
+            let own_claim = own_claim_and_proof(parent, &body, &header, epochs);
+
+            proven_block(header, body, transaction_claim, vec![own_claim])
+        }
+
+        /// Main net's epochs with the block interval halved at the block after
+        /// activation, and halved again at the block after that.
+        fn two_speedups() -> [Epoch; 3] {
+            let halving = activation_height().value() + 1;
+            let halved = Epoch {
+                height: bfe!(halving),
+                target_block_interval: Timestamp::millis(294_000),
+                speedup_log2: bfe!(1),
+                equivalent_height_offset: bfe!(halving - (halving >> 1)),
+                ..activation_epoch()
+            };
+            let second_halving = halving + 1;
+            let equivalent = halved.equivalent_height(second_halving.into());
+            let quartered = Epoch {
+                height: bfe!(second_halving),
+                target_block_interval: Timestamp::millis(147_000),
+                speedup_log2: bfe!(2),
+                equivalent_height_offset: bfe!(equivalent - (second_halving >> 2)),
+                ..activation_epoch()
+            };
+
+            [activation_epoch(), halved, quartered]
         }
 
         /// A proven previous block that carries the verifying program's claim,
@@ -4225,6 +4350,53 @@ mod tests {
                 &next_body,
                 &next_header,
             );
+        }
+
+        #[test]
+        fn chain_through_two_speedup_epochs_halves_the_subsidy_twice() {
+            let epochs = EpochTable::new(&two_speedups());
+            let program = PredecessorIsValid::new();
+            let subsidy = Block::block_subsidy(activation_height());
+
+            // Each block pays its epoch's subsidy: the original at activation,
+            // half of it from the next block, a quarter from the one after.
+            let first = proven_successor_paying(&fixture_grandparent(), subsidy, &epochs);
+            let second = proven_successor_paying(&first, subsidy.half(), &epochs);
+            let third = proven_successor_paying(&second, subsidy.half().half(), &epochs);
+            assert_accepts_with_epochs(&program, &first, second.body(), second.header(), &epochs);
+            assert_accepts_with_epochs(&program, &second, third.body(), third.header(), &epochs);
+            let (next_body, next_header) = next_body_and_header(&third, 0);
+            assert_accepts_with_epochs(&program, &third, &next_body, &next_header, &epochs);
+
+            // What the second block paid is too much one block later.
+            let overpaid = proven_successor_paying(&second, subsidy.half(), &epochs);
+            let (next_body, next_header) = next_body_and_header(&overpaid, 0);
+            assert_rejects_with_epochs(
+                &program,
+                &overpaid,
+                &next_body,
+                &next_header,
+                &epochs,
+                BlockValidationRule::CoinbaseTooBig.error_id(),
+            );
+        }
+
+        #[test]
+        fn chain_through_two_speedup_epochs_with_a_table_growing_as_they_start() {
+            let epochs = two_speedups();
+            let table = |num_started: usize| EpochTable::new(&epochs[..num_started]);
+            let program = PredecessorIsValid::new();
+            let subsidy = Block::block_subsidy(activation_height());
+
+            // Each block's claim holds the epochs that have started by its
+            // height, and its successor's table extends it by the next.
+            let first = proven_successor_paying(&fixture_grandparent(), subsidy, &table(1));
+            let second = proven_successor_paying(&first, subsidy.half(), &table(2));
+            let third = proven_successor_paying(&second, subsidy.half().half(), &table(3));
+            assert_accepts_with_epochs(&program, &first, second.body(), second.header(), &table(2));
+            assert_accepts_with_epochs(&program, &second, third.body(), third.header(), &table(3));
+            let (next_body, next_header) = next_body_and_header(&third, 0);
+            assert_accepts_with_epochs(&program, &third, &next_body, &next_header, &table(3));
         }
 
         #[test]

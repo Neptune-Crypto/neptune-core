@@ -92,7 +92,7 @@ pub struct Epoch {
 impl Epoch {
     /// The height a block at this height would have at the original block
     /// interval.
-    fn equivalent_height(&self, height: BlockHeight) -> u64 {
+    pub(super) fn equivalent_height(&self, height: BlockHeight) -> u64 {
         self.equivalent_height_offset.value() + (height.value() >> self.speedup_log2.value())
     }
 

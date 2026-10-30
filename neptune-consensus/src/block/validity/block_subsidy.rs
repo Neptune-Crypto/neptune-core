@@ -109,13 +109,18 @@ impl BasicSnippet for BlockSubsidy {
 mod tests {
     use neptune_primitives::block_height::BlockHeight;
     use neptune_primitives::block_height::BLOCKS_PER_GENERATION;
+    use neptune_primitives::network::Network;
+    use neptune_primitives::timestamp::Timestamp;
     use num_traits::Zero;
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
     use tasm_lib::triton_vm::vm::VM;
 
     use super::*;
+    use crate::block::validity::epoch_table::EpochTable;
     use crate::block::Block;
+    use crate::consensus_rule_set::ConsensusRuleSet;
+    use crate::consensus_rule_set::BLOCK_HEIGHT_SOFTFORK_EPSILON_MAIN_NET;
     use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
     /// An epoch without speedup, whose schedule is the one
@@ -180,6 +185,77 @@ mod tests {
         assert_eq!(
             quarter(INITIAL_BLOCK_SUBSIDY).half(),
             epoch.block_subsidy(first_halving.into())
+        );
+    }
+
+    #[test]
+    fn main_net_epochs_with_two_halvings_of_the_block_interval() {
+        let activation = BLOCK_HEIGHT_SOFTFORK_EPSILON_MAIN_NET.value();
+        let initial = ConsensusRuleSet::epoch_table(Network::Main).in_force_at(activation.into());
+        assert_eq!(Timestamp::millis(588_000), initial.target_block_interval);
+
+        // Blocks come twice as fast from four blocks past activation on, so
+        // the equivalent height of that block is its own height.
+        let halving = activation + 4;
+        let halved = Epoch {
+            height: bfe!(halving),
+            target_block_interval: Timestamp::millis(294_000),
+            speedup_log2: bfe!(1),
+            equivalent_height_offset: bfe!(halving - (halving >> 1)),
+            ..initial
+        };
+
+        // Blocks come four times as fast from four blocks later on, by which
+        // point the equivalent height trails the height by two.
+        let second_halving = halving + 4;
+        let equivalent = second_halving - 2;
+        let quartered = Epoch {
+            height: bfe!(second_halving),
+            target_block_interval: Timestamp::millis(147_000),
+            speedup_log2: bfe!(2),
+            equivalent_height_offset: bfe!(equivalent - (second_halving >> 2)),
+            ..initial
+        };
+        let table = EpochTable::new(&[initial, halved, quartered]);
+
+        let half = INITIAL_BLOCK_SUBSIDY.half();
+        let quarter = half.half();
+        for (height, epoch, expected) in [
+            (activation, initial, INITIAL_BLOCK_SUBSIDY),
+            (halving - 1, initial, INITIAL_BLOCK_SUBSIDY),
+            (halving, halved, half),
+            (second_halving - 1, halved, half),
+            (second_halving, quartered, quarter),
+            (second_halving + 1, quartered, quarter),
+            (second_halving + 4_000, quartered, quarter),
+        ] {
+            assert_eq!(epoch, table.in_force_at(height.into()), "height {height}");
+            assert_eq!(
+                expected,
+                epoch.block_subsidy(height.into()),
+                "height {height}"
+            );
+            assert_eq!(expected, block_subsidy_in_vm_under(&epoch, height));
+        }
+
+        // The four blocks sharing an equivalent height pay what the one
+        // block at that height would have.
+        let shared: Vec<_> = (second_halving..second_halving + 4)
+            .map(|height| quartered.block_subsidy(height.into()))
+            .collect();
+        assert_eq!(
+            Block::block_subsidy(equivalent.into()),
+            shared.into_iter().sum::<NativeCurrencyAmount>()
+        );
+
+        // The generation ends when the equivalent height reaches the original
+        // boundary: four times as many blocks past the second halving.
+        let offset = quartered.equivalent_height_offset.value();
+        let boundary = 4 * (BLOCKS_PER_GENERATION - NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT - offset);
+        assert_eq!(quarter, block_subsidy_in_vm_under(&quartered, boundary - 1));
+        assert_eq!(
+            quarter.half(),
+            block_subsidy_in_vm_under(&quartered, boundary)
         );
     }
 
