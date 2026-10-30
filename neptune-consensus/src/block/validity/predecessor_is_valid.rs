@@ -2844,7 +2844,6 @@ mod tests {
     use crate::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::transaction::transparent_input::TransparentInput;
     use crate::transaction::validity::neptune_proof::Proof as NeptuneProof;
-    use crate::transaction::validity::single_proof::SingleProof;
 
     #[test]
     fn sign_test_refuses_non_canonical_limbs() {
@@ -3312,10 +3311,10 @@ mod tests {
         }
     }
 
-    /// At or past hard fork delta on main net, so that the fixture
-    /// transaction is proved under the delta rules.
+    /// Main net's, so that the host judges the fixture chain under the same
+    /// rules as the program.
     fn activation_height() -> BlockHeight {
-        BlockHeight::from(60_000u64)
+        crate::consensus_rule_set::BLOCK_HEIGHT_SOFTFORK_EPSILON_MAIN_NET
     }
 
     fn minimum_block_time() -> Timestamp {
@@ -3326,28 +3325,9 @@ mod tests {
         Network::Main.target_block_interval()
     }
 
+    /// Main net's epsilon epoch.
     fn activation_epoch() -> Epoch {
-        let consensus_rule_set = ConsensusRuleSet::HardforkDelta;
-        Epoch {
-            height: activation_height().into(),
-            minimum_block_time: minimum_block_time(),
-            target_block_interval: target_block_interval(),
-            max_num_inputs: bfe!(consensus_rule_set.max_num_inputs() as u64),
-            max_num_outputs: bfe!(consensus_rule_set.max_num_outputs() as u64),
-            max_num_announcements: bfe!(consensus_rule_set.max_num_announcements() as u64),
-            max_block_size: bfe!(consensus_rule_set.max_block_size() as u64),
-            transaction_backdating_threshold: consensus_rule_set
-                .transaction_backdating_threshold()
-                .unwrap(),
-            speedup_log2: bfe!(0),
-            equivalent_height_offset: bfe!(0),
-            lustration_counter_initial: lustration_counter_initial(),
-            resets_lustration_status: bfe!(0),
-            min_swbf_padded_rows: bfe!(2 << FIXTURE_LEAF_LOG2_PADDED_HEIGHT),
-            block_program_digest: BlockProgram.hash(),
-            single_proof_digest: SingleProof::new(consensus_rule_set).hash(),
-            swbf_aggregation_digest: SwbfUpdateAggregation::new().hash(),
-        }
+        epochs().in_force_at(activation_height())
     }
 
     /// The padded height of each of the two leaf proofs beneath a fixture
@@ -3367,7 +3347,7 @@ mod tests {
     }
 
     fn epochs() -> EpochTable {
-        EpochTable::new(&[activation_epoch()])
+        ConsensusRuleSet::epoch_table(Network::Main)
     }
 
     /// Give the header the difficulty and cumulative proof of work its
@@ -4045,11 +4025,93 @@ mod tests {
         epochs: &EpochTable,
         error_id: i128,
     ) {
+        assert_rejects_with_epochs_and_host_rule(
+            program,
+            prev_block,
+            next_body,
+            next_header,
+            epochs,
+            error_id,
+            error_id,
+        );
+    }
+
+    /// As [assert_rejects], where the host reaches another rule first.
+    fn assert_rejects_and_host_rejects_for(
+        program: &PredecessorIsValid,
+        prev_block: &Block,
+        next_body: &BlockBody,
+        next_header: &BlockHeader,
+        error_id: i128,
+        host_error_id: i128,
+    ) {
+        assert_rejects_with_epochs_and_host_rule(
+            program,
+            prev_block,
+            next_body,
+            next_header,
+            &epochs(),
+            error_id,
+            host_error_id,
+        );
+    }
+
+    /// Whether the host judges this rule on the fixture chain at all: it
+    /// checks proof-of-work outside `validate`, and `validate_without_proof`
+    /// skips the proof.
+    fn host_judges(error_id: i128) -> bool {
+        error_id != PowValidationError::ThresholdNotMet.error_id()
+            && error_id != BlockValidationRule::ProofQuality.error_id()
+    }
+
+    /// The program rejects for the rule, and the host rejects for the host's
+    /// rule: the previous block against its predecessor, or, where that
+    /// passes, the next block against the previous one.
+    fn assert_rejects_with_epochs_and_host_rule(
+        program: &PredecessorIsValid,
+        prev_block: &Block,
+        next_body: &BlockBody,
+        next_header: &BlockHeader,
+        epochs: &EpochTable,
+        error_id: i128,
+        host_error_id: i128,
+    ) {
         let (claim, nondeterminism) =
             claim_and_nondeterminism(program, prev_block, next_body, next_header, epochs);
         program
             .test_assertion_failure(PublicInput::new(claim.input), nondeterminism, &[error_id])
             .unwrap();
+
+        let mirrors_host =
+            *epochs == self::epochs() && prev_block.header().height >= epochs.activation_height();
+        if !mirrors_host || !host_judges(error_id) {
+            return;
+        }
+        let Some(predecessor) = predecessor_of(prev_block) else {
+            return;
+        };
+        let now = prev_block.header().timestamp;
+        let host_error = prev_block
+            .validate_without_proof(&predecessor, now, Network::Main)
+            .err()
+            .unwrap_or_else(|| {
+                let mut header = *next_header;
+                header.pow.set_version_in_pow(header.version);
+                let next_block = Block::new(
+                    header,
+                    next_body.clone(),
+                    BlockAppendix::default(),
+                    BlockProof::Invalid,
+                );
+                next_block
+                    .validate_without_proof(prev_block, header.timestamp, Network::Main)
+                    .expect_err("host must reject what the program rejects")
+            });
+        assert_eq!(
+            host_error_id,
+            BlockValidationRule::from(&host_error).error_id(),
+            "host rejects for another rule: {host_error}"
+        );
     }
 
     /// The tests that need a block proof in the witness: they run the
@@ -5722,12 +5784,15 @@ ones):
                 unproven_prev_block_and_next_body_and_header(0);
             prev_block.set_proof(BlockProof::Genesis);
 
-            assert_rejects(
+            // The host sees the next header point elsewhere before it
+            // reaches the MMR.
+            assert_rejects_and_host_rejects_for(
                 &skipping(),
                 &prev_block,
                 &next_body,
                 &next_header,
                 BlockValidationRule::BlockMmrUpdate.error_id(),
+                BlockValidationRule::PrevBlockDigest.error_id(),
             );
         }
 
@@ -5767,12 +5832,14 @@ ones):
                 ),
             );
 
-            assert_rejects(
+            // The host checks the MMR update before the leaf count.
+            assert_rejects_and_host_rejects_for(
                 &skipping(),
                 &prev_block,
                 &next_body,
                 &next_header,
                 BlockValidationRule::BlockHeight.error_id(),
+                BlockValidationRule::BlockMmrUpdate.error_id(),
             );
         }
 
@@ -7073,12 +7140,15 @@ ones):
             let (prev_block, next_body, next_header) =
                 prev_block_with_transaction_kernel(transaction_kernel, &epochs());
 
-            assert_rejects(
+            // The host's unpacking rejects the repeated record before the
+            // uniqueness rule.
+            assert_rejects_and_host_rejects_for(
                 &skipping(),
                 &prev_block,
                 &next_body,
                 &next_header,
                 BlockValidationRule::RemovalRecordsUniqueness.error_id(),
+                BlockValidationRule::RemovalRecordsUnpackFailure.error_id(),
             );
         }
 
