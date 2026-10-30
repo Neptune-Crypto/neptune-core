@@ -7,6 +7,7 @@ use neptune_consensus::transaction::transaction_proof::TransactionProofType;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_primitives::timestamp::Timestamp;
 use neptune_wallet::address::KeyType;
+use num_traits::CheckedSub;
 use num_traits::Zero;
 
 /// test: a block spending hundreds of inputs propagates between nodes
@@ -80,7 +81,8 @@ pub async fn block_with_many_inputs_propagates() -> anyhow::Result<()> {
         .await?;
     bob.wait_until_block_height(4, timeout_secs).await?;
 
-    // Fan in: spending the whole balance consumes every one of them.
+    // Spending the whole balance consumes all UTXOs. Because of many inputs,
+    // a high fee must be paid to the composer.
     let balance = alice
         .gsl
         .api()
@@ -88,14 +90,15 @@ pub async fn block_with_many_inputs_propagates() -> anyhow::Result<()> {
         .balances(Timestamp::now())
         .await
         .confirmed_available;
+    let fee = NativeCurrencyAmount::coins(2);
     alice
         .gsl
         .api_mut()
         .tx_sender_mut()
         .send(
-            vec![(alice_address, balance)],
+            vec![(alice_address, balance.checked_sub(&fee).unwrap())],
             Default::default(),
-            NativeCurrencyAmount::zero(),
+            fee,
             Timestamp::now(),
             accept_lustrations,
         )

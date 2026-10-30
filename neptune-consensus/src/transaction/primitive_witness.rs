@@ -394,22 +394,11 @@ impl PrimitiveWitness {
     /// mutator set.
     pub fn update_with_new_ms_data(self, mutator_set_update: MutatorSetUpdate) -> Self {
         let mut msa_state: MutatorSetAccumulator = self.mutator_set_accumulator.clone();
-        let mut transaction_removal_records: Vec<RemovalRecord> = self.kernel.inputs.clone();
-        let mut transaction_removal_records: Vec<&mut RemovalRecord> =
-            transaction_removal_records.iter_mut().collect();
 
-        let mut primitive_witness = self;
-
-        let old_membership_proofs = primitive_witness.input_membership_proofs.clone();
-        let own_items = primitive_witness
-            .input_utxos
-            .utxos
-            .iter()
-            .map(Tip5::hash)
-            .collect_vec();
+        let own_items = self.input_utxos.utxos.iter().map(Tip5::hash).collect_vec();
         let mut authenticated_items = own_items
             .into_iter()
-            .zip(old_membership_proofs)
+            .zip(self.input_membership_proofs.clone())
             .map(|(item, msmp)| AuthenticatedItem {
                 item,
                 ms_membership_proof: msmp,
@@ -420,27 +409,44 @@ impl PrimitiveWitness {
         // spent in supplied mutator set update.
         let _ = mutator_set_update.apply_to_accumulator_and_records(
             &mut msa_state,
-            &mut transaction_removal_records,
+            &mut [],
             &mut authenticated_items.iter_mut().collect_vec(),
         );
         let new_membership_proofs = authenticated_items
             .into_iter()
             .map(|x| x.ms_membership_proof)
             .collect_vec();
-        primitive_witness.input_membership_proofs = new_membership_proofs;
+
+        self.with_mutator_set(msa_state, new_membership_proofs)
+    }
+
+    /// The witness at this mutator set, with these membership proofs for its
+    /// inputs, valid there: the kernel's inputs and mutator set hash follow
+    /// from them, and the type script witnesses are regenerated.
+    pub fn with_mutator_set(
+        self,
+        mutator_set_accumulator: MutatorSetAccumulator,
+        input_membership_proofs: Vec<MsMembershipProof>,
+    ) -> Self {
+        let mut primitive_witness = self;
+        let inputs = primitive_witness
+            .input_utxos
+            .utxos
+            .iter()
+            .zip(&input_membership_proofs)
+            .map(|(utxo, membership_proof)| {
+                mutator_set_accumulator.drop(Tip5::hash(utxo), membership_proof)
+            })
+            .collect_vec();
+        primitive_witness.input_membership_proofs = input_membership_proofs;
 
         let kernel = TransactionKernelModifier::default()
-            .inputs(
-                transaction_removal_records
-                    .into_iter()
-                    .map(|x| x.to_owned())
-                    .collect_vec(),
-            )
-            .mutator_set_hash(msa_state.hash())
+            .inputs(inputs)
+            .mutator_set_hash(mutator_set_accumulator.hash())
             .clone_modify(&primitive_witness.kernel);
 
         primitive_witness.kernel = kernel.clone();
-        primitive_witness.mutator_set_accumulator = msa_state.clone();
+        primitive_witness.mutator_set_accumulator = mutator_set_accumulator;
 
         // Set type_scripts_and_witnesses field from other fields in primitive witness.
         let type_scripts_and_witnesses = primitive_witness

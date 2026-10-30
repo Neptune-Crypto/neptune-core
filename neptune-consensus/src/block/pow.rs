@@ -423,7 +423,8 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
             ConsensusRuleSet::HardforkAlpha | ConsensusRuleSet::TvmProofVersion1 => parent_digest,
             ConsensusRuleSet::HardforkBeta
             | ConsensusRuleSet::HardforkGamma
-            | ConsensusRuleSet::HardforkDelta => {
+            | ConsensusRuleSet::HardforkDelta
+            | ConsensusRuleSet::SoftforkEpsilon => {
                 if !meets_threshold {
                     return Err(PowValidationError::ThresholdNotMet);
                 }
@@ -488,6 +489,13 @@ pub enum PowValidationError {
     PathBInvalid,
     ThresholdNotMet,
     CannotParseLustrationCounter,
+}
+
+impl PowValidationError {
+    /// The error ID a Triton program asserts with when it checks this rule.
+    pub(super) fn error_id(self) -> i128 {
+        1_000_800 + self as i128
+    }
 }
 
 // Not under test flag since it's used in both tests and benchmarks

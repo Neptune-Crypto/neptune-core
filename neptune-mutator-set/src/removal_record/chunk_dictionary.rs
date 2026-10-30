@@ -51,6 +51,13 @@ impl ChunkDictionary {
         Self { dictionary }
     }
 
+    /// A dictionary with the entries in the given order. The order matters
+    /// for the packed form of a list of removal records, where the keys are
+    /// tree heights with markers that do not sort like the heights.
+    pub fn new_in_given_order(dictionary: Vec<(ChunkIndex, AuthenticatedChunk)>) -> Self {
+        Self { dictionary }
+    }
+
     /// Consume the dictionary, returning its `(chunk index, (auth path, chunk))`
     /// entries.
     pub fn into_inner(self) -> Vec<(ChunkIndex, AuthenticatedChunk)> {

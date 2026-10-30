@@ -123,7 +123,10 @@ async fn revert_update_from_remove_test(
             .unwrap()
             .update_from_remove(applied_removal_record);
 
-        archival_mutator_set.remove(applied_removal_record).await;
+        archival_mutator_set
+            .remove(applied_removal_record.absolute_indices)
+            .await
+            .unwrap();
 
         if i + 1 == cutoff_point {
             membership_proof_snapshot = Some(own_membership_proof.as_ref().unwrap().clone());
@@ -147,7 +150,7 @@ async fn revert_update_from_remove_test(
             .revert_update_from_remove(revert_removal_record);
 
         archival_mutator_set
-            .revert_remove(revert_removal_record)
+            .revert_remove(revert_removal_record.absolute_indices)
             .await;
 
         // keep other removal records up-to-date?
@@ -203,7 +206,7 @@ async fn revert_update_single_remove_test() {
     let mut removal_records = vec![];
     for i in 0..ms_size {
         let removal_record = ams.drop(items[i], &mps[i]).await;
-        ams.remove(&removal_record).await;
+        ams.remove(removal_record.absolute_indices).await.unwrap();
         MsMembershipProof::batch_update_from_remove(
             &mut mps.iter_mut().collect_vec(),
             &removal_record,
@@ -228,7 +231,7 @@ async fn revert_update_single_remove_test() {
 
     // Revert all removals in opposite order and verify that the MPs become valid again
     for i in (0..ms_size).rev() {
-        ams.revert_remove(&removal_records[i]).await;
+        ams.revert_remove(removal_records[i].absolute_indices).await;
         for mp in mps.iter_mut().take(ms_size) {
             mp.revert_update_from_remove(&removal_records[i]);
         }
@@ -517,7 +520,10 @@ async fn revert_updates_mixed_test() {
             removed_items_and_membership_proofs.push((item, membership_proof.clone(), index));
 
             // remove the item from the mutator set
-            archival_mutator_set.remove(&removal_record).await;
+            archival_mutator_set
+                .remove(removal_record.absolute_indices)
+                .await
+                .unwrap();
 
             // record record
             records.push(Either::Right(removal_record));
@@ -589,7 +595,9 @@ async fn revert_updates_mixed_test() {
                                         records_abbreviation = format!("{records_abbreviation}r");
 
                                         // revert update to mutator set
-                                        archival_mutator_set.revert_remove(&removal_record).await;
+                                        archival_mutator_set
+                                            .revert_remove(removal_record.absolute_indices)
+                                            .await;
 
                                         // assert valid proofs
                                         for (_, mp) in &mut tracked_items_and_membership_proofs {

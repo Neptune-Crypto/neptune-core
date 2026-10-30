@@ -81,83 +81,138 @@ where
         }
     }
 
-    pub async fn remove(&mut self, removal_record: &RemovalRecord) {
-        let new_chunks: HashMap<u64, Chunk> = self.remove_helper(removal_record).await;
-        self.chunks.set_many(new_chunks).await;
+    pub async fn remove(
+        &mut self,
+        absolute_indices: AbsoluteIndexSet,
+    ) -> Result<(), AbsoluteIndexSet> {
+        self.batch_remove(&[absolute_indices]).await
+    }
+
+    /// Apply these index sets to the Bloom filter, as removal records with
+    /// them would: the active window directly, the inactive chunks read,
+    /// changed, hashed and written as one batch, with one batch mutation of
+    /// the MMR over them.
+    ///
+    /// Nothing is applied if any index set is a double spend. In that case, the
+    /// offending index set is returned.
+    pub async fn batch_remove(
+        &mut self,
+        index_sets: &[AbsoluteIndexSet],
+    ) -> Result<(), AbsoluteIndexSet> {
+        match self.apply_index_sets(index_sets, true).await {
+            Some(double_spend) => Err(double_spend),
+            None => Ok(()),
+        }
+    }
+
+    /// Undo [`Self::batch_remove`] of these index sets.
+    ///
+    /// # Panics
+    ///
+    /// If an index is not set, that is, if the index sets were not applied.
+    pub async fn revert_batch_remove(&mut self, index_sets: &[AbsoluteIndexSet]) {
+        self.apply_index_sets(index_sets, false).await;
+    }
+
+    /// Abstract, internal method for either applying or reverting the
+    /// application of a collection of absolute index sets.
+    ///
+    /// When applying, checks for double spends. If one is found, the mutator
+    /// set is left untouched, and the offending index set is returned.
+    async fn apply_index_sets(
+        &mut self,
+        index_sets: &[AbsoluteIndexSet],
+        insert: bool,
+    ) -> Option<AbsoluteIndexSet> {
+        let batch_index = self.get_batch_index_async().await;
+        let active_window_start = batch_index * u128::from(CHUNK_SIZE);
+
+        let mut active: Vec<u32> = vec![];
+        let mut per_chunk: HashMap<u64, Vec<u32>> = HashMap::new();
+        for index in index_sets.iter().flat_map(|index_set| index_set.iter()) {
+            if index >= active_window_start {
+                active.push(
+                    u32::try_from(index - active_window_start)
+                        .expect("Relative index for active window must be valid u32"),
+                );
+            } else {
+                per_chunk
+                    .entry((index / u128::from(CHUNK_SIZE)) as u64)
+                    .or_default()
+                    .push((index % u128::from(CHUNK_SIZE)) as u32);
+            }
+        }
+
+        let (chunk_indices, relative_indices): (Vec<u64>, Vec<Vec<u32>>) =
+            per_chunk.into_iter().unzip();
+        let mut chunks = self.chunks.get_many(&chunk_indices).await;
+
+        if insert {
+            let chunk_position: HashMap<u64, usize> = chunk_indices
+                .iter()
+                .enumerate()
+                .map(|(position, &chunk_index)| (chunk_index, position))
+                .collect();
+            let is_set = |index: u128| {
+                if index >= active_window_start {
+                    self.swbf_active
+                        .contains((index - active_window_start) as u32)
+                } else {
+                    let position = chunk_position[&((index / u128::from(CHUNK_SIZE)) as u64)];
+                    chunks[position].contains((index % u128::from(CHUNK_SIZE)) as u32)
+                }
+            };
+            let mut multiplicity: HashMap<u128, u32> = HashMap::new();
+            for index in index_sets.iter().flat_map(|index_set| index_set.iter()) {
+                *multiplicity.entry(index).or_default() += 1;
+            }
+
+            let already_set = |index_set: &AbsoluteIndexSet| {
+                let mut own: HashMap<u128, u32> = HashMap::new();
+                for index in index_set.iter() {
+                    *own.entry(index).or_default() += 1;
+                }
+                !own.into_iter()
+                    // If just *one* index was not set, and touched only by this
+                    // index set, then it's not a double spend.
+                    .any(|(index, own_count)| multiplicity[&index] == own_count && !is_set(index))
+            };
+            if let Some(double_spend) = index_sets.iter().find(|index_set| already_set(index_set)) {
+                return Some(*double_spend);
+            }
+        }
+
+        if insert {
+            self.swbf_active.insert_many(&active);
+        } else {
+            for relative_index in active {
+                self.swbf_active.remove(relative_index);
+            }
+        }
+
+        for (chunk, relative_indices) in chunks.iter_mut().zip(&relative_indices) {
+            if insert {
+                chunk.insert_many(relative_indices);
+            } else {
+                chunk.subtract(Chunk::from_slice(relative_indices));
+            }
+        }
+
+        // Calculate the new leaf values
+        let leafs = chunk_indices
+            .iter()
+            .zip(&chunks)
+            .map(|(chunk_index, chunk)| (*chunk_index, Tip5::hash(chunk)))
+            .collect_vec();
+        self.swbf_inactive.batch_mutate_leaf(leafs).await;
+        self.chunks
+            .set_many(chunk_indices.into_iter().zip(chunks))
+            .await;
+        None
     }
 
     pub async fn hash(&self) -> Digest {
         self.accumulator().await.hash()
-    }
-
-    /// Apply a list of removal records while keeping a list of mutator set
-    /// membership proofs up-to-date.
-    pub async fn batch_remove(&mut self, removal_records: Vec<RemovalRecord>) {
-        let batch_index = self.get_batch_index_async().await;
-        let active_window_start = batch_index * u128::from(CHUNK_SIZE);
-
-        // Collect all indices that that are set by the removal records
-        let all_removal_records_indices: Vec<u128> = removal_records
-            .iter()
-            .map(|x| x.absolute_indices.to_vec())
-            .concat();
-
-        // Loop over all indices from removal records in order to create a
-        // mapping {chunk index => chunk mutation } where "chunk mutation" has
-        // the type of `Chunk` but only represents the values which are set by
-        // the removal records being handled.
-        let mut chunkidx_to_chunk_difference_dict: HashMap<u64, Chunk> = HashMap::new();
-        for index in all_removal_records_indices {
-            if index >= active_window_start {
-                let relative_index = u32::try_from(index - active_window_start)
-                    .expect("Relative index for active window must be valid u32");
-                self.swbf_active.insert(relative_index);
-            } else {
-                chunkidx_to_chunk_difference_dict
-                    .entry((index / u128::from(CHUNK_SIZE)) as u64)
-                    .or_insert_with(Chunk::empty_chunk)
-                    .insert((index % u128::from(CHUNK_SIZE)) as u32);
-            }
-        }
-
-        // Collect all affected chunks as they look before these removal records
-        // are applied. These chunks are part of the removal records, so we
-        // fetch them there.
-        let mut new_chunks: HashMap<u64, Chunk> = HashMap::new();
-        for removal_record in removal_records {
-            for (chunk_index, (_, chunk)) in removal_record.target_chunks.into_inner() {
-                debug_assert!(
-                    new_chunks
-                        .get(&chunk_index)
-                        .is_none_or(|chk| Tip5::hash(chk) == Tip5::hash(&chunk)),
-                    "Sanity check: All removal records must agree on chunks"
-                );
-                new_chunks.insert(chunk_index, chunk);
-            }
-        }
-
-        // Apply the removal records: the new chunk is obtained by adding the
-        // chunk difference
-        for (chunk_index, chunk) in &mut new_chunks {
-            let new_chunk = chunk
-                .clone()
-                .combine(chunkidx_to_chunk_difference_dict[chunk_index].clone());
-            *chunk = new_chunk.clone();
-            self.chunks.set(*chunk_index, new_chunk).await;
-        }
-
-        // the Bloom filter such that we can apply a batch-update operation to
-        // the MMR through which this part of the Bloom filter is represented.
-        let swbf_inactive_mutation_data: Vec<(u64, Digest)> = new_chunks
-            .into_iter()
-            .map(|(idx, chk)| (idx, Tip5::hash(&chk)))
-            .collect();
-
-        // Apply the batch-update to the inactive part of the sliding window Bloom filter.
-        // This updates both the inactive part of the SWBF and the MMR membership proofs
-        self.swbf_inactive
-            .batch_mutate_leaf_and_update_mps(&mut [], swbf_inactive_mutation_data)
-            .await;
     }
 
     /// Clear the mutator set: revert all operations so as to bring it into a
@@ -250,32 +305,7 @@ where
         let auth_path_aocl = self.get_aocl_authentication_path(aocl_leaf_index).await?;
         let swbf_indices =
             AbsoluteIndexSet::compute(item, sender_randomness, receiver_preimage, aocl_leaf_index);
-
-        let batch_index = self.get_batch_index_async().await;
-        let window_start = batch_index * u128::from(CHUNK_SIZE);
-
-        let chunk_indices: Vec<u64> = swbf_indices
-            .to_array()
-            .iter()
-            .filter(|bi| **bi < window_start)
-            .map(|bi| (*bi / u128::from(CHUNK_SIZE)) as u64)
-            .collect();
-        let mut target_chunks: ChunkDictionary = ChunkDictionary::default();
-
-        // This is maximum 45 chunks, so it's OK to get all at once. No need
-        // to have a stream. Stream didn't work when this function was called
-        // from RPC server, so we just collect all here.
-        let chunks = self.chunks.get_many(&chunk_indices).await;
-
-        for (chunk_index, chunk) in chunk_indices.into_iter().zip_eq(chunks) {
-            assert!(
-                self.chunks.len().await > chunk_index,
-                "Chunks must be known if its authentication path is known."
-            );
-            let chunk_membership_proof: mmr::mmr_membership_proof::MmrMembershipProof =
-                self.swbf_inactive.prove_membership_async(chunk_index).await;
-            target_chunks.insert(chunk_index, (chunk_membership_proof, chunk.to_owned()));
-        }
+        let target_chunks = self.chunk_dictionary(swbf_indices).await;
 
         Ok(MsMembershipProof {
             auth_path_aocl,
@@ -284,6 +314,31 @@ where
             target_chunks,
             aocl_leaf_index,
         })
+    }
+
+    /// The chunks for the inactive SWBF that the indices belong to, along with
+    /// the chunks authentication paths.
+    pub async fn chunk_dictionary(&self, absolute_indices: AbsoluteIndexSet) -> ChunkDictionary {
+        let window_start = self.get_batch_index_async().await * u128::from(CHUNK_SIZE);
+        let chunk_indices = absolute_indices
+            .iter()
+            .filter(|index| *index < window_start)
+            .map(|index| (index / u128::from(CHUNK_SIZE)) as u64)
+            .sorted()
+            .dedup()
+            .collect_vec();
+        let mut target_chunks = ChunkDictionary::default();
+
+        // This is maximum 45 chunks, so it's OK to get all at once. No need
+        // to have a stream. Stream didn't work when this function was called
+        // from RPC server, so we just collect all here.
+        let chunks = self.chunks.get_many(&chunk_indices).await;
+        for (chunk_index, chunk) in chunk_indices.into_iter().zip_eq(chunks) {
+            let chunk_membership_proof =
+                self.swbf_inactive.prove_membership_async(chunk_index).await;
+            target_chunks.insert(chunk_index, (chunk_membership_proof, chunk));
+        }
+        target_chunks
     }
 
     /// Restore a mutator set membership proof in a privacy-preserving manner,
@@ -346,53 +401,8 @@ where
         })
     }
 
-    /// Revert the `RemovalRecord` by removing the indices that
-    /// were inserted by it. These live in either the active window, or
-    /// in a relevant chunk.
-    ///
-    /// # Panics
-    ///
-    /// - If the supplied removal record does not have all its index set, i.e.
-    ///   if the supplied removal record was not already applied to the mutator
-    ///   set.
-    pub async fn revert_remove(&mut self, removal_record: &RemovalRecord) {
-        let removal_record_indices: Vec<u128> = removal_record.absolute_indices.to_vec();
-        let batch_index = self.get_batch_index_async().await;
-        let active_window_start = batch_index * u128::from(CHUNK_SIZE);
-        let mut chunkidx_to_difference_dict: HashMap<u64, Chunk> = HashMap::new();
-
-        // Populate the dictionary by iterating over all the removal
-        // record's indices and inserting them into the correct
-        // chunk in the dictionary, if the index is in the inactive
-        // part. Otherwise, remove the index from the active window.
-        for rr_index in removal_record_indices {
-            if rr_index >= active_window_start {
-                let relative_index = u32::try_from(rr_index - active_window_start)
-                    .expect("Relative index for active window must be valid u32");
-                self.swbf_active.remove(relative_index);
-            } else {
-                let chunkidx = (rr_index / u128::from(CHUNK_SIZE)) as u64;
-                let relative_index = (rr_index % u128::from(CHUNK_SIZE)) as u32;
-                chunkidx_to_difference_dict
-                    .entry(chunkidx)
-                    .or_insert_with(Chunk::empty_chunk)
-                    .insert(relative_index);
-            }
-        }
-
-        for (chunk_index, revert_chunk) in chunkidx_to_difference_dict {
-            // For each chunk, subtract the difference from the chunk.
-            let previous_chunk = self.chunks.get(chunk_index).await;
-            let mut new_chunk = previous_chunk;
-            new_chunk.subtract(revert_chunk.clone());
-
-            // update archival mmr
-            self.swbf_inactive
-                .mutate_leaf(chunk_index, Tip5::hash(&new_chunk))
-                .await;
-
-            self.chunks.set(chunk_index, new_chunk).await;
-        }
+    pub async fn revert_remove(&mut self, absolute_indices: AbsoluteIndexSet) {
+        self.revert_batch_remove(&[absolute_indices]).await;
     }
 
     /// Determine whether the given `AdditionRecord` can be reversed.
@@ -558,60 +568,6 @@ where
         //  - index == 1 does not generate a slide
         //  - index == n * BATCH_SIZE generates a slide for any n
     }
-
-    /// Remove a record and return the chunks that have been updated in this process,
-    /// after applying the update. Does not mutate the removal record.
-    pub async fn remove_helper(&mut self, removal_record: &RemovalRecord) -> HashMap<u64, Chunk> {
-        let batch_index = self.get_batch_index_async().await;
-        let active_window_start = batch_index * u128::from(CHUNK_SIZE);
-
-        // insert all indices
-        let mut new_target_chunks: ChunkDictionary = removal_record.target_chunks.clone();
-        let chunkindices_to_indices_dict: HashMap<u64, Vec<u128>> =
-            removal_record.get_chunkidx_to_indices_dict();
-
-        for (chunk_index, indices) in chunkindices_to_indices_dict {
-            if chunk_index >= batch_index as u64 {
-                // index is in the active part, so insert it in the active part of the Bloom filter
-                for index in indices {
-                    let relative_index = u32::try_from(index - active_window_start)
-                        .expect("Relative index for active window must be valid u32");
-                    self.swbf_active.insert(relative_index);
-                }
-
-                continue;
-            }
-
-            // If chunk index is not in the active part, insert the index into the relevant chunk
-            let new_target_chunks_clone = new_target_chunks.clone();
-            let count_leaves = self.aocl.num_leafs().await;
-            let relevant_chunk = new_target_chunks
-                .get_mut(&chunk_index)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "Can't get chunk index {chunk_index} from removal record dictionary! dictionary: {:?}\nAOCL size: {}\nbatch index: {}\nRemoval record: {:?}",
-                        new_target_chunks_clone,
-                        count_leaves,
-                        batch_index,
-                        removal_record
-                    )
-                });
-            for index in indices {
-                let relative_index = (index % u128::from(CHUNK_SIZE)) as u32;
-                relevant_chunk.1.insert(relative_index);
-            }
-        }
-
-        // update mmr
-        // to do this, we need to keep track of all membership proofs
-        // If we want to update the membership proof with this removal, we
-        // could use the below function.
-        self.swbf_inactive
-            .batch_mutate_leaf_and_update_mps(&mut [], new_target_chunks.indices_and_leafs())
-            .await;
-
-        new_target_chunks.indices_and_chunks().into_iter().collect()
-    }
 }
 
 #[cfg(test)]
@@ -626,6 +582,7 @@ mod tests {
     use rand::rngs::StdRng;
     use rand::RngExt;
     use rand::SeedableRng;
+    use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 
     use super::*;
     use crate::test_shared::empty_rusty_mutator_set;
@@ -917,7 +874,10 @@ mod tests {
                 .absolute_index_set_was_applied(rem0.absolute_indices)
                 .await
         );
-        archival_mutator_set.remove(&rem0).await;
+        archival_mutator_set
+            .remove(rem0.absolute_indices)
+            .await
+            .unwrap();
         assert!(
             archival_mutator_set
                 .absolute_index_set_was_applied(rem0.absolute_indices)
@@ -967,7 +927,10 @@ mod tests {
                 .absolute_index_set_was_applied(rem1.absolute_indices)
                 .await
         );
-        archival_mutator_set.remove(&rem1).await;
+        archival_mutator_set
+            .remove(rem1.absolute_indices)
+            .await
+            .unwrap();
         assert!(
             archival_mutator_set
                 .absolute_index_set_was_applied(rem1.absolute_indices)
@@ -1012,7 +975,9 @@ mod tests {
         assert_eq!(archival_mutator_set.hash().await, msa.hash(), "Archival MS and MS accumulator must agree also with collisions in the Bloom filter indices");
 
         // Reverse 1st removal
-        archival_mutator_set.revert_remove(&rem0).await;
+        archival_mutator_set
+            .revert_remove(rem0.absolute_indices)
+            .await;
         assert!(
             !archival_mutator_set
                 .absolute_index_set_was_applied(rem0.absolute_indices)
@@ -1040,7 +1005,9 @@ mod tests {
                 .absolute_index_set_was_applied(rem1.absolute_indices)
                 .await
         );
-        archival_mutator_set.revert_remove(&rem1).await;
+        archival_mutator_set
+            .revert_remove(rem1.absolute_indices)
+            .await;
         assert!(
             !archival_mutator_set
                 .absolute_index_set_was_applied(rem1.absolute_indices)
@@ -1083,7 +1050,9 @@ mod tests {
 
         // This next line should panic, as we're attempting to remove an index that is not present
         // in the active window
-        archival_mutator_set.revert_remove(&removal_record).await;
+        archival_mutator_set
+            .revert_remove(removal_record.absolute_indices)
+            .await;
     }
 
     #[should_panic(expected = "Attempted to remove index that was not present in chunk.")]
@@ -1108,7 +1077,7 @@ mod tests {
         // This next line should panic, as we're attempting to remove an index that is not present
         // in the inactive part of the Bloom filter
         archival_mutator_set
-            .revert_remove(&fake_removal_record)
+            .revert_remove(fake_removal_record.absolute_indices)
             .await;
     }
 
@@ -1157,7 +1126,10 @@ mod tests {
                     .absolute_index_set_was_applied(removal_record.absolute_indices)
                     .await
             );
-            archival_mutator_set.remove(&removal_record).await;
+            archival_mutator_set
+                .remove(removal_record.absolute_indices)
+                .await
+                .unwrap();
             assert!(
                 !archival_mutator_set
                     .verify(item, &restored_membership_proof)
@@ -1169,7 +1141,9 @@ mod tests {
                     .await
             );
 
-            archival_mutator_set.revert_remove(&removal_record).await;
+            archival_mutator_set
+                .revert_remove(removal_record.absolute_indices)
+                .await;
             assert!(
                 !archival_mutator_set
                     .absolute_index_set_was_applied(removal_record.absolute_indices)
@@ -1183,6 +1157,145 @@ mod tests {
                     .await
             );
         }
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn batch_remove_agrees_with_the_accumulator_and_reverts() {
+        let mut rms = empty_rusty_mutator_set().await;
+        let ams = rms.ams_mut();
+        let mut membership_proofs: Vec<MsMembershipProof> = vec![];
+        let mut items: Vec<Digest> = vec![];
+        for _ in 0..45 * BATCH_SIZE {
+            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
+            let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
+            let membership_proof = ams.prove(item, sender_randomness, receiver_preimage).await;
+            MsMembershipProof::batch_update_from_addition(
+                &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
+                &items,
+                &ams.accumulator().await,
+                &addition_record,
+            )
+            .expect("MS membership update must work");
+            ams.add(&addition_record).await;
+            membership_proofs.push(membership_proof);
+            items.push(item);
+        }
+        let mut removal_records = vec![];
+        for (mp, &item) in membership_proofs.iter().zip_eq(&items) {
+            removal_records.push(ams.drop(item, mp).await);
+        }
+        let index_sets = removal_records
+            .iter()
+            .map(|rr| rr.absolute_indices)
+            .collect_vec();
+        let before = ams.hash().await;
+        let mut accumulator = ams.accumulator().await;
+        accumulator.batch_remove(removal_records, &mut []);
+
+        ams.batch_remove(&index_sets).await.unwrap();
+        assert_eq!(accumulator.hash(), ams.hash().await);
+        for (mp, &item) in membership_proofs.iter().zip_eq(&items) {
+            assert!(!ams.verify(item, mp).await);
+        }
+
+        ams.revert_batch_remove(&index_sets).await;
+        assert_eq!(before, ams.hash().await);
+        for (mp, &item) in membership_proofs.iter().zip_eq(&items) {
+            assert!(ams.verify(item, mp).await);
+        }
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn batch_remove_rejects_a_double_spend() {
+        let mut rms = empty_rusty_mutator_set().await;
+        let ams = rms.ams_mut();
+        let mut membership_proofs: Vec<MsMembershipProof> = vec![];
+        let mut items: Vec<Digest> = vec![];
+        for _ in 0..45 * BATCH_SIZE {
+            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
+            let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
+            let membership_proof = ams.prove(item, sender_randomness, receiver_preimage).await;
+            MsMembershipProof::batch_update_from_addition(
+                &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
+                &items,
+                &ams.accumulator().await,
+                &addition_record,
+            )
+            .expect("MS membership update must work");
+            ams.add(&addition_record).await;
+            membership_proofs.push(membership_proof);
+            items.push(item);
+        }
+        // The first items' indices reach into the inactive chunks.
+        let first = ams
+            .drop(items[0], &membership_proofs[0])
+            .await
+            .absolute_indices;
+        let second = ams
+            .drop(items[1], &membership_proofs[1])
+            .await
+            .absolute_indices;
+        ams.batch_remove(&[first]).await.unwrap();
+        let after_first = ams.hash().await;
+
+        assert_eq!(Err(first), ams.batch_remove(&[first]).await);
+        assert_eq!(Err(first), ams.batch_remove(&[second, first]).await);
+        assert_eq!(Err(second), ams.batch_remove(&[second, second]).await);
+        assert_eq!(after_first, ams.hash().await, "nothing applied");
+
+        ams.batch_remove(&[second]).await.unwrap();
+        assert!(!ams.verify(items[1], &membership_proofs[1]).await);
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn swbfi_prefix_peaks_are_the_peaks_after_removals() {
+        let mut rms = empty_rusty_mutator_set().await;
+        let ams = rms.ams_mut();
+        let mut membership_proofs: Vec<MsMembershipProof> = vec![];
+        let mut items: Vec<Digest> = vec![];
+        for _ in 0..45 * BATCH_SIZE {
+            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
+            let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
+            let membership_proof = ams.prove(item, sender_randomness, receiver_preimage).await;
+            MsMembershipProof::batch_update_from_addition(
+                &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
+                &items,
+                &ams.accumulator().await,
+                &addition_record,
+            )
+            .expect("MS membership update must work");
+            ams.add(&addition_record).await;
+            membership_proofs.push(membership_proof);
+            items.push(item);
+        }
+        let mut removal_records = vec![];
+        for (mp, &item) in membership_proofs.iter().zip_eq(&items).step_by(7) {
+            removal_records.push(ams.drop(item, mp).await);
+        }
+        let index_sets = removal_records
+            .iter()
+            .map(|rr| rr.absolute_indices)
+            .collect_vec();
+        let before = ams.accumulator().await;
+        let mut after_removals = before.clone();
+        after_removals.batch_remove(removal_records, &mut []);
+
+        ams.batch_remove(&index_sets).await.unwrap();
+        for _ in 0..3 * BATCH_SIZE {
+            let (item, sender_randomness, receiver_preimage) = mock_item_and_randomnesses();
+            ams.add(&commit(item, sender_randomness, receiver_preimage.hash()))
+                .await;
+        }
+
+        let peaks_after_removals = after_removals.swbf_inactive.peaks();
+        assert_ne!(before.swbf_inactive.peaks(), peaks_after_removals);
+        assert_ne!(ams.swbf_inactive.peaks().await, peaks_after_removals);
+        assert_eq!(
+            peaks_after_removals,
+            ams.swbf_inactive
+                .peaks_at(before.swbf_inactive.num_leafs())
+                .await
+        );
     }
 
     #[apply(shared_tokio_runtime)]
@@ -1225,7 +1338,14 @@ mod tests {
         for (mp, &item) in membership_proofs.iter().zip_eq(items.iter()) {
             assert!(archival_mutator_set.verify(item, mp).await);
         }
-        archival_mutator_set.batch_remove(removal_records).await;
+        let index_sets = removal_records
+            .iter()
+            .map(|rr| rr.absolute_indices)
+            .collect_vec();
+        archival_mutator_set
+            .batch_remove(&index_sets)
+            .await
+            .unwrap();
         for (mp, &item) in membership_proofs.iter().zip_eq(items.iter()) {
             assert!(!archival_mutator_set.verify(item, mp).await);
         }
@@ -1285,7 +1405,11 @@ mod tests {
             }
 
             let commitment_prior_to_removal = ams_batch.hash().await;
-            ams_batch.batch_remove(removal_records.clone()).await;
+            let index_sets = removal_records
+                .iter()
+                .map(|rr| rr.absolute_indices)
+                .collect_vec();
+            ams_batch.batch_remove(&index_sets).await.unwrap();
 
             let mut applied_rrs = removal_records.clone();
             while let Some(rr) = applied_rrs.pop() {
@@ -1298,7 +1422,7 @@ mod tests {
                     &rr,
                 )
                 .unwrap();
-                ams_separate.remove(&rr).await;
+                ams_separate.remove(rr.absolute_indices).await.unwrap();
             }
 
             // Ensure both AMSs are in the same state.
@@ -1333,8 +1457,12 @@ mod tests {
 
             // Verify that removal record indices were applied. If not, below function call will crash.
             for removal_record in &removal_records {
-                ams_batch.revert_remove(removal_record).await;
-                ams_separate.revert_remove(removal_record).await;
+                ams_batch
+                    .revert_remove(removal_record.absolute_indices)
+                    .await;
+                ams_separate
+                    .revert_remove(removal_record.absolute_indices)
+                    .await;
             }
 
             // Verify that mutator set before and after removal are the same

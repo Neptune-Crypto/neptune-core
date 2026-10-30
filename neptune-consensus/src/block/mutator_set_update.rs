@@ -5,7 +5,51 @@ use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_mutator_set::removal_record::RemovalRecord;
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::prelude::Digest;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
+
+/// Witness data required to update a transaction from one mutator set to a
+/// later one.
+#[derive(Clone, Debug)]
+pub struct MutatorSetCatchUp {
+    pub new_mutator_set: MutatorSetAccumulator,
+    pub new_inputs: Vec<RemovalRecord>,
+    pub appended_aocl_leafs: Vec<Digest>,
+}
+
+impl MutatorSetCatchUp {
+    /// Through the blocks' update, from the set and the inputs valid there.
+    /// Needs the update's chunk data.
+    pub fn from_update(
+        mutator_set: &MutatorSetAccumulator,
+        inputs: &[RemovalRecord],
+        update: &MutatorSetUpdate,
+    ) -> Result<Self> {
+        let mut mutator_set = mutator_set.clone();
+        let mut inputs = inputs.to_vec();
+        update.apply_to_accumulator_and_records(
+            &mut mutator_set,
+            &mut inputs.iter_mut().collect::<Vec<_>>(),
+            &mut [],
+        )?;
+        let appended_aocl_leafs = update
+            .additions
+            .iter()
+            .map(|addition_record| addition_record.canonical_commitment)
+            .collect();
+        Ok(Self {
+            new_mutator_set: mutator_set,
+            new_inputs: inputs,
+            appended_aocl_leafs,
+        })
+    }
+
+    pub fn aocl_successor_proof(&self, old_aocl: &MmrAccumulator) -> MmrSuccessorProof {
+        MmrSuccessorProof::new_from_batch_append(old_aocl, &self.appended_aocl_leafs)
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct MutatorSetUpdate {
@@ -524,12 +568,6 @@ mod tests {
             prop_assert_eq!(msa_sequential, msa_batch);
         }
 
-        /// The batch check is stricter than sequential application in one
-        /// corner: a removal record whose indices are covered by the Bloom
-        /// filter and the *other* records of the update combined, without
-        /// being covered by the Bloom filter and earlier records alone.
-        /// passes sequentially but fails the batch check. For honestly
-        /// generated removal records this corner has negligible probability.
         #[test]
         fn batch_check_rejects_fully_covered_record_where_sequential_accepts() {
             // All indices lie in the initial active window, so removal

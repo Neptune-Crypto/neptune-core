@@ -1444,11 +1444,14 @@ impl RpcApi for RpcServer {
         &self,
         request: GetBlockTemplateRequest,
     ) -> RpcResult<GetBlockTemplateResponse> {
+        let network = self.state.cli().network;
+        let address = ReceivingAddress::from_bech32m(&request.guesser_address, network)
+            .map_err(|_| RpcError::InvalidAddress)?;
+
         let (maybe_proposal, tip_header) = {
             let global_state = self.state.lock_guard().await;
             let proposal = global_state.mining_state.block_proposal.map(|p| p.clone());
             let tip_header = *global_state.chain.tip().header();
-
             (proposal, tip_header)
         };
 
@@ -1456,7 +1459,6 @@ impl RpcApi for RpcServer {
             return Ok(GetBlockTemplateResponse { template: None });
         };
 
-        let network = self.state.cli().network;
         let consensus_rules = ConsensusRuleSet::infer_from(network, proposal.header().height);
         let difficulty = if consensus_rules.use_parent_difficulty() {
             tip_header.difficulty
@@ -1464,9 +1466,6 @@ impl RpcApi for RpcServer {
             proposal.header().difficulty
         };
 
-        let address =
-            ReceivingAddress::from_bech32m(&request.guesser_address, self.state.cli().network)
-                .map_err(|_| RpcError::InvalidAddress)?;
         proposal.set_header_guesser_data(address.into());
 
         let template = RpcBlockTemplate {
@@ -1745,8 +1744,10 @@ impl RpcApi for RpcServer {
         let consensus_rule_set = ConsensusRuleSet::infer_from(network, next_block_height);
         let tx = state.mempool().get_transactions_for_block_composition(
             consensus_rule_set,
+            network,
             usize::MAX,
             Some(1),
+            self.state.cli().min_fee_per_swbf_leaf,
         );
         drop(state);
         let tx = tx.first();

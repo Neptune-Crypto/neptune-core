@@ -4124,6 +4124,7 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
+        let network = self.state.cli().network;
         let (mut proposal, difficulty) = {
             let global_state = self.state.lock_guard().await;
             let Some(proposal) = global_state
@@ -4136,7 +4137,6 @@ impl RPC for NeptuneRPCServer {
 
             let latest_block_header = *global_state.chain.tip().header();
 
-            let network = self.state.cli().network;
             let next_rules = ConsensusRuleSet::infer_from(network, proposal.header().height);
             let difficulty = if next_rules.use_parent_difficulty() {
                 latest_block_header.difficulty

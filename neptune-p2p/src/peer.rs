@@ -1142,7 +1142,8 @@ impl SyncChallengeResponse {
         // The tip is included in the below check, so if *it* doesn't have an
         // above average difficulty, something is almost certainly off.
 
-        let too_few_above_mean_difficulties = !own_tip_height.is_genesis()
+        let too_few_above_mean_difficulties = network.is_main()
+            && !own_tip_height.is_genesis()
             && self
                 .blocks
                 .iter()

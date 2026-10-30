@@ -17,15 +17,31 @@ use super::Block;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::proof_abstractions::SecretWitness;
 
+mod apply_addition_record;
+mod apply_addition_records;
 pub mod block_primitive_witness;
 pub mod block_program;
 pub mod block_proof_witness;
+mod block_subsidy;
 pub mod coinbase_is_valid;
 pub mod correct_control_parameter_update;
 pub mod correct_mmr_update;
 pub mod correct_mutator_set_update;
+pub mod difficulty_control;
+pub mod epoch_table;
+#[cfg(test)]
+mod extension_claim;
+mod guesser_fee_addition_records;
+pub mod knows_mutator_set;
+mod meets_threshold;
 pub mod mmr_membership;
+mod mutator_set_hash;
+mod mutator_set_update_from_state_hash;
 pub mod predecessor_is_valid;
+mod removal_record_pointers;
+mod removal_records_are_unique;
+pub mod swbf_update;
+mod verified_lustration_amount;
 
 /// The validity of a block, in the principal case, decomposes into these subclaims.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
