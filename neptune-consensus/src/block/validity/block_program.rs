@@ -534,6 +534,46 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn appendix_claim_with_a_tampered_proof_is_rejected() {
+        let network = Network::Main;
+        let height = BLOCK_HEIGHT_SOFTFORK_EPSILON_MAIN_NET.previous().unwrap();
+        let block_primitive_witness =
+            BlockPrimitiveWitness::deterministic_with_block_height(height, network);
+        let block_body_mast_hash_as_input = PublicInput::new(
+            block_primitive_witness
+                .body()
+                .mast_hash()
+                .reversed()
+                .values()
+                .to_vec(),
+        );
+
+        let halt_program = Program::new(&triton_asm!(halt));
+        let halt_claim = Claim::new(halt_program.hash());
+        let halt_proof = triton_vm::prove(
+            Stark::default(),
+            &halt_claim,
+            halt_program,
+            NonDeterminism::default(),
+        )
+        .unwrap();
+        let mut words = halt_proof.0.clone();
+        *words.last_mut().unwrap() += BFieldElement::new(1);
+        let tampered_proof = tasm_lib::triton_vm::proof::Proof(words);
+
+        let block_proof_witness = BlockProofWitness::produce(block_primitive_witness, vec![])
+            .with_claim_test(halt_claim, tampered_proof.into());
+        let nondeterminism = block_proof_witness.nondeterminism();
+
+        assert!(BlockProgram
+            .run_tasm(&block_body_mast_hash_as_input, nondeterminism.clone())
+            .is_err());
+        assert!(BlockProgram
+            .run_rust(&block_body_mast_hash_as_input, nondeterminism)
+            .is_err());
+    }
+
     test_program_snapshot!(
         BlockProgram,
         "df05b05b64f356da179866a5858c0ca10756e62ccf603d8188952773bb6359f1f1a24f06b3eb7bfc"

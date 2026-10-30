@@ -659,6 +659,7 @@ pub(super) mod tests {
     use super::*;
     use crate::proof_abstractions::tasm::builtins as tasm;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
+    use crate::proof_abstractions::tasm::program::tests::test_program_snapshot;
 
     impl TritonProgramSpecification for KnowsMutatorSet {
         fn source(&self) {
@@ -1134,4 +1135,9 @@ pub(super) mod tests {
             .about_version(RULE_SET.triton_proof_version().version());
         assert_eq!(expected, claim);
     }
+
+    test_program_snapshot!(
+        KnowsMutatorSet,
+        "e832cc56aa9b4454c966eab1730a6d202890c2d7e2765328f55b5e121f4a2d8e704d6e274b0edc6d"
+    );
 }

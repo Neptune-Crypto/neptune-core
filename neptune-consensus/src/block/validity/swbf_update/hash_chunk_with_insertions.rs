@@ -490,6 +490,31 @@ mod tests {
         insertions: &[u32],
         tokens: Vec<BFieldElement>,
     ) -> Option<Digest> {
+        tasm_run(chunk, insertions, tokens).ok()
+    }
+
+    /// The snippet must fail an assertion with the error ID of rule 2.e on
+    /// these tokens.
+    fn assert_rejects_as_integrity(chunk: &[u32], insertions: &[u32], tokens: Vec<BFieldElement>) {
+        let Err(InstructionError::AssertionFailed(AssertionError { id, .. })) =
+            tasm_run(chunk, insertions, tokens.clone())
+        else {
+            panic!("{tokens:?} must fail an assertion");
+        };
+        assert_eq!(
+            Some(BlockValidationRule::MutatorSetUpdateIntegrity.error_id()),
+            id,
+            "{tokens:?}"
+        );
+    }
+
+    /// Runs the snippet on the chunk and insertions with these tokens, and
+    /// returns the digest it computes.
+    fn tasm_run(
+        chunk: &[u32],
+        insertions: &[u32],
+        tokens: Vec<BFieldElement>,
+    ) -> Result<Digest, InstructionError> {
         let encoding_pointer = bfe!(1_000);
         let indices_pointer = bfe!(10_000);
         let mut nondeterminism = NonDeterminism::new(tokens);
@@ -512,7 +537,7 @@ mod tests {
             vec![encoding_pointer, indices_pointer],
         ]
         .concat();
-        vm_state.run().ok()?;
+        vm_state.run()?;
 
         let stack = &vm_state.op_stack.stack;
         let init_stack = HashChunkWithInsertions.init_stack_for_isolated_run();
@@ -528,7 +553,7 @@ mod tests {
         );
         let mut digest = stack[stack.len() - Digest::LEN..].to_vec();
         digest.reverse();
-        Some(Digest::new(digest.try_into().unwrap()))
+        Ok(Digest::new(digest.try_into().unwrap()))
     }
 
     fn sorted(rng: &mut StdRng, len: usize, bound: u32) -> Vec<u32> {
@@ -690,11 +715,7 @@ mod tests {
             vec![bfe!(1), bfe!(5)],
             vec![bfe!(1), bfe!(4)],
         ] {
-            assert_eq!(
-                None,
-                tasm_digest(&chunk, &insertions, tokens.clone()),
-                "{tokens:?}"
-            );
+            assert_rejects_as_integrity(&chunk, &insertions, tokens);
         }
     }
 
@@ -787,11 +808,7 @@ mod tests {
     fn single_insertion_out_of_place_or_not_enclosed_is_rejected() {
         let chunk = vec![2, 4, 6, 8];
         for (insertion, position) in [(3, 0), (3, 2), (3, 5), (9, 3), (1, 1)] {
-            assert_eq!(
-                None,
-                tasm_digest(&chunk, &[insertion], vec![bfe!(position)]),
-                "{insertion} at {position}"
-            );
+            assert_rejects_as_integrity(&chunk, &[insertion], vec![bfe!(position)]);
         }
     }
 }

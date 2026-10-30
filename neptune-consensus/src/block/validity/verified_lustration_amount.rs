@@ -880,6 +880,81 @@ mod tests {
         }
     }
 
+    /// Pin the range start the program computes for this index set to the
+    /// one `AbsoluteIndexSet::aocl_range` computes. With no announcements,
+    /// the program must accept the threshold just below the host's range
+    /// start and crash with the error ID of rule 2.o at the range start
+    /// itself. An index set whose range the host rejects must crash the
+    /// program with the unknown lustration problem.
+    fn assert_range_start_agrees(index_set: AbsoluteIndexSet) {
+        let records = [RemovalRecord {
+            absolute_indices: index_set,
+            target_chunks: ChunkDictionary::empty(),
+        }];
+        match index_set.aocl_range() {
+            Ok((range_start, _)) => {
+                if let Some(below) = range_start.checked_sub(1) {
+                    assert_eq!(
+                        NativeCurrencyAmount::zero(),
+                        run(&records, &[], below).unwrap()
+                    );
+                }
+                let missing = BlockValidationRule::MissingLustrationAnnouncement.error_id();
+                assert_crashes(&records, &[], range_start, missing);
+            }
+            Err(_) => {
+                let unknown = BlockValidationRule::UnknownLustrationProblem.error_id();
+                assert_crashes(&records, &[], u64::MAX, unknown);
+            }
+        }
+    }
+
+    #[test]
+    fn range_start_agrees_with_host_at_every_boundary() {
+        let chunk = u128::from(CHUNK_SIZE);
+        let window = u128::from(WINDOW_SIZE);
+        // The last minimum whose range end fits in a u64 with a zero offset,
+        // and the first whose range end does not.
+        let last_fitting = (chunk << 61) - chunk;
+        let minimums = [
+            0,
+            1,
+            chunk - 1,
+            chunk,
+            2 * chunk - 1,
+            2 * chunk,
+            window - 1,
+            window,
+            window + 1,
+            1 << 32,
+            1 << 64,
+            last_fitting - 1,
+            last_fitting,
+            last_fitting + 1,
+            last_fitting + chunk,
+        ];
+
+        let max_distance = WINDOW_SIZE - 1;
+        let one_hot = |position: usize, distance: u32| {
+            let mut distances = [0; NUM_TRIALS as usize];
+            distances[position] = distance;
+            distances
+        };
+        let distances = [
+            [0; NUM_TRIALS as usize],
+            [max_distance; NUM_TRIALS as usize],
+            one_hot(0, max_distance),
+            one_hot(NUM_TRIALS as usize - 1, max_distance),
+            one_hot(NUM_TRIALS as usize / 2, CHUNK_SIZE),
+        ];
+
+        for minimum in minimums {
+            for distances in distances {
+                assert_range_start_agrees(AbsoluteIndexSet::new_raw(minimum, distances));
+            }
+        }
+    }
+
     /// Whether the program takes the message for a lustration announcement's
     /// whose words after the flag encode a transparent input.
     fn program_decodes(message: &[BFieldElement]) -> bool {

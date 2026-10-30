@@ -513,6 +513,65 @@ mod tests {
     }
 
     #[test]
+    fn forged_quotient_or_remainder_is_rejected() {
+        use tasm_lib::triton_vm::error::InstructionError;
+        use tasm_lib::triton_vm::isa::instruction::AssertionError;
+
+        let target = 588_000u64;
+        let interval = Timestamp::millis(target);
+        let height = BlockHeight::from(100u64);
+        let [scale_hi, scale_lo, remainder_hi, remainder_lo]: [BFieldElement; 4] =
+            DifficultyControl::divined_tokens(interval, height)
+                .try_into()
+                .unwrap();
+        let remainder_not_below = DifficultyControl::REMAINDER_NOT_BELOW_DIVISOR_ERROR;
+        let does_not_divide = DifficultyControl::QUOTIENT_DOES_NOT_DIVIDE_ERROR;
+
+        for (tokens, error_id) in [
+            (
+                vec![scale_hi, scale_lo, remainder_hi, remainder_lo + bfe!(1)],
+                does_not_divide,
+            ),
+            (
+                vec![scale_hi, scale_lo + bfe!(1), remainder_hi, remainder_lo],
+                does_not_divide,
+            ),
+            (
+                vec![scale_hi, scale_lo, remainder_hi, bfe!(target)],
+                remainder_not_below,
+            ),
+            (
+                vec![
+                    scale_hi,
+                    scale_lo - bfe!(1),
+                    remainder_hi,
+                    remainder_lo + bfe!(target),
+                ],
+                remainder_not_below,
+            ),
+        ] {
+            let error = run_in_vm(
+                Difficulty::new([100_000_000, 0, 0, 0, 0]),
+                interval,
+                Timestamp::millis(1_000_000),
+                Timestamp::millis(1_000_000 + target + 1),
+                height,
+                NonDeterminism::new(tokens.clone()),
+            )
+            .unwrap_err();
+            assert!(
+                matches!(
+                    error.source,
+                    InstructionError::AssertionFailed(AssertionError { id, .. })
+                        if id == Some(error_id)
+                ),
+                "{tokens:?}: {}",
+                error.source
+            );
+        }
+    }
+
+    #[test]
     fn invalid_encodings_are_rejected() {
         use tasm_lib::triton_vm::error::InstructionError;
         use tasm_lib::triton_vm::error::OpStackError;

@@ -1123,6 +1123,24 @@ pub(in crate::block::validity) mod tests {
         );
     }
 
+    #[test]
+    fn input_tree_lists_of_unequal_length_are_rejected() {
+        // One path list more than there are heights, then one fewer.
+        let mut witness = witness_with_chunks();
+        witness.tree_paths.push(witness.tree_paths[0].clone());
+        assert_rejects(
+            &witness,
+            BlockValidationRule::RemovalRecordsUnpackFailure.error_id(),
+        );
+
+        let mut witness = witness_with_chunks();
+        witness.tree_paths.pop();
+        assert_rejects(
+            &witness,
+            BlockValidationRule::RemovalRecordsUnpackFailure.error_id(),
+        );
+    }
+
     /// The witness with one input's indices set in its chunks: that input is
     /// The witness's tokens with the one at this position changed.
     fn tampered_tokens(witness: &CorrectSwbfUpdateWitness, position: usize) -> NonDeterminism {

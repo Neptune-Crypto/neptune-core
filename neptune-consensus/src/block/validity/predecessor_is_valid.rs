@@ -2797,6 +2797,7 @@ mod tests {
     use crate::proof_abstractions::tasm::builtins::verify_stark;
     use crate::proof_abstractions::tasm::program::proof_cache::load_proof_or_produce_and_save;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
+    use crate::proof_abstractions::tasm::program::tests::test_program_snapshot;
     use crate::proof_abstractions::test_runtime::tokio_runtime;
     use crate::proof_abstractions::SecretWitness;
     use crate::transaction::announcement::Announcement;
@@ -4318,6 +4319,24 @@ mod tests {
             header.pow.set_version_in_pow(header.version);
             let prev_block =
                 Block::new(header, body, BlockAppendix::default(), BlockProof::Invalid);
+            let (next_body, next_header) = next_body_and_header(&prev_block, 0);
+
+            assert_rejects(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                PowValidationError::ThresholdNotMet.error_id(),
+            );
+        }
+
+        #[test]
+        fn prev_block_with_difficulty_below_the_minimum_fails() {
+            let prev_prev_block = random_unproven_block(0);
+            let (body, mut header) = next_body_and_header(&prev_prev_block, 0);
+            header.difficulty =
+                Difficulty::from_biguint(BigUint::from(Difficulty::MINIMUM) - 1u32).unwrap();
+            let prev_block = unproven_block_with_own_claim(&prev_prev_block, body, header, 0);
             let (next_body, next_header) = next_body_and_header(&prev_block, 0);
 
             assert_rejects(
@@ -6547,6 +6566,64 @@ ones):
         }
 
         #[test]
+        fn prev_block_whose_own_claim_names_other_body_height_or_genesis_fails() {
+            let prev_prev_block = random_unproven_block(0);
+            let (body, header) = next_body_and_header(&prev_prev_block, 0);
+            let own_claim = own_claim(&skipping(), &prev_prev_block, &body, &header);
+
+            // The claim's input starts with the body hash, then the height,
+            // then the genesis digest.
+            for position in [0, Digest::LEN, Digest::LEN + 1] {
+                let mut claim = own_claim.clone();
+                claim.input[position] += bfe!(1);
+                let prev_block = unproven_block(header, body.clone(), vec![claim]);
+                let (next_body, next_header) = next_body_and_header(&prev_block, 0);
+
+                assert_rejects(
+                    &skipping(),
+                    &prev_block,
+                    &next_body,
+                    &next_header,
+                    BlockValidationRule::AppendixMissingClaim.error_id(),
+                );
+            }
+        }
+
+        #[test]
+        fn prev_block_with_transaction_claim_about_other_kernel_fails() {
+            let prev_prev_block = random_unproven_block(0);
+            let (body, header) = next_body_and_header(&prev_prev_block, 0);
+            let own_claim = own_claim(&skipping(), &prev_prev_block, &body, &header);
+            let mut transaction_claim = single_proof_claim(
+                body.transaction_kernel.mast_hash(),
+                ConsensusRuleSet::HardforkDelta,
+            );
+            transaction_claim.input[0] += bfe!(1);
+            let claims = [
+                vec![transaction_claim],
+                swbf_update_claim(&header, &body).into_iter().collect(),
+                vec![own_claim],
+                main_host_claims(&header, &body),
+            ]
+            .concat();
+            let prev_block = block(
+                header,
+                body,
+                BlockAppendix::new(claims),
+                BlockProof::Invalid,
+            );
+            let (next_body, next_header) = next_body_and_header(&prev_block, 0);
+
+            assert_rejects(
+                &skipping(),
+                &prev_block,
+                &next_body,
+                &next_header,
+                BlockValidationRule::AppendixMissingClaim.error_id(),
+            );
+        }
+
+        #[test]
         fn prev_block_with_swbf_claim_not_starting_at_the_first_leaf_fails() {
             let mut claim = fixture_swbf_claim();
             claim.input[INPUT_FIRST_LEAF_INDEX] += bfe!(1);
@@ -7197,4 +7274,9 @@ ones):
             );
         }
     }
+
+    test_program_snapshot!(
+        PredecessorIsValid::new(),
+        "b419dd22f4692534619e9f2ca0d6060c11be158e9e12a7e4ec3338f199da2ecc1a0a630e25fa21dd"
+    );
 }

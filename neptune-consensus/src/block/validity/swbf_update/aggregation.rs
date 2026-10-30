@@ -740,6 +740,7 @@ pub(in crate::block::validity) mod tests {
     use crate::proof_abstractions::tasm::builtins as tasm;
     use crate::proof_abstractions::tasm::builtins::verify_stark;
     use crate::proof_abstractions::tasm::program::spec::TritonProgramSpecification;
+    use crate::proof_abstractions::tasm::program::tests::test_program_snapshot;
 
     impl TritonProgramSpecification for SwbfUpdateAggregation {
         fn source(&self) {
@@ -1204,6 +1205,28 @@ pub(in crate::block::validity) mod tests {
             assert_eq!(rust_output, tasm_output);
             assert_eq!(witness.output(), tasm_output);
         }
+
+        #[test]
+        fn child_with_tampered_proof_is_rejected() {
+            let leaves = chained_witnesses(&[1, 2], 8);
+            let (left, left_proof) = proven_leaf(&leaves[0]);
+            let (right, right_proof) = proven_leaf(&leaves[1]);
+            let mut words = right_proof.0.clone();
+            *words.last_mut().unwrap() += BFieldElement::new(1);
+            let witness = SwbfUpdateAggregationWitness::new(
+                left,
+                left_proof,
+                right,
+                Proof(words),
+                index_set_digests(&leaves),
+            );
+            let program = SwbfUpdateAggregation::new();
+            let input = witness.standard_input();
+            let nondeterminism = witness.nondeterminism_for(&program);
+
+            assert!(program.run_tasm(&input, nondeterminism.clone()).is_err());
+            assert!(program.run_rust(&input, nondeterminism).is_err());
+        }
     }
 
     /// Prints how the program's cycles and table rows distribute over its
@@ -1220,4 +1243,9 @@ pub(in crate::block::validity) mod tests {
         );
         println!("{profile}");
     }
+
+    test_program_snapshot!(
+        SwbfUpdateAggregation::new(),
+        "ff76bed66c3443de8916866c88ec07312ad6465f6d82bc779c79350ebd369acfbe5b5fa1911bcdaf"
+    );
 }
