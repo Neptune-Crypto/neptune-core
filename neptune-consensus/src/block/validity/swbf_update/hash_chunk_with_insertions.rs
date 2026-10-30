@@ -72,7 +72,6 @@ impl BasicSnippet for HashChunkWithInsertions {
         let block_alloc = library.kmalloc(1);
         let rest_alloc = library.kmalloc(1);
         let old_blocks_alloc = library.kmalloc(1);
-        let error_id = BlockValidationRule::MutatorSetUpdateIntegrity.error_id();
 
         let entrypoint = self.entrypoint();
         let general = format!("{entrypoint}_general");
@@ -153,7 +152,7 @@ impl BasicSnippet for HashChunkWithInsertions {
                 divine 1
                 // The position does not exceed the chunk's length, and its
                 // neighbours enclose the index.
-                dup 0 dup 2 lt push 0 eq assert error_id {error_id}
+                dup 0 dup 2 lt push 0 eq assert error_id {BlockValidationRule::MutatorSetUpdateIntegrity.error_id()}
                 dup 2 addi 1 read_mem 1 pop 1
                 // _ *chunk *sorted length position index
 
@@ -211,7 +210,7 @@ impl BasicSnippet for HashChunkWithInsertions {
             // AFTER:  _ ... position index
             {single_before}:
                 {&read(&chunk_alloc)} dup 2 add addi 1 read_mem 1 pop 1
-                dup 1 lt push 0 eq assert error_id {error_id}
+                dup 1 lt push 0 eq assert error_id {BlockValidationRule::MutatorSetUpdateIntegrity.error_id()}
                 return
 
             // The entry at the position must not fall below the index.
@@ -219,7 +218,7 @@ impl BasicSnippet for HashChunkWithInsertions {
             // AFTER:  _ ... position index
             {single_at}:
                 {&read(&chunk_alloc)} dup 2 add addi 2 read_mem 1 pop 1
-                dup 1 swap 1 lt push 0 eq assert error_id {error_id}
+                dup 1 swap 1 lt push 0 eq assert error_id {BlockValidationRule::MutatorSetUpdateIntegrity.error_id()}
                 return
 
             // BEFORE: _
@@ -309,8 +308,8 @@ impl BasicSnippet for HashChunkWithInsertions {
 
                 // Positions do not decrease, and do not exceed the chunk's
                 // length.
-                dup 2 dup 1 lt push 0 eq assert error_id {error_id}
-                dup 0 dup 6 lt push 0 eq assert error_id {error_id}
+                dup 2 dup 1 lt push 0 eq assert error_id {BlockValidationRule::MutatorSetUpdateIntegrity.error_id()}
+                dup 0 dup 6 lt push 0 eq assert error_id {BlockValidationRule::MutatorSetUpdateIntegrity.error_id()}
                 dup 3 read_mem 1 pop 1
                 // _ *first *stop *x_end *x *old f *target x
 
@@ -335,7 +334,7 @@ impl BasicSnippet for HashChunkWithInsertions {
             // AFTER:  _ ... *target x
             {check_before}:
                 dup 1 addi -1 read_mem 1 pop 1
-                dup 1 lt push 0 eq assert error_id {error_id}
+                dup 1 lt push 0 eq assert error_id {BlockValidationRule::MutatorSetUpdateIntegrity.error_id()}
                 return
 
             // The entry at the position must not fall below the index.
@@ -343,7 +342,7 @@ impl BasicSnippet for HashChunkWithInsertions {
             // AFTER:  _ ... *target x
             {check_at}:
                 dup 1 read_mem 1 pop 1
-                dup 1 swap 1 lt push 0 eq assert error_id {error_id}
+                dup 1 swap 1 lt push 0 eq assert error_id {BlockValidationRule::MutatorSetUpdateIntegrity.error_id()}
                 return
 
             // The chunk's entries from the cursor up to the target absorbed:
@@ -476,6 +475,8 @@ mod tests {
     use rand::SeedableRng;
     use tasm_lib::memory::encode_to_memory;
     use tasm_lib::prelude::Tip5;
+    use tasm_lib::triton_vm::isa::instruction::AssertionError;
+    use tasm_lib::triton_vm::isa::instruction::InstructionError;
     use tasm_lib::triton_vm::vm::VMState;
     use tasm_lib::triton_vm::vm::VM;
 

@@ -40,10 +40,6 @@ use crate::block::block_validation_error::BlockValidationRule;
 pub(super) struct UpdateTreeLeaf;
 
 impl UpdateTreeLeaf {
-    pub(super) fn old_root_mismatch_error_id() -> i128 {
-        BlockValidationRule::RemovalRecordsValidity.error_id()
-    }
-
     /// The node indices of a tree's authentication structure for these leaf
     /// indices, from the highest down: the order the Merkle tree gives the
     /// structure's digests.
@@ -242,7 +238,7 @@ impl BasicSnippet for UpdateTreeLeaf {
                 // _ *running *path (hi + 1) lo *path' 1 1 [old_root]
 
                 dup 11 addi {Digest::LEN - 1} read_mem {Digest::LEN} pop 1
-                assert_vector error_id {Self::old_root_mismatch_error_id()}
+                assert_vector error_id {BlockValidationRule::RemovalRecordsValidity.error_id()}
                 pop 5 pop 3
                 // _ *running *path (hi + 1) lo
 
@@ -694,7 +690,7 @@ mod tests {
         matches!(
             result,
             Err(InstructionError::VectorAssertionFailed(_, AssertionError { id, .. }))
-                if id == Some(UpdateTreeLeaf::old_root_mismatch_error_id())
+                if id == Some(BlockValidationRule::RemovalRecordsValidity.error_id())
         )
     }
 

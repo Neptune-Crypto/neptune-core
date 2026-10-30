@@ -54,14 +54,6 @@ pub(super) struct ChunkInsertions;
 impl ChunkInsertions {
     const LOG2_CHUNK_SIZE: u8 = CHUNK_SIZE.ilog2() as u8;
 
-    fn no_chunk_error_id() -> i128 {
-        BlockValidationRule::RemovalRecordsValidity.error_id()
-    }
-
-    fn lists_error_id() -> i128 {
-        BlockValidationRule::MutatorSetUpdateIntegrity.error_id()
-    }
-
     /// The first absolute index of the active window for this many leafs in
     /// the inactive SWBF.
     fn window_start(swbfi_leaf_count: u64) -> u128 {
@@ -227,8 +219,6 @@ impl BasicSnippet for ChunkInsertions {
 
         let chunk_size = CHUNK_SIZE;
         let chunks_per_limb = 1_u64 << (32 - Self::LOG2_CHUNK_SIZE);
-        let no_chunk = Self::no_chunk_error_id();
-        let lists_error = Self::lists_error_id();
 
         let read_word = |alloc: &Alloc| triton_asm!(push {alloc.read_address()} read_mem 1 pop 1);
         let write_word =
@@ -305,7 +295,7 @@ impl BasicSnippet for ChunkInsertions {
                 // _ consumed
 
                 {&read_word(&total_alloc)}
-                eq assert error_id {lists_error}
+                eq assert error_id {BlockValidationRule::MutatorSetUpdateIntegrity.error_id()}
                 {&read_word(&insertions_alloc)}
                 // _ *insertions
 
@@ -351,8 +341,8 @@ impl BasicSnippet for ChunkInsertions {
                 divine 1
                 // _ length *sorted *sorted[i] previous i entry
 
-                dup 2 dup 1 lt push 0 eq assert error_id {lists_error}
-                push {chunk_size} dup 1 lt assert error_id {lists_error}
+                dup 2 dup 1 lt push 0 eq assert error_id {BlockValidationRule::MutatorSetUpdateIntegrity.error_id()}
+                push {chunk_size} dup 1 lt assert error_id {BlockValidationRule::MutatorSetUpdateIntegrity.error_id()}
                 dup 0 pick 4 write_mem 1 place 3
                 // _ length *sorted *sorted[i + 1] previous i entry
 
@@ -492,7 +482,7 @@ impl BasicSnippet for ChunkInsertions {
                 // _ ... distance relative_index [chunk_index] position
 
                 {&read_word(&num_chunks_alloc)}
-                dup 1 lt assert error_id {no_chunk}
+                dup 1 lt assert error_id {BlockValidationRule::RemovalRecordsValidity.error_id()}
                 {&read_word(&chunk_indices_alloc)}
                 dup 1 push 2 mul add addi 2 read_mem 2 pop 1
                 // _ ... distance relative_index [chunk_index] position [listed_chunk_index]
@@ -501,22 +491,22 @@ impl BasicSnippet for ChunkInsertions {
                 place 2 pick 3 eq
                 // _ ... distance relative_index lo_agree position hi_agree
 
-                swap 1 place 2 mul assert error_id {no_chunk}
+                swap 1 place 2 mul assert error_id {BlockValidationRule::RemovalRecordsValidity.error_id()}
                 // _ ... distance relative_index position
 
                 divine 1
                 {&read_word(&insertions_alloc)} dup 2 add addi 1 read_mem 1 pop 1
                 // _ ... relative_index position slot *sorted
 
-                dup 0 read_mem 1 pop 1 dup 2 lt assert error_id {lists_error}
+                dup 0 read_mem 1 pop 1 dup 2 lt assert error_id {BlockValidationRule::MutatorSetUpdateIntegrity.error_id()}
                 dup 0 dup 2 add addi 1 read_mem 1 pop 1
-                dup 4 eq assert error_id {lists_error}
+                dup 4 eq assert error_id {BlockValidationRule::MutatorSetUpdateIntegrity.error_id()}
                 // _ ... relative_index position slot *sorted
 
                 dup 0 read_mem 1 pop 1 add addi 1 dup 1 add
                 // _ ... relative_index position slot *taken[slot]
 
-                dup 0 read_mem 1 pop 1 push 0 eq assert error_id {lists_error}
+                dup 0 read_mem 1 pop 1 push 0 eq assert error_id {BlockValidationRule::MutatorSetUpdateIntegrity.error_id()}
                 push 1 swap 1 write_mem 1 pop 1
                 pop 3
                 // _ ... distance
@@ -662,7 +652,7 @@ mod tests {
             chunk_indices,
             leaf_count,
             tokens,
-            ChunkInsertions::lists_error_id(),
+            BlockValidationRule::MutatorSetUpdateIntegrity.error_id(),
         );
     }
 
@@ -852,7 +842,7 @@ mod tests {
                 &chunk_indices,
                 leaf_count,
                 tampered,
-                ChunkInsertions::no_chunk_error_id(),
+                BlockValidationRule::RemovalRecordsValidity.error_id(),
             );
             checked += 1;
         }
@@ -912,7 +902,7 @@ mod tests {
             &chunk_indices[1..],
             leaf_count,
             tokens,
-            ChunkInsertions::no_chunk_error_id(),
+            BlockValidationRule::RemovalRecordsValidity.error_id(),
         );
     }
 
@@ -1039,14 +1029,14 @@ mod tests {
                 &records,
                 &fewer,
                 leaf_count,
-                ChunkInsertions::no_chunk_error_id(),
+                BlockValidationRule::RemovalRecordsValidity.error_id(),
             );
         }
         assert_rejects_rule(
             &records,
             &[],
             leaf_count,
-            ChunkInsertions::no_chunk_error_id(),
+            BlockValidationRule::RemovalRecordsValidity.error_id(),
         );
     }
 
@@ -1071,7 +1061,7 @@ mod tests {
             &records,
             &shifted,
             leaf_count,
-            ChunkInsertions::no_chunk_error_id(),
+            BlockValidationRule::RemovalRecordsValidity.error_id(),
         );
     }
 

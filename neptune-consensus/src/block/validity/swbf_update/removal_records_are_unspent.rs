@@ -52,10 +52,6 @@ impl RemovalRecordsAreUnspent {
     const LOG2_CHUNK_SIZE: u8 = CHUNK_SIZE.ilog2() as u8;
     pub(super) const UNSORTED_WINDOW_ERROR_ID: i128 = 1_000_620;
 
-    fn error_id() -> i128 {
-        BlockValidationRule::RemovalRecordsValidity.error_id()
-    }
-
     /// The gap position of an index in a sorted list: where it would be
     /// inserted. If the index is set, the position given still fails.
     fn gap_position(sorted: &[u32], index: u32) -> usize {
@@ -160,8 +156,6 @@ impl BasicSnippet for RemovalRecordsAreUnspent {
         let gap_left = format!("{entrypoint}_gap_left");
         let gap_right = format!("{entrypoint}_gap_right");
 
-        let error_id = Self::error_id();
-        let unsorted_window_error_id = Self::UNSORTED_WINDOW_ERROR_ID;
         let chunk_size = CHUNK_SIZE;
         let read_u128 = triton_asm!(addi 3 read_mem 4 pop 1);
 
@@ -169,13 +163,13 @@ impl BasicSnippet for RemovalRecordsAreUnspent {
         // BEFORE: _ x y
         // AFTER:  _ x
         let assert_below_keep_upper =
-            triton_asm!(dup 1 lt push 0 eq assert error_id {unsorted_window_error_id});
+            triton_asm!(dup 1 lt push 0 eq assert error_id {Self::UNSORTED_WINDOW_ERROR_ID});
 
         // Asserts y <= x, keeping the smaller one.
         // BEFORE: _ x y
         // AFTER:  _ y
         let assert_below_keep_lower = triton_asm!(
-            dup 0 place 2 swap 1 lt push 0 eq assert error_id {unsorted_window_error_id}
+            dup 0 place 2 swap 1 lt push 0 eq assert error_id {Self::UNSORTED_WINDOW_ERROR_ID}
         );
 
         // BEFORE: _ neg_index ... e (element - index) * ...
@@ -280,7 +274,7 @@ impl BasicSnippet for RemovalRecordsAreUnspent {
                 // _ *context *record[i]_si num_records i
 
                 divine 1
-                dup 0 push {NUM_TRIALS} swap 1 lt assert error_id {error_id}
+                dup 0 push {NUM_TRIALS} swap 1 lt assert error_id {BlockValidationRule::RemovalRecordsValidity.error_id()}
                 // _ *context *record[i]_si num_records i position
 
                 dup 3 addi 1 {&field!(RemovalRecord::absolute_indices)}
@@ -346,7 +340,7 @@ impl BasicSnippet for RemovalRecordsAreUnspent {
                 // _ ... r0 chunk_lo chunk_hi position
 
                 dup 7 addi {num_chunks_offset} read_mem 1 pop 1
-                dup 1 lt assert error_id {error_id}
+                dup 1 lt assert error_id {BlockValidationRule::RemovalRecordsValidity.error_id()}
                 // _ ... r0 chunk_lo chunk_hi position
 
                 dup 7 addi {chunk_indices_offset} read_mem 1 pop 1
@@ -356,7 +350,7 @@ impl BasicSnippet for RemovalRecordsAreUnspent {
                 pick 4 eq place 2 pick 3 eq
                 // _ ... r0 lo_agree position hi_agree
 
-                swap 1 place 2 mul assert error_id {error_id}
+                swap 1 place 2 mul assert error_id {BlockValidationRule::RemovalRecordsValidity.error_id()}
                 // _ ... r0 position
 
                 dup 5 addi {chunks_offset} read_mem 1 pop 1
@@ -379,8 +373,8 @@ impl BasicSnippet for RemovalRecordsAreUnspent {
                 // _ *context *record_si num_records i [index - window_start]
 
                 // The difference must fit the window.
-                place 3 add add push 0 eq assert error_id {error_id}
-                dup 0 push {WINDOW_SIZE} swap 1 lt assert error_id {error_id}
+                place 3 add add push 0 eq assert error_id {BlockValidationRule::RemovalRecordsValidity.error_id()}
+                dup 0 push {WINDOW_SIZE} swap 1 lt assert error_id {BlockValidationRule::RemovalRecordsValidity.error_id()}
                 // _ *context *record_si num_records i relative_index
 
                 dup 4 addi {window_offset} read_mem 1 pop 1
@@ -400,7 +394,7 @@ impl BasicSnippet for RemovalRecordsAreUnspent {
                 dup 2 read_mem 1 pop 1
                 // _ *list index gap len
 
-                dup 0 addi 1 dup 2 lt assert error_id {error_id}
+                dup 0 addi 1 dup 2 lt assert error_id {BlockValidationRule::RemovalRecordsValidity.error_id()}
                 // _ *list index gap len
 
                 dup 1 push 0 eq push 0 eq skiz call {gap_left}
@@ -416,7 +410,7 @@ impl BasicSnippet for RemovalRecordsAreUnspent {
                 dup 3 dup 2 add read_mem 1 pop 1
                 // _ *list index gap len list[gap - 1]
 
-                dup 3 swap 1 lt assert error_id {error_id}
+                dup 3 swap 1 lt assert error_id {BlockValidationRule::RemovalRecordsValidity.error_id()}
                 // _ *list index gap len
 
                 return
@@ -427,7 +421,7 @@ impl BasicSnippet for RemovalRecordsAreUnspent {
                 dup 3 dup 2 add addi 1 read_mem 1 pop 1
                 // _ *list index gap len list[gap]
 
-                dup 3 lt assert error_id {error_id}
+                dup 3 lt assert error_id {BlockValidationRule::RemovalRecordsValidity.error_id()}
                 // _ *list index gap len
 
                 return
@@ -516,7 +510,11 @@ mod tests {
             _public_input: &[BFieldElement],
             _sponge: &mut Option<Tip5>,
         ) -> Result<Vec<BFieldElement>, RustShadowError> {
-            let fail = || RustShadowError::AssertionError(Self::error_id());
+            let fail = || {
+                RustShadowError::AssertionError(
+                    BlockValidationRule::RemovalRecordsValidity.error_id(),
+                )
+            };
             let swbfi_leaf_count = pop_u64(stack);
             let window_pointer = stack.pop().unwrap();
             let chunks_pointer = stack.pop().unwrap();
@@ -770,7 +768,10 @@ mod tests {
         }
 
         fn assert_rejects_with_tokens(&self, tokens: Vec<BFieldElement>) {
-            self.assert_rejects_with_tokens_and_error(tokens, RemovalRecordsAreUnspent::error_id());
+            self.assert_rejects_with_tokens_and_error(
+                tokens,
+                BlockValidationRule::RemovalRecordsValidity.error_id(),
+            );
         }
 
         fn assert_rejects_with_tokens_and_error(&self, tokens: Vec<BFieldElement>, error_id: i128) {

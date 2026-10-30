@@ -95,21 +95,18 @@ impl BasicSnippet for CounterTreeUnspent {
         let gap_left = format!("{entrypoint}_gap_left");
         let gap_right = format!("{entrypoint}_gap_right");
 
-        let error_id = BlockValidationRule::RemovalRecordsValidity.error_id();
-        let unsorted_window_error_id = RemovalRecordsAreUnspent::UNSORTED_WINDOW_ERROR_ID;
         let read_u128 = triton_asm!(addi 3 read_mem 4 pop 1);
 
         // Asserts y <= x, keeping the larger one.
         // BEFORE: _ x y
         // AFTER:  _ x
-        let assert_below_keep_upper =
-            triton_asm!(dup 1 lt push 0 eq assert error_id {unsorted_window_error_id});
+        let assert_below_keep_upper = triton_asm!(dup 1 lt push 0 eq assert error_id {RemovalRecordsAreUnspent::UNSORTED_WINDOW_ERROR_ID});
 
         // Asserts y <= x, keeping the smaller one.
         // BEFORE: _ x y
         // AFTER:  _ y
         let assert_below_keep_lower = triton_asm!(
-            dup 0 place 2 swap 1 lt push 0 eq assert error_id {unsorted_window_error_id}
+            dup 0 place 2 swap 1 lt push 0 eq assert error_id {RemovalRecordsAreUnspent::UNSORTED_WINDOW_ERROR_ID}
         );
 
         // BEFORE: _ neg_index ... e (element - index) * ...
@@ -212,7 +209,7 @@ impl BasicSnippet for CounterTreeUnspent {
                 // _ *context *record[i]_si num_records i
 
                 divine 1
-                dup 0 push {NUM_TRIALS} swap 1 lt assert error_id {error_id}
+                dup 0 push {NUM_TRIALS} swap 1 lt assert error_id {BlockValidationRule::RemovalRecordsValidity.error_id()}
                 dup 0 push {position_alloc.write_address()} write_mem 1 pop 1
                 // _ *context *record[i]_si num_records i position
 
@@ -263,7 +260,7 @@ impl BasicSnippet for CounterTreeUnspent {
                 read_mem 1 pop 1
                 // _ *context *record_si num_records i count
 
-                push 0 eq assert error_id {error_id}
+                push 0 eq assert error_id {BlockValidationRule::RemovalRecordsValidity.error_id()}
                 push 1
                 return
 
@@ -277,8 +274,8 @@ impl BasicSnippet for CounterTreeUnspent {
                 // _ *context *record_si num_records i [index - window_start]
 
                 // The difference must fit the window.
-                place 3 add add push 0 eq assert error_id {error_id}
-                dup 0 push {WINDOW_SIZE} swap 1 lt assert error_id {error_id}
+                place 3 add add push 0 eq assert error_id {BlockValidationRule::RemovalRecordsValidity.error_id()}
+                dup 0 push {WINDOW_SIZE} swap 1 lt assert error_id {BlockValidationRule::RemovalRecordsValidity.error_id()}
                 // _ *context *record_si num_records i relative_index
 
                 dup 4 addi {window_offset} read_mem 1 pop 1
@@ -298,7 +295,7 @@ impl BasicSnippet for CounterTreeUnspent {
                 dup 2 read_mem 1 pop 1
                 // _ *list index gap len
 
-                dup 0 addi 1 dup 2 lt assert error_id {error_id}
+                dup 0 addi 1 dup 2 lt assert error_id {BlockValidationRule::RemovalRecordsValidity.error_id()}
                 // _ *list index gap len
 
                 dup 1 push 0 eq push 0 eq skiz call {gap_left}
@@ -314,7 +311,7 @@ impl BasicSnippet for CounterTreeUnspent {
                 dup 3 dup 2 add read_mem 1 pop 1
                 // _ *list index gap len list[gap - 1]
 
-                dup 3 swap 1 lt assert error_id {error_id}
+                dup 3 swap 1 lt assert error_id {BlockValidationRule::RemovalRecordsValidity.error_id()}
                 // _ *list index gap len
 
                 return
@@ -325,7 +322,7 @@ impl BasicSnippet for CounterTreeUnspent {
                 dup 3 dup 2 add addi 1 read_mem 1 pop 1
                 // _ *list index gap len list[gap]
 
-                dup 3 lt assert error_id {error_id}
+                dup 3 lt assert error_id {BlockValidationRule::RemovalRecordsValidity.error_id()}
                 // _ *list index gap len
 
                 return

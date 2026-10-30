@@ -59,14 +59,6 @@ pub(super) struct MutateSwbfiPeaks;
 pub(super) type TreeRun = (u32, Vec<(u64, Digest)>, Vec<(u64, Digest)>);
 
 impl MutateSwbfiPeaks {
-    fn unpack_error_id() -> i128 {
-        BlockValidationRule::RemovalRecordsUnpackFailure.error_id()
-    }
-
-    fn validity_error_id() -> i128 {
-        BlockValidationRule::RemovalRecordsValidity.error_id()
-    }
-
     /// The chunk after the insertions, as the mutator set produces it.
     pub(crate) fn mutated(chunk: &[u32], insertions: &[u32]) -> Vec<u32> {
         let mut mutated = [chunk, insertions].concat();
@@ -277,8 +269,6 @@ impl BasicSnippet for MutateSwbfiPeaks {
         let chunks_loop = format!("{entrypoint}_chunks_loop");
         let single_leaf_tree = format!("{entrypoint}_single_leaf_tree");
         let chunk_hashes = format!("{entrypoint}_chunk_hashes");
-        let unpack_error_id = Self::unpack_error_id();
-        let validity_error_id = Self::validity_error_id();
 
         let read_remaining = triton_asm!(push {remaining_alloc.read_address()} read_mem 2 pop 1);
         let read_leaf_count = triton_asm!(push {leaf_count_alloc.read_address()} read_mem 2 pop 1);
@@ -320,7 +310,7 @@ impl BasicSnippet for MutateSwbfiPeaks {
                 // Every chunk lies in a tree of the estimate.
                 {&read_next_chunk}
                 {&read_chunk_indices} read_mem 1 pop 1
-                eq assert error_id {unpack_error_id}
+                eq assert error_id {BlockValidationRule::RemovalRecordsUnpackFailure.error_id()}
                 // _
 
                 return
@@ -397,12 +387,12 @@ impl BasicSnippet for MutateSwbfiPeaks {
 
                 {&read_leaf_count} dup 2 call {u64_shift_right}
                 {&read_estimate} dup 4 call {u64_shift_right}
-                {&DataType::U64.compare()} assert error_id {validity_error_id}
+                {&DataType::U64.compare()} assert error_id {BlockValidationRule::RemovalRecordsValidity.error_id()}
                 // _ *paths run_length (height + 1)
 
                 {&read_leaf_count} dup 2 addi -1 call {u64_shift_right}
                 swap 1 pop 1 push 2 swap 1 div_mod pick 1 pop 1
-                assert error_id {validity_error_id}
+                assert error_id {BlockValidationRule::RemovalRecordsValidity.error_id()}
                 // _ *paths run_length (height + 1)
 
                 {&read_leaf_count} pick 2 call {u64_shift_right} call {popcount}
@@ -433,7 +423,7 @@ impl BasicSnippet for MutateSwbfiPeaks {
                 pick 14 pick 14 pick 14 pick 14 pick 14
                 // _ *paths run_length peak_index first [new] [running] [old]
 
-                assert_vector error_id {validity_error_id}
+                assert_vector error_id {BlockValidationRule::RemovalRecordsValidity.error_id()}
                 pop 5
                 push {running_alloc.write_address()} write_mem {Digest::LEN} pop 1
                 return
@@ -871,15 +861,16 @@ mod tests {
     fn estimate_with_another_tree_fails() {
         let mut rng = StdRng::seed_from_u64(3);
         Fixture::new(&mut rng, 13, vec![1, 5], 4)
-            .assert_rejects(MutateSwbfiPeaks::validity_error_id());
-        Fixture::new(&mut rng, 6, vec![0], 2).assert_rejects(MutateSwbfiPeaks::validity_error_id());
+            .assert_rejects(BlockValidationRule::RemovalRecordsValidity.error_id());
+        Fixture::new(&mut rng, 6, vec![0], 2)
+            .assert_rejects(BlockValidationRule::RemovalRecordsValidity.error_id());
     }
 
     #[test]
     fn chunk_beyond_the_estimate_fails() {
         let mut rng = StdRng::seed_from_u64(4);
         Fixture::new(&mut rng, 13, vec![1, 12], 8)
-            .assert_rejects(MutateSwbfiPeaks::unpack_error_id());
+            .assert_rejects(BlockValidationRule::RemovalRecordsUnpackFailure.error_id());
     }
 
     #[test]
@@ -887,7 +878,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(5);
         let mut fixture = Fixture::new(&mut rng, 13, vec![1, 2, 5, 9, 12], 13);
         fixture.chunks[2].insert(0, 0);
-        fixture.assert_rejects(MutateSwbfiPeaks::validity_error_id());
+        fixture.assert_rejects(BlockValidationRule::RemovalRecordsValidity.error_id());
     }
 
     #[test]
@@ -904,7 +895,7 @@ mod tests {
             let mut tampered =
                 Fixture::new(&mut StdRng::seed_from_u64(6), 13, vec![1, 2, 5, 9], 13);
             tampered.tree_paths[tree][position].0[word] += bfe!(1);
-            tampered.assert_rejects(MutateSwbfiPeaks::validity_error_id());
+            tampered.assert_rejects(BlockValidationRule::RemovalRecordsValidity.error_id());
         }
     }
 
@@ -931,7 +922,7 @@ mod tests {
             let mut tampered =
                 Fixture::new(&mut StdRng::seed_from_u64(11), 13, vec![1, 2, 5, 9, 12], 13);
             tampered.peaks[peak].0[word] += bfe!(1);
-            tampered.assert_rejects(MutateSwbfiPeaks::validity_error_id());
+            tampered.assert_rejects(BlockValidationRule::RemovalRecordsValidity.error_id());
         }
     }
 
@@ -948,17 +939,17 @@ mod tests {
             let mut tampered = fresh();
             let value = tampered.chunks[chunk][entry];
             tampered.chunks[chunk][entry] = if value == 0 { 1 } else { value - 1 };
-            tampered.assert_rejects(MutateSwbfiPeaks::validity_error_id());
+            tampered.assert_rejects(BlockValidationRule::RemovalRecordsValidity.error_id());
 
             let mut tampered = fresh();
             tampered.chunks[chunk].remove(entry);
-            tampered.assert_rejects(MutateSwbfiPeaks::validity_error_id());
+            tampered.assert_rejects(BlockValidationRule::RemovalRecordsValidity.error_id());
         }
         for chunk in 0..fixture.chunks.len() {
             let mut tampered =
                 Fixture::new(&mut StdRng::seed_from_u64(12), 13, vec![1, 2, 5, 9, 12], 13);
             tampered.chunks[chunk].insert(0, 0);
-            tampered.assert_rejects(MutateSwbfiPeaks::validity_error_id());
+            tampered.assert_rejects(BlockValidationRule::RemovalRecordsValidity.error_id());
         }
     }
 
@@ -980,6 +971,6 @@ mod tests {
             .find(|paths| !paths.is_empty())
             .unwrap();
         paths.pop();
-        fixture.assert_rejects(MutateSwbfiPeaks::validity_error_id());
+        fixture.assert_rejects(BlockValidationRule::RemovalRecordsValidity.error_id());
     }
 }

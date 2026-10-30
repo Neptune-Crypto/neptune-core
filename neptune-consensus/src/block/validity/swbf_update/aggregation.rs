@@ -394,7 +394,6 @@ impl TritonProgram for SwbfUpdateAggregation {
         let digests_are_equal = DataType::Digest.compare();
         let read_digest = triton_asm!(addi {Digest::LEN - 1} read_mem {Digest::LEN} pop 1);
         // 1.h)
-        let chaining = BlockValidationRule::SwbfUpdateChaining.error_id();
 
         // BEFORE: _ *list
         // AFTER:  _ [digest]
@@ -456,7 +455,7 @@ impl TritonProgram for SwbfUpdateAggregation {
             push {input_msa_hash_alloc.read_address()} read_mem {Digest::LEN} pop 1
             // _ *w *left_claim left_first_leaf_index [left_mutator_set_hash] [own_mutator_set_hash]
 
-            assert_vector error_id {chaining}
+            assert_vector error_id {BlockValidationRule::SwbfUpdateChaining.error_id()}
             pop {Digest::LEN}
             // _ *w *left_claim left_first_leaf_index
 
@@ -466,7 +465,7 @@ impl TritonProgram for SwbfUpdateAggregation {
             eq
             // _ *w *left_claim (left_first_leaf_index == our_first_leaf_index)
 
-            assert error_id {chaining}
+            assert error_id {BlockValidationRule::SwbfUpdateChaining.error_id()}
             // _ *w *left_claim
 
             {&verify_left}
@@ -488,7 +487,7 @@ impl TritonProgram for SwbfUpdateAggregation {
             push {first_leaf_index_alloc.read_address()} read_mem 1 pop 1
             // _ *w *left_output left_last_leaf_index left_first_leaf_index
 
-            swap 1 lt push 0 eq assert error_id {chaining}
+            swap 1 lt push 0 eq assert error_id {BlockValidationRule::SwbfUpdateChaining.error_id()}
             // _ *w *left_output
 
             /* Assert that right claim started where left claim ended */
@@ -499,14 +498,14 @@ impl TritonProgram for SwbfUpdateAggregation {
             dup 7 addi {OUTPUT_MUTATOR_SET_HASH + Digest::LEN} read_mem {Digest::LEN} pop 1
             // _ *w *left_output *right right_first_leaf_index [right_mutator_set_hash] [left_mutator_set_hash_after]
 
-            assert_vector error_id {chaining}
+            assert_vector error_id {BlockValidationRule::SwbfUpdateChaining.error_id()}
             pop {Digest::LEN}
             // _ *w *left_output *right right_first_leaf_index
 
             /* Assert left claim outputs the next leaf index matching right
                claims' input leaf index */
             dup 2 addi {1 + OUTPUT_LAST_LEAF_INDEX} read_mem 1 pop 1
-            addi 1 eq assert error_id {chaining}
+            addi 1 eq assert error_id {BlockValidationRule::SwbfUpdateChaining.error_id()}
             // _ *w *left_output *right
 
             {&verify_right}
@@ -529,7 +528,7 @@ impl TritonProgram for SwbfUpdateAggregation {
             dup 2 addi {1 + OUTPUT_LAST_LEAF_INDEX} read_mem 1 pop 1 addi 1
             // _ *w *left_output *right_output right_last_leaf_index right_first_leaf_index
 
-            swap 1 lt push 0 eq assert error_id {chaining}
+            swap 1 lt push 0 eq assert error_id {BlockValidationRule::SwbfUpdateChaining.error_id()}
             // _ *w *left_output *right_output
 
             dup 2 {&field!(SwbfUpdateAggregationWitness::index_set_digests)}
@@ -548,7 +547,7 @@ impl TritonProgram for SwbfUpdateAggregation {
             pick 3 eq
             // _ *w *left_output *right_output *digests left_count right_count (num_digests == (left_count + right_count))
 
-            assert error_id {chaining}
+            assert error_id {BlockValidationRule::SwbfUpdateChaining.error_id()}
             // _ *w *left_output *right_output *digests left_count right_count
 
             dup 2 push 0 dup 3
@@ -557,14 +556,14 @@ impl TritonProgram for SwbfUpdateAggregation {
             call {digest_peaks}
             {&hash_digest_list}
             dup 9 addi {1 + OUTPUT_NUM_PEAKS} {&hash_digest_list}
-            assert_vector error_id {chaining}
+            assert_vector error_id {BlockValidationRule::SwbfUpdateChaining.error_id()}
             pop {Digest::LEN}
             // _ *w *left_output *right_output *digests left_count right_count
 
             dup 2 dup 2 dup 2 call {digest_peaks}
             {&hash_digest_list}
             dup 8 addi {1 + OUTPUT_NUM_PEAKS} {&hash_digest_list}
-            assert_vector error_id {chaining}
+            assert_vector error_id {BlockValidationRule::SwbfUpdateChaining.error_id()}
             pop {Digest::LEN}
             // _ *w *left_output *right_output *digests left_count right_count
 
@@ -609,7 +608,7 @@ impl TritonProgram for SwbfUpdateAggregation {
                 add
                 // _ *claim (is_leaf || is_self)
 
-                assert error_id {chaining}
+                assert error_id {BlockValidationRule::SwbfUpdateChaining.error_id()}
                 // _ *claim
 
                 /* Assert the claim's version matches out version */
@@ -618,7 +617,7 @@ impl TritonProgram for SwbfUpdateAggregation {
                 eq
                 // _ *claim (claim_version == our_version)
 
-                assert error_id {chaining}
+                assert error_id {BlockValidationRule::SwbfUpdateChaining.error_id()}
                 // _ *claim
 
                 dup 0 {&field_with_size!(Claim::input)}
@@ -626,7 +625,7 @@ impl TritonProgram for SwbfUpdateAggregation {
 
                 /* Assert expected length of claim's input */
                 // The size counts the length word the pointer points at.
-                push {1 + INPUT_LEN} eq assert error_id {chaining}
+                push {1 + INPUT_LEN} eq assert error_id {BlockValidationRule::SwbfUpdateChaining.error_id()}
 
                 // _ *claim *claim_input
                 dup 0 addi {1 + INPUT_FIRST_LEAF_INDEX} read_mem 1 pop 1
@@ -689,7 +688,7 @@ impl TritonProgram for SwbfUpdateAggregation {
                 addi {1 + OUTPUT_PEAKS} eq
                 // _ *claim_output (size == expected_claim_output_size)
 
-                assert error_id {chaining}
+                assert error_id {BlockValidationRule::SwbfUpdateChaining.error_id()}
                 return
 
             // INVARIANT: _ *end *peak[i]_previous_word

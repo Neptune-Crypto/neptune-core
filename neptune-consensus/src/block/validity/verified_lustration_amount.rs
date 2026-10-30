@@ -66,14 +66,6 @@ pub(super) struct VerifiedLustrationAmount;
 impl VerifiedLustrationAmount {
     const INDEX_SET_LEN: u32 = NUM_TRIALS + 4;
 
-    fn missing_error_id() -> i128 {
-        BlockValidationRule::MissingLustrationAnnouncement.error_id()
-    }
-
-    fn unknown_error_id() -> i128 {
-        BlockValidationRule::UnknownLustrationProblem.error_id()
-    }
-
     /// The transparent input a lustration announcement's message encodes
     /// after its flag, as the kernel decodes it: the words after the flag
     /// must be exactly one encoding. Crashes with the error ID of rule 2.o
@@ -86,7 +78,6 @@ impl VerifiedLustrationAmount {
     fn decode_announcement(library: &mut Library) -> Vec<LabelledInstruction> {
         let audit_transparent_input =
             library.import(Box::new(VerifyNdSiIntegrity::<TransparentInput>::default()));
-        let missing = Self::missing_error_id();
 
         triton_asm!(
             read_mem 1 addi 3
@@ -95,7 +86,7 @@ impl VerifiedLustrationAmount {
             dup 0 call {audit_transparent_input}
             // _ message_length *transparent_input size
 
-            pick 2 addi -1 eq assert error_id {missing}
+            pick 2 addi -1 eq assert error_id {BlockValidationRule::MissingLustrationAnnouncement.error_id()}
             // _ *transparent_input
         )
     }
@@ -185,8 +176,6 @@ impl BasicSnippet for VerifiedLustrationAmount {
         let decode_announcement = Self::decode_announcement(library);
         let compute_absolute_indices = library.import(Box::new(ComputeAbsoluteIndices));
 
-        let missing = Self::missing_error_id();
-        let unknown = Self::unknown_error_id();
         let index_set_len = Self::INDEX_SET_LEN;
         let minimum_offset = NUM_TRIALS + DataType::U128.stack_size() as u32 - 1;
 
@@ -194,7 +183,7 @@ impl BasicSnippet for VerifiedLustrationAmount {
         // A u128 on top of the stack fits in a u64.
         let fits_in_u64 = triton_asm!(
             dup 3 push 0 eq dup 3 push 0 eq mul
-            assert error_id {unknown}
+            assert error_id {BlockValidationRule::UnknownLustrationProblem.error_id()}
         );
         // The sign bit of the i128 limb on top of the stack.
         let sign = triton_asm!(push {1_u64 << 31} swap 1 lt push 0 eq);
@@ -280,7 +269,7 @@ impl BasicSnippet for VerifiedLustrationAmount {
                 // _ ... *index_set position
 
                 dup 11 read_mem 1 pop 1 dup 1 lt
-                assert error_id {missing}
+                assert error_id {BlockValidationRule::MissingLustrationAnnouncement.error_id()}
                 // _ ... *index_set position
 
                 dup 11 pick 1 call {get_pointer}
@@ -308,7 +297,7 @@ impl BasicSnippet for VerifiedLustrationAmount {
                 dup 6 push {index_set_len} call {hash_varlen}
                 // _ ... *index_set *transparent_input [announced_index_set_digest] [index_set_digest]
 
-                assert_vector error_id {missing}
+                assert_vector error_id {BlockValidationRule::MissingLustrationAnnouncement.error_id()}
                 pop 5
                 // _ ... *index_set *transparent_input
 
@@ -442,15 +431,15 @@ impl BasicSnippet for VerifiedLustrationAmount {
                 pick 5 swap 1 push 0 eq mul
                 // _ [sum] (same_sign && sign_sum != sign_a)
 
-                push 0 eq assert error_id {unknown}
+                push 0 eq assert error_id {BlockValidationRule::UnknownLustrationProblem.error_id()}
                 // _ [sum]
 
                 dup 3 dup 3 dup 3 dup 3 {&push_max_amount} call {i128_lt}
-                push 0 eq assert error_id {unknown}
+                push 0 eq assert error_id {BlockValidationRule::UnknownLustrationProblem.error_id()}
                 // _ [sum]
 
                 {&push_min_amount} dup 7 dup 7 dup 7 dup 7 call {i128_lt}
-                push 0 eq assert error_id {unknown}
+                push 0 eq assert error_id {BlockValidationRule::UnknownLustrationProblem.error_id()}
                 // _ [sum]
 
                 return
@@ -467,7 +456,7 @@ impl BasicSnippet for VerifiedLustrationAmount {
                 pop 1
                 // _ *index_set max_offset
 
-                push {WINDOW_SIZE} dup 1 lt assert error_id {unknown}
+                push {WINDOW_SIZE} dup 1 lt assert error_id {BlockValidationRule::UnknownLustrationProblem.error_id()}
                 // _ *index_set max_offset
 
                 dup 1 addi {minimum_offset} read_mem 4 pop 1
@@ -738,7 +727,7 @@ mod tests {
             &records,
             &announcements[..1],
             threshold,
-            VerifiedLustrationAmount::missing_error_id(),
+            BlockValidationRule::MissingLustrationAnnouncement.error_id(),
         );
     }
 
@@ -771,7 +760,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(4);
         let (inputs, announcements) = three_inputs(&mut rng);
         let records = inputs.iter().map(record).collect_vec();
-        let missing = VerifiedLustrationAmount::missing_error_id();
+        let missing = BlockValidationRule::MissingLustrationAnnouncement.error_id();
 
         assert_crashes(&records, &announcements[1..], u64::MAX, missing);
         assert_crashes(&records, &[], u64::MAX, missing);
@@ -841,7 +830,7 @@ mod tests {
             &records,
             &announcements,
             u64::MAX,
-            VerifiedLustrationAmount::unknown_error_id(),
+            BlockValidationRule::UnknownLustrationProblem.error_id(),
         );
     }
 
@@ -861,7 +850,7 @@ mod tests {
             &[record],
             &announcements,
             u64::MAX,
-            VerifiedLustrationAmount::unknown_error_id(),
+            BlockValidationRule::UnknownLustrationProblem.error_id(),
         );
     }
 

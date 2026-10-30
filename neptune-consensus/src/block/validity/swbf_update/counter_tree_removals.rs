@@ -59,10 +59,6 @@ pub(super) struct CounterTreeRemovals;
 impl CounterTreeRemovals {
     const LOG2_CHUNK_SIZE: u8 = CHUNK_SIZE.ilog2() as u8;
 
-    fn error_id() -> i128 {
-        BlockValidationRule::RemovalRecordsValidity.error_id()
-    }
-
     /// The trees of an inactive SWBF with this leaf count, from the highest
     /// down, as the height and the index of the first leaf: the order the
     /// snippet's tree table has.
@@ -152,7 +148,6 @@ impl BasicSnippet for CounterTreeRemovals {
         let entry_path_words = 7;
         let entry_size = 8;
 
-        let error_id = Self::error_id();
         let read_u64 = |alloc: &tasm_lib::library::StaticAllocation| triton_asm!(push {alloc.read_address()} read_mem 2 pop 1);
         let write_u64 = |alloc: &tasm_lib::library::StaticAllocation| triton_asm!(push {alloc.write_address()} write_mem 2 pop 1);
         let read_word = |alloc: &tasm_lib::library::StaticAllocation| triton_asm!(push {alloc.read_address()} read_mem 1 pop 1);
@@ -324,7 +319,7 @@ impl BasicSnippet for CounterTreeRemovals {
                 // _ ... distance [index]
 
                 divine 1
-                {&read_word(&num_trees_alloc)} dup 1 lt assert error_id {error_id}
+                {&read_word(&num_trees_alloc)} dup 1 lt assert error_id {BlockValidationRule::RemovalRecordsValidity.error_id()}
                 push {entry_size} mul {&read_word(&table_alloc)} add
                 // _ ... distance [index] *entry
 
@@ -340,7 +335,7 @@ impl BasicSnippet for CounterTreeRemovals {
 
                 dup 2 addi {entry_leafs + 1} read_mem 2 pop 1
                 pick 3 pick 3 call {u64_lt}
-                assert error_id {error_id}
+                assert error_id {BlockValidationRule::RemovalRecordsValidity.error_id()}
                 // _ ... distance [index] *entry
 
                 dup 0 addi {entry_offset + 1} read_mem 2 pop 1

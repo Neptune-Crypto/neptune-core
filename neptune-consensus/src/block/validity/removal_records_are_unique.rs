@@ -65,7 +65,6 @@ impl BasicSnippet for RemovalRecordsAreUnique {
         let u128_safe_add = library.import(Box::new(U128SafeAdd));
         let u128_lt = library.import(Box::new(U128Lt));
 
-        let error_id = BlockValidationRule::RemovalRecordsUniqueness.error_id();
         let entrypoint = self.entrypoint();
         let check_nonempty = format!("{entrypoint}_nonempty");
         let check_loop = format!("{entrypoint}_loop");
@@ -182,7 +181,7 @@ impl BasicSnippet for RemovalRecordsAreUnique {
                 // _ *pointers n *taken 0 0
 
                 // Take the first position without comparing.
-                {&Self::divine_position(error_id)}
+                {&Self::divine_position()}
                 // _ *pointers n *taken 0 0 *record
 
                 place 1 pop 1
@@ -204,11 +203,11 @@ impl BasicSnippet for RemovalRecordsAreUnique {
                 dup 3 dup 2 eq skiz return
                 // _ *pointers n *taken i *previous
 
-                {&Self::divine_position(error_id)}
+                {&Self::divine_position()}
                 // _ *pointers n *taken i *previous *current
 
                 dup 1 dup 1 call {index_set_lt}
-                assert error_id {error_id}
+                assert error_id {BlockValidationRule::RemovalRecordsUniqueness.error_id()}
                 // _ *pointers n *taken i *previous *current
 
                 place 1 pop 1
@@ -233,17 +232,17 @@ impl RemovalRecordsAreUnique {
     /// BEFORE: _ *pointers n *taken x y
     /// AFTER:  _ *pointers n *taken x y *record
     /// ```
-    fn divine_position(error_id: i128) -> Vec<LabelledInstruction> {
+    fn divine_position() -> Vec<LabelledInstruction> {
         triton_asm!(
             divine 1
             // _ *pointers n *taken x y position
 
             dup 4 dup 1 lt
-            assert error_id {error_id}
+            assert error_id {BlockValidationRule::RemovalRecordsUniqueness.error_id()}
             // _ *pointers n *taken x y position
 
             dup 3 dup 1 add addi 1 read_mem 1 pop 1
-            push 0 eq assert error_id {error_id}
+            push 0 eq assert error_id {BlockValidationRule::RemovalRecordsUniqueness.error_id()}
             // _ *pointers n *taken x y position
 
             push 1 dup 4 dup 2 add addi 1 write_mem 1 pop 1

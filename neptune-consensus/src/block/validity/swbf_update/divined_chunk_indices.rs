@@ -22,10 +22,6 @@ use crate::block::block_validation_error::BlockValidationRule;
 pub(super) struct DivinedChunkIndices;
 
 impl DivinedChunkIndices {
-    fn error_id() -> i128 {
-        BlockValidationRule::RemovalRecordsUnpackFailure.error_id()
-    }
-
     /// The tokens the prover supplies for these chunk indices.
     pub(crate) fn divined_tokens(chunk_indices: &[u64]) -> Vec<BFieldElement> {
         chunk_indices
@@ -115,7 +111,7 @@ impl BasicSnippet for DivinedChunkIndices {
                 dup 1 dup 5 lt
                 dup 2 dup 6 eq
                 dup 2 dup 6 lt
-                mul add assert error_id {Self::error_id()}
+                mul add assert error_id {BlockValidationRule::RemovalRecordsUnpackFailure.error_id()}
                 // _ num_chunks *chunk_indices *chunk_indices[i] [previous] i [current]
 
                 dup 1 dup 1 dup 7 write_mem {u64_size}
@@ -167,7 +163,11 @@ mod tests {
             _public_input: &[BFieldElement],
             _sponge: &mut Option<Tip5>,
         ) -> Result<Vec<BFieldElement>, RustShadowError> {
-            let fail = || RustShadowError::AssertionError(Self::error_id());
+            let fail = || {
+                RustShadowError::AssertionError(
+                    BlockValidationRule::RemovalRecordsUnpackFailure.error_id(),
+                )
+            };
             let num_chunks: u32 = stack.pop().unwrap().try_into().unwrap();
             let list = dynamic_allocator(memory);
             memory.insert(list, bfe!(num_chunks));
@@ -283,7 +283,7 @@ mod tests {
                         DivinedChunkIndices::divined_tokens(&chunk_indices),
                     )
                     .into(),
-                &[DivinedChunkIndices::error_id()],
+                &[BlockValidationRule::RemovalRecordsUnpackFailure.error_id()],
             );
         }
     }

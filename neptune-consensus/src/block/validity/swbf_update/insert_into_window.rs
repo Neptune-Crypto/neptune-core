@@ -34,10 +34,6 @@ use crate::block::block_validation_error::BlockValidationRule;
 pub(super) struct InsertIntoWindow;
 
 impl InsertIntoWindow {
-    fn error_id() -> i128 {
-        BlockValidationRule::MutatorSetUpdateIntegrity.error_id()
-    }
-
     /// The window's list with the sorted indices inserted: what the snippet
     /// produces for a sorted window.
     #[cfg(test)]
@@ -84,7 +80,6 @@ impl BasicSnippet for InsertIntoWindow {
         let insert_loop = format!("{entrypoint}_insert_loop");
         let check_left = format!("{entrypoint}_check_left_neighbour");
         let check_right = format!("{entrypoint}_check_right_neighbour");
-        let error_id = Self::error_id();
 
         triton_asm!(
             {entrypoint}:
@@ -137,8 +132,8 @@ impl BasicSnippet for InsertIntoWindow {
 
                 // Positions do not decrease, and do not exceed the window's
                 // length.
-                dup 2 dup 1 lt push 0 eq assert error_id {error_id}
-                dup 0 dup 8 lt push 0 eq assert error_id {error_id}
+                dup 2 dup 1 lt push 0 eq assert error_id {BlockValidationRule::MutatorSetUpdateIntegrity.error_id()}
+                dup 0 dup 8 lt push 0 eq assert error_id {BlockValidationRule::MutatorSetUpdateIntegrity.error_id()}
                 // _ ... previous *out position
 
                 dup 5 read_mem 1 pop 1
@@ -178,7 +173,7 @@ impl BasicSnippet for InsertIntoWindow {
                 dup 7 dup 2 add addi -1 read_mem 1 pop 1
                 // _ ... position index window[position - 1]
 
-                dup 1 lt push 0 eq assert error_id {error_id}
+                dup 1 lt push 0 eq assert error_id {BlockValidationRule::MutatorSetUpdateIntegrity.error_id()}
                 // _ ... position index
 
                 return
@@ -190,7 +185,7 @@ impl BasicSnippet for InsertIntoWindow {
                 dup 7 dup 2 add read_mem 1 pop 1
                 // _ ... position index window[position]
 
-                dup 1 swap 1 lt push 0 eq assert error_id {error_id}
+                dup 1 swap 1 lt push 0 eq assert error_id {BlockValidationRule::MutatorSetUpdateIntegrity.error_id()}
                 // _ ... position index
 
                 return
@@ -234,7 +229,11 @@ mod tests {
             _public_input: &[BFieldElement],
             _sponge: &mut Option<Tip5>,
         ) -> Result<Vec<BFieldElement>, RustShadowError> {
-            let fail = || RustShadowError::AssertionError(Self::error_id());
+            let fail = || {
+                RustShadowError::AssertionError(
+                    BlockValidationRule::MutatorSetUpdateIntegrity.error_id(),
+                )
+            };
             let indices_pointer = stack.pop().unwrap();
             let window_pointer = stack.pop().unwrap();
             let read_list = |memory: &HashMap<BFieldElement, BFieldElement>,
@@ -375,7 +374,7 @@ mod tests {
             InsertIntoWindow
                 .initial_state(window, indices, tokens)
                 .into(),
-            &[InsertIntoWindow::error_id()],
+            &[BlockValidationRule::MutatorSetUpdateIntegrity.error_id()],
         );
     }
 

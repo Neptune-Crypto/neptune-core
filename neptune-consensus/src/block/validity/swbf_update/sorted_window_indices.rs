@@ -38,14 +38,6 @@ use crate::block::block_validation_error::BlockValidationRule;
 pub(super) struct SortedWindowIndices;
 
 impl SortedWindowIndices {
-    fn beyond_window_error_id() -> i128 {
-        BlockValidationRule::RemovalRecordsValidity.error_id()
-    }
-
-    fn error_id() -> i128 {
-        BlockValidationRule::MutatorSetUpdateIntegrity.error_id()
-    }
-
     /// The indices of the records at or past the window start, relative to
     /// it, in the order of the records and of their indices. An index beyond
     /// the window's end is `None`; the snippet rejects it.
@@ -141,8 +133,6 @@ impl BasicSnippet for SortedWindowIndices {
         let sub_mode_in_window = format!("{entrypoint}_sub_mode_in_window");
         let process = format!("{entrypoint}_process_index");
 
-        let error_id = Self::error_id();
-        let beyond_window_error_id = Self::beyond_window_error_id();
         let read_u128 = triton_asm!(addi 3 read_mem 4 pop 1);
 
         // The context: the window start, the sorted list and its length,
@@ -194,7 +184,7 @@ impl BasicSnippet for SortedWindowIndices {
 
                 dup 0 addi {consumed_offset} read_mem 1 pop 1
                 dup 1 addi {length_offset} read_mem 1 pop 1
-                eq assert error_id {error_id}
+                eq assert error_id {BlockValidationRule::MutatorSetUpdateIntegrity.error_id()}
                 // _ *context
 
                 addi {sorted_offset} read_mem 1 pop 1
@@ -212,8 +202,8 @@ impl BasicSnippet for SortedWindowIndices {
                 divine 1
                 // _ length *sorted *sorted[i] previous i entry
 
-                dup 2 dup 1 lt push 0 eq assert error_id {error_id}
-                push {WINDOW_SIZE} dup 1 lt assert error_id {error_id}
+                dup 2 dup 1 lt push 0 eq assert error_id {BlockValidationRule::MutatorSetUpdateIntegrity.error_id()}
+                push {WINDOW_SIZE} dup 1 lt assert error_id {BlockValidationRule::MutatorSetUpdateIntegrity.error_id()}
                 // _ length *sorted *sorted[i] previous i entry
 
                 dup 0 pick 4 write_mem 1 place 3
@@ -299,8 +289,8 @@ impl BasicSnippet for SortedWindowIndices {
                 call {u128_sub}
                 // _ *context *record_si num_records i *index_set [minimum - window_start]
 
-                place 3 add add push 0 eq assert error_id {beyond_window_error_id}
-                push {WINDOW_SIZE} dup 1 lt assert error_id {beyond_window_error_id}
+                place 3 add add push 0 eq assert error_id {BlockValidationRule::RemovalRecordsValidity.error_id()}
+                push {WINDOW_SIZE} dup 1 lt assert error_id {BlockValidationRule::RemovalRecordsValidity.error_id()}
                 // _ *context *record_si num_records i *index_set base
 
                 push 1 swap 1
@@ -329,7 +319,7 @@ impl BasicSnippet for SortedWindowIndices {
             // AFTER:  _ *context *record_si num_records i 1 base *distances[k] k 1
             {add_mode}:
                 pop 1 dup 3 add
-                push {WINDOW_SIZE} dup 1 lt assert error_id {beyond_window_error_id}
+                push {WINDOW_SIZE} dup 1 lt assert error_id {BlockValidationRule::RemovalRecordsValidity.error_id()}
                 // _ *context *record_si num_records i 1 base *distances[k] k relative_index
 
                 call {process}
@@ -365,21 +355,21 @@ impl BasicSnippet for SortedWindowIndices {
                 // _ ... relative_index position
 
                 dup 9 addi {length_offset} read_mem 1 pop 1
-                dup 1 lt assert error_id {error_id}
+                dup 1 lt assert error_id {BlockValidationRule::MutatorSetUpdateIntegrity.error_id()}
                 // _ ... relative_index position
 
                 dup 9 addi {sorted_offset} read_mem 1 pop 1
                 dup 1 add addi 1 read_mem 1 pop 1
                 // _ ... relative_index position sorted[position]
 
-                dup 2 eq assert error_id {error_id}
+                dup 2 eq assert error_id {BlockValidationRule::MutatorSetUpdateIntegrity.error_id()}
                 // _ ... relative_index position
 
                 dup 9 addi {taken_offset} read_mem 1 pop 1
                 dup 1 add addi 1
                 // _ ... relative_index position *taken[position]
 
-                dup 0 read_mem 1 pop 1 push 0 eq assert error_id {error_id}
+                dup 0 read_mem 1 pop 1 push 0 eq assert error_id {BlockValidationRule::MutatorSetUpdateIntegrity.error_id()}
                 push 1 swap 1 write_mem 1 pop 1
                 // _ ... relative_index position
 
@@ -435,8 +425,16 @@ mod tests {
             _public_input: &[BFieldElement],
             _sponge: &mut Option<Tip5>,
         ) -> Result<Vec<BFieldElement>, RustShadowError> {
-            let fail = || RustShadowError::AssertionError(Self::error_id());
-            let beyond = || RustShadowError::AssertionError(Self::beyond_window_error_id());
+            let fail = || {
+                RustShadowError::AssertionError(
+                    BlockValidationRule::MutatorSetUpdateIntegrity.error_id(),
+                )
+            };
+            let beyond = || {
+                RustShadowError::AssertionError(
+                    BlockValidationRule::RemovalRecordsValidity.error_id(),
+                )
+            };
             let window_start = {
                 let limbs: [BFieldElement; 4] = core::array::from_fn(|_| stack.pop().unwrap());
                 *u128::decode(&limbs).unwrap()
@@ -751,7 +749,7 @@ mod tests {
 
     #[test]
     fn index_beyond_the_window_is_rejected() {
-        let error_id = SortedWindowIndices::beyond_window_error_id();
+        let error_id = BlockValidationRule::RemovalRecordsValidity.error_id();
         let window_start = 5000;
         // The minimum lies in the window, an index does not.
         let mut indices = [window_start + 10; NUM_TRIALS as usize];
@@ -782,13 +780,13 @@ mod tests {
             &records,
             window_start,
             tokens,
-            SortedWindowIndices::error_id(),
+            BlockValidationRule::MutatorSetUpdateIntegrity.error_id(),
         );
     }
 
     #[test]
     fn tampered_tokens_are_rejected() {
-        let error_id = SortedWindowIndices::error_id();
+        let error_id = BlockValidationRule::MutatorSetUpdateIntegrity.error_id();
         let mut rng = StdRng::seed_from_u64(2);
         let window_start = 1 << 50;
         let records = random_records_around(&mut rng, 3, window_start);

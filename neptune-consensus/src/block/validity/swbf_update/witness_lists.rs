@@ -31,10 +31,6 @@ use crate::block::block_validation_error::BlockValidationRule;
 pub(super) struct WitnessLists;
 
 impl WitnessLists {
-    fn error_id() -> i128 {
-        BlockValidationRule::RemovalRecordsUnpackFailure.error_id()
-    }
-
     /// The leaf count of the inactive SWBF with trees of these heights.
     pub(in crate::block::validity) fn swbfi_leaf_count_estimate(tree_heights: &[u32]) -> u64 {
         tree_heights
@@ -83,13 +79,12 @@ impl BasicSnippet for WitnessLists {
         let pointers_loop = format!("{entrypoint}_pointers_loop");
         let estimate = format!("{entrypoint}_estimate");
         let estimate_loop = format!("{entrypoint}_estimate_loop");
-        let error_id = Self::error_id();
 
         triton_asm!(
             {entrypoint}:
                 // _ *chunks *tree_heights *tree_paths
                 dup 1 read_mem 1 pop 1 dup 1 read_mem 1 pop 1
-                eq assert error_id {error_id}
+                eq assert error_id {BlockValidationRule::RemovalRecordsUnpackFailure.error_id()}
                 // A chunk's list sits two words past its element: past
                 // the element's own length and the storage's first word.
                 pick 2 push 2 call {pointers}
@@ -149,7 +144,7 @@ impl BasicSnippet for WitnessLists {
                 dup 3 read_mem 1 pop 1
                 // _ remaining *height [estimate] next_height height
 
-                dup 1 dup 1 lt push 0 eq assert error_id {error_id}
+                dup 1 dup 1 lt push 0 eq assert error_id {BlockValidationRule::RemovalRecordsUnpackFailure.error_id()}
                 dup 0 addi 1 place 2 pick 1 pop 1
                 // _ remaining *height [estimate] (height + 1) height
 
