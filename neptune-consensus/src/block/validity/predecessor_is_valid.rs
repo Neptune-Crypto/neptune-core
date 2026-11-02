@@ -410,6 +410,12 @@ impl PredecessorIsValid {
         }
     }
 
+    /// The bound on the high limb of a previous block's timestamp, so that
+    /// no sum of the timestamp and a block interval or the guesser lock
+    /// period wraps around the field: 2^38 milliseconds of headroom below
+    /// the modulus, out of the field's 584 million years.
+    const TIMESTAMP_HIGH_LIMB_BOUND: u64 = (1 << 32) - (1 << 6);
+
     /// The sign bit is the top bit of the most significant limb. Crashes
     /// unless every limb is a u32.
     ///
@@ -1326,6 +1332,11 @@ impl TritonProgram for PredecessorIsValid {
             // _ *w [prev_block_hash] *prev_claim_output [earliest_prev_block_timestamp: u64]
 
             dup 8 {&read_prev_block_timestamp} split
+            // _ *w [prev_block_hash] *prev_claim_output [earliest_prev_block_timestamp] [prev_block_timestamp]
+
+            // Far enough below the modulus
+            push {Self::TIMESTAMP_HIGH_LIMB_BOUND} dup 2 lt
+            assert error_id {BlockValidationRule::FutureDating.error_id()}
             // _ *w [prev_block_hash] *prev_claim_output [earliest_prev_block_timestamp] [prev_block_timestamp]
 
             call {u64_lt}
@@ -3141,6 +3152,10 @@ mod tests {
                     Timestamp(parent_claim.output[Self::output_timestamp_offset()]);
 
                 // 0.d)
+                assert!(
+                    witness.prev_block_header.timestamp.0.value() >> 32
+                        < Self::TIMESTAMP_HIGH_LIMB_BOUND
+                );
                 assert!(
                     prev_prev_block_timestamp + prev_minimum_block_time
                         <= witness.prev_block_header.timestamp
@@ -6461,6 +6476,53 @@ ones):
             assert_accepts_with_epochs(&skipping(), &prev_block, &next_body, &next_header, &epochs);
         }
 
+        /// A timestamp close to the modulus makes the sums the rules take
+        /// with it wrap around. The host refuses such a block by the wall
+        /// clock; the program, which has none, by a bound.
+        #[test]
+        fn prev_block_with_timestamp_near_the_modulus_fails() {
+            let epochs = epochs();
+            let grandparent = random_unproven_block_at_height(0, activation_height().value());
+            let bound = Timestamp(bfe!(PredecessorIsValid::TIMESTAMP_HIGH_LIMB_BOUND << 32));
+            let (prev_block, next_body, next_header) =
+                prev_block_with_timestamp(&grandparent, bound, &epochs);
+            let program = skipping();
+            let (claim, nondeterminism) =
+                claim_and_nondeterminism(&program, &prev_block, &next_body, &next_header, &epochs);
+            program
+                .test_assertion_failure(
+                    PublicInput::new(claim.input),
+                    nondeterminism,
+                    &[BlockValidationRule::FutureDating.error_id()],
+                )
+                .unwrap();
+            let now = grandparent.header().timestamp + Timestamp::hours(1);
+            assert_eq!(
+                Err(BlockValidationError::FutureDating),
+                prev_block.validate_without_proof(&grandparent, now, Network::Main)
+            );
+
+            // One millisecond less passes the bound, on a grandparent dated
+            // so that the block interval stays ordinary.
+            let timestamp = bound - Timestamp::millis(1);
+            let (header, body) = random_header_and_body(
+                0,
+                activation_height().value(),
+                timestamp - Timestamp::hours(1),
+            );
+            let grandparent = unproven_block(header, body, vec![]);
+            let (prev_block, next_body, next_header) =
+                prev_block_with_timestamp(&grandparent, timestamp, &epochs);
+            let (claim, nondeterminism) =
+                claim_and_nondeterminism(&program, &prev_block, &next_body, &next_header, &epochs);
+            assert_eq!(
+                claim.output,
+                program
+                    .run_tasm(&PublicInput::new(claim.input), nondeterminism)
+                    .unwrap()
+            );
+        }
+
         #[test]
         fn epochs_may_be_appended_after_the_prev_block() {
             let (prev_block, next_body, next_header) =
@@ -7781,6 +7843,6 @@ ones):
 
     test_program_snapshot!(
         PredecessorIsValid::new(),
-        "53e6b25eb78ad9019464f4ead5da006a5930ebde361341646dba578961a2507b520a524d766a5537"
+        "5f178fd133578567d46652b08fb60875054c6f9afbc9f9078c927944d554d2599977e6d8d04e7cce"
     );
 }
