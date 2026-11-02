@@ -1442,31 +1442,31 @@ market maker or a wallet.
 
 ### 4.11 Vaults, and vaulted NPT
 
-Fix a type script `TokenType` whose coins carry an amount as their state, and a
+Fix a type script `Vaultee` whose coins carry an amount as their state, and a
 **policy** `Policy`, a predicate on transactions. The **vault type script**
-`Vault(TokenType, Policy)` holds the hashes of `TokenType` and `Policy` as
+`Vault(Vaultee, Policy)` holds the hashes of `Vaultee` and `Policy` as
 constants, and its coins carry one of two states:
 
-- a **token** `token(a)`, with `a` an amount of `TokenType`'s amount type; a
+- a **token** `token(a)`, with `a` an amount of `Vaultee`'s amount type; a
   UTXO carrying it holds `a` tokens;
 - a **vault marker** `vault`, which marks the UTXO carrying it.
 
 A **vault** is a UTXO whose lock script is `VaultLockScript`, a program that
-halts on every input, and whose coins are exactly `TokenType(v)` and
-`Vault(TokenType, Policy) vault`. `v` is the vault's **holding**. A **vault
+halts on every input, and whose coins are exactly `Vaultee(v)` and
+`Vault(Vaultee, Policy) vault`. `v` is the vault's **holding**. A **vault
 announcement** of a vault is an announcement, under a flag of its own, of the
 vault's UTXO, sender randomness `sr` and receiver preimage `rp`.
 
 For a transaction, write `Δh` for the holdings of the vaults among its outputs
 less those among its inputs, and `Δt` for the tokens among its outputs less
-those among its inputs. `Vault(TokenType, Policy)` accepts a transaction if and
+those among its inputs. `Vault(Vaultee, Policy)` accepts a transaction if and
 only if
 
 1. every output that carries a vault marker is a vault, and the transaction
    carries a vault announcement of it whose `sr` and `rp` give its addition
    record, `commit(H(utxo), sr, H(rp))`,
 2. every token amount among the outputs is non-negative, and every sum lies in
-   the range of `TokenType`'s amount type,
+   the range of `Vaultee`'s amount type,
 3. `Δt ≤ max(0, Δh)`, and
 4. `Policy` accepts the transaction.
 
@@ -1476,7 +1476,7 @@ whatever `Policy` is, every token was minted together with a deposit of at least
 the same amount. By rule 1 every vault can be found. Who may create a vault, who
 may spend one, and whether spending one burns tokens are `Policy`'s to decide.
 Rule 1 is checked on outputs only: every input was the output of an earlier
-transaction on which `Vault(TokenType, Policy)` ran.
+transaction on which `Vault(Vaultee, Policy)` ran.
 
 **The bearer policy.** `Bearer` accepts a transaction if and only if `Δt = Δh`,
 at most one vault is among its inputs, and at most one among its outputs. The
@@ -1517,25 +1517,13 @@ from the vault that a pending withdrawal spends, which they can identify, since
 every vault's randomnesses are public, and its owner may outbid them or spend
 another vault.
 
-**A policy may make its vault unique.** `UniqueBearer(I₀)`, with `I₀` the
-absolute index set of the removal record of one UTXO already in the AOCL, is
-`Bearer`, and in addition requires that a transaction with a vault among its
-outputs and none among its inputs have a removal record with index set `I₀`
-among its inputs. The mutator set lets `I₀` be spent once, so at most one vault
-is ever created from nothing, and by `Bearer` every later vault replaces
-exactly one spent vault. At most one vault of the type exists at any time, and
-once it is emptied none ever exists again. The price is contention: every
-deposit and withdrawal spends the same UTXO, so the type admits at most one of
-them per block, and a pending one must be rebuilt whenever another is mined
-first.
-
 **Every vault is announced, so every vault can be found.** Spending a UTXO needs
 its item, both randomnesses and its AOCL index. The vault announcement supplies
 the first three, and its block supplies the fourth. Rule 1 makes the
 announcement a condition of validity rather than a courtesy: a vault nobody
 could find would be a holding no token could withdraw. The randomness need not
 stay the same from one vault to the next, since the announcement says what it
-is. `Vault(TokenType, Policy)` checks rule 1 against the kernel: it sees the
+is. `Vault(Vaultee, Policy)` checks rule 1 against the kernel: it sees the
 kernel MAST hash and the salted outputs, authenticates the outputs and
 announcements fields against the former (`authenticate_txk_field`), and
 `KernelToOutputs` aligns the salted outputs with the kernel's addition records.
@@ -1545,15 +1533,15 @@ equal to the holding withdrawn, under conditions it names, such as a signature
 or an attestation from a named party, and may restrict who creates vaults.
 Vaults are interchangeable, so `Policy`'s conditions are terms of the asset, not
 of a deposit, and the tokens are backed only as `Policy` says. `Policy`'s hash
-is a constant of `Vault(TokenType, Policy)`, so `Vault(TokenType, Policy)` and
-`Vault(TokenType, Policy′)` are different type scripts and their tokens are
+is a constant of `Vault(Vaultee, Policy)`, so `Vault(Vaultee, Policy)` and
+`Vault(Vaultee, Policy′)` are different type scripts and their tokens are
 different assets: a token's type script states every condition under which its
 backing can leave.
 
 **Why `Policy` lives in the type script.** The conditions must be fixed by the
 token's type, so that its holder knows them, and `Bearer` must see the UTXOs,
 while a lock script sees only addition records (§4.2).
-`Vault(TokenType, Policy)` sees both the UTXOs and the kernel, and divines
+`Vault(Vaultee, Policy)` sees both the UTXOs and the kernel, and divines
 `Policy`'s witness.
 
 **Why rule 1 fixes the lock script and the coins.** Rule 1 makes `Policy` the
@@ -1901,7 +1889,7 @@ any vault.
 - [ ] The fork's activation heights, once known (§5)
 
 ### Phase 2c — vaults and vaulted NPT
-- [ ] `Vault(TokenType, Policy)` as a type script generic over `TokenType` and
+- [ ] `Vault(Vaultee, Policy)` as a type script generic over `Vaultee` and
       `Policy`, with vNPT as `Vault(NativeCurrency, Bearer)` (§4.11)
 - [ ] Tests: creation, withdrawal, emptying, topping up and transfer
       accepted; tokens minted without a deposit, a withdrawal without a burn,
@@ -1910,8 +1898,6 @@ any vault.
       announcement whose randomnesses do not give the vault's addition record,
       a negative token, a vault under another lock script and a vault with a
       third coin rejected
-- [ ] `UniqueBearer(I₀)`: a vault created from nothing without spending `I₀`
-      rejected
 - [ ] The wallet tracks vault announcements, and withdraws from a vault chosen
       at random among those holding enough
 
