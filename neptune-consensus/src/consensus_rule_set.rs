@@ -65,11 +65,11 @@ pub const BLOCK_HEIGHT_HARDFORK_DELTA_TESTNET: BlockHeight =
 
 /// Height of the first block that uses the epsilon ruleset, on main net.
 pub const BLOCK_HEIGHT_SOFTFORK_EPSILON_MAIN_NET: BlockHeight =
-    BlockHeight::new(BFieldElement::new(61_000u64));
+    BlockHeight::new(BFieldElement::new(61_600u64));
 
 /// Height of the first block that uses the epsilon ruleset, on testnet-0.
 pub const BLOCK_HEIGHT_SOFTFORK_EPSILON_TESTNET: BlockHeight =
-    BlockHeight::new(BFieldElement::new(6_750u64));
+    BlockHeight::new(BFieldElement::new(6_800u64));
 
 /// Transactions that are more than three days older than the block are
 /// disallowed. Only enforced from hardfork gamma and onwards.
@@ -809,7 +809,7 @@ pub(crate) mod tests {
     fn epoch_on_testnet_0() {
         let table = ConsensusRuleSet::epoch_table(Network::Testnet(0));
         let expected = Epoch {
-            height: bfe!(6750),
+            height: bfe!(6800),
             lustration_counter_initial: NativeCurrencyAmount::coins(4_154_368),
             ..ConsensusRuleSet::epoch_table(Network::Main).in_force_at(65_000.into())
         };
