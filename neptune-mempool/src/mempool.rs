@@ -377,7 +377,8 @@ impl BlockTransactionSelection {
         selection.kernel_wo_inputs_size_acc =
             full_kernel_size - block_transaction.inputs.encode().len() - 1;
         selection.full_kernel_size_acc = full_kernel_size;
-        selection.remaining_num_inputs -= inputs.len();
+        selection.remaining_num_inputs =
+            selection.remaining_num_inputs.saturating_sub(inputs.len());
         selection.remaining_num_outputs = selection
             .remaining_num_outputs
             .saturating_sub(block_transaction.outputs.len());
@@ -1886,7 +1887,9 @@ impl Mempool {
                 if max_num_txs.is_some_and(|max| selection.transactions.len() == max) {
                     break;
                 }
-                if part.kernel.retires_before(now + MEMPOOL_RETIREMENT_MARGIN)
+                if !self.tx_is_synced(&part.kernel)
+                    || !matches!(part.proof, TransactionProof::SingleProof(_))
+                    || part.kernel.retires_before(now + MEMPOOL_RETIREMENT_MARGIN)
                     || selection.conflicts_with(&part.kernel)
                     || !selection.pays_for_its_leaves(&part.kernel)
                 {

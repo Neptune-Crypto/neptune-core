@@ -69,12 +69,13 @@ impl Network {
 
     /// indicates max duration between blocks before difficulty reset, if any.
     ///
-    /// The difficulty is reset to genesis difficulty on testnet network(s) any
+    /// The difficulty is reset to genesis difficulty on the mock network any
     /// time the duration between a block and the previous block is >= twice the
-    /// target interval ie 19.6 minutes.
+    /// target interval ie 19.6 minutes. Only a mock-proof network may reset:
+    /// the proven block rules have no reset branch.
     ///
-    /// - testnet, testnet-mock: Some(19.6 minutes)
-    /// - mainnet, others: None
+    /// - testnet-mock: Some(19.6 minutes)
+    /// - mainnet, testnet, others: None
     pub fn difficulty_reset_interval(&self) -> Option<Timestamp> {
         match *self {
             Self::TestnetMock => Some(self.target_block_interval() * 2),

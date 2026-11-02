@@ -769,6 +769,42 @@ pub(crate) mod tests {
         assert_eq!(expected, table.in_force_at(1_000_000.into()));
     }
 
+    /// The host reads rule 2.g's subsidy and rules 0.d and 0.e's block times
+    /// from the network, where the proven rules read them from the epoch in
+    /// force. An epoch that changes any of them must first move those reads
+    /// to the epoch table.
+    #[test]
+    fn every_epoch_agrees_with_what_the_host_reads_from_the_network() {
+        for network in Network::all_networks() {
+            for epoch in ConsensusRuleSet::epoch_table(network).epochs() {
+                assert_eq!(
+                    network.minimum_block_time(),
+                    epoch.minimum_block_time,
+                    "{network:?}"
+                );
+                assert_eq!(
+                    network.target_block_interval(),
+                    epoch.target_block_interval,
+                    "{network:?}"
+                );
+                assert_eq!(bfe!(0), epoch.speedup_log2, "{network:?}");
+                assert_eq!(bfe!(0), epoch.equivalent_height_offset, "{network:?}");
+            }
+        }
+    }
+
+    /// The proven rules have no difficulty-reset branch, so a network that
+    /// resets its difficulty cannot require real proofs.
+    #[test]
+    fn only_mock_proof_networks_reset_their_difficulty() {
+        for network in Network::all_networks() {
+            assert!(
+                network.difficulty_reset_interval().is_none() || network.use_mock_proof(),
+                "{network:?}"
+            );
+        }
+    }
+
     #[test]
     fn epoch_on_testnet_0() {
         let table = ConsensusRuleSet::epoch_table(Network::Testnet(0));

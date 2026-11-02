@@ -125,7 +125,8 @@ pub const NUM_EPOCHS: usize = 8;
 /// has not started, it appends one at the same height, which takes
 /// precedence. The recursion accepts that: a block's claim must hold a prefix
 /// of its successor's table, short only of epochs that had not started by
-/// the block's height.
+/// the block's height. A node demands the claim under its own table, so
+/// appending an epoch is a hard fork: every node must switch at once.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, BFieldCodec)]
 pub struct EpochTable([Epoch; NUM_EPOCHS]);
 
@@ -172,6 +173,11 @@ impl EpochTable {
     }
 
     /// The height from which blocks must carry this claim.
+    /// The epochs the table holds, in order of height.
+    pub fn epochs(&self) -> impl Iterator<Item = &Epoch> {
+        self.0.iter().filter(|&epoch| *epoch != Epoch::default())
+    }
+
     pub fn activation_height(&self) -> BlockHeight {
         self.0[0].height.into()
     }
