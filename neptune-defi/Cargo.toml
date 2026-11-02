@@ -50,6 +50,8 @@ serde_json = "1.0"
 tokio = { version = "1.47", features = ["macros", "net", "process", "rt-multi-thread", "signal", "time"] }
 
 [dev-dependencies]
+async-trait = "0.1.83"
+
 # Depending on this crate with the `arbitrary-impls` and `test-stand-in`
 # features turns them on for the crate under test and its dependencies when
 # running `cargo test`.

@@ -1846,7 +1846,7 @@ any vault.
       in the node's data directory that only the user can read; plugins use
       `plugin::connect` (§4.8)
 - [x] A negative offered amount refused in every configuration (§4.3)
-- [ ] `RpcChain` refuses a block whose AOCL leaf count is below its number of
+- [x] `RpcChain` refuses a block whose AOCL leaf count is below its number of
       outputs, rather than underflowing
 - [x] Orders retired on a spent order UTXO, not only admitted on an
       announcement (§4.10)

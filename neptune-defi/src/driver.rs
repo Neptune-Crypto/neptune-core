@@ -47,6 +47,9 @@ pub enum ChainError {
 
     /// The chain could not be read.
     Rpc(RpcError),
+
+    /// The chain gave a block with this hash that contradicts itself.
+    Inconsistent(Digest),
 }
 
 /// Why a [`Driver`] could not follow a notification. The state is then as it
@@ -74,6 +77,9 @@ impl fmt::Display for DriverError {
         match self {
             Self::Chain(ChainError::Unknown(hash)) => write!(f, "unknown block {}", hash.to_hex()),
             Self::Chain(ChainError::Rpc(error)) => write!(f, "cannot read the chain: {error}"),
+            Self::Chain(ChainError::Inconsistent(hash)) => {
+                write!(f, "the chain gave an inconsistent block {}", hash.to_hex())
+            }
             Self::TooDeep { depth } => write!(
                 f,
                 "the new tip does not descend from any of the last {depth} blocks applied"
@@ -189,9 +195,15 @@ impl<C: RpcApi> Chain for RpcChain<C> {
         let transaction = kernel.body.transaction_kernel;
 
         // The body's accumulator counts the transaction's outputs but not the
-        // guesser's, which come after them.
-        let first_leaf_index =
-            kernel.body.mutator_set_accumulator.aocl.leaf_count - transaction.outputs.len() as u64;
+        // guesser's, which come after them. It counts fewer leafs than the
+        // transaction has outputs if and only if the node is wrong.
+        let first_leaf_index = kernel
+            .body
+            .mutator_set_accumulator
+            .aocl
+            .leaf_count
+            .checked_sub(transaction.outputs.len() as u64)
+            .ok_or(ChainError::Inconsistent(hash))?;
 
         Ok(ObservedBlock {
             id: BlockId {
@@ -460,6 +472,51 @@ mod tests {
         .expect("the driver stops walking");
         assert_eq!(Err(DriverError::TooDeep { depth: 10 }), followed);
         assert_eq!(&log(&["apply a"]), driver.state());
+    }
+
+    /// A node that answers every call with the same JSON value.
+    struct CannedNode(serde_json::Value);
+
+    #[async_trait::async_trait]
+    impl neptune_rpc_api::api::client::transport::Transport for CannedNode {
+        async fn call(
+            &self,
+            _method: &str,
+            _params: serde_json::Value,
+        ) -> neptune_rpc_api::model::json::JsonResult<serde_json::Value> {
+            Ok(self.0.clone())
+        }
+    }
+
+    /// A block whose accumulator counts fewer AOCL leafs than its transaction
+    /// has outputs is refused, and changes nothing.
+    #[tokio::test]
+    async fn a_block_with_fewer_leafs_than_outputs_is_an_error_that_changes_nothing() {
+        use neptune_consensus::block::Block;
+        use neptune_primitives::network::Network;
+        use neptune_rpc_api::model::block::RpcBlockKernel;
+        use neptune_rpc_api::model::message::GetBlockKernelResponse;
+
+        let genesis = Block::genesis(Network::Main);
+        let num_outputs = genesis.body().transaction_kernel.outputs.len() as u64;
+        assert!(num_outputs > 0);
+
+        let mut kernel = RpcBlockKernel::from(&genesis.kernel);
+        kernel.body.mutator_set_accumulator.aocl.leaf_count = num_outputs - 1;
+        let response = GetBlockKernelResponse {
+            kernel: Some(kernel),
+        };
+        let chain = RpcChain {
+            client: CannedNode(serde_json::to_value(response).unwrap()),
+        };
+
+        let mut driver = Driver::new(Log::default(), 10);
+        assert_eq!(
+            Err(DriverError::Chain(ChainError::Inconsistent(genesis.hash()))),
+            driver.on_block(genesis.hash(), &chain).await
+        );
+        assert_eq!(&Log::default(), driver.state());
+        assert_eq!(None, driver.tip());
     }
 
     /// A driver of depth 1 remembers only the block it applied last: it
