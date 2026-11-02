@@ -683,6 +683,37 @@ mod tests {
             assert!(!msa.can_remove_all(&[covering, covered]));
         }
 
+        #[test]
+        fn shared_last_unset_index_is_reachable_with_honest_additions_and_removals() {
+            // Two items whose index sets share one index, with every other
+            // index of both set: each passes the per-record check, and the
+            // batch refuses them.
+            use rand::rngs::StdRng;
+            use rand::SeedableRng;
+
+            let (msa, spends) =
+                two_items_sharing_their_only_unset_index(&mut StdRng::seed_from_u64(0));
+            let records = spends
+                .iter()
+                .map(|(item, membership_proof)| msa.drop(*item, membership_proof))
+                .collect_vec();
+            let unset = |record: &RemovalRecord| {
+                record
+                    .absolute_indices
+                    .iter()
+                    .filter(|&index| !msa.index_is_set(record, index))
+                    .collect_vec()
+            };
+            let [first, second] = records.as_slice() else {
+                panic!("two items");
+            };
+            assert_eq!(1, unset(first).len());
+            assert_eq!(unset(first), unset(second));
+            assert!(msa.can_remove(first));
+            assert!(msa.can_remove(second));
+            assert!(!msa.can_remove_all(&records));
+        }
+
         #[proptest]
         fn missing_chunk_dictionary_entry_small(
             #[strategy((1u64)..=(u64::from(u8::MAX)))] _num_leafs_aocl: u64,

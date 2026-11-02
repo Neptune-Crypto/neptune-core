@@ -72,7 +72,8 @@ pub enum BlockValidationError {
     #[error("all removal records must be unique")]
     RemovalRecordsUniqueness,
     ///   2.d) Verify that the mutator set update induced by the block
-    ///        is possible
+    ///        is possible. Subsumed by 2.b: each removal record has an index
+    ///        unset before the block, so the update is allowed. Never returned.
     #[error("mutator set update must be possible")]
     MutatorSetUpdateImpossible,
     ///   2.e) Verify that the mutator set update induced by the block sends

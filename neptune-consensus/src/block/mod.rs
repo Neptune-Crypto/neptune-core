@@ -1009,13 +1009,10 @@ impl Block {
             &msa_before,
         )
         .map(|after_removals| after_removals.hash());
-        let mut msa = msa_before;
-        let ms_update_result = mutator_set_update.apply_to_accumulator(&mut msa);
 
         // 2.d)
-        if ms_update_result.is_err() {
-            return Err(BlockValidationError::MutatorSetUpdateImpossible);
-        };
+        let mut msa = msa_before;
+        mutator_set_update.apply_to_accumulator_unsafe(&mut msa);
 
         // 2.e)
         if msa.hash() != self.body().mutator_set_accumulator.hash() {
@@ -1858,10 +1855,24 @@ mod test_support {
         /// The mutator set after it contains only the genesis outputs, so the
         /// archival mutator set is known.
         pub fn fake_genesis_at_height(network: Network, height: BlockHeight) -> Self {
+            let mutator_set = Self::genesis(network)
+                .body()
+                .mutator_set_accumulator
+                .clone();
+            Self::fake_genesis_at_height_with_mutator_set(network, height, mutator_set)
+        }
+
+        /// As [`Self::fake_genesis_at_height`], with this mutator set in its
+        /// body.
+        pub fn fake_genesis_at_height_with_mutator_set(
+            network: Network,
+            height: BlockHeight,
+            mutator_set: MutatorSetAccumulator,
+        ) -> Self {
             let genesis = Self::genesis(network);
             let body = BlockBody::new(
                 genesis.body().transaction_kernel.clone(),
-                genesis.body().mutator_set_accumulator.clone(),
+                mutator_set,
                 genesis.body().lock_free_mmr_accumulator.clone(),
                 block_mmra_with_num_leafs(height.value(), vec![]),
             );
@@ -2203,6 +2214,103 @@ pub(crate) mod tests {
         let (required, sample_claim) = required_claims(Network::RegTest);
         assert!(!required.contains(&sample_claim));
         assert_eq!(3, required.len());
+    }
+
+    #[test]
+    fn inputs_sharing_their_only_unset_index_are_accepted() {
+        // Two inputs whose only unset indices coincide: each is a first spend
+        // on its own, which rule 2.b and the proven rules accept, though
+        // together they have no index that only one of them sets.
+        use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
+        use neptune_mutator_set::shared::BATCH_SIZE;
+        use neptune_mutator_set::test_shared::two_items_sharing_their_only_unset_index;
+        use rand::rngs::StdRng;
+        use rand::SeedableRng;
+
+        use crate::consensus_rule_set::BLOCK_HEIGHT_HARDFORK_DELTA_MAIN_NET;
+        use crate::consensus_rule_set::BLOCK_HEIGHT_SOFTFORK_EPSILON_MAIN_NET;
+        use crate::transaction::test_helpers::make_mock_transaction_with_mutator_set_hash_and_timestamp;
+
+        let network = Network::Main;
+        let (mutator_set, spends) =
+            two_items_sharing_their_only_unset_index(&mut StdRng::seed_from_u64(0));
+        for parent_height in [
+            BLOCK_HEIGHT_HARDFORK_DELTA_MAIN_NET,
+            BLOCK_HEIGHT_SOFTFORK_EPSILON_MAIN_NET.previous().unwrap(),
+        ] {
+            let mut parent = Block::fake_genesis_at_height_with_mutator_set(
+                network,
+                parent_height,
+                mutator_set.clone(),
+            );
+            // The items' index sets lie above the first window, so their
+            // possible AOCL range starts a batch past leaf zero: spending
+            // them calls for no lustration under this threshold.
+            let counter = parent.header().pow.lustration_status().unwrap().counter;
+            parent
+                .kernel_mut()
+                .header
+                .pow
+                .set_lustration_status(LustrationStatus {
+                    counter,
+                    max_lustrating_aocl_leaf_index: u64::from(BATCH_SIZE) - 1,
+                });
+
+            // The parent's guesser fee outputs follow the items; their
+            // membership proofs must know.
+            let mut after_parent = mutator_set.clone();
+            let mut spends = spends.clone();
+            for addition_record in parent.guesser_fee_addition_records().unwrap() {
+                let items = spends.iter().map(|(item, _)| *item).collect_vec();
+                MsMembershipProof::batch_update_from_addition(
+                    &mut spends
+                        .iter_mut()
+                        .map(|(_, membership_proof)| membership_proof)
+                        .collect_vec(),
+                    &items,
+                    &after_parent,
+                    &addition_record,
+                )
+                .unwrap();
+                after_parent.add(&addition_record);
+            }
+            assert_eq!(
+                parent.mutator_set_accumulator_after().unwrap().hash(),
+                after_parent.hash()
+            );
+            let inputs = spends
+                .iter()
+                .map(|(item, membership_proof)| after_parent.drop(*item, membership_proof))
+                .collect_vec();
+            assert!(inputs.iter().all(|input| after_parent.can_remove(input)));
+            assert!(!after_parent.can_remove_all(&inputs));
+
+            let timestamp = parent.header().timestamp + Timestamp::hours(1);
+            let transaction = make_mock_transaction_with_mutator_set_hash_and_timestamp(
+                inputs,
+                vec![],
+                after_parent.hash(),
+                timestamp,
+            );
+            let mut block = Block::block_template_invalid_proof(
+                &parent,
+                BlockTransaction::upgrade(transaction),
+                timestamp,
+                None,
+                network,
+            );
+            block.set_appendix(BlockAppendix::new(BlockAppendix::mock_consensus_claims(
+                block.body(),
+                &parent,
+                network,
+            )));
+
+            assert_eq!(
+                Ok(()),
+                block.validate_without_proof(&parent, timestamp, network),
+                "parent at height {parent_height}"
+            );
+        }
     }
 
     /// The SWBF root claim about the block's transaction on the mutator set

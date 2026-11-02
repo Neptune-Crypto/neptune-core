@@ -162,21 +162,8 @@ where
                     chunks[position].contains((index % u128::from(CHUNK_SIZE)) as u32)
                 }
             };
-            let mut multiplicity: HashMap<u128, u32> = HashMap::new();
-            for index in index_sets.iter().flat_map(|index_set| index_set.iter()) {
-                *multiplicity.entry(index).or_default() += 1;
-            }
 
-            let already_set = |index_set: &AbsoluteIndexSet| {
-                let mut own: HashMap<u128, u32> = HashMap::new();
-                for index in index_set.iter() {
-                    *own.entry(index).or_default() += 1;
-                }
-                !own.into_iter()
-                    // If just *one* index was not set, and touched only by this
-                    // index set, then it's not a double spend.
-                    .any(|(index, own_count)| multiplicity[&index] == own_count && !is_set(index))
-            };
+            let already_set = |index_set: &AbsoluteIndexSet| index_set.iter().all(&is_set);
             if let Some(double_spend) = index_sets.iter().find(|index_set| already_set(index_set)) {
                 return Some(*double_spend);
             }
@@ -1240,7 +1227,6 @@ mod tests {
 
         assert_eq!(Err(first), ams.batch_remove(&[first]).await);
         assert_eq!(Err(first), ams.batch_remove(&[second, first]).await);
-        assert_eq!(Err(second), ams.batch_remove(&[second, second]).await);
         assert_eq!(after_first, ams.hash().await, "nothing applied");
 
         ams.batch_remove(&[second]).await.unwrap();
