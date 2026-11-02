@@ -835,7 +835,9 @@ impl Block {
     ///
     /// The mutator set after the parent must be provided. Everything else
     /// relating to the parent is read from the block's claim about its
-    /// predecessor.
+    /// predecessor. The claim's rules do not reach below the activation
+    /// height, so the caller must compare the returned info's
+    /// `activation_parent_hash` against the hash it knows.
     pub async fn validate_tip(
         &self,
         parent_mutator_set: &MutatorSetAccumulator,
@@ -880,13 +882,13 @@ impl Block {
         }
 
         let parent_mutator_set = previous_block.mutator_set_accumulator_after()?;
-        let parent_work = PredecessorIsValid::new().parent_work_since_activation(
+        let parent_info = PredecessorIsValid::new().parent_block_info(
             previous_block,
             ConsensusRuleSet::epoch_table(network).activation_height(),
             Block::genesis_digest(network),
         );
         self.validate_except_proof(
-            &ParentBlockInfo::of_block(previous_block, parent_work),
+            &parent_info,
             &parent_mutator_set,
             Some(&previous_block.body().block_mmr_accumulator),
             now,
@@ -2075,13 +2077,13 @@ pub(crate) mod tests {
             network: Network,
         ) -> Result<(), BlockValidationError> {
             let parent_mutator_set = previous_block.mutator_set_accumulator_after()?;
-            let parent_work = PredecessorIsValid::new().parent_work_since_activation(
+            let parent_info = PredecessorIsValid::new().parent_block_info(
                 previous_block,
                 ConsensusRuleSet::epoch_table(network).activation_height(),
                 Block::genesis_digest(network),
             );
             self.validate_except_proof(
-                &ParentBlockInfo::of_block(previous_block, parent_work),
+                &parent_info,
                 &parent_mutator_set,
                 Some(&previous_block.body().block_mmr_accumulator),
                 now,

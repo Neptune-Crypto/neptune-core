@@ -306,6 +306,8 @@ impl From<&PredecessorIsValidWitness> for PredecessorIsValidWitnessMemory {
 ///  - previous block's cumulative proof-of-work
 ///  - previous block's difficulty
 ///  - hash of the mutator set after the previous block
+///  - proof of work since activation
+///  - hash of the latest block below the activation height
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec)]
 pub struct PredecessorIsValid {
     /// Whether to verify the previous block's proof. Only ever false in tests.
@@ -336,12 +338,21 @@ pub struct ParentBlockInfo {
     /// proof of work. A light client compares chains by this value since a
     /// light client cannot trust the value in the block header.
     pub work_since_activation: ProofOfWork,
+
+    /// The hash of the latest block below the activation height of the
+    /// program for predecessor validity. The hash of the block the predecessor
+    /// is valid chain is built on.
+    pub activation_parent_hash: Digest,
 }
 
 impl ParentBlockInfo {
     /// Describe this block as the previous block, with this proof of work
-    /// since activation.
-    pub fn of_block(prev_block: &Block, work_since_activation: ProofOfWork) -> Self {
+    /// since activation and this latest block below activation.
+    pub fn of_block(
+        prev_block: &Block,
+        work_since_activation: ProofOfWork,
+        activation_parent_hash: Digest,
+    ) -> Self {
         let header = prev_block.header();
         // The mutator set the next block's transaction is built on. A
         // previous block whose fee is negative is rejected regardless, so
@@ -358,6 +369,7 @@ impl ParentBlockInfo {
             difficulty: header.difficulty,
             mutator_set_hash: mutator_set_after_prev_block,
             work_since_activation,
+            activation_parent_hash,
         }
     }
 
@@ -375,6 +387,7 @@ impl ParentBlockInfo {
             self.difficulty.encode(),
             self.mutator_set_hash.values().to_vec(),
             self.work_since_activation.encode(),
+            self.activation_parent_hash.values().to_vec(),
         ]
         .concat();
         assert_eq!(
@@ -481,9 +494,15 @@ impl PredecessorIsValid {
         Self::output_mutator_set_offset() + Digest::LEN
     }
 
+    /// Where in the claim's output the hash of the latest block below the
+    /// activation height starts.
+    fn output_activation_parent_offset() -> usize {
+        Self::output_work_since_activation_offset() + ProofOfWork::static_length().unwrap()
+    }
+
     /// Number of words in the claim's output.
     fn output_len() -> usize {
-        Self::output_work_since_activation_offset() + ProofOfWork::static_length().unwrap()
+        Self::output_activation_parent_offset() + Digest::LEN
     }
 
     /// The previous block as a claim's output describes it. None if the
@@ -494,6 +513,7 @@ impl PredecessorIsValid {
         let difficulty_offset = Self::output_difficulty_offset();
         let mutator_set_offset = Self::output_mutator_set_offset();
         let work_offset = Self::output_work_since_activation_offset();
+        let activation_parent_offset = Self::output_activation_parent_offset();
         if output.len() != Self::output_len() {
             return None;
         }
@@ -511,39 +531,55 @@ impl PredecessorIsValid {
             mutator_set_hash: Digest::new(
                 output[mutator_set_offset..work_offset].try_into().unwrap(),
             ),
-            work_since_activation: *ProofOfWork::decode(&output[work_offset..]).ok()?,
+            work_since_activation: *ProofOfWork::decode(
+                &output[work_offset..activation_parent_offset],
+            )
+            .ok()?,
+            activation_parent_hash: Digest::new(
+                output[activation_parent_offset..].try_into().unwrap(),
+            ),
         })
     }
 
-    /// The proof-of-work since activation of this program.
-    ///
-    /// Read from the output of the parent block. Zero if the parent block does
-    /// not contain a claim for this program, or lies below the activation
-    /// height or is genesis.
-    pub fn parent_work_since_activation(
+    /// The previous block as the claim about it describes it: its header's
+    /// values, the mutator set after it, and what its own claim passes on:
+    /// the proof of work since activation, grown by its difficulty, and the
+    /// latest block below activation. A previous block below the activation
+    /// height, or the genesis block, has no claim to pass anything on: its
+    /// work since activation is zero and it is itself the latest block below
+    /// activation. So is a previous block without the claim.
+    pub fn parent_block_info(
         &self,
         prev_block: &Block,
         activation_height: BlockHeight,
         genesis_digest: Digest,
-    ) -> ProofOfWork {
-        if prev_block.header().height < activation_height || prev_block.hash() == genesis_digest {
-            return ProofOfWork::zero();
-        }
-        let input_start = [
-            prev_block.body().mast_hash().reversed().values().to_vec(),
-            vec![prev_block.header().height.into()],
-        ]
-        .concat();
-        prev_block
-            .appendix()
-            .iter()
-            .find(|claim| {
-                claim.program_digest == self.hash() && claim.input.starts_with(&input_start)
-            })
-            .and_then(|claim| Self::parse_output(&claim.output))
-            .map_or_else(ProofOfWork::zero, |parent| {
-                parent.work_since_activation + prev_block.header().difficulty
-            })
+    ) -> ParentBlockInfo {
+        let own_claim = if prev_block.header().height < activation_height
+            || prev_block.hash() == genesis_digest
+        {
+            None
+        } else {
+            let input_start = [
+                prev_block.body().mast_hash().reversed().values().to_vec(),
+                vec![prev_block.header().height.into()],
+                genesis_digest.reversed().values().to_vec(),
+            ]
+            .concat();
+            prev_block
+                .appendix()
+                .iter()
+                .find(|claim| {
+                    claim.program_digest == self.hash() && claim.input.starts_with(&input_start)
+                })
+                .and_then(|claim| Self::parse_output(&claim.output))
+        };
+        let work_since_activation = own_claim.map_or_else(ProofOfWork::zero, |parent| {
+            parent.work_since_activation + prev_block.header().difficulty
+        });
+        let activation_parent_hash =
+            own_claim.map_or_else(|| prev_block.hash(), |parent| parent.activation_parent_hash);
+
+        ParentBlockInfo::of_block(prev_block, work_since_activation, activation_parent_hash)
     }
 
     /// Number of words in the claim's standard-in stream.
@@ -607,12 +643,9 @@ impl PredecessorIsValid {
             genesis_digest,
             epochs,
         );
-        let work_since_activation = self.parent_work_since_activation(
-            prev_block,
-            epochs.activation_height(),
-            genesis_digest,
-        );
-        let output = ParentBlockInfo::of_block(prev_block, work_since_activation).encode();
+        let output = self
+            .parent_block_info(prev_block, epochs.activation_height(), genesis_digest)
+            .encode();
 
         Claim::new(self.hash())
             .with_input(input)
@@ -696,6 +729,9 @@ impl TritonProgram for PredecessorIsValid {
         // claim's output.
         let mutator_set_after_prev_block_alloc = library.kmalloc(Digest::LEN as u32);
         let work_since_activation_alloc = library.kmalloc(DataType::U192.stack_size() as u32);
+        // The hash of the latest block below the activation height, for the
+        // claim's output.
+        let activation_parent_alloc = library.kmalloc(Digest::LEN as u32);
         let new_claim = library.import(Box::new(NewClaim::new(ConsensusRuleSet::HardforkDelta)));
         let generate_single_proof_claim = library.import(Box::new(GenerateSingleProofClaim::new(
             ConsensusRuleSet::HardforkDelta,
@@ -1371,6 +1407,20 @@ impl TritonProgram for PredecessorIsValid {
 
             push {work_since_activation_alloc.write_address()}
             {&DataType::U192.write_value_to_memory_pop_pointer()}
+            // _ *w [prev_block_hash] *prev_claim_output
+        );
+
+        // The last block below activation: what the previous block's claim
+        // sets.
+        // BEFORE: _ *w [prev_block_hash] *prev_claim_output
+        // AFTER:  _ *w [prev_block_hash] *prev_claim_output
+        let activation_parent_prev = triton_asm!(
+            dup 0 addi {Self::output_activation_parent_offset() + Digest::LEN}
+            read_mem {Digest::LEN} pop 1
+            // _ *w [prev_block_hash] *prev_claim_output [activation_parent_hash]
+
+            push {activation_parent_alloc.write_address()}
+            write_mem {Digest::LEN} pop 1
             // _ *w [prev_block_hash] *prev_claim_output
         );
 
@@ -2169,6 +2219,9 @@ impl TritonProgram for PredecessorIsValid {
                 {&work_since_activation_prev}
                 // _ *w [prev_block_hash] *prev_claim_output
 
+                {&activation_parent_prev}
+                // _ *w [prev_block_hash] *prev_claim_output
+
                 call {rule_2t_prev}
                 // _ *w [prev_block_hash] *prev_claim_output
 
@@ -2541,7 +2594,8 @@ impl TritonProgram for PredecessorIsValid {
 
         // The claim's output: the previous block's hash, lustration status,
         // timestamp, cumulative proof-of-work and difficulty, the hash of
-        // the mutator set after it, and the proof of work since activation.
+        // the mutator set after it, the proof of work since activation, and
+        // the hash of the latest block below activation.
         // BEFORE: _ [next_block_body_mh] *w [prev_block_hash]
         // AFTER:  _ [next_block_body_mh]
         let write_output = triton_asm!(
@@ -2564,6 +2618,11 @@ impl TritonProgram for PredecessorIsValid {
             push {work_since_activation_alloc.read_address()}
             {&DataType::U192.read_value_from_memory_pop_pointer()}
             {&DataType::U192.write_value_to_stdout()}
+            // _ [next_block_body_mh]
+
+            push {activation_parent_alloc.read_address()}
+            read_mem {Digest::LEN} pop 1
+            write_io {Digest::LEN}
             // _ [next_block_body_mh]
         );
 
@@ -2702,6 +2761,13 @@ impl TritonProgram for PredecessorIsValid {
             push 0 push 0 push 0 push 0 push 0 push 0
             push {work_since_activation_alloc.write_address()}
             {&DataType::U192.write_value_to_memory_pop_pointer()}
+            // _ [next_block_body_mh] *w [prev_block_hash]
+
+            // Set digest for parent of activation to parent block. Overwritten
+            // by parent's output if parent block is beyond activation.
+            dup 4 dup 4 dup 4 dup 4 dup 4
+            push {activation_parent_alloc.write_address()}
+            write_mem {Digest::LEN} pop 1
             // _ [next_block_body_mh] *w [prev_block_hash]
 
             {&prev_block_epoch_rules_if_activated}
@@ -3038,6 +3104,7 @@ mod tests {
             // program execution.
             let cumulative_pow_size = ProofOfWork::static_length().unwrap();
             let mut work_since_activation = ProofOfWork::zero();
+            let mut activation_parent_hash = prev_block_hash;
             if prev_block_height >= epochs.activation_height() && !prev_block_is_genesis {
                 let prev_minimum_block_time = prev_epoch.minimum_block_time;
                 let prev_target_block_interval = prev_epoch.target_block_interval;
@@ -3124,6 +3191,13 @@ mod tests {
                 )
                 .unwrap();
                 work_since_activation = prev_prev_block_work + witness.prev_block_header.difficulty;
+                let activation_parent_offset = Self::output_activation_parent_offset();
+                activation_parent_hash = Digest::new(
+                    parent_claim.output
+                        [activation_parent_offset..activation_parent_offset + Digest::LEN]
+                        .try_into()
+                        .unwrap(),
+                );
 
                 // 2.t)
                 let mutator_set_offset = Self::output_mutator_set_offset();
@@ -3308,6 +3382,7 @@ mod tests {
             }
             tasm::tasmlib_io_write_to_stdout___digest(mutator_set_after_prev_block.hash());
             tasm::tasmlib_io_write_to_stdout___encoding(work_since_activation);
+            tasm::tasmlib_io_write_to_stdout___digest(activation_parent_hash);
         }
     }
 
@@ -6255,11 +6330,14 @@ ones):
             // contains a claim of this program with a value.
             let earlier_work = ProofOfWork::zero() + Difficulty::from(1_234u32);
             let work_offset = PredecessorIsValid::output_work_since_activation_offset();
+            let work_end = PredecessorIsValid::output_activation_parent_offset();
             let below = random_unproven_block_at_height(0, activation_height().value() - 1);
             let (next_body, next_header) = next_body_and_header(&below, 0);
             assert!(work_of(&below, &next_body, &next_header).is_zero());
             let mut claim = own_claim(&skipping(), &below, &next_body, &next_header);
-            claim.output.splice(work_offset.., earlier_work.encode());
+            claim
+                .output
+                .splice(work_offset..work_end, earlier_work.encode());
             let below = block_solved_by_nonce_search(
                 *below.header(),
                 below.body().clone(),
@@ -6289,7 +6367,9 @@ ones):
                 .cloned()
                 .map(|mut claim| {
                     if claim.program_digest == skipping().hash() {
-                        claim.output.splice(work_offset.., earlier_work.encode());
+                        claim
+                            .output
+                            .splice(work_offset..work_end, earlier_work.encode());
                     }
                     claim
                 })
@@ -6304,6 +6384,79 @@ ones):
             assert_eq!(
                 earlier_work + prev_block.header().difficulty,
                 work_of(&prev_block, &next_body, &next_header)
+            );
+            assert_accepts_with_epochs(&skipping(), &prev_block, &next_body, &next_header, &epochs);
+        }
+
+        /// The claim names the latest block below activation: a previous
+        /// block below activation names itself, one at activation names its
+        /// parent, and one above passes on what its own claim names, which
+        /// is the parent itself when the parent carries no claim.
+        #[test]
+        fn activation_parent_hash_is_the_latest_block_below_activation() {
+            let epochs = epochs();
+            let activation_parent_of =
+                |prev_block: &Block, next_body: &BlockBody, next_header: &BlockHeader| {
+                    let claim = own_claim(&skipping(), prev_block, next_body, next_header);
+                    PredecessorIsValid::parse_output(&claim.output)
+                        .unwrap()
+                        .activation_parent_hash
+                };
+
+            for height_below in [1, 2] {
+                let below =
+                    random_unproven_block_at_height(0, activation_height().value() - height_below);
+                let (next_body, next_header) = next_body_and_header(&below, 0);
+                assert_eq!(
+                    below.hash(),
+                    activation_parent_of(&below, &next_body, &next_header)
+                );
+                assert_accepts_with_epochs(&skipping(), &below, &next_body, &next_header, &epochs);
+            }
+
+            let (prev_block, next_body, next_header) =
+                unproven_prev_block_and_next_body_and_header(0);
+            assert_eq!(
+                fixture_grandparent().hash(),
+                activation_parent_of(&prev_block, &next_body, &next_header)
+            );
+
+            let (prev_block, next_body, next_header) = prev_block_with_transaction_kernel_at_height(
+                transaction_kernel_and_proof().0.clone(),
+                &epochs,
+                activation_height().value() + 1,
+            );
+            assert_eq!(
+                prev_block.header().prev_block_digest,
+                activation_parent_of(&prev_block, &next_body, &next_header)
+            );
+            assert_accepts_with_epochs(&skipping(), &prev_block, &next_body, &next_header, &epochs);
+
+            // Whatever the previous block's own claim names is passed on.
+            let named: Digest = StdRng::seed_from_u64(0).random();
+            let offset = PredecessorIsValid::output_activation_parent_offset();
+            let claims = prev_block
+                .appendix()
+                .claims()
+                .iter()
+                .cloned()
+                .map(|mut claim| {
+                    if claim.program_digest == skipping().hash() {
+                        claim.output.splice(offset.., named.values());
+                    }
+                    claim
+                })
+                .collect();
+            let prev_block = block_solved_by_nonce_search(
+                *prev_block.header(),
+                prev_block.body().clone(),
+                BlockAppendix::new(claims),
+                BlockProof::Invalid,
+            );
+            let (next_body, next_header) = next_body_and_header(&prev_block, 0);
+            assert_eq!(
+                named,
+                activation_parent_of(&prev_block, &next_body, &next_header)
             );
             assert_accepts_with_epochs(&skipping(), &prev_block, &next_body, &next_header, &epochs);
         }
@@ -7318,6 +7471,10 @@ ones):
                 prev_block.mutator_set_accumulator_after().unwrap().hash(),
                 parsed.mutator_set_hash
             );
+            assert_eq!(
+                prev_block.header().prev_block_digest,
+                parsed.activation_parent_hash
+            );
             assert!(PredecessorIsValid::parse_output(&claim.output[1..]).is_none());
         }
 
@@ -7624,6 +7781,6 @@ ones):
 
     test_program_snapshot!(
         PredecessorIsValid::new(),
-        "54e14c7feb71908fc48d46d94e5d79a7ad79938a15297c8fbe39f23561000b188c28b1aae0dceeb5"
+        "53e6b25eb78ad9019464f4ead5da006a5930ebde361341646dba578961a2507b520a524d766a5537"
     );
 }
