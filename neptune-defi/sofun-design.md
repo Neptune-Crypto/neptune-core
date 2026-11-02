@@ -591,9 +591,9 @@ wallet to get right than three independent ones.
 
 **Naming the pair.** The type of a UTXO is determined by the type scripts of its
 coins, so a pair is `(offered type scripts, demanded type
-scripts)`. SOFuN's pair is `{vNPT} → {NativeCurrency, TimeLock}`, where vNPT
-is `V(NativeCurrency, Bearer)`, the vault type script of NPT under the bearer
-rule (§4.11). Another offered asset is another pair with the same body.
+scripts)`. SOFuN's pair is `{vNPT} → {NativeCurrency, TimeLock}`, where
+vNPT is `Vault(NativeCurrency, Bearer)`, the vault type script of NPT under the
+bearer rule (§4.11). Another offered asset is another pair with the same body.
 `pair_id` is the first element of the hash of the two sets, the way a receiver
 id is the first element of a hash of a seed: a filter, and an index. It is not
 authenticated by the body — a consumer that knows the schema recomputes it from
@@ -1442,40 +1442,41 @@ market maker or a wallet.
 
 ### 4.11 Vaults, and vaulted NPT
 
-Fix a type script `B` whose coins carry an amount as their state, and a
-predicate `P` on transactions, the **policy**. The **vault type script**
-`V(B, P)` holds the hashes of `B` and `P` as constants, and its coins carry one
-of two states:
+Fix a type script `TokenType` whose coins carry an amount as their state, and a
+**policy** `Policy`, a predicate on transactions. The **vault type script**
+`Vault(TokenType, Policy)` holds the hashes of `TokenType` and `Policy` as
+constants, and its coins carry one of two states:
 
-- a **token** `token(a)`, with `a` an amount of `B`'s amount type; a UTXO
-  carrying it holds `a` tokens;
+- a **token** `token(a)`, with `a` an amount of `TokenType`'s amount type; a
+  UTXO carrying it holds `a` tokens;
 - a **vault marker** `vault`, which marks the UTXO carrying it.
 
 A **vault** is a UTXO whose lock script is `VaultLockScript`, a program that
-halts on every input, and whose coins are exactly `B(v)` and `V(B, P) vault`.
-`v` is the vault's **holding**. A **vault announcement** of a vault is an
-announcement, under a flag of its own, of the vault's UTXO, sender randomness
-`sr` and receiver preimage `rp`.
+halts on every input, and whose coins are exactly `TokenType(v)` and
+`Vault(TokenType, Policy) vault`. `v` is the vault's **holding**. A **vault
+announcement** of a vault is an announcement, under a flag of its own, of the
+vault's UTXO, sender randomness `sr` and receiver preimage `rp`.
 
 For a transaction, write `Δh` for the holdings of the vaults among its outputs
 less those among its inputs, and `Δt` for the tokens among its outputs less
-those among its inputs. `V(B, P)` accepts a transaction if and only if
+those among its inputs. `Vault(TokenType, Policy)` accepts a transaction if and
+only if
 
 1. every output that carries a vault marker is a vault, and the transaction
    carries a vault announcement of it whose `sr` and `rp` give its addition
    record, `commit(H(utxo), sr, H(rp))`,
 2. every token amount among the outputs is non-negative, and every sum lies in
-   the range of `B`'s amount type,
+   the range of `TokenType`'s amount type,
 3. `Δt ≤ max(0, Δh)`, and
-4. `P` accepts the transaction.
+4. `Policy` accepts the transaction.
 
-**`V` fixes backing and visibility; `P` chooses everything else.** By rule 3 a
-transaction mints no more tokens than it adds to the total holding, so whatever
-`P` is, every token was minted together with a deposit of at least the same
-amount. By rule 1 every vault can be found. Who may create a vault, who may
-spend one, and whether spending one burns tokens are `P`'s to decide. Rule 1 is
-checked on outputs only: every input was the output of an earlier transaction
-on which `V(B, P)` ran.
+**`Vault` fixes backing and visibility; `Policy` chooses everything else.** By
+rule 3 a transaction mints no more tokens than it adds to the total holding, so
+whatever `Policy` is, every token was minted together with a deposit of at least
+the same amount. By rule 1 every vault can be found. Who may create a vault, who
+may spend one, and whether spending one burns tokens are `Policy`'s to decide.
+Rule 1 is checked on outputs only: every input was the output of an earlier
+transaction on which `Vault(TokenType, Policy)` ran.
 
 **The bearer policy.** `Bearer` accepts a transaction if and only if `Δt = Δh`,
 at most one vault is among its inputs, and at most one among its outputs. The
@@ -1493,7 +1494,7 @@ Every transaction changes the total of the tokens and the total holding of the
 vaults by the same amount. Both are zero at genesis, so **the total of the
 tokens equals the total holding of the vaults.** The tokens are a bearer asset:
 whoever holds `z` tokens may withdraw `z` from any vault holding at least `z`,
-and nobody else may. **Vaulted NPT** (vNPT) is `V(NativeCurrency, Bearer)`.
+and nobody else may. **Vaulted NPT** (vNPT) is `Vault(NativeCurrency, Bearer)`.
 
 **Vaults are interchangeable.** No token is tied to a vault. Two transactions
 conflict only if they spend the same vault, a deposit spends none, and a
@@ -1528,36 +1529,39 @@ deposit and withdrawal spends the same UTXO, so the type admits at most one of
 them per block, and a pending one must be rebuilt whenever another is mined
 first.
 
-**Every vault is announced, so every vault can be found.** Spending a UTXO
-needs its item, both randomnesses and its AOCL index. The vault announcement
-supplies the first three, and its block supplies the fourth. Rule 1 makes the
+**Every vault is announced, so every vault can be found.** Spending a UTXO needs
+its item, both randomnesses and its AOCL index. The vault announcement supplies
+the first three, and its block supplies the fourth. Rule 1 makes the
 announcement a condition of validity rather than a courtesy: a vault nobody
 could find would be a holding no token could withdraw. The randomness need not
 stay the same from one vault to the next, since the announcement says what it
-is. `V(B, P)` checks rule 1 against the kernel: it sees the kernel MAST hash
-and the salted outputs, authenticates the outputs and announcements fields
-against the former (`authenticate_txk_field`), and `KernelToOutputs` aligns
-the salted outputs with the kernel's addition records.
+is. `Vault(TokenType, Policy)` checks rule 1 against the kernel: it sees the
+kernel MAST hash and the salted outputs, authenticates the outputs and
+announcements fields against the former (`authenticate_txk_field`), and
+`KernelToOutputs` aligns the salted outputs with the kernel's addition records.
 
-**Other policies.** A `P` may let a vault be spent without burning tokens
+**Other policies.** A `Policy` may let a vault be spent without burning tokens
 equal to the holding withdrawn, under conditions it names, such as a signature
 or an attestation from a named party, and may restrict who creates vaults.
-Vaults are interchangeable, so `P`'s conditions are terms of the asset, not of
-a deposit, and the tokens are backed only as `P` says. `P`'s hash is a constant
-of `V(B, P)`, so `V(B, P)` and `V(B, P′)` are different type scripts and their
-tokens are different assets: a token's type script states every condition
-under which its backing can leave.
+Vaults are interchangeable, so `Policy`'s conditions are terms of the asset, not
+of a deposit, and the tokens are backed only as `Policy` says. `Policy`'s hash
+is a constant of `Vault(TokenType, Policy)`, so `Vault(TokenType, Policy)` and
+`Vault(TokenType, Policy′)` are different type scripts and their tokens are
+different assets: a token's type script states every condition under which its
+backing can leave.
 
-**Why `P` lives in the type script.** The conditions must be fixed by the
+**Why `Policy` lives in the type script.** The conditions must be fixed by the
 token's type, so that its holder knows them, and `Bearer` must see the UTXOs,
-while a lock script sees only addition records (§4.2). `V(B, P)` sees both the
-UTXOs and the kernel, and divines `P`'s witness.
+while a lock script sees only addition records (§4.2).
+`Vault(TokenType, Policy)` sees both the UTXOs and the kernel, and divines
+`Policy`'s witness.
 
-**Why rule 1 fixes the lock script and the coins.** Rule 1 makes `P` the whole
-of the conditions on spending a vault. A vault under a lock script of its
-creator's choosing could be spent only on its creator's terms as well as `P`'s.
-A vault carrying a `TimeLock` coin could be spent by nobody before the release
-date. Either would add a condition that the token's type script does not state.
+**Why rule 1 fixes the lock script and the coins.** Rule 1 makes `Policy` the
+whole of the conditions on spending a vault. A vault under a lock script of its
+creator's choosing could be spent only on its creator's terms as well as
+`Policy`'s. A vault carrying a `TimeLock` coin could be spent by nobody before
+the release date. Either would add a condition that the token's type script does
+not state.
 
 **SOFuN is generic in the offered asset.** The order's lock script constrains
 only the reward (§4.2), and the time-lock rule counts only `NativeCurrency`
@@ -1897,8 +1901,8 @@ any vault.
 - [ ] The fork's activation heights, once known (§5)
 
 ### Phase 2c — vaults and vaulted NPT
-- [ ] `V(B, P)` as a type script generic over `B` and the policy `P`, with
-      vNPT as `V(NativeCurrency, Bearer)` (§4.11)
+- [ ] `Vault(TokenType, Policy)` as a type script generic over `TokenType` and
+      `Policy`, with vNPT as `Vault(NativeCurrency, Bearer)` (§4.11)
 - [ ] Tests: creation, withdrawal, emptying, topping up and transfer
       accepted; tokens minted without a deposit, a withdrawal without a burn,
       tokens minted in a withdrawal, a vNPT transaction spending two vaults or
