@@ -3694,16 +3694,37 @@ mod tests {
         if header.height < activation {
             return vec![];
         }
-        let mutator_set = parent.mutator_set_accumulator_after().unwrap();
         vec![
             PredecessorIsValid::claim_about(&parent, body.mast_hash(), network),
-            KnowsMutatorSet::claim(
-                parent.hash(),
-                &mutator_set,
-                ConsensusRuleSet::knows_mutator_set_activation_height(network),
-                ConsensusRuleSet::infer_from(network, header.height),
-            ),
+            knows_mutator_set_claim(&parent, header.height),
         ]
+    }
+
+    /// The composer's claim to know the mutator set after this parent, for
+    /// a block at this height on it, under Main's rules.
+    fn knows_mutator_set_claim(parent: &Block, height: BlockHeight) -> Claim {
+        let network = Network::Main;
+        KnowsMutatorSet::claim(
+            parent.hash(),
+            &parent.mutator_set_accumulator_after().unwrap(),
+            ConsensusRuleSet::knows_mutator_set_activation_height(network),
+            ConsensusRuleSet::infer_from(network, height),
+        )
+    }
+
+    /// The previous block as the host judges it against its predecessor. A
+    /// proven fixture block cannot carry the composer's mutator set claim,
+    /// which the fixtures cannot prove, so the host sees that claim as data.
+    fn as_host_sees(prev_block: &Block, predecessor: &Block) -> Block {
+        let height = prev_block.header().height;
+        let claim = knows_mutator_set_claim(predecessor, height);
+        if height < activation_height() || prev_block.appendix().find(&claim).is_some() {
+            return prev_block.clone();
+        }
+        let mut block = prev_block.clone();
+        let claims = [prev_block.appendix().claims(), &[claim]].concat();
+        block.set_appendix(BlockAppendix::new(claims));
+        block
     }
 
     /// As [unproven_block], with this SWBF update claim, or none.
@@ -3994,7 +4015,7 @@ mod tests {
         if mirrors_host {
             let predecessor =
                 predecessor_of(prev_block).expect("test case must be built on a block");
-            prev_block
+            as_host_sees(prev_block, &predecessor)
                 .validate_without_proof(&predecessor, prev_block.header().timestamp, Network::Main)
                 .expect("host must accept a previous block the program accepts");
         }
@@ -4091,7 +4112,7 @@ mod tests {
             return;
         };
         let now = prev_block.header().timestamp;
-        let host_error = prev_block
+        let host_error = as_host_sees(prev_block, &predecessor)
             .validate_without_proof(&predecessor, now, Network::Main)
             .err()
             .unwrap_or_else(|| {
@@ -5879,20 +5900,19 @@ ones):
             );
         }
 
+        /// The required claims and as many fillers as the appendix may hold
+        /// in all: too many by the required ones, so that the host reaches
+        /// the size rule.
         #[test]
         fn prev_block_with_too_many_claims_fails() {
             let mut rng = StdRng::seed_from_u64(0);
             let prev_prev_block = random_unproven_block(0);
             let (body, header) = next_body_and_header(&prev_prev_block, 0);
-            let claims = (0..=MAX_NUM_CLAIMS)
+            let fillers = (0..MAX_NUM_CLAIMS)
                 .map(|_| Claim::new(rng.random()))
                 .collect();
-            let prev_block = block(
-                header,
-                body,
-                BlockAppendix::new(claims),
-                BlockProof::Invalid,
-            );
+            let prev_block = unproven_block(header, body, fillers);
+            assert!(prev_block.appendix().len() > MAX_NUM_CLAIMS);
             let (next_body, next_header) = next_body_and_header(&prev_block, 0);
 
             assert_rejects(
