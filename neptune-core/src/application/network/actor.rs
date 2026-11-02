@@ -3450,9 +3450,7 @@ mod tests {
         };
         let mut deadline = Instant::now() + Duration::from_secs(20);
         let mut seen_reservation = false;
-        while let Ok(event) =
-            tokio::time::timeout_at(deadline, observer.select_next_some()).await
-        {
+        while let Ok(event) = tokio::time::timeout_at(deadline, observer.select_next_some()).await {
             match event {
                 SwarmEvent::Behaviour(libp2p::identify::Event::Received { info, .. }) => {
                     for address in &info.listen_addrs {
@@ -3467,8 +3465,7 @@ mod tests {
                     }
                 }
                 SwarmEvent::ConnectionClosed {
-                    num_established: 0,
-                    ..
+                    num_established: 0, ..
                 }
                 | SwarmEvent::OutgoingConnectionError { .. } => {
                     let _ = observer.dial(target.clone());
