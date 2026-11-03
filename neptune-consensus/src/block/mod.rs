@@ -2311,6 +2311,65 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn epsilon_claims_are_required_from_the_activation_height_on() {
+        use crate::consensus_rule_set::BLOCK_HEIGHT_SOFTFORK_EPSILON_MAIN_NET;
+
+        let network = Network::Main;
+        let activation = BLOCK_HEIGHT_SOFTFORK_EPSILON_MAIN_NET;
+        for (parent_height, without_epsilon_claims) in [
+            (activation.checked_sub(2).unwrap(), Ok(())),
+            (
+                activation.previous().unwrap(),
+                Err(BlockValidationError::AppendixMissingClaim),
+            ),
+        ] {
+            let parent = Block::fake_genesis_at_height(network, parent_height);
+            let block = invalid_empty_block(&parent, network);
+            let now = block.header().timestamp;
+            let height = block.header().height;
+            let rule_set = ConsensusRuleSet::infer_from(network, height);
+            let mutator_set = parent.mutator_set_accumulator_after().unwrap();
+            let transaction_claim = BlockAppendix::transaction_validity_claim(
+                block.body().transaction_kernel.mast_hash(),
+                rule_set,
+            );
+            let epsilon_claims = vec![
+                PredecessorIsValid::claim_about(&parent, block.body().mast_hash(), network),
+                KnowsMutatorSet::claim(
+                    parent.hash(),
+                    &mutator_set,
+                    ConsensusRuleSet::knows_mutator_set_activation_height(network),
+                    rule_set,
+                ),
+                SwbfUpdateAggregation::root_claim_without_proofs(
+                    &block.body().transaction_kernel.inputs,
+                    &mutator_set,
+                    rule_set.min_swbf_padded_rows(network),
+                ),
+            ];
+            let check = |claims: Vec<Claim>| {
+                let mut block = block.clone();
+                block.set_appendix(BlockAppendix::new(claims));
+                block.validate_without_proof(&parent, now, network)
+            };
+
+            assert_eq!(
+                without_epsilon_claims,
+                check(vec![transaction_claim.clone()]),
+                "height {height}"
+            );
+
+            // Allow inclusion of epsilon claim before activation. Require it
+            // after.
+            assert_eq!(
+                Ok(()),
+                check([vec![transaction_claim], epsilon_claims].concat()),
+                "height {height}"
+            );
+        }
+    }
+
     /// The SWBF root claim about the block's transaction on the mutator set
     /// after its parent: on the floor, covering the inputs, committing to
     /// them, ending where the removals leave the set.

@@ -434,6 +434,85 @@ async fn blocks_across_epsilon_activation_on_main_net() {
 
 #[traced_test]
 #[tokio::test]
+async fn reorganisation_across_epsilon_activation_on_main_net() {
+    let network = Network::Main;
+    let activation = BLOCK_HEIGHT_SOFTFORK_EPSILON_MAIN_NET;
+    let fake_genesis = Block::fake_genesis_at_height(network, activation.checked_sub(2).unwrap());
+    let mut rng = StdRng::seed_from_u64(55512346);
+    let cli = cli_args::Args {
+        network,
+        tx_proving_capability: Some(TxProvingCapability::SingleProof),
+        ..Default::default()
+    };
+    let mut bob = mock_genesis_global_state_with_block(
+        0,
+        WalletEntropy::new_pseudorandom(rng.random()),
+        cli,
+        fake_genesis.clone(),
+    )
+    .await;
+    // Sets the block as the tip, by rollback where it lies on another
+    // branch, and checks the archival mutator set follows.
+    async fn switch_to(bob: &mut GlobalStateLock, block: &Block) {
+        bob.set_new_tip(block.clone()).await.unwrap();
+        let archival = bob
+            .lock_guard()
+            .await
+            .chain
+            .archival_state()
+            .archival_mutator_set
+            .ams()
+            .accumulator()
+            .await;
+        assert_eq!(
+            block.mutator_set_accumulator_after().unwrap().hash(),
+            archival.hash(),
+            "archival state must follow the tip at height {}",
+            block.header().height
+        );
+    }
+
+    // The last block of delta, then the first epsilon block on the first
+    // branch.
+    let mut now = fake_genesis.header().timestamp + Timestamp::hours(1);
+    let (last_delta_block, _) = mine_to_own_wallet(bob.clone(), now).await;
+    assert_eq!(
+        activation.previous().unwrap(),
+        last_delta_block.header().height
+    );
+    switch_to(&mut bob, &last_delta_block).await;
+    now += Timestamp::hours(1);
+    let (first_a, _) = mine_to_own_wallet(bob.clone(), now).await;
+    assert!(first_a.is_valid(&last_delta_block, now, network).await);
+    switch_to(&mut bob, &first_a).await;
+
+    // Back to the delta block, and two epsilon blocks on the second branch.
+    switch_to(&mut bob, &last_delta_block).await;
+    now += Timestamp::hours(1);
+    let (first_b, _) = mine_to_own_wallet(bob.clone(), now).await;
+    assert_ne!(first_a.hash(), first_b.hash());
+    assert!(first_b.is_valid(&last_delta_block, now, network).await);
+    switch_to(&mut bob, &first_b).await;
+    now += Timestamp::hours(1);
+    let (second_b, _) = mine_to_own_wallet(bob.clone(), now).await;
+    assert!(second_b.is_valid(&first_b, now, network).await);
+    switch_to(&mut bob, &second_b).await;
+
+    // Back to the first branch, two blocks deep across the activation, and
+    // one block further on it.
+    switch_to(&mut bob, &first_a).await;
+    now += Timestamp::hours(1);
+    let (second_a, _) = mine_to_own_wallet(bob.clone(), now).await;
+    assert!(second_a.is_valid(&first_a, now, network).await);
+    switch_to(&mut bob, &second_a).await;
+    assert_eq!(
+        activation.next(),
+        bob.lock_guard().await.chain.tip().header().height
+    );
+}
+
+#[traced_test]
+#[tokio::test]
 async fn lustration_counter_errors() {
     async fn assert_error(mut block: Block, parent: &Block, expected_error: BlockValidationError) {
         let network = Network::RegTest;
