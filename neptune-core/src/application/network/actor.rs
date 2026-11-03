@@ -464,7 +464,11 @@ impl NetworkActor {
         };
 
         // Configure Kademlia
-        let kad_config = libp2p::kad::Config::new(Self::kademlia_protocol(network));
+        // The default 16 KiB packet limit rejects most FIND_NODE responses:
+        // peers behind relays accumulate many circuit addresses, and observed
+        // responses on mainnet reach 50 KB.
+        let mut kad_config = libp2p::kad::Config::new(Self::kademlia_protocol(network));
+        kad_config.set_max_packet_size(256 * 1024);
 
         // Build Swarm
         let upgraded_peers = Arc::new(Mutex::new(HashSet::new()));
@@ -690,6 +694,10 @@ impl NetworkActor {
         let mut check_sticky_peers = tokio::time::interval(Duration::from_secs(30));
 
         loop {
+            // External addresses change both through swarm events and through
+            // direct calls that emit no event, so re-check on every turn.
+            self.update_relay_server_status();
+
             tokio::select! {
                 // Handle libp2p Swarm Events.
                 //
@@ -2548,6 +2556,30 @@ impl NetworkActor {
         }
     }
 
+    /// Serves relay reservations only while some external address is direct.
+    ///
+    /// Left to itself, the relay server serves as soon as it has any external
+    /// address, circuit addresses included. A node reachable only through a
+    /// relay would then grant reservations it cannot honor, since a connection
+    /// arriving over a circuit cannot be extended over another, and its
+    /// reservation replies would carry its circuit address, from which the
+    /// reserving node derives a dead two-hop address and advertises it.
+    fn update_relay_server_status(&mut self) {
+        let directly_reachable = self.swarm.external_addresses().any(|address| {
+            !address
+                .iter()
+                .any(|p| matches!(p, libp2p::multiaddr::Protocol::P2pCircuit))
+        });
+        let status = if directly_reachable {
+            libp2p::relay::Status::Enable
+        } else {
+            libp2p::relay::Status::Disable
+        };
+        if let Some(relay_server) = self.swarm.behaviour_mut().relay_server.as_mut() {
+            relay_server.set_status(Some(status));
+        }
+    }
+
     /// Collects a point-in-time snapshot of the node's network stack.
     ///
     /// This method aggregates data from the internal Swarm behaviors (AutoNAT,
@@ -3309,5 +3341,144 @@ mod tests {
 
         dialer.task.abort();
         reserved.task.abort();
+    }
+
+    /// A node reachable only through a relay cannot relay for others: a
+    /// connection arriving at it over a circuit cannot be extended over a
+    /// second one. Were it to accept reservations anyway, its reservation
+    /// replies would hand out its own circuit address, from which the
+    /// reserving node derives a dead two-hop circuit address.
+    #[tokio::test]
+    async fn node_reachable_only_through_a_relay_serves_no_reservations() {
+        let (_relay, relayed, _relay_address, _circuit) =
+            relay_and_reserved_node(Keypair::generate_ed25519(), None).await;
+
+        // The candidate is directly connected to the relayed node, so it has
+        // a direct address on which it could request a reservation there.
+        let candidate_address = free_localhost_tcp_address();
+        let candidate = TestNode::start(
+            Keypair::generate_ed25519(),
+            vec![candidate_address.clone()],
+            true,
+        )
+        .await;
+        candidate
+            .command(NetworkActorCommand::Listen(candidate_address.clone()))
+            .await;
+        relayed.dial_until_connected(candidate_address, 2).await;
+
+        // The candidate may learn of the relay and reserve there; that is
+        // fine. It must not hold a reservation with the relayed node.
+        let relayed_by = |address: &Multiaddr, relay: PeerId| {
+            address.iter().tuple_windows().any(|(a, b)| {
+                a == libp2p::multiaddr::Protocol::P2p(relay)
+                    && b == libp2p::multiaddr::Protocol::P2pCircuit
+            })
+        };
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            let overview = candidate.overview().await;
+            assert!(
+                !overview
+                    .external_addresses
+                    .iter()
+                    .any(|address| relayed_by(address, relayed.peer_id)),
+                "relayed node granted a reservation: {:?}",
+                overview.external_addresses
+            );
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+
+        candidate.task.abort();
+        relayed.task.abort();
+    }
+
+    /// Regression test for the two-hop circuit addresses seen on mainnet, of
+    /// the form `<relay>/p2p-circuit/p2p/<relayed>/p2p-circuit/p2p/<node>`.
+    /// They are dead, yet Identify and Kademlia spread them, bloating DHT
+    /// responses. An outside observer records everything a node advertises
+    /// while it seeks a relay, with both a public relay and a node reachable
+    /// only through that relay on offer.
+    #[tokio::test]
+    async fn node_never_advertises_a_two_hop_circuit_address() {
+        let (_relay, relayed, _relay_address, _circuit) =
+            relay_and_reserved_node(Keypair::generate_ed25519(), None).await;
+
+        let candidate_address = free_localhost_tcp_address();
+        let candidate = TestNode::start(
+            Keypair::generate_ed25519(),
+            vec![candidate_address.clone()],
+            true,
+        )
+        .await;
+        candidate
+            .command(NetworkActorCommand::Listen(candidate_address.clone()))
+            .await;
+        relayed
+            .dial_until_connected(candidate_address.clone(), 2)
+            .await;
+
+        // The observer speaks only Identify, so the candidate closes the
+        // connection when the handshake times out. Redial whenever it does.
+        let mut observer = libp2p::SwarmBuilder::with_new_identity()
+            .with_tokio()
+            .with_tcp(
+                libp2p::tcp::Config::default(),
+                libp2p::noise::Config::new,
+                libp2p::yamux::Config::default,
+            )
+            .unwrap()
+            .with_behaviour(|key| {
+                libp2p::identify::Behaviour::new(libp2p::identify::Config::new(
+                    NetworkActor::protocol_version(Network::RegTest),
+                    key.public(),
+                ))
+            })
+            .unwrap()
+            .build();
+        let target = candidate_address.with_p2p(candidate.peer_id).unwrap();
+        observer.dial(target.clone()).unwrap();
+
+        // Watch until the candidate advertises a relay reservation, which
+        // shows that the observer sees circuit addresses at all, and then a
+        // little longer to catch any further reservation.
+        let num_circuits = |address: &Multiaddr| {
+            address
+                .iter()
+                .filter(|p| matches!(p, libp2p::multiaddr::Protocol::P2pCircuit))
+                .count()
+        };
+        let mut deadline = Instant::now() + Duration::from_secs(20);
+        let mut seen_reservation = false;
+        while let Ok(event) = tokio::time::timeout_at(deadline, observer.select_next_some()).await {
+            match event {
+                SwarmEvent::Behaviour(libp2p::identify::Event::Received { info, .. }) => {
+                    for address in &info.listen_addrs {
+                        assert!(
+                            num_circuits(address) < 2,
+                            "two-hop circuit address advertised: {address}"
+                        );
+                    }
+                    if !seen_reservation && info.listen_addrs.iter().any(has_circuit) {
+                        seen_reservation = true;
+                        deadline = Instant::now() + Duration::from_secs(3);
+                    }
+                }
+                SwarmEvent::ConnectionClosed {
+                    num_established: 0, ..
+                }
+                | SwarmEvent::OutgoingConnectionError { .. } => {
+                    let _ = observer.dial(target.clone());
+                }
+                _ => {}
+            }
+        }
+        assert!(
+            seen_reservation,
+            "candidate never advertised a relay reservation"
+        );
+
+        candidate.task.abort();
+        relayed.task.abort();
     }
 }
