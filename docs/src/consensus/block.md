@@ -50,7 +50,7 @@ A block is incrementally valid, relative to a predecessor block, iff (all of):
      - f) The current block's cumulative proof-of-work number equals that of the predecessor plus the current block's difficulty. (Before HardforkBeta, the predecessor's difficulty was added instead.)
      - g) The block timestamp is not set further in the future, relative to the host machine's clock, than the futuredating limit, which is 60 seconds.
  1. The block's stand-alone non-transaction data is correct, specifically (all of):
-     - a) The block appendix contains the expected claims. At present, the list of expected claims contains only one item: the claim that the block's transaction is valid.
+     - a) The block appendix contains the expected claims. Before SoftforkEpsilon, the list holds one item: the claim that the block's transaction is valid. From epsilon onwards it also holds the claims that the predecessor is valid, that the composer knows the mutator set, and the root of the SWBF update tree over the block's inputs; see [Succinctness](succinctness.md).
      - b) The block appendix does not contain too many claims. The limit is 500.
      - c) The block proof is of the right type, namely `SingleProof`. (This variant lives on `BlockProof` and is distinct from the like-named variant living on `TransactionProof`.) The alternatives are `Genesis` and `Invalid`.
      - d) The proof passes Triton VM verification. The input for the claim is the block mast hash; the output is the (concatenation of) hashes of claims in the appendix; and the program is the `BlockProgram`. The `BlockProgram` merely proves the integral verification of all claims in the appendix.
@@ -78,6 +78,8 @@ A block is incrementally valid, relative to a predecessor block, iff (all of):
      - s) The lustration counter does not exceed its initial value.
      - t) The transaction's `mutator_set_hash` equals the hash of the mutator set as it was after the predecessor block.
      - u) From HardforkDelta onwards, the transaction is not retired: no retirement announcement carries a retirement timestamp earlier than the block timestamp.
+     - w) From SoftforkEpsilon onwards, the leaf proofs beneath the SWBF update claim total at least the work floor, 2^23 padded rows on main net.
+     - x) From SoftforkEpsilon onwards, the SWBF update claim covers exactly the transaction's inputs, by count and by its commitment to their index sets, and the mutator set it outputs, hash and inactive-SWBF peaks, is the one after all removals have been applied (rule e).
 
 ### C: Mmr Membership
 

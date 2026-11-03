@@ -5,15 +5,19 @@ on `thv/swbfi-tree`. The options a) through i) below are the ones weighed;
 the sections after them record what was built from d) with e1), e'_1) and
 e'_2), with measurements.
 
-## Where we stand (2026-10-09)
+## Where we stand (2026-11-03)
 
 Built in `neptune-consensus`, gated by the epoch table, not activated.
 
 - **d)** `CorrectSwbfUpdate` leaf, `SwbfUpdateAggregation`, trees of any
   height; `PredecessorIsValid` takes an aggregation as the root. Leaf: 50.7k
   processor rows per input at fixture density, 40.8k with empty chunks, RAM
-  45.8k; the composer puts at most 36 inputs in a 2^21 leaf, measured safe
+  45.8k; the composer puts at most 38 inputs in a 2^21 leaf, measured safe
   for an inactive SWBF of 2^27 chunks.
+- **Peaks output** (2026-11-03): leaf and aggregation also output the
+  inactive SWBF's peaks after the removals; `PredecessorIsValid` reads them
+  from the root claim instead of divining them, and a node without chunks
+  can rebuild the mutator set from the claim.
 - **Work floor** `min_swbf_padded_rows`: leaves idle to a height,
   aggregations sum the heights verification binds, claims carry leaf
   positions.
