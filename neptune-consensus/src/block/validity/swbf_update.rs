@@ -7,9 +7,10 @@
 //! segments. Both have the same claim layout, defined by the leaf, so the
 //! root alone says what the whole tree proved: from the mutator set the
 //! block's transaction is built on, removing all its inputs yields the
-//! mutator set the root outputs. The leaves are numbered from the first,
-//! and an aggregation's children must be adjacent in that numbering, so
-//! that no leaf, and no proof, serves twice.
+//! mutator set the root outputs, whose inactive SWBF peaks the root outputs
+//! as well, for verifiers without the chunks. The leaves are numbered from
+//! the first, and an aggregation's children must be adjacent in that
+//! numbering, so that no leaf, and no proof, serves twice.
 //!
 //! The aggregation reads each leaf proof's padded height and sums them up
 //! the tree; `PredecessorIsValid` holds the sum at the root to the epoch's
@@ -65,6 +66,12 @@ pub(super) const OUTPUT_MUTATOR_SET_HASH: usize = 2;
 pub(super) const OUTPUT_LAST_LEAF_INDEX: usize = OUTPUT_MUTATOR_SET_HASH + Digest::LEN;
 pub(super) const OUTPUT_NUM_PEAKS: usize = OUTPUT_LAST_LEAF_INDEX + 1;
 pub(super) const OUTPUT_PEAKS: usize = OUTPUT_NUM_PEAKS + 1;
+// After the index-set peaks: the number of peaks of the inactive SWBF after
+// the removals, then those peaks.
+
+/// The most peaks either list holds: an MMR of up to 2^64 leaves has at
+/// most 64.
+pub(super) const MAX_PEAKS: usize = 64;
 
 /// An SWBF update claim's output taken apart; the same for a leaf and an
 /// aggregation. See [`leaf::CorrectSwbfUpdate`] for the input.
@@ -87,12 +94,16 @@ pub(in crate::block) struct ClaimOutput {
 
     /// The peaks of the MMR over the inputs' index sets.
     pub(in crate::block) peaks: Vec<Digest>,
+
+    /// The peaks of the inactive SWBF after the removals.
+    pub(in crate::block) swbfi_peaks: Vec<Digest>,
 }
 
 impl ClaimOutput {
     /// # Panics
     ///
-    /// - If the output's length does not fit its number of peaks.
+    /// - If the output's length does not fit its numbers of peaks, or a
+    ///   number exceeds [`MAX_PEAKS`].
     /// - If output does not match the output format of the SWBF update tree
     pub(super) fn parse(output: &[BFieldElement]) -> Self {
         Self::try_parse(output).expect("output must have the SWBF update claim's layout")
@@ -101,10 +112,16 @@ impl ClaimOutput {
     /// The output taken apart, if it has the layout.
     pub(in crate::block) fn try_parse(output: &[BFieldElement]) -> Option<Self> {
         let num_peaks = usize::try_from(output.get(OUTPUT_NUM_PEAKS)?.value()).ok()?;
-        let expected_len = Digest::LEN
-            .checked_mul(num_peaks)
-            .and_then(|num_words| num_words.checked_add(OUTPUT_PEAKS))?;
-        if output.len() != expected_len {
+        if num_peaks > MAX_PEAKS {
+            return None;
+        }
+        let num_swbfi_peaks_index = OUTPUT_PEAKS + Digest::LEN * num_peaks;
+        let swbfi_peaks_index = num_swbfi_peaks_index + 1;
+        let num_swbfi_peaks = usize::try_from(output.get(num_swbfi_peaks_index)?.value()).ok()?;
+        if num_swbfi_peaks > MAX_PEAKS {
+            return None;
+        }
+        if output.len() != swbfi_peaks_index + Digest::LEN * num_swbfi_peaks {
             return None;
         }
         let count = u32::try_from(output[OUTPUT_COUNT].value()).ok()?;
@@ -117,7 +134,11 @@ impl ClaimOutput {
                     .unwrap(),
             ),
             last_leaf_index: output[OUTPUT_LAST_LEAF_INDEX],
-            peaks: output[OUTPUT_PEAKS..]
+            peaks: output[OUTPUT_PEAKS..num_swbfi_peaks_index]
+                .chunks(Digest::LEN)
+                .map(|words| Digest::new(words.try_into().unwrap()))
+                .collect(),
+            swbfi_peaks: output[swbfi_peaks_index..]
                 .chunks(Digest::LEN)
                 .map(|words| Digest::new(words.try_into().unwrap()))
                 .collect(),
@@ -143,6 +164,13 @@ impl ClaimOutput {
             vec![bfe!(self.peaks.len() as u64)],
             // Those peaks.
             self.peaks.iter().flat_map(|peak| peak.values()).collect(),
+            // Number of peaks of the inactive SWBF after the removals.
+            vec![bfe!(self.swbfi_peaks.len() as u64)],
+            // Those peaks.
+            self.swbfi_peaks
+                .iter()
+                .flat_map(|peak| peak.values())
+                .collect(),
         ]
         .concat()
     }
@@ -160,7 +188,8 @@ mod tests {
             count: 3,
             mutator_set_hash: Digest::default(),
             last_leaf_index: bfe!(7),
-            peaks: vec![],
+            peaks: vec![Digest::default()],
+            swbfi_peaks: vec![Digest::default(); 2],
         };
         assert_eq!(
             Some(honest.clone()),
@@ -168,10 +197,37 @@ mod tests {
         );
 
         // 5 * num_peaks == 1 mod 2^64, so a one-word tail passes an
-        // unchecked length check.
-        let mut output = honest.encode();
-        output[OUTPUT_NUM_PEAKS] = bfe!(0xCCCC_CCCC_CCCC_CCCD_u64);
-        output.push(bfe!(0));
-        assert_eq!(None, ClaimOutput::try_parse(&output));
+        // unchecked length check, for either count.
+        for count in [OUTPUT_NUM_PEAKS, OUTPUT_PEAKS + Digest::LEN] {
+            let mut output = honest.encode();
+            output[count] = bfe!(0xCCCC_CCCC_CCCC_CCCD_u64);
+            output.push(bfe!(0));
+            assert_eq!(None, ClaimOutput::try_parse(&output));
+        }
+    }
+
+    #[test]
+    fn peak_counts_above_the_cap_are_refused() {
+        let with = |peaks: usize, swbfi_peaks: usize| ClaimOutput {
+            padded_rows: bfe!(0),
+            count: 3,
+            mutator_set_hash: Digest::default(),
+            last_leaf_index: bfe!(7),
+            peaks: vec![Digest::default(); peaks],
+            swbfi_peaks: vec![Digest::default(); swbfi_peaks],
+        };
+        for (peaks, swbfi_peaks) in [(MAX_PEAKS, 0), (0, MAX_PEAKS), (MAX_PEAKS, MAX_PEAKS)] {
+            let output = with(peaks, swbfi_peaks);
+            assert_eq!(
+                Some(output.clone()),
+                ClaimOutput::try_parse(&output.encode())
+            );
+        }
+        for (peaks, swbfi_peaks) in [(MAX_PEAKS + 1, 0), (0, MAX_PEAKS + 1)] {
+            assert_eq!(
+                None,
+                ClaimOutput::try_parse(&with(peaks, swbfi_peaks).encode())
+            );
+        }
     }
 }

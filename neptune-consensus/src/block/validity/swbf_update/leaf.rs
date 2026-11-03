@@ -8,14 +8,17 @@
 //! block proof. Its public input binds the mutator set by hash and its
 //! output the inputs by a commitment to their index sets, so that a verifier
 //! that holds neither the chunks nor the mutator set can still tell what was
-//! proven. The input also carries the leaf's position among the block's
-//! leaves, so that no two leaves of one block share a claim, and no proof
-//! can stand in for two leaves. Light nodes check the tip's update from it
-//! on the host machine, and `PredecessorIsValid` checks the predecessor's
-//! from the predecessor's copy. It is a leaf of the SWBF aggregation tree,
-//! which reads the padded height of its proof, and sums these for all leaf
-//! programs verified in the aggregation tree. This sum is calculated to
-//! remove the incentive to mine empty blocks.
+//! proven. The output also carries the inactive SWBF's peaks after the
+//! removals, which a verifier without the chunks cannot compute and needs
+//! for the mutator set that follows. The input also carries the leaf's
+//! position among the block's leaves, so that no two leaves of one block
+//! share a claim, and no proof can stand in for two leaves. Light nodes
+//! check the tip's update from it on the host machine, and
+//! `PredecessorIsValid` checks the predecessor's from the predecessor's
+//! copy. It is a leaf of the SWBF aggregation tree, which reads the padded
+//! height of its proof, and sums these for all leaf programs verified in the
+//! aggregation tree. This sum is calculated to remove the incentive to mine
+//! empty blocks.
 
 use std::sync::OnceLock;
 use std::time::Instant;
@@ -404,6 +407,8 @@ impl SecretWitness for CorrectSwbfUpdateWitness {
         // - number of peaks in the MMR of the absolute index sets in this leaf
         //   (1 word)
         // - those peaks (5 words each)
+        // - number of peaks of the inactive SWBF after the removals (1 word)
+        // - those peaks (5 words each)
         let mutator_set_after =
             SwbfiPeaksAfterRemovals::apply_removals(&self.packed_inputs(), &self.mutator_set);
         ClaimOutput {
@@ -412,6 +417,7 @@ impl SecretWitness for CorrectSwbfUpdateWitness {
             mutator_set_hash: mutator_set_after.hash(),
             last_leaf_index: self.leaf_index,
             peaks: RemovalIndexCommitment::peaks(&self.inputs),
+            swbfi_peaks: mutator_set_after.swbf_inactive.peaks(),
         }
         .encode()
     }
@@ -453,6 +459,8 @@ impl SecretWitness for CorrectSwbfUpdateWitness {
 /// - the hash of the mutator set after the removals (5 words)
 /// - the last leaf index: the leaf's own, echoed from the input (1 word)
 /// - the number of peaks of the MMR over the inputs' index sets (1 word)
+/// - those peaks (5 words each)
+/// - the number of peaks of the inactive SWBF after the removals (1 word)
 /// - those peaks (5 words each)
 ///
 /// Aggregations of leaves keep this layout, with the first word summing the
@@ -559,13 +567,13 @@ impl TritonProgram for CorrectSwbfUpdate {
             dup 3 {&field!(CorrectSwbfUpdateWitness::tree_heights)}
             dup 4 {&field!(CorrectSwbfUpdateWitness::tree_paths)}
             call {hash_after_removals}
-            // _ *peaks *w [mutator_set_after_removals_hash]
+            // _ *peaks *w *swbfi_peaks' [mutator_set_after_removals_hash]
 
             push {Self::ATTESTED_PADDED_ROWS} write_io 1
-            dup 5 {&field!(CorrectSwbfUpdateWitness::inputs)} read_mem 1 pop 1 write_io 1
+            dup 6 {&field!(CorrectSwbfUpdateWitness::inputs)} read_mem 1 pop 1 write_io 1
             write_io {Digest::LEN}
-            pop 1
-            // _ *peaks
+            place 2 pop 1
+            // _ *swbfi_peaks' *peaks
 
             // The leaf index, which only the claim reads: the last leaf index
             // of a leaf is its own.
@@ -574,10 +582,19 @@ impl TritonProgram for CorrectSwbfUpdate {
             dup 0 read_mem 1 pop 1
             dup 0 write_io 1
             push {Digest::LEN} mul dup 1 add
-            // _ *peaks *peaks_end
+            // _ *swbfi_peaks' *peaks *peaks_end
 
             swap 1 call {write_peaks}
-            // _ *peaks_end *peaks_end
+            // _ *swbfi_peaks' *peaks_end *peaks_end
+
+            pop 2
+            dup 0 read_mem 1 pop 1
+            dup 0 write_io 1
+            push {Digest::LEN} mul dup 1 add
+            // _ *swbfi_peaks' *swbfi_peaks_end
+
+            swap 1 call {write_peaks}
+            // _ *swbfi_peaks_end *swbfi_peaks_end
 
             pop 2
             push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS}
@@ -699,6 +716,7 @@ pub(in crate::block::validity) mod tests {
                 mutator_set_hash: mutator_set_after.hash(),
                 last_leaf_index: tasm::tasmlib_io_read_stdin___bfe(),
                 peaks: index_set_peaks,
+                swbfi_peaks: mutator_set_after.swbf_inactive.peaks(),
             };
             for word in output.encode() {
                 tasm::tasmlib_io_write_to_stdout___bfe(word);
@@ -827,10 +845,16 @@ pub(in crate::block::validity) mod tests {
             assert_eq!(rust_output, tasm_output, "{num_inputs} inputs");
             assert_eq!(witness.output(), tasm_output, "{num_inputs} inputs");
 
-            // The hash is that of the mutator set the archival update
-            // computes.
-            let expected_hash = archival_mutator_set_after(&witness).hash().values();
-            assert_eq!(expected_hash, tasm_output[2..7], "{num_inputs} inputs");
+            // The hash and the inactive SWBF's peaks are those of the
+            // mutator set the archival update computes.
+            let archival = archival_mutator_set_after(&witness);
+            assert_eq!(
+                archival.hash().values(),
+                tasm_output[2..7],
+                "{num_inputs} inputs"
+            );
+            let output = ClaimOutput::parse(&tasm_output);
+            assert_eq!(archival.swbf_inactive.peaks(), output.swbfi_peaks);
         }
     }
 

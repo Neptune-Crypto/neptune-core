@@ -1,9 +1,10 @@
 //! Two SWBF update claims aggregated into one: from the mutator set the
 //! left child starts on, removing both children's inputs yields the
-//! mutator set the right child ends on. The claim has the leaf's input and
-//! output layout, so a tree of aggregations over leaves is bound by its root
-//! alone, and the padded rows of the leaf proofs beneath it, summed in the
-//! output, say how much proving work the root stands on.
+//! mutator set the right child ends on, with the inactive SWBF peaks the
+//! right child outputs. The claim has the leaf's input and output layout,
+//! so a tree of aggregations over leaves is bound by its root alone, and
+//! the padded rows of the leaf proofs beneath it, summed in the output, say
+//! how much proving work the root stands on.
 //!
 //! The children are claims of the leaf program or of this one, and their
 //! proofs are verified here; a leaf's padded height is read from its proof,
@@ -12,7 +13,8 @@
 //! left child outputs, and the right child's first leaf index is the left
 //! child's last plus one, so that no leaf, and no proof, serves twice. The
 //! index sets' digests come as witness; the children's peaks are recomputed
-//! from them, and this claim's over all of them.
+//! from them, and this claim's over all of them. Both children output as
+//! many inactive SWBF peaks, since removals leave its leaf count alone.
 
 use std::future::Future;
 use std::sync::OnceLock;
@@ -34,6 +36,7 @@ use tasm_lib::prelude::TasmObject;
 use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::triton_vm::proof_item::ProofItemVariant;
+use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 use tasm_lib::verifier::vm_proof_iter::dequeue_next_as::DequeueNextAs;
 use tasm_lib::verifier::vm_proof_iter::new::New as NewProofIter;
@@ -49,6 +52,7 @@ use super::ClaimOutput;
 use super::INPUT_FIRST_LEAF_INDEX;
 use super::INPUT_LEN;
 use super::INPUT_MUTATOR_SET_HASH;
+use super::MAX_PEAKS;
 use super::OUTPUT_COUNT;
 use super::OUTPUT_LAST_LEAF_INDEX;
 use super::OUTPUT_MUTATOR_SET_HASH;
@@ -154,6 +158,7 @@ impl SecretWitness for SwbfUpdateAggregationWitness {
         let digests = &self.index_set_digests;
         assert_eq!(left.peaks, DigestPeaks::peaks(&digests[..left.count]));
         assert_eq!(right.peaks, DigestPeaks::peaks(&digests[left.count..]));
+        assert_eq!(left.swbfi_peaks.len(), right.swbfi_peaks.len());
         ClaimOutput {
             padded_rows: Self::child_padded_rows(&self.left_claim, &self.left_proof)
                 + Self::child_padded_rows(&self.right_claim, &self.right_proof),
@@ -161,6 +166,7 @@ impl SecretWitness for SwbfUpdateAggregationWitness {
             mutator_set_hash: right.mutator_set_hash,
             last_leaf_index: right.last_leaf_index,
             peaks: DigestPeaks::peaks(digests),
+            swbfi_peaks: right.swbfi_peaks,
         }
         .encode()
     }
@@ -211,6 +217,7 @@ impl SwbfUpdateAggregation {
             mutator_set_hash: after_removals.hash(),
             last_leaf_index: bfe!(CorrectSwbfUpdate::FIRST_LEAF_INDEX + 1),
             peaks: RemovalIndexCommitment::peaks(inputs),
+            swbfi_peaks: after_removals.swbf_inactive.peaks(),
         };
         Claim::new(Self::new().hash())
             .with_input(CorrectSwbfUpdate::claim_input(
@@ -586,7 +593,33 @@ impl TritonProgram for SwbfUpdateAggregation {
             swap 1 call {write_peaks}
             // _ *w *left_output *right_output *peaks_end *peaks_end
 
-            pop 5
+            pop 2
+            // _ *w *left_output *right_output
+
+            /* The inactive SWBF's peaks after all removals are the right
+               child's; the left child outputs as many, since removals leave
+               the SWBF's leaf count unchanged. */
+            dup 0 addi {1 + OUTPUT_NUM_PEAKS} read_mem 1 pop 1
+            push {Digest::LEN} mul addi {1 + OUTPUT_PEAKS} add
+            // _ *w *left_output *right_swbfi_peaks
+
+            dup 1 addi {1 + OUTPUT_NUM_PEAKS} read_mem 1 pop 1
+            push {Digest::LEN} mul addi {1 + OUTPUT_PEAKS} dup 2 add read_mem 1 pop 1
+            dup 1 read_mem 1 pop 1
+            // _ *w *left_output *right_swbfi_peaks left_num_swbfi_peaks right_num_swbfi_peaks
+
+            eq assert error_id {BlockValidationRule::SwbfUpdateChaining.error_id()}
+            // _ *w *left_output *right_swbfi_peaks
+
+            dup 0 read_mem 1 pop 1
+            dup 0 write_io 1
+            push {Digest::LEN} mul dup 1 add
+            // _ *w *left_output *right_swbfi_peaks *right_swbfi_peaks_end
+
+            swap 1 call {write_peaks}
+            // _ *w *left_output *right_swbfi_peaks_end *right_swbfi_peaks_end
+
+            pop 4
             halt
 
             // A claim of the leaf program or of this one, of the current
@@ -682,13 +715,24 @@ impl TritonProgram for SwbfUpdateAggregation {
                 // Crashes unless the count is a u32.
                 dup 1 addi {1 + OUTPUT_COUNT} read_mem 1 pop 1 pop_count pop 1
 
+                // No MMR has more peaks; crashes unless the count is a u32.
                 dup 1 addi {1 + OUTPUT_NUM_PEAKS} read_mem 1 pop 1
+                push {MAX_PEAKS + 1} dup 1 lt
+                assert error_id {BlockValidationRule::SwbfUpdateChaining.error_id()}
                 // _ *claim_output size num_peaks
 
-                push {Digest::LEN} mul
-                // _ *claim_output size expected_peaks_size
+                push {Digest::LEN} mul addi {1 + OUTPUT_PEAKS}
+                // _ *claim_output size num_swbfi_peaks_offset
 
-                addi {1 + OUTPUT_PEAKS} eq
+                dup 2 dup 1 add read_mem 1 pop 1
+                push {MAX_PEAKS + 1} dup 1 lt
+                assert error_id {BlockValidationRule::SwbfUpdateChaining.error_id()}
+                // _ *claim_output size num_swbfi_peaks_offset num_swbfi_peaks
+
+                push {Digest::LEN} mul addi 1 add
+                // _ *claim_output size expected_claim_output_size
+
+                eq
                 // _ *claim_output (size == expected_claim_output_size)
 
                 assert error_id {BlockValidationRule::SwbfUpdateChaining.error_id()}
@@ -795,6 +839,7 @@ pub(in crate::block::validity) mod tests {
             assert_eq!(left.count + right.count, digests.len());
             assert_eq!(left.peaks, DigestPeaks::peaks(&digests[..left.count]));
             assert_eq!(right.peaks, DigestPeaks::peaks(&digests[left.count..]));
+            assert_eq!(left.swbfi_peaks.len(), right.swbfi_peaks.len());
 
             let padded_rows = SwbfUpdateAggregationWitness::child_padded_rows;
             let output = ClaimOutput {
@@ -804,6 +849,7 @@ pub(in crate::block::validity) mod tests {
                 mutator_set_hash: right.mutator_set_hash,
                 last_leaf_index: right.last_leaf_index,
                 peaks: DigestPeaks::peaks(digests),
+                swbfi_peaks: right.swbfi_peaks,
             };
             for word in output.encode() {
                 tasm::tasmlib_io_write_to_stdout___bfe(word);
@@ -914,10 +960,9 @@ pub(in crate::block::validity) mod tests {
             assert_eq!(bfe!(2 << CHILD_LOG2_PADDED_HEIGHT), parsed.padded_rows);
             assert_eq!(left_size + right_size, parsed.count);
             assert_eq!(bfe!(2), parsed.last_leaf_index);
-            assert_eq!(
-                archival_mutator_set_after(&leaves[1]).hash(),
-                parsed.mutator_set_hash
-            );
+            let archival = archival_mutator_set_after(&leaves[1]);
+            assert_eq!(archival.hash(), parsed.mutator_set_hash);
+            assert_eq!(archival.swbf_inactive.peaks(), parsed.swbfi_peaks);
             let all_inputs = [leaves[0].inputs(), leaves[1].inputs()].concat();
             assert_eq!(
                 RemovalIndexCommitment::peaks(&all_inputs),
@@ -1174,6 +1219,31 @@ pub(in crate::block::validity) mod tests {
     }
 
     #[test]
+    fn children_with_different_swbfi_peak_counts_are_rejected() {
+        let (mut witness, _) = witness_over_leaves(2, 2, 5);
+        let mut left = ClaimOutput::parse(&witness.left_claim.output);
+        assert!(
+            !left.swbfi_peaks.is_empty(),
+            "the fixture must hold SWBF peaks"
+        );
+        left.swbfi_peaks.pop();
+        witness.left_claim.output = left.encode();
+        assert_rejects(&witness, None);
+    }
+
+    #[test]
+    fn child_whose_swbfi_peak_count_is_off_is_rejected() {
+        let (honest, _) = witness_over_leaves(2, 2, 5);
+        let num_peaks = ClaimOutput::parse(&honest.right_claim.output).peaks.len();
+        let count = OUTPUT_PEAKS + Digest::LEN * num_peaks;
+        for off_by in [bfe!(1), -bfe!(1)] {
+            let mut witness = honest.clone();
+            witness.right_claim.output[count] += off_by;
+            assert_rejects(&witness, None);
+        }
+    }
+
+    #[test]
     fn child_counts_beyond_u32_are_rejected() {
         // The two counts still sum to the number of index set digests.
         let (mut witness, _) = witness_over_leaves(2, 2, 5);
@@ -1273,6 +1343,6 @@ pub(in crate::block::validity) mod tests {
 
     test_program_snapshot!(
         SwbfUpdateAggregation::new(),
-        "b8116639afc35511e993b51eb43360290f937975c83e3645cf96da1557e9bdbe20ed7b405196fd6a"
+        "01569443df182bf488ec30ebe92c062ab9b3c68785e048d36145ed9afbe86f8a3d5ce84f64134c05"
     );
 }

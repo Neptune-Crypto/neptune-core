@@ -1006,11 +1006,10 @@ impl Block {
             inputs.clone(),
             self.body().transaction_kernel.outputs.clone(),
         );
-        let hash_after_removals = SwbfiPeaksAfterRemovals::try_apply_removals(
+        let after_removals = SwbfiPeaksAfterRemovals::try_apply_removals(
             &self.body().transaction_kernel.inputs,
             &msa_before,
-        )
-        .map(|after_removals| after_removals.hash());
+        );
 
         // 2.d)
         let mut msa = msa_before;
@@ -1026,7 +1025,7 @@ impl Block {
                 .expect("the SWBF update claim comes last");
             self.validate_swbf_update_claim(
                 swbf_claim,
-                hash_after_removals,
+                after_removals.as_ref(),
                 consensus_rule_set.min_swbf_padded_rows(network),
             )?;
         }
@@ -1298,11 +1297,11 @@ impl Block {
     /// mutator set after its parent, as the program checks it for a parent:
     /// present, with leaf proofs reaching the floor, covering every input,
     /// committing to the inputs' index sets, and ending on the mutator set
-    /// the removals leave.
+    /// the removals leave, with its inactive SWBF peaks.
     fn validate_swbf_update_claim(
         &self,
         shape: &Claim,
-        hash_after_removals: Option<Digest>,
+        after_removals: Option<&MutatorSetAccumulator>,
         min_swbf_padded_rows: u64,
     ) -> Result<(), BlockValidationError> {
         let claim = self
@@ -1323,7 +1322,12 @@ impl Block {
         }
 
         // 2.e)
-        if Some(output.mutator_set_hash) != hash_after_removals {
+        let Some(after_removals) = after_removals else {
+            return Err(BlockValidationError::MutatorSetUpdateIntegrity);
+        };
+        if output.mutator_set_hash != after_removals.hash()
+            || output.swbfi_peaks != after_removals.swbf_inactive.peaks()
+        {
             return Err(BlockValidationError::MutatorSetUpdateIntegrity);
         }
         Ok(())
@@ -2328,8 +2332,7 @@ pub(crate) mod tests {
         assert!(floor > 0);
         let mutator_set = genesis.mutator_set_accumulator_after().unwrap();
         let inputs = &block1.body().transaction_kernel.inputs;
-        let hash_after_removals = SwbfiPeaksAfterRemovals::try_apply_removals(inputs, &mutator_set)
-            .map(|after_removals| after_removals.hash());
+        let after_removals = SwbfiPeaksAfterRemovals::try_apply_removals(inputs, &mutator_set);
         let required = BlockAppendix::consensus_claims(
             block1.body(),
             height,
@@ -2339,7 +2342,7 @@ pub(crate) mod tests {
         );
         let shape = required.last().unwrap();
         let check =
-            |block: &Block| block.validate_swbf_update_claim(shape, hash_after_removals, floor);
+            |block: &Block| block.validate_swbf_update_claim(shape, after_removals.as_ref(), floor);
         let with_claim = |claim: Claim| {
             let mut block = block1.clone();
             block.set_appendix(BlockAppendix::new(vec![claim]));
@@ -2386,6 +2389,14 @@ pub(crate) mod tests {
             Err(BlockValidationError::MutatorSetUpdateIntegrity),
             check(&with_claim(with_output(&other_end)))
         );
+        let other_swbfi_peaks = ClaimOutput {
+            swbfi_peaks: [good.swbfi_peaks.clone(), vec![Digest::default()]].concat(),
+            ..good.clone()
+        };
+        assert_eq!(
+            Err(BlockValidationError::MutatorSetUpdateIntegrity),
+            check(&with_claim(with_output(&other_swbfi_peaks)))
+        );
         let mut truncated = root_claim(&mutator_set, floor);
         truncated.output.pop();
         assert_eq!(
@@ -2428,9 +2439,10 @@ pub(crate) mod tests {
             claim.output = ClaimOutput {
                 padded_rows: bfe!(floor),
                 count: inputs.len(),
-                mutator_set_hash: Digest::default(),
+                mutator_set_hash: mutator_set.hash(),
                 last_leaf_index: bfe!(0),
                 peaks: RemovalIndexCommitment::peaks(inputs),
+                swbfi_peaks: mutator_set.swbf_inactive.peaks(),
             }
             .encode();
             claim
@@ -2438,7 +2450,7 @@ pub(crate) mod tests {
         let check = |claim: Claim| {
             let mut block = block1.clone();
             block.set_appendix(BlockAppendix::new(vec![claim]));
-            block.validate_swbf_update_claim(shape, Some(Digest::default()), floor)
+            block.validate_swbf_update_claim(shape, Some(&mutator_set), floor)
         };
 
         assert_eq!(Ok(()), check(claim_over(&[a.clone(), b])));

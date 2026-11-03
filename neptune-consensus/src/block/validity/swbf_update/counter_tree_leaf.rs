@@ -408,7 +408,7 @@ impl BasicSnippet for CounterTreePeaksAfterRemovals {
 ///
 /// ```text
 /// BEFORE: _ *inputs *mutator_set *counter_paths
-/// AFTER:  _ [mutator_set_hash_after_removals]
+/// AFTER:  _ *swbfi_peaks_after [mutator_set_hash_after_removals]
 /// ```
 #[derive(Debug, Copy, Clone)]
 struct CounterTreeHashAfterRemovals;
@@ -419,7 +419,13 @@ impl BasicSnippet for CounterTreeHashAfterRemovals {
     }
 
     fn return_values(&self) -> Vec<(DataType, String)> {
-        vec![(DataType::Digest, "mutator_set_hash".to_string())]
+        vec![
+            (
+                DataType::List(Box::new(DataType::Digest)),
+                "*swbfi_peaks_after".to_string(),
+            ),
+            (DataType::Digest, "mutator_set_hash".to_string()),
+        ]
     }
 
     fn entrypoint(&self) -> String {
@@ -436,17 +442,18 @@ impl BasicSnippet for CounterTreeHashAfterRemovals {
             {self.entrypoint()}:
                 dup 2 dup 2 dup 2 call {peaks_after_removals}
                 pick 1 pop 1
-                // _ *inputs *mutator_set *swbfi_peaks'
+                dup 0 place 3
+                // _ *swbfi_peaks' *inputs *mutator_set *swbfi_peaks'
 
                 dup 2 dup 2 call {window_after_removals}
-                // _ *inputs *mutator_set *swbfi_peaks' *window'
+                // _ *swbfi_peaks' *inputs *mutator_set *swbfi_peaks' *window'
 
                 dup 2 {&MutatorSetHash::read_components()}
                 pick 5 pop 1
                 pick 5 pop 1
                 pick 6 place 5
                 call {mutator_set_hash_from_components}
-                // _ *inputs *mutator_set [mutator_set_hash_after_removals]
+                // _ *swbfi_peaks' *inputs *mutator_set [mutator_set_hash_after_removals]
 
                 pick 5 pop 1
                 pick 5 pop 1
@@ -641,6 +648,7 @@ impl CounterTreeLeafCase {
             mutator_set_hash: counter_mutator_set_after.hash(),
             last_leaf_index: list.leaf_index(),
             peaks: RemovalIndexCommitment::peaks(inputs),
+            swbfi_peaks: counter_mutator_set_after.swbf_inactive.peaks(),
         }
         .encode();
 
@@ -766,15 +774,22 @@ impl TritonProgram for CounterTreeLeaf {
             dup 1 {&field!(CounterTreeLeafWitness::mutator_set)}
             dup 2 {&field!(CounterTreeLeafWitness::counter_paths)} addi 1
             call {hash_after_removals}
-            // _ *peaks *w [mutator_set_after_removals_hash]
+            // _ *peaks *w *swbfi_peaks' [mutator_set_after_removals_hash]
 
             push {CorrectSwbfUpdate::ATTESTED_PADDED_ROWS} write_io 1
-            dup 5 {&field!(CounterTreeLeafWitness::inputs)} read_mem 1 pop 1 write_io 1
+            dup 6 {&field!(CounterTreeLeafWitness::inputs)} read_mem 1 pop 1 write_io 1
             write_io {Digest::LEN}
-            pop 1
-            // _ *peaks
+            place 2 pop 1
+            // _ *swbfi_peaks' *peaks
 
             read_io 1 write_io 1
+            dup 0 read_mem 1 pop 1
+            dup 0 write_io 1
+            push {Digest::LEN} mul dup 1 add
+            swap 1 call {write_peaks}
+            pop 2
+            // _ *swbfi_peaks'
+
             dup 0 read_mem 1 pop 1
             dup 0 write_io 1
             push {Digest::LEN} mul dup 1 add

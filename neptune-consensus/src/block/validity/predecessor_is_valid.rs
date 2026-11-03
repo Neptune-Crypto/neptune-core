@@ -59,6 +59,7 @@ use super::swbf_update::removal_index_commitment::RemovalIndexCommitment;
 use super::swbf_update::swbfi_peaks_after_removals::SwbfiPeaksAfterRemovals;
 use super::swbf_update::INPUT_FIRST_LEAF_INDEX;
 use super::swbf_update::INPUT_LEN;
+use super::swbf_update::MAX_PEAKS;
 use super::swbf_update::OUTPUT_COUNT;
 use super::swbf_update::OUTPUT_MUTATOR_SET_HASH;
 use super::swbf_update::OUTPUT_NUM_PEAKS;
@@ -1598,12 +1599,21 @@ impl TritonProgram for PredecessorIsValid {
             // The output has the leaf's layout: the padded rows of the leaf
             // proofs beneath the claim, the number of index sets covered, the
             // hash of the mutator set after the removals, the last leaf
-            // index, then the peaks of the MMR over the index sets as a list.
+            // index, then the peaks of the MMR over the index sets as a list,
+            // then the inactive SWBF's peaks after the removals as a list.
             // The leaf proofs must total the epoch's floor, and the claim
             // must cover all inputs, whose peaks are recomputed here.
             dup 0 read_mem 1 pop 1
             dup 1 addi {1 + OUTPUT_NUM_PEAKS} read_mem 1 pop 1
-            push {Digest::LEN} mul addi {OUTPUT_PEAKS} eq
+            push {MAX_PEAKS + 1} dup 1 lt
+            assert error_id {BlockValidationRule::MutatorSetUpdateIntegrity.error_id()}
+            push {Digest::LEN} mul addi {OUTPUT_PEAKS}
+            // _ *w [prev_block_hash] *prev_claim_output *swbf_claim_output len num_swbfi_peaks_index
+
+            dup 2 dup 1 add addi 1 read_mem 1 pop 1
+            push {MAX_PEAKS + 1} dup 1 lt
+            assert error_id {BlockValidationRule::MutatorSetUpdateIntegrity.error_id()}
+            push {Digest::LEN} mul addi 1 add eq
             assert error_id {BlockValidationRule::MutatorSetUpdateIntegrity.error_id()}
             push {prev_epoch_alloc.read_address()} read_mem 1 pop 1
             {&field!(Epoch::min_swbf_padded_rows)} read_mem 1 pop 1 split
@@ -7843,6 +7853,6 @@ ones):
 
     test_program_snapshot!(
         PredecessorIsValid::new(),
-        "5f178fd133578567d46652b08fb60875054c6f9afbc9f9078c927944d554d2599977e6d8d04e7cce"
+        "6cb2fc02314b0eddbf3068f3e372e6d2a853f1fccc688445b8f3b2d8b9cb22fa2123b422e4850f6b"
     );
 }
