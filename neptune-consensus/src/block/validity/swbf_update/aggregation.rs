@@ -781,6 +781,7 @@ pub(in crate::block::validity) mod tests {
     use tasm_lib::triton_vm::proof_item::ProofItem;
     use tasm_lib::triton_vm::proof_stream::ProofStream;
     use tasm_lib::triton_vm::vm::VM;
+    use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
     use super::super::leaf::tests::archival_mutator_set_after;
     use super::super::leaf::tests::chained_witnesses;
@@ -1052,6 +1053,30 @@ pub(in crate::block::validity) mod tests {
                 parsed.mutator_set_hash
             );
         }
+    }
+
+    #[test]
+    fn root_claim_rebuilds_the_mutator_set_without_chunks() {
+        let leaves = chained_witnesses(&[2, 0, 3], 9);
+        let (root, _) = block_on(skipping().tree(&leaves, run_and_placeholder)).unwrap();
+        let parsed = ClaimOutput::parse(&root.output);
+        let parent = leaves[0].mutator_set();
+        let window_start = SwbfiPeaksAfterRemovals::window_start(parent);
+
+        let mut rebuilt = parent.clone();
+        for index in leaves
+            .iter()
+            .flat_map(|leaf| leaf.inputs())
+            .flat_map(|input| input.absolute_indices.to_array())
+            .filter(|&index| index >= window_start)
+        {
+            rebuilt.swbf_active.insert((index - window_start) as u32);
+        }
+        rebuilt.swbf_inactive =
+            MmrAccumulator::init(parsed.swbfi_peaks, parent.swbf_inactive.num_leafs());
+
+        assert_eq!(parsed.mutator_set_hash, rebuilt.hash());
+        assert_eq!(archival_mutator_set_after(leaves.last().unwrap()), rebuilt);
     }
 
     #[test]
