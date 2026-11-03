@@ -36,7 +36,6 @@ use tasm_lib::prelude::TasmObject;
 use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::triton_vm::stark::Stark;
-use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::verifier::own_program_digest::OwnProgramDigest;
 use tasm_lib::verifier::stark_verify::StarkVerify;
@@ -52,16 +51,15 @@ use super::guesser_fee_addition_records::GuesserFeeAdditionRecords;
 use super::meets_threshold::MeetsThreshold;
 use super::mutator_set_hash::MutatorSetHash;
 use super::mutator_set_hash::MutatorSetHashFromComponents;
-use super::mutator_set_update_from_state_hash::MutatorSetUpdateFromStateHash;
+use super::mutator_set_update_from_peaks::MutatorSetUpdateFromPeaks;
 use super::removal_records_are_unique::RemovalRecordsAreUnique;
 use super::swbf_update::leaf::CorrectSwbfUpdate;
 use super::swbf_update::removal_index_commitment::RemovalIndexCommitment;
-use super::swbf_update::swbfi_peaks_after_removals::SwbfiPeaksAfterRemovals;
+use super::swbf_update::window_after_removals::WindowAfterRemovals;
 use super::swbf_update::INPUT_FIRST_LEAF_INDEX;
 use super::swbf_update::INPUT_LEN;
 use super::swbf_update::MAX_PEAKS;
 use super::swbf_update::OUTPUT_COUNT;
-use super::swbf_update::OUTPUT_MUTATOR_SET_HASH;
 use super::swbf_update::OUTPUT_NUM_PEAKS;
 use super::swbf_update::OUTPUT_PADDED_ROWS;
 use super::swbf_update::OUTPUT_PEAKS;
@@ -97,9 +95,6 @@ pub struct PredecessorIsValidWitness {
     prev_block: Block,
     next_block_body: BlockBody,
     prev_block_transaction_mutator_set: MutatorSetAccumulator,
-
-    /// SWBFI peaks after the previous block's removals.
-    prev_block_swbfi_peaks_after_removals: Vec<Digest>,
 }
 
 impl PredecessorIsValidWitness {
@@ -111,28 +106,11 @@ impl PredecessorIsValidWitness {
         next_block_body: &BlockBody,
         prev_block_transaction_mutator_set: MutatorSetAccumulator,
     ) -> Self {
-        // From the kernel's own chunks, where it carries them and they apply;
-        // empty otherwise, to be supplied.
-        let prev_block_swbfi_peaks_after_removals = SwbfiPeaksAfterRemovals::try_apply_removals(
-            &prev_block.body().transaction_kernel.inputs,
-            &prev_block_transaction_mutator_set,
-        )
-        .map(|mutator_set_after| mutator_set_after.swbf_inactive.peaks())
-        .unwrap_or_default();
-
         Self {
             prev_block: prev_block.clone(),
             next_block_body: next_block_body.clone(),
             prev_block_transaction_mutator_set,
-            prev_block_swbfi_peaks_after_removals,
         }
-    }
-
-    /// With these peaks of the inactive SWBF after the previous block's
-    /// removals, for a block whose kernel carries its inputs without chunks.
-    pub fn with_swbfi_peaks_after_removals(mut self, peaks: Vec<Digest>) -> Self {
-        self.prev_block_swbfi_peaks_after_removals = peaks;
-        self
     }
 
     /// Under the network's table.
@@ -192,13 +170,12 @@ impl PredecessorIsValidWitness {
                     prev_block_height.previous().unwrap(),
                 ));
 
-            // 2.a, 2.b, 2.e)
+            // 2.e)
             nondeterminism
                 .individual_tokens
-                .extend(MutatorSetUpdateFromStateHash::divined_tokens(
+                .extend(WindowAfterRemovals::divined_tokens(
                     &self.prev_block.body().transaction_kernel.inputs,
                     &self.prev_block_transaction_mutator_set,
-                    &self.prev_block_swbfi_peaks_after_removals,
                 ));
 
             // 2.o)
@@ -721,7 +698,7 @@ impl TritonProgram for PredecessorIsValid {
         let mutator_set_hash_from_components =
             library.import(Box::new(MutatorSetHashFromComponents));
         let mutator_set_hash = library.import(Box::new(MutatorSetHash));
-        let mutator_set_update = library.import(Box::new(MutatorSetUpdateFromStateHash));
+        let mutator_set_update = library.import(Box::new(MutatorSetUpdateFromPeaks));
         let removal_index_commitment = library.import(Box::new(RemovalIndexCommitment));
         // What the claim to know the mutator set in the previous block's
         // appendix must bind: the previous block's parent, its AOCL and its
@@ -1635,16 +1612,18 @@ impl TritonProgram for PredecessorIsValid {
             pop {Digest::LEN}
             // _ *w [prev_block_hash] *prev_claim_output *swbf_claim_output
 
-            addi {OUTPUT_MUTATOR_SET_HASH + Digest::LEN} read_mem {Digest::LEN} pop 1
-            // _ *w [prev_block_hash] *prev_claim_output [mutator_set_after_removals_hash]
+            // The inactive SWBF's peaks after the removals, from the claim.
+            dup 0 addi {1 + OUTPUT_NUM_PEAKS} read_mem 1 pop 1
+            push {Digest::LEN} mul addi {1 + OUTPUT_PEAKS} add
+            // _ *w [prev_block_hash] *prev_claim_output *swbfi_peaks_after_removals
 
-            dup 11 {&prev_block_txk} {&field!(TransactionKernel::inputs)}
-            dup 12 {&prev_block_txk} {&field!(TransactionKernel::outputs)}
-            dup 13 {&field!(PredecessorIsValidWitnessMemory::prev_block_transaction_mutator_set)}
-            dup 14 {&field!(PredecessorIsValidWitnessMemory::prev_block_body)}
+            dup 7 {&prev_block_txk} {&field!(TransactionKernel::inputs)}
+            dup 8 {&prev_block_txk} {&field!(TransactionKernel::outputs)}
+            dup 9 {&field!(PredecessorIsValidWitnessMemory::prev_block_transaction_mutator_set)}
+            dup 10 {&field!(PredecessorIsValidWitnessMemory::prev_block_body)}
             {&field!(BlockBody::mutator_set_accumulator)}
-            pick 8 pick 8 pick 8 pick 8 pick 8
-            // _ *w [prev_block_hash] *prev_claim_output *inputs *outputs *mutator_set *body_mutator_set [mutator_set_after_removals_hash]
+            pick 4
+            // _ *w [prev_block_hash] *prev_claim_output *inputs *outputs *mutator_set *body_mutator_set *swbfi_peaks_after_removals
 
             call {mutator_set_update}
             // _ *w [prev_block_hash] *prev_claim_output
@@ -2900,6 +2879,7 @@ mod tests {
     use rand::SeedableRng;
     use tasm_lib::triton_vm::execution_trace_profiler::ExecutionTraceProfile;
     use tasm_lib::triton_vm::execution_trace_profiler::VMTableHeights;
+    use tasm_lib::twenty_first::prelude::Mmr;
 
     use super::super::extension_claim::ExtensionClaim;
     use super::super::extension_claim::ExtensionClaimWitness;
@@ -3266,11 +3246,11 @@ mod tests {
                     RemovalIndexCommitment::peaks(&prev_transaction_kernel.inputs),
                     output.peaks
                 );
-                MutatorSetUpdateFromStateHash::verify(
+                MutatorSetUpdateFromPeaks::verify(
                     &prev_transaction_kernel.inputs,
                     &prev_transaction_kernel.outputs,
                     mutator_set,
-                    output.mutator_set_hash,
+                    &output.swbfi_peaks,
                     &witness.prev_block_body.mutator_set_accumulator,
                 );
                 // 1.e)
@@ -3601,37 +3581,9 @@ mod tests {
         (claim, proof.clone())
     }
 
-    /// The inactive SWBF's peaks after the removals of each fixture block that
-    /// carries its inputs without chunks, by the block's hash: what the
-    /// archival mutator set supplies the witness with under e1.
-    fn swbfi_peaks_after_removals() -> &'static std::sync::Mutex<HashMap<Digest, Vec<Digest>>> {
-        static PEAKS: OnceLock<std::sync::Mutex<HashMap<Digest, Vec<Digest>>>> = OnceLock::new();
-        PEAKS.get_or_init(Default::default)
-    }
-
-    fn remember_swbfi_peaks_after_removals(block: &Block, peaks: Vec<Digest>) {
-        swbfi_peaks_after_removals()
-            .lock()
-            .unwrap()
-            .insert(block.hash(), peaks);
-    }
-
-    /// The witness for the previous block, with the peaks from the registry
-    /// if the block carries its inputs without chunks.
+    /// The witness for the previous block.
     fn witness_for(prev_block: &Block, next_body: &BlockBody) -> PredecessorIsValidWitness {
-        let witness = PredecessorIsValidWitness::new(
-            prev_block,
-            next_body,
-            transaction_mutator_set(prev_block),
-        );
-        match swbfi_peaks_after_removals()
-            .lock()
-            .unwrap()
-            .get(&prev_block.hash())
-        {
-            Some(peaks) => witness.with_swbfi_peaks_after_removals(peaks.clone()),
-            None => witness,
-        }
+        PredecessorIsValidWitness::new(prev_block, next_body, transaction_mutator_set(prev_block))
     }
 
     /// Each block a fixture parent has been built on, by its hash.
@@ -4879,11 +4831,6 @@ mod tests {
                 own_claim_with_epochs(&skipping(), &grandparent, &body, &header, &epochs());
             let prev_block =
                 unproven_block_with_swbf_claim(header, body, vec![own_claim], swbf_claim);
-            let peaks =
-                SwbfiPeaksAfterRemovals::apply_removals(&kernel_with_chunks.inputs, &mutator_set)
-                    .swbf_inactive
-                    .peaks();
-            remember_swbfi_peaks_after_removals(&prev_block, peaks);
             let (next_body, next_header) = next_body_and_header_with_transaction(
                 &prev_block,
                 0,
@@ -5335,7 +5282,7 @@ mod tests {
             const MUTATOR_SET_UPDATE_RULES: [&str; 3] = [
                 "neptune_consensus_block_removal_index_commitment",
                 "predecessor_is_valid_find_swbf_claim",
-                "neptune_consensus_block_mutator_set_update_from_state_hash_rule_2e",
+                "neptune_consensus_block_mutator_set_update_from_peaks_rule_2e",
             ];
 
             fn new(profile: &ExecutionTraceProfile) -> Self {
@@ -5496,8 +5443,8 @@ mod tests {
                         "MMR peaks over the inputs' index sets"
                     }
                     "find_swbf_claim" => "find SWBF update claim in appendix",
-                    "neptune_consensus_block_mutator_set_update_from_state_hash_rule_2e" => {
-                        "2.e window, peaks, additions and comparison"
+                    "neptune_consensus_block_mutator_set_update_from_peaks_rule_2e" => {
+                        "2.e window, additions and comparison"
                     }
                     "rule_2q_prev" => "2.q lustration threshold",
                     "rules_2o_2p_2r_prev" => "2.o/2.p/2.r lustration amount and counter",
@@ -7221,9 +7168,15 @@ ones):
         }
 
         #[test]
-        fn prev_block_with_swbf_claim_outputting_other_state_fails() {
+        fn prev_block_with_swbf_claim_outputting_other_peaks_fails() {
             let mut claim = fixture_swbf_claim();
-            claim.output[OUTPUT_MUTATOR_SET_HASH] += bfe!(1);
+            let mut output = ClaimOutput::parse(&claim.output);
+            assert!(
+                !output.swbfi_peaks.is_empty(),
+                "the fixture must hold SWBF peaks"
+            );
+            output.swbfi_peaks[0].0[0] += bfe!(1);
+            claim.output = output.encode();
             let (prev_block, next_body, next_header) = prev_block_with_swbf_claim(Some(claim));
             assert_rejects(
                 &skipping(),
@@ -7853,6 +7806,6 @@ ones):
 
     test_program_snapshot!(
         PredecessorIsValid::new(),
-        "6cb2fc02314b0eddbf3068f3e372e6d2a853f1fccc688445b8f3b2d8b9cb22fa2123b422e4850f6b"
+        "ad13955a71331c1829a67bc7dd4ba5a3e243c537976a82bcd21f8c6a872826ad5acd4f4ab697ca16"
     );
 }

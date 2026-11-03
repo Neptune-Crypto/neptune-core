@@ -36,7 +36,7 @@ pub mod knows_mutator_set;
 mod meets_threshold;
 pub mod mmr_membership;
 mod mutator_set_hash;
-mod mutator_set_update_from_state_hash;
+mod mutator_set_update_from_peaks;
 pub mod predecessor_is_valid;
 mod removal_record_pointers;
 mod removal_records_are_unique;

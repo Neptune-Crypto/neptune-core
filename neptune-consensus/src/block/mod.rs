@@ -146,10 +146,6 @@ pub struct ComposerWitness {
     pub knows_ams: KnowsMutatorSetWitness,
     pub prev_block_transaction_mutator_set: MutatorSetAccumulator,
 
-    /// Peaks of the inactive SWBF after the predecessor's removals, before
-    /// its additions.
-    pub prev_block_swbfi_peaks_after_removals: Vec<Digest>,
-
     /// What the composer proved for an earlier proposal on the same
     /// predecessor, to build on.
     pub previous: Option<ComposerProofs>,
@@ -319,7 +315,6 @@ impl Block {
                     &primitive_witness.predecessor_block,
                     &body,
                     composer_witness.prev_block_transaction_mutator_set,
-                    composer_witness.prev_block_swbfi_peaks_after_removals,
                     triton_vm_job_queue.clone(),
                     proof_job_options.clone(),
                 )
@@ -381,7 +376,6 @@ impl Block {
         predecessor: &Block,
         body: &BlockBody,
         prev_block_transaction_mutator_set: MutatorSetAccumulator,
-        prev_block_swbfi_peaks_after_removals: Vec<Digest>,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<(Claim, Proof)> {
@@ -389,8 +383,7 @@ impl Block {
         let program = PredecessorIsValid::new();
         let claim = PredecessorIsValid::claim_about(predecessor, body.mast_hash(), network);
         let witness =
-            PredecessorIsValidWitness::new(predecessor, body, prev_block_transaction_mutator_set)
-                .with_swbfi_peaks_after_removals(prev_block_swbfi_peaks_after_removals);
+            PredecessorIsValidWitness::new(predecessor, body, prev_block_transaction_mutator_set);
         info!("Proving that the predecessor is valid");
         let proof = ProofBuilder::new()
             .program(program.program())

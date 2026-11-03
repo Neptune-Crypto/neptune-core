@@ -1669,20 +1669,9 @@ impl GlobalState {
             .await
             .unwrap_or_default();
 
-        // Internal nodes of SWBFI MMR after parent removals will agree with
-        // that of tip, which includes both parent removals, and its additions.
-        let prev_block_swbfi_peaks_after_removals = self
-            .chain
-            .archival_state()
-            .archival_mutator_set
-            .ams()
-            .swbf_inactive
-            .peaks_at(prev_block_transaction_mutator_set.swbf_inactive.num_leafs())
-            .await;
         Ok(Some(ComposerWitness {
             knows_ams,
             prev_block_transaction_mutator_set,
-            prev_block_swbfi_peaks_after_removals,
             previous: None,
         }))
     }

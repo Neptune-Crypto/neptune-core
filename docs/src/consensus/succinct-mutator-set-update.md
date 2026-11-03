@@ -255,17 +255,18 @@ requires them of the root claim. Only the root claim goes in the appendix.
 Programs. The leaf is a current-block program, `CorrectSwbfUpdate`: input
 the hash of the mutator set it starts from, output the number of leaves
 and of index sets it covers, the hash of the mutator set after those
-removals, and the peaks. `SwbfUpdateAggregation` has the same input and
-output layout and verifies two children, each a leaf or an aggregation: the
-left child's input is its own, the right child's input is the left's output
-state, and the children's peaks are those of the witnessed digests. The
-root's proof is consumed by the block proof like every appendix claim's.
-`PredecessorIsValid` drops the recomputation and keeps the cheap
-remainder: find the root claim in the predecessor's appendix, check its
-start hash against the recursion's own output, its count against the
-block's inputs and its peaks against those it computes, divine the SWBFI
-peaks after the removals and check them with the window against the output
-hash, apply the additions, compare with the predecessor's body. `solo_validate` does the same binding
+removals, the peaks, and the SWBFI peaks after the removals.
+`SwbfUpdateAggregation` has the same input and output layout and verifies
+two children, each a leaf or an aggregation: the left child's input is its
+own, the right child's input is the left's output state, the children's
+peaks are those of the witnessed digests, and the SWBFI peaks are the
+right child's. The root's proof is consumed by the block proof like every
+appendix claim's. `PredecessorIsValid` drops the recomputation and keeps
+the cheap remainder: find the root claim in the predecessor's appendix,
+check its start hash against the recursion's own output, its count against
+the block's inputs and its peaks against those it computes, take the SWBFI
+peaks after the removals from it, apply the window and the additions,
+compare with the predecessor's body. `solo_validate` does the same binding
 on the host machine for the tip, after verifying the block proof, with the
 parent's accumulator fetched from a peer and checked against the hash the
 recursion outputs. So the tip's update is verified at zero confirmations,
