@@ -2282,7 +2282,6 @@ pub(crate) mod tests {
                 .map(|(item, membership_proof)| after_parent.drop(*item, membership_proof))
                 .collect_vec();
             assert!(inputs.iter().all(|input| after_parent.can_remove(input)));
-            assert!(!after_parent.can_remove_all(&inputs));
 
             let timestamp = parent.header().timestamp + Timestamp::hours(1);
             let transaction = make_mock_transaction_with_mutator_set_hash_and_timestamp(

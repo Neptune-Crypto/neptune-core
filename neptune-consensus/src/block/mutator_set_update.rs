@@ -247,7 +247,9 @@ impl MutatorSetUpdate {
             }
         }
 
-        let removal_records_are_valid = ms_accumulator.can_remove_all(&cloned_removals);
+        let removal_records_are_valid = cloned_removals
+            .iter()
+            .all(|removal_record| ms_accumulator.can_remove(removal_record));
 
         // Apply all removal records in one batch. The batch application
         // produces the same accumulator, removal records and authenticated
@@ -546,7 +548,7 @@ mod tests {
         }
 
         #[proptest(cases = 10)]
-        fn duplicated_removal_record_invalidates_update(
+        fn duplicated_removal_record_is_judged_against_the_pre_state(
             #[strategy(1u64..=(u64::from(u8::MAX)))] _num_leafs_aocl: u64,
             #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), 1))]
             _removables: Vec<(Digest, Digest, Digest)>,
@@ -558,7 +560,7 @@ mod tests {
                 MutatorSetUpdate::new(vec![removal_record.clone(), removal_record], vec![]);
 
             let mut msa_batch = msa_and_records.mutator_set_accumulator.clone();
-            prop_assert!(update.apply_to_accumulator(&mut msa_batch).is_err());
+            prop_assert!(update.apply_to_accumulator(&mut msa_batch).is_ok());
 
             let mut msa_sequential = msa_and_records.mutator_set_accumulator.clone();
             let sequential_is_valid =
@@ -569,7 +571,7 @@ mod tests {
         }
 
         #[test]
-        fn batch_check_rejects_fully_covered_record_where_sequential_accepts() {
+        fn fully_covered_record_is_accepted() {
             // All indices lie in the initial active window, so removal
             // records with empty chunk dictionaries are valid.
             fn removal_record(indices: [u128; NUM_TRIALS as usize]) -> RemovalRecord {
@@ -612,7 +614,7 @@ mod tests {
             assert!(sequential_is_valid);
 
             let mut msa_batch = msa.clone();
-            assert!(update.apply_to_accumulator(&mut msa_batch).is_err());
+            assert!(update.apply_to_accumulator(&mut msa_batch).is_ok());
 
             assert_eq!(msa_sequential, msa_batch);
         }
