@@ -26,6 +26,7 @@ use super::transaction_kernel::TransactionKernelModifier;
 use super::utxo::Utxo;
 use crate::block::mutator_set_update::MutatorSetUpdate;
 use crate::type_scripts::known_type_scripts;
+use crate::type_scripts::known_type_scripts::is_known_type_script;
 use crate::type_scripts::known_type_scripts::match_type_script_and_generate_witness;
 use crate::type_scripts::TypeScriptAndWitness;
 
@@ -392,7 +393,24 @@ impl PrimitiveWitness {
     /// spent in the supplied mutator set update. Otherwise panics. Also
     /// assumes that the lock script witnesses are still valid under the new
     /// mutator set.
-    pub fn update_with_new_ms_data(self, mutator_set_update: MutatorSetUpdate) -> Self {
+    ///
+    /// The update changes the kernel, so every type script witness is
+    /// generated again. This succeeds if and only if every type script of the
+    /// witness is a known type script; the witness of any other type script
+    /// came from the caller, and there is no way to generate it again.
+    pub fn update_with_new_ms_data(
+        self,
+        mutator_set_update: MutatorSetUpdate,
+    ) -> Result<Self, UnknownTypeScript> {
+        if let Some(unknown) = self
+            .type_scripts_and_witnesses
+            .iter()
+            .map(|ts_and_w| ts_and_w.program.hash())
+            .find(|hash| !is_known_type_script(*hash))
+        {
+            return Err(UnknownTypeScript(unknown));
+        }
+
         let mut msa_state: MutatorSetAccumulator = self.mutator_set_accumulator.clone();
         let mut transaction_removal_records: Vec<RemovalRecord> = self.kernel.inputs.clone();
         let mut transaction_removal_records: Vec<&mut RemovalRecord> =
@@ -458,9 +476,14 @@ impl PrimitiveWitness {
             .collect_vec();
         primitive_witness.type_scripts_and_witnesses = type_scripts_and_witnesses;
 
-        primitive_witness
+        Ok(primitive_witness)
     }
 }
+
+/// A type script whose witness only the transaction's creator can generate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("type script {0} is unknown, so its witness cannot be generated again")]
+pub struct UnknownTypeScript(pub Digest);
 
 /// enumerates possible witness validation errors
 #[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize)]
@@ -1847,9 +1870,28 @@ mod tests {
             mined_pw.kernel.inputs.clone(),
             mined_pw.kernel.outputs.clone(),
         );
-        let updated_pw = PrimitiveWitness::update_with_new_ms_data(own_pw, ms_update);
+        let updated_pw = PrimitiveWitness::update_with_new_ms_data(own_pw, ms_update).unwrap();
 
         prop_assert!(updated_pw.validate().await.is_ok());
+    }
+
+    #[test]
+    fn updating_primitive_witness_with_unknown_type_script_fails() {
+        let mut primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(1), 1, 0)
+            .new_tree(&mut TestRunner::deterministic())
+            .unwrap()
+            .current();
+        let unknown = TypeScriptAndWitness::new_with_tokens(triton_program!(halt), vec![]);
+        let unknown_hash = unknown.program.hash();
+        primitive_witness.type_scripts_and_witnesses.push(unknown);
+
+        let ms_update = MutatorSetUpdate::new(vec![], vec![]);
+        assert_eq!(
+            Err(UnknownTypeScript(unknown_hash)),
+            primitive_witness
+                .update_with_new_ms_data(ms_update)
+                .map(|_| ())
+        );
     }
 
     #[traced_test]

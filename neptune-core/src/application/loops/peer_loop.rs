@@ -7786,8 +7786,9 @@ mod tests {
                     .await;
 
                 // Mempool should now contain the unsynced transaction. Tip is block 1.
-                let pw_block1 =
-                    pw_genesis.update_with_new_ms_data(block1.mutator_set_update(network).unwrap());
+                let pw_block1 = pw_genesis
+                    .update_with_new_ms_data(block1.mutator_set_update(network).unwrap())
+                    .unwrap();
                 let tx_synced_to_block1 = upgrade(pw_block1, consensus_rule_set).await;
 
                 let tx_notification: TransactionNotification =

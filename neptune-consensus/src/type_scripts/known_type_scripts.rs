@@ -30,6 +30,10 @@ pub fn match_type_script_and_generate_witness(
     Some(type_script_and_witness)
 }
 
+pub(crate) fn is_known_type_script(type_script_hash: Digest) -> bool {
+    type_script_hash == NativeCurrency.hash() || type_script_hash == TimeLock.hash()
+}
+
 pub(crate) fn is_known_type_script_with_valid_state(coin: &Coin) -> bool {
     NativeCurrency.matches_coin(coin) || TimeLock.matches_coin(coin)
 }

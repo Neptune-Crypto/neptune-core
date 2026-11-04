@@ -106,13 +106,15 @@ mod tests {
                 MempoolUpdateJob::PrimitiveWitness(primitive_witness_update) => {
                     let new_pw = primitive_witness_update
                         .old_primitive_witness
-                        .update_with_new_ms_data(mutator_set_update.clone());
+                        .update_with_new_ms_data(mutator_set_update.clone())
+                        .unwrap();
                     updated_txs.push((new_pw.clone().into(), Some(new_pw)))
                 }
                 MempoolUpdateJob::ProofCollection(primitive_witness_update) => {
                     let new_pw = primitive_witness_update
                         .old_primitive_witness
-                        .update_with_new_ms_data(mutator_set_update.clone());
+                        .update_with_new_ms_data(mutator_set_update.clone())
+                        .unwrap();
                     let pc_job = PrimitiveWitnessToProofCollection {
                         primitive_witness: new_pw.clone(),
                     };

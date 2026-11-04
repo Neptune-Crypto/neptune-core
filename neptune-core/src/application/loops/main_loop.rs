@@ -265,10 +265,14 @@ impl MainLoopHandler {
                         result.push(MempoolUpdateJobResult::Failure(txid));
                         continue;
                     };
-                    let new_pw = pw_update
+                    let Ok(new_pw) = pw_update
                         .old_primitive_witness
                         .clone()
-                        .update_with_new_ms_data(msa_update);
+                        .update_with_new_ms_data(msa_update)
+                    else {
+                        result.push(MempoolUpdateJobResult::Failure(txid));
+                        continue;
+                    };
                     let upgraded_tx = match &job {
                         MempoolUpdateJob::PrimitiveWitness(_) => Transaction {
                             kernel: new_pw.kernel.clone(),

@@ -753,10 +753,16 @@ impl UpgradeJob {
                             // Since proof collections cannot be updated, we instead update the
                             // primitive witness and create a new job to upgrade the updated
                             // primitive witness to a proof collection.
-                            let new_pw = PrimitiveWitness::update_with_new_ms_data(
+                            let new_pw = match PrimitiveWitness::update_with_new_ms_data(
                                 pw_to_pc.primitive_witness,
                                 ms_update,
-                            );
+                            ) {
+                                Ok(new_pw) => new_pw,
+                                Err(error) => {
+                                    info!("Cannot update the transaction's primitive witness: {error}");
+                                    return;
+                                }
+                            };
                             UpgradeJob::PrimitiveWitnessToProofCollection(
                                 PrimitiveWitnessToProofCollection {
                                     primitive_witness: new_pw,

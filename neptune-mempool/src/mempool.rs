@@ -3535,7 +3535,7 @@ mod tests {
             prop_assume!(!ms_update.is_empty());
 
             let updated_tx =
-                PrimitiveWitness::update_with_new_ms_data(mempool_tx.clone(), ms_update);
+                PrimitiveWitness::update_with_new_ms_data(mempool_tx.clone(), ms_update).unwrap();
 
             let original_tx = into_single_proof_transaction(mempool_tx, size_old_proof);
             let updated_tx = into_single_proof_transaction(updated_tx, size_new_proof);

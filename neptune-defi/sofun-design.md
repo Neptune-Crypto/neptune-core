@@ -1871,6 +1871,9 @@ any vault.
       TimeLock}`, and the order UTXO holding a vNPT token (§4.1, §4.3)
 - [ ] The transaction builder takes type scripts it does not know, with their
       witnesses, from its caller (§4.9)
+- [x] A witness-backed transaction with a type script the node does not know
+      is dropped when the mutator set changes, rather than crashing the node,
+      since only its creator can generate that type script's witness again
 - [ ] The fill pays the order's vNPT to the composer's wallet, and the wallet
       registers vNPT tokens and withdraws from vaults with them (§4.4, §4.9)
 - [x] `ConsensusRuleSet::allows_coinbase_inputs`: true on RegTest, false

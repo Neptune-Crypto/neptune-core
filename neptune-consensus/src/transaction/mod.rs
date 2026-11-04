@@ -240,7 +240,8 @@ impl Transaction {
     ) -> Transaction {
         let mutator_set_update = MutatorSetUpdate::new(new_removal_records, new_addition_records);
         let primitive_witness =
-            PrimitiveWitness::update_with_new_ms_data(old_primitive_witness, mutator_set_update);
+            PrimitiveWitness::update_with_new_ms_data(old_primitive_witness, mutator_set_update)
+                .expect("every type script should be known");
         let kernel = primitive_witness.kernel.clone();
         let witness = TransactionProof::Witness(primitive_witness);
 
