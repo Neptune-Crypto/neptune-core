@@ -123,6 +123,24 @@ impl ActiveWindow {
         self.sbf.sort();
     }
 
+    /// As [`Self::insert`] for each index, sorting once.
+    ///
+    /// # Panics
+    ///
+    /// - if an index is not less than window size
+    pub fn insert_many(&mut self, indices: &[u32]) {
+        for index in indices {
+            assert!(
+                *index < WINDOW_SIZE,
+                "index cannot exceed window size in `insert`. WINDOW_SIZE = {}, got index = {}",
+                WINDOW_SIZE,
+                index
+            );
+        }
+        self.sbf.extend_from_slice(indices);
+        self.sbf.sort();
+    }
+
     pub fn remove(&mut self, index: u32) {
         assert!(
             index < WINDOW_SIZE,

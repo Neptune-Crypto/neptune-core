@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use futures::channel::oneshot;
 use neptune_consensus::block::block_transaction::BlockTransaction;
+use neptune_consensus::block::proof_of_work_puzzle::ProofOfWorkPuzzle;
 use neptune_consensus::block::test_helpers::invalid_block_with_transaction;
 use neptune_consensus::block::validity::block_primitive_witness::BlockPrimitiveWitness;
 use neptune_consensus::block::validity::block_program::BlockProgram;
@@ -10,6 +11,7 @@ use neptune_consensus::block::Block;
 use neptune_consensus::block::BlockProof;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
 use neptune_consensus::proof_abstractions::verifier::cache_true_claims;
 use neptune_consensus::transaction::validity::neptune_proof::Proof;
 use neptune_consensus::transaction::Transaction;
@@ -29,8 +31,10 @@ use crate::api::export::GlobalStateLock;
 use crate::api::export::OutputFormat;
 use crate::application::loops::channel::NewBlockFound;
 use crate::application::loops::mine_loop::compose_block_helper;
+use crate::application::loops::mine_loop::create_block_transaction_from;
 use crate::application::loops::mine_loop::guess_nonce;
 use crate::application::loops::mine_loop::guesser_configuration::GuessingConfiguration;
+use crate::application::loops::mine_loop::TxMergeOrigin;
 use crate::tests::shared::mock_tx::send_coins;
 use crate::tests::shared::Randomness;
 
@@ -58,6 +62,7 @@ pub(crate) async fn next_block(
         TritonVmProofJobOptions::default_with_network(network),
     )
     .await
+    .unwrap()
     .unwrap();
 
     let height = child_no_pow.header().height;
@@ -171,7 +176,7 @@ pub(crate) async fn fake_valid_block_proposal_from_tx(
     let body = primitive_witness.body().to_owned();
     let header = primitive_witness.header(timestamp, network.target_block_interval());
     let (appendix, proof) = {
-        let block_proof_witness = BlockProofWitness::produce(primitive_witness);
+        let block_proof_witness = BlockProofWitness::produce(primitive_witness, vec![]);
         let appendix = block_proof_witness.appendix();
         let consensus_rules = ConsensusRuleSet::infer_from(network, header.height);
         let claim = BlockProgram::claim(&body, &appendix, consensus_rules);
@@ -193,7 +198,13 @@ async fn fake_valid_block_from_block_tx_for_tests(
 
     let block_height = block.header().height;
     let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height);
-    block.satisfy_pow(predecessor.header().difficulty, consensus_rule_set);
+    let difficulty = if consensus_rule_set.use_parent_difficulty() {
+        predecessor.header().difficulty
+    } else {
+        block.header().difficulty
+    };
+    let pow = ProofOfWorkPuzzle::new(block.clone(), difficulty).solve(consensus_rule_set);
+    block.set_header_pow(pow);
 
     block
 }
@@ -268,6 +279,62 @@ pub async fn fake_block_successor_with_merged_tx(
     } else {
         fake_valid_block_proposal_from_tx(predecessor, block_tx, network).await
     }
+}
+
+/// Compose a block on the node's tip that confirms these transactions and
+/// nothing from the mempool, as the node's composer would, and guess it as
+/// [`guess_for_tests`] does.
+pub(crate) async fn compose_and_guess_for_tests(
+    state: &GlobalStateLock,
+    txs: Vec<Transaction>,
+    timestamp: Timestamp,
+) -> Block {
+    let predecessor = state.lock_guard().await.chain.tip().to_owned();
+    let job_options = TritonVmProofJobOptions::default_with_network(state.cli().network);
+    let (block_tx, _) = create_block_transaction_from(
+        &predecessor,
+        state.clone(),
+        timestamp,
+        job_options.clone(),
+        TxMergeOrigin::ExplicitList(txs),
+    )
+    .await
+    .unwrap();
+    let witness = state
+        .lock_guard()
+        .await
+        .composer_witness(&predecessor)
+        .await
+        .unwrap();
+    let (mut block, _) = Block::compose(
+        predecessor,
+        block_tx,
+        timestamp,
+        witness,
+        TritonVmJobQueue::get_instance(),
+        job_options,
+    )
+    .await
+    .unwrap();
+    guess_for_tests(&mut block, state).await;
+    block
+}
+
+/// Guess the proposal as the node's guesser would: find a nonce that meets
+/// the difficulty. The node's tip must be the proposal's parent.
+pub(crate) async fn guess_for_tests(proposal: &mut Block, state: &GlobalStateLock) {
+    let network = state.cli().network;
+    let state = state.lock_guard().await;
+    let parent = state.chain.tip();
+    assert_eq!(parent.hash(), proposal.header().prev_block_digest);
+    let rules = ConsensusRuleSet::infer_from(network, proposal.header().height);
+    let difficulty = if rules.use_parent_difficulty() {
+        parent.header().difficulty
+    } else {
+        proposal.header().difficulty
+    };
+    let pow = ProofOfWorkPuzzle::new(proposal.clone(), difficulty).solve(rules);
+    proposal.set_header_pow(pow);
 }
 
 pub(crate) async fn fake_valid_block_proposal_successor_for_test(

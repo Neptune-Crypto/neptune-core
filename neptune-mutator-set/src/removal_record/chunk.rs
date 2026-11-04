@@ -23,22 +23,22 @@ use super::super::shared::CHUNK_SIZE;
 ///  |     |   '------------------- num set indices per removed element
 ///  |     '----------------------- UTXOs per batch
 ///  '----------------------------- num batches that can touch one specific chunk
-const MAX_PACKED_LENGTH: usize = 34561;
-const MAX_UNPACKED_LENGTH: usize = 92160;
+pub const MAX_PACKED_LENGTH: usize = 34561;
+pub const MAX_UNPACKED_LENGTH: usize = 92160;
 
 /// The limits that applied before hardfork delta, when the length indicator
 /// was a single `u12` and no chunk could hold more than 4095 indices.
 ///
 /// (4095 + 1) * 12 / 32 = 1536
-const MAX_PACKED_LENGTH_BEFORE_BIG_CHUNKS: usize = 1536;
-const MAX_UNPACKED_LENGTH_BEFORE_BIG_CHUNKS: usize = 4095;
+pub const MAX_PACKED_LENGTH_BEFORE_BIG_CHUNKS: usize = 1536;
+pub const MAX_UNPACKED_LENGTH_BEFORE_BIG_CHUNKS: usize = 4095;
 
 /// The 12th bit of the first `u12` of a packed [`Chunk`]. It is set iff the
 /// next `u12` is also part of the length indicator. See [`Chunk::pack`].
-const LONG_LENGTH_FLAG: u32 = 1 << 11;
+pub const LONG_LENGTH_FLAG: u32 = 1 << 11;
 
 #[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
-pub(crate) enum ChunkUnpackError {
+pub enum ChunkUnpackError {
     #[error("payload is too large -- packed chunk may not exceed {max} u32s")]
     PayloadTooBig { max: usize },
 
@@ -213,7 +213,7 @@ impl Chunk {
     /// The long form is only produced when `allow_big_chunks` is set.
     /// Otherwise, the length indicator is always a single u12 and no chunk may
     /// hold more than [`MAX_UNPACKED_LENGTH_BEFORE_BIG_CHUNKS`] indices.
-    pub(crate) fn pack(&self, allow_big_chunks: bool) -> Chunk {
+    pub fn pack(&self, allow_big_chunks: bool) -> Chunk {
         if self.relative_indices.is_empty() {
             return Self {
                 relative_indices: vec![],
@@ -280,7 +280,7 @@ impl Chunk {
     }
 
     /// Inverse of [`Self::pack`].
-    pub(crate) fn try_unpack(&self, allow_big_chunks: bool) -> Result<Self, ChunkUnpackError> {
+    pub fn try_unpack(&self, allow_big_chunks: bool) -> Result<Self, ChunkUnpackError> {
         if self.relative_indices.is_empty() {
             return Ok(Self {
                 relative_indices: vec![],
@@ -427,10 +427,12 @@ impl<'a> Arbitrary<'a> for Chunk {
         if relative_indices.iter().any(|index| index.is_err()) {
             return arbitrary::Result::<Chunk>::Err(arbitrary::Error::IncorrectFormat);
         }
+        // Sorted since that how the mutator set keeps its chunks.
         Ok(Chunk {
             relative_indices: relative_indices
                 .into_iter()
                 .map(|i| i.unwrap())
+                .sorted_unstable()
                 .collect_vec(),
         })
     }

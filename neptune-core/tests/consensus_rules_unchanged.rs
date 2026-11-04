@@ -9,6 +9,8 @@ use itertools::Itertools;
 use neptune_archive::archival_state::ArchivalState;
 use neptune_consensus::block::block_header::BlockHeaderWithBlockHashWitness;
 use neptune_consensus::block::validity::block_program::BlockProgram;
+use neptune_consensus::block::validity::difficulty_control::difficulty_control_in_vm;
+use neptune_consensus::block::Block;
 use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_primitives::block_height::BlockHeight;
@@ -336,4 +338,99 @@ async fn ensure_blocks_in_test_data_dir(
     }
 
     test_data_dir
+}
+
+/// The difficulty of every block in a `blk` file, recomputed in Triton VM
+/// from its predecessor.
+async fn assert_difficulty_control_in_vm_agrees_with_blocks(
+    network: Network,
+    sub_dir: Option<&str>,
+    blk_file: &str,
+) {
+    logging::tracing_logger();
+
+    let test_data_dir = ensure_blocks_in_test_data_dir(vec![blk_file], network, sub_dir).await;
+    let block_file_paths = ArchivalState::read_block_file_names_from_directory(&test_data_dir)
+        .unwrap()
+        .into_iter()
+        .filter(|x| x.to_string_lossy().contains(blk_file))
+        .collect_vec();
+    let blocks = ArchivalState::blocks_from_file_without_record(&block_file_paths[0])
+        .await
+        .unwrap();
+
+    // These block files may contain organized-away (not canonical) blocks. So
+    // real parent must be found and not assumed to be the preceding block in
+    // the block list.
+    let previous_of = |block: &Block| {
+        blocks
+            .iter()
+            .find(|candidate| candidate.hash() == block.header().prev_block_digest)
+    };
+    let pairs = blocks
+        .iter()
+        .filter_map(|block| previous_of(block).map(|previous| (previous, block)))
+        .collect_vec();
+    assert!(!pairs.is_empty(), "{blk_file} must hold consecutive blocks");
+
+    for (previous, block) in pairs {
+        let expected = difficulty_control_in_vm(
+            previous.header().difficulty,
+            network.target_block_interval(),
+            previous.header().timestamp,
+            block.header().timestamp,
+            previous.header().height,
+        );
+        assert_eq!(
+            block.header().difficulty,
+            expected,
+            "{network} block {}",
+            block.header().height
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn difficulty_control_in_vm_agrees_with_first_main_net_blocks() {
+    assert_difficulty_control_in_vm_agrees_with_blocks(Network::Main, None, "blk0.dat").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn difficulty_control_in_vm_agrees_with_main_net_blocks_around_hardfork_alpha() {
+    assert_difficulty_control_in_vm_agrees_with_blocks(
+        Network::Main,
+        Some("hf-alpha-validity"),
+        "blk121.dat",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn difficulty_control_in_vm_agrees_with_main_net_blocks_around_hardfork_beta() {
+    assert_difficulty_control_in_vm_agrees_with_blocks(
+        Network::Main,
+        Some("hf-beta-validity"),
+        "blk325.dat",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn difficulty_control_in_vm_agrees_with_main_net_blocks_around_hardfork_gamma() {
+    assert_difficulty_control_in_vm_agrees_with_blocks(
+        Network::Main,
+        Some("hf-gamma-validity"),
+        "blk344.dat",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn difficulty_control_in_vm_agrees_with_testnet0_blocks_around_hardfork_delta() {
+    assert_difficulty_control_in_vm_agrees_with_blocks(
+        Network::Testnet(0),
+        Some("hf-delta-validity"),
+        "blk44.dat",
+    )
+    .await;
 }

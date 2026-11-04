@@ -151,8 +151,10 @@ impl RegTestPrivate {
             let max_kernel_len = consensus_rule_set.max_recommended_block_tx_kernel_size();
             gs.mempool().get_transactions_for_block_composition(
                 consensus_rule_set,
+                network,
                 max_kernel_len,
                 Some(gsl.cli().max_num_compose_mergers.get()),
+                gsl.cli().min_fee_per_swbf_leaf,
             )
         } else {
             vec![]

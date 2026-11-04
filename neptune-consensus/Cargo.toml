@@ -83,6 +83,8 @@ neptune-mutator-set = { version = "0.19.4", path = "../neptune-mutator-set" }
 neptune-primitives = { version = "0.19.4", path = "../neptune-primitives" }
 
 [dev-dependencies]
+futures = "0.3"
+
 # Unit tests in this crate need the optional arbitrary/proptest impls and the
 # test-support constructors. Referencing this crate with the `test-helpers`
 # feature (which enables `arbitrary-impls`) causes feature unification to turn

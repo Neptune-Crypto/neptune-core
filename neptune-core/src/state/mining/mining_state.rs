@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 
 use itertools::Itertools;
+use neptune_consensus::block::block_transaction::BlockTransaction;
+use neptune_consensus::block::ComposerProofs;
 use neptune_wallet::coinbase_distribution::CoinbaseDistribution;
+use neptune_wallet::expected_utxo::ExpectedUtxo;
 use tasm_lib::prelude::Digest;
 use tracing::info;
 
@@ -16,6 +19,16 @@ pub const MAX_NUM_EXPORTED_BLOCK_PROPOSAL_STORED: usize = 10_000;
 #[derive(Debug, Default)]
 struct OverrideCoinbaseSettings {
     coinbase_distribution: Option<CoinbaseDistribution>,
+}
+
+/// What the composer built for its latest proposal, for the next proposal
+/// on the same predecessor to build on.
+#[derive(Debug, Clone)]
+pub(crate) struct ComposerWork {
+    pub(crate) predecessor: Digest,
+    pub(crate) block_transaction: BlockTransaction,
+    pub(crate) composer_utxos: Vec<ExpectedUtxo>,
+    pub(crate) proofs: ComposerProofs,
 }
 
 /// State related to the mining (composing and guessing) of the next block.
@@ -37,6 +50,10 @@ pub struct MiningState {
     /// since when.
     // Only the mining task should write to this, anyone can read.
     pub(crate) mining_status: MiningStatus,
+
+    /// Cached data to make the next block proposal faster. Only the composer
+    /// task writes to this.
+    pub(crate) composer_work: Option<ComposerWork>,
 
     /// Parameters used to override default coinbase behavior. Can e.g. be used
     /// to set a new coinbase distribution for the next block proposal produced

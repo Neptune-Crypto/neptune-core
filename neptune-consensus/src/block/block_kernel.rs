@@ -2,6 +2,7 @@ use get_size2::GetSize;
 use itertools::Itertools;
 use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::commit;
+use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
 use neptune_primitives::mast_hash::HasDiscriminant;
 use neptune_primitives::mast_hash::MastHash;
@@ -35,6 +36,9 @@ pub struct BlockKernel {
 }
 
 impl BlockKernel {
+    /// How long the guesser's reward stays time-locked after the block.
+    pub(crate) const MINER_REWARD_TIME_LOCK_PERIOD: Timestamp = Timestamp::years(3);
+
     pub fn new(header: BlockHeader, body: BlockBody, appendix: BlockAppendix) -> Self {
         Self {
             header,
@@ -54,8 +58,6 @@ impl BlockKernel {
     ///
     /// The genesis block does not have a guesser reward.
     pub fn guesser_fee_utxos(&self) -> Result<Vec<Utxo>, BlockValidationError> {
-        const MINER_REWARD_TIME_LOCK_PERIOD: Timestamp = Timestamp::years(3);
-
         if self.header.height.is_genesis() {
             return Ok(vec![]);
         }
@@ -70,7 +72,7 @@ impl BlockKernel {
         let lock_script_hash = self.header.guesser_receiver_data.lock_script_hash;
         let unlocked_utxo = Utxo::new(lock_script_hash, coins_unlocked);
         let locked_utxo = Utxo::new(lock_script_hash, coins_timelocked)
-            .with_time_lock(self.header.timestamp + MINER_REWARD_TIME_LOCK_PERIOD);
+            .with_time_lock(self.header.timestamp + Self::MINER_REWARD_TIME_LOCK_PERIOD);
 
         Ok(vec![locked_utxo, unlocked_utxo])
     }
@@ -99,6 +101,16 @@ impl BlockKernel {
                 commit(item, sender_randomness, receiver_digest)
             })
             .collect_vec())
+    }
+
+    /// The index sets of the block's inputs.
+    pub fn removal_index_sets(&self) -> Vec<AbsoluteIndexSet> {
+        self.body
+            .transaction_kernel
+            .inputs
+            .iter()
+            .map(|removal_record| removal_record.absolute_indices)
+            .collect()
     }
 
     /// Return the mutator set update, including guesser fee outputs, invoked by

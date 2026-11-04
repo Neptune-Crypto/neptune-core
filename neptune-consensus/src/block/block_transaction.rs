@@ -199,6 +199,52 @@ impl BlockTransaction {
         proof_job_options: TritonVmProofJobOptions,
         consensus_rule_set: ConsensusRuleSet,
     ) -> anyhow::Result<BlockTransaction> {
+        Self::merge_into(
+            coinbase,
+            other,
+            shuffle_seed,
+            true,
+            triton_vm_job_queue,
+            proof_job_options,
+            consensus_rule_set,
+        )
+        .await
+    }
+
+    /// Merge a regular [`Transaction`] into a [`BlockTransaction`], keeping
+    /// the block transaction's inputs first and the other's after them, so
+    /// that an SWBF update tree over the block transaction's inputs extends
+    /// by the other's. Outputs and announcements are shuffled as in
+    /// [`Self::merge`].
+    pub async fn merge_appending(
+        block_transaction: BlockTransaction,
+        other: Transaction,
+        shuffle_seed: [u8; 32],
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
+        proof_job_options: TritonVmProofJobOptions,
+        consensus_rule_set: ConsensusRuleSet,
+    ) -> anyhow::Result<BlockTransaction> {
+        Self::merge_into(
+            block_transaction.into(),
+            other,
+            shuffle_seed,
+            false,
+            triton_vm_job_queue,
+            proof_job_options,
+            consensus_rule_set,
+        )
+        .await
+    }
+
+    async fn merge_into(
+        coinbase: BlockOrRegularTransaction,
+        other: Transaction,
+        shuffle_seed: [u8; 32],
+        shuffle_inputs: bool,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
+        proof_job_options: TritonVmProofJobOptions,
+        consensus_rule_set: ConsensusRuleSet,
+    ) -> anyhow::Result<BlockTransaction> {
         let cb_ts = coinbase.kernel().timestamp;
         let other_ts = other.kernel.timestamp;
         let diff = std::cmp::max(cb_ts, other_ts) - std::cmp::min(cb_ts, other_ts);
@@ -206,8 +252,16 @@ impl BlockTransaction {
             diff <= BoundTimeDiff::MAX_TIMESTAMP_DIFF,
             "Time difference may not be too big when merging with coinbase transactions"
         );
-        let merge_witness =
-            MergeWitness::for_composition(coinbase, other, shuffle_seed, consensus_rule_set);
+        let merge_witness = if shuffle_inputs {
+            MergeWitness::for_composition(coinbase, other, shuffle_seed, consensus_rule_set)
+        } else {
+            MergeWitness::for_composition_appending(
+                coinbase,
+                other,
+                shuffle_seed,
+                consensus_rule_set,
+            )
+        };
         let tx = MergeWitness::merge(
             merge_witness,
             consensus_rule_set,

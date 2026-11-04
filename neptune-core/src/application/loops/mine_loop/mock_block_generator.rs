@@ -42,7 +42,7 @@ impl MockBlockGenerator {
         header.guesser_receiver_data.lock_script_hash = guesser_address.lock_script_hash();
 
         let (appendix, proof) = {
-            let block_proof_witness = BlockProofWitness::produce(primitive_witness);
+            let block_proof_witness = BlockProofWitness::produce(primitive_witness, vec![]);
             let appendix = block_proof_witness.appendix();
             (appendix, BlockProof::SingleProof(Proof::valid_mock()))
         };

@@ -18,6 +18,7 @@ The rule sets below are the ones main net has used since the (balance-preserving
 | HardforkBeta     | hard                       | ~2026-05-13                       | 38,000                              | Removes memory hardness of PoW; adds a lustration barrier to ensure the prior soundness bug did not inflate supply; checks PoW threshold against own difficulty, not parent.      |
 | HardforkGamma    | hard                       | 2026-06-18                        | 40,300                              | Fixes June 2026 soundness bugs in the recursive proof verifier (upstream in `tasm-lib`) and in Triton VM's `sponge_mem_absorb` instruction, along with other under-constrained trace values; restarts the lustration counting, all earlier proofs having been found unsound; rejects transactions backdated by more than three days. |
 | HardforkDelta    | hard                       | ~2026-09-24                       | 55,000                              | Activates transaction chaining: `SingleProof` gains the `Fix` and `Weld` branches, which recursively verify a `LinkProof` and so let a chained transaction (`LinkTx`) become a block-borne transaction. See [Transaction](./transaction.md).      |
+| SoftforkEpsilon  | soft                       | not yet active                    | 62,000                              | Succinct validation: the appendix must also contain the claims that the predecessor is valid, that the composer knows the mutator set, and that the block's removals update the SWBF correctly, the last as a tree of leaf proofs totalling at least 2^23 padded rows. See [Succinctness](./succinctness.md). |
 
 ### Other networks
 
@@ -31,12 +32,13 @@ Test net (`testnet-0`) follows the same sequence of rule sets, at its own height
 | HardforkBeta     | 3,669                               |
 | HardforkGamma    | 4,650                               |
 | HardforkDelta    | 5,400                               |
+| SoftforkEpsilon  | 6,860                               |
 
 Every other network -- `regtest`, `testnet-mock`, and `testnet-`*n* for *n* > 0 -- runs the newest rule set at every height, genesis included, rather than working through the sequence. Whatever a fork introduces is therefore live there from the first block: on those networks a chained transaction can become block-borne long before hardfork delta activates anywhere else. (Lustration is the one thing that cannot start at genesis, so it starts at height 1 instead.)
 
 ### What varies
 
-A rule set is a bundle of individually small decisions. The table below gives the ones that differ; everything not listed is the same under all six.
+A rule set is a bundle of individually small decisions. The table below gives the ones that differ; everything not listed is the same under all seven. SoftforkEpsilon changes none of them, it only adds the three appendix claims and the SWBF work floor.
 
 | | **Reboot** | **Alpha** | **TvmV1** | **Beta** | **Gamma** | **Delta** |
 |---|---|---|---|---|---|---|

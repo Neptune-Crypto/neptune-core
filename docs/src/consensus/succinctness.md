@@ -67,14 +67,12 @@ The predecessor-is-valid claim is present in the appendix as of the latest soft
 fork.
 
 The predecessor-is-valid program performs all checks that were previously done
-only on the host machine except one: authenticating the removal records' chunks
-and authentication structures. This check is still performed on the host machine
-but only incrementally.
-
-The motivation for leaving this check out is a) the concretely high cost of both
-including the chunks and authentication structures in the block and
-authenticating them, and b) an anticipated hard fork that moves them out of the
-block, at least in terms of block size; changes their data structure, saving
-VM cycles; and decomposes the entire authentication task into a PCD tree,
-enabling parallelism so that transaction throughput scales with the parallel
-compute power available.
+only on the host machine except one: authenticating the removal records' chunks.
+That check is a claim of its own, the SWBF update tree. Each leaf authenticates
+the chunks for a segment of the inputs and outputs the mutator set after their
+removal, hash and inactive-SWBF peaks; aggregations join adjacent claims. The
+predecessor-is-valid program verifies the root and rebuilds the predecessor's
+mutator set from its peaks, so no proof reads the chunks in the block. The
+composer proves the tree, in parallel. A later hard fork can therefore drop the
+chunks from blocks without touching any program; see
+[the update cost notes](./succinct-mutator-set-update.md).

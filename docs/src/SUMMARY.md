@@ -8,6 +8,8 @@
   - [Neptune Coins](./consensus/neptune-coins.md)
   - [Mining](./consensus/mining.md)
   - [Succinctness](./consensus/succinctness.md)
+    - [Succinct Mutator-Set Update](./consensus/succinct-mutator-set-update.md)
+    - [PredecessorIsValid Cost Profile](./consensus/predecessor-is-valid-cost-profile.md)
 - [Neptune-Core](./neptune-core.md)
   - [Overview](./neptune-core/overview.md)
   - [Events](./neptune-core/events.md)

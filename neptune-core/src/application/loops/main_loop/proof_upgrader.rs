@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use itertools::Itertools;
-use neptune_consensus::block::mutator_set_update::MutatorSetUpdate;
+use neptune_consensus::block::mutator_set_update::MutatorSetCatchUp;
 use neptune_consensus::chaintx::cast::cast;
 use neptune_consensus::chaintx::chain::chain;
 use neptune_consensus::chaintx::forge::forge;
@@ -231,7 +231,7 @@ impl ChainJob {
 pub(crate) struct UpdateLinkJob {
     pub link_tx: LinkTx,
     pub old_mutator_set_accumulator: MutatorSetAccumulator,
-    pub mutator_set_update: MutatorSetUpdate,
+    pub catch_up: MutatorSetCatchUp,
     pub consensus_rule_set: ConsensusRuleSet,
 }
 
@@ -245,7 +245,7 @@ impl UpdateLinkJob {
         self.link_tx
             .new_with_updated_mutator_set_records(
                 &self.old_mutator_set_accumulator,
-                &self.mutator_set_update,
+                &self.catch_up,
                 single_proof_digest,
                 triton_vm_job_queue,
                 proof_job_options,
@@ -358,7 +358,7 @@ pub struct UpdateMutatorSetDataJob {
     old_kernel: TransactionKernel,
     old_single_proof: Proof,
     old_mutator_set: MutatorSetAccumulator,
-    mutator_set_update: MutatorSetUpdate,
+    catch_up: MutatorSetCatchUp,
     upgrade_incentive: UpgradeIncentive,
 
     /// Consensus rules that apply *after* the transaction has been updated.
@@ -370,7 +370,7 @@ impl UpdateMutatorSetDataJob {
         old_kernel: TransactionKernel,
         old_single_proof: Proof,
         old_mutator_set: MutatorSetAccumulator,
-        mutator_set_update: MutatorSetUpdate,
+        catch_up: MutatorSetCatchUp,
         upgrade_incentive: UpgradeIncentive,
         consensus_rule_set: ConsensusRuleSet,
     ) -> Self {
@@ -378,7 +378,7 @@ impl UpdateMutatorSetDataJob {
             old_kernel,
             old_single_proof,
             old_mutator_set,
-            mutator_set_update,
+            catch_up,
             upgrade_incentive,
             consensus_rule_set,
         }
@@ -393,7 +393,7 @@ impl UpdateMutatorSetDataJob {
             old_kernel,
             old_single_proof,
             old_mutator_set,
-            mutator_set_update,
+            catch_up,
             consensus_rule_set,
             ..
         } = self;
@@ -401,7 +401,7 @@ impl UpdateMutatorSetDataJob {
         let ret = Transaction::new_with_updated_mutator_set_records_given_proof(
             old_kernel,
             &old_mutator_set,
-            &mutator_set_update,
+            &catch_up,
             old_single_proof,
             triton_vm_job_queue,
             proof_job_options,
@@ -506,12 +506,7 @@ impl UpgradeJob {
             UpgradeJob::Merge { mutator_set, .. } => mutator_set.clone(),
             UpgradeJob::Fix { mutator_set, .. } => mutator_set.clone(),
             UpgradeJob::UpdateMutatorSetData(update_mutator_set_data_job) => {
-                let mut new_msa = update_mutator_set_data_job.old_mutator_set.clone();
-                update_mutator_set_data_job
-                    .mutator_set_update
-                    .apply_to_accumulator(&mut new_msa)
-                    .unwrap();
-                new_msa
+                update_mutator_set_data_job.catch_up.new_mutator_set.clone()
             }
         }
     }
@@ -720,11 +715,18 @@ impl UpgradeJob {
                     "Transaction is deprecated after upgrade because of new block(s). Affected txs: [{}]",
                     affected_txids.iter().join("\n"));
 
-                let Some(ms_update) = global_state
+                let inputs = upgraded
+                    .kernel
+                    .inputs
+                    .iter()
+                    .map(|removal_record| removal_record.absolute_indices)
+                    .collect::<Vec<_>>();
+                let Some((_, catch_up)) = global_state
                     .chain
                     .archival_state()
-                    .get_mutator_set_update_to_tip(
-                        &mutator_set_for_tx,
+                    .catch_up_to_tip(
+                        mutator_set_for_tx.hash(),
+                        &inputs,
                         SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE,
                     )
                     .await
@@ -741,7 +743,7 @@ impl UpgradeJob {
                         old_kernel: upgraded.kernel,
                         old_single_proof: single_proof,
                         old_mutator_set: mutator_set_for_tx,
-                        mutator_set_update: ms_update,
+                        catch_up,
                         upgrade_incentive,
                         consensus_rule_set,
                     };
@@ -753,10 +755,15 @@ impl UpgradeJob {
                             // Since proof collections cannot be updated, we instead update the
                             // primitive witness and create a new job to upgrade the updated
                             // primitive witness to a proof collection.
-                            let new_pw = PrimitiveWitness::update_with_new_ms_data(
-                                pw_to_pc.primitive_witness,
-                                ms_update,
-                            );
+                            let Some(new_pw) = global_state
+                                .chain
+                                .archival_state()
+                                .catch_up_primitive_witness(&pw_to_pc.primitive_witness)
+                                .await
+                            else {
+                                info!("Couldn't restore the primitive witness at the tip.");
+                                return;
+                            };
                             UpgradeJob::PrimitiveWitnessToProofCollection(
                                 PrimitiveWitnessToProofCollection {
                                     primitive_witness: new_pw,
@@ -1507,7 +1514,13 @@ mod tests {
             .lock_guard()
             .await
             .mempool()
-            .get_transactions_for_block_composition(ConsensusRuleSet::default(), usize::MAX, None);
+            .get_transactions_for_block_composition(
+                ConsensusRuleSet::default(),
+                network,
+                usize::MAX,
+                None,
+                NativeCurrencyAmount::zero(),
+            );
         assert_eq!(1, txs.len());
 
         drop(main_to_peer_rx);
@@ -1833,7 +1846,13 @@ mod tests {
             .lock_guard()
             .await
             .mempool()
-            .get_transactions_for_block_composition(ConsensusRuleSet::default(), usize::MAX, None);
+            .get_transactions_for_block_composition(
+                ConsensusRuleSet::default(),
+                network,
+                usize::MAX,
+                None,
+                NativeCurrencyAmount::zero(),
+            );
         assert_eq!(1, mempool_tx.len());
         let mempool_tx = &mempool_tx[0];
 

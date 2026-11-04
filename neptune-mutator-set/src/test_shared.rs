@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 
 use itertools::Itertools;
@@ -17,7 +18,10 @@ use crate::addition_record::AdditionRecord;
 use crate::commit;
 use crate::ms_membership_proof::MsMembershipProof;
 use crate::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::removal_record::absolute_index_set::AbsoluteIndexSet;
 use crate::removal_record::RemovalRecord;
+use crate::shared::BATCH_SIZE;
+use crate::shared::CHUNK_SIZE;
 use crate::shared::WINDOW_SIZE;
 
 pub fn mock_item_and_randomnesses() -> (Digest, Digest, Digest) {
@@ -53,6 +57,153 @@ pub fn remove_mock_item(
 ) {
     let removal_record: RemovalRecord = mutator_set.drop(item, mp);
     mutator_set.remove_helper(&removal_record);
+}
+
+/// The AOCL leaf index of the first of
+/// [`two_items_sharing_their_only_unset_index`]'s items.
+pub const LEAFS_BEFORE_THE_TWO_ITEMS: u64 = (WINDOW_SIZE / CHUNK_SIZE * BATCH_SIZE) as u64;
+
+/// Add an item, keeping every membership proof in sync, and remember it.
+fn add_item(
+    mutator_set: &mut MutatorSetAccumulator,
+    items: &mut Vec<Digest>,
+    membership_proofs: &mut Vec<MsMembershipProof>,
+    item: Digest,
+    sender_randomness: Digest,
+    receiver_preimage: Digest,
+) {
+    let addition_record = commit(item, sender_randomness, receiver_preimage.hash());
+    let membership_proof = mutator_set.prove(item, sender_randomness, receiver_preimage);
+    MsMembershipProof::batch_update_from_addition(
+        &mut membership_proofs.iter_mut().collect_vec(),
+        items,
+        mutator_set,
+        &addition_record,
+    )
+    .unwrap();
+    mutator_set.add(&addition_record);
+    items.push(item);
+    membership_proofs.push(membership_proof);
+}
+
+/// A mutator set holding two items whose index sets share one index, with
+/// every other index of both set: each is a first spend on its own, but
+/// together they have no index that only one of them sets. Built from
+/// honest additions and removals alone: the second item's sender randomness
+/// is ground to share an index with the first's, and a helper item is
+/// ground to hit each remaining index, added and removed.
+///
+/// Filler items that stay fill the first window's worth of AOCL batches, so
+/// the two items come at leaf indices [`LEAFS_BEFORE_THE_TWO_ITEMS`] and one
+/// more, and their index sets lie above the first window.
+///
+/// Returns the mutator set and the two items with their membership proofs,
+/// which further additions must keep in sync before dropping them.
+pub fn two_items_sharing_their_only_unset_index(
+    rng: &mut StdRng,
+) -> (MutatorSetAccumulator, Vec<(Digest, MsMembershipProof)>) {
+    let receiver_preimage: Digest = rng.random();
+    let indices = |item, sender_randomness, leaf_index| {
+        AbsoluteIndexSet::compute(item, sender_randomness, receiver_preimage, leaf_index).to_vec()
+    };
+    let mut mutator_set = MutatorSetAccumulator::default();
+    for _ in 0..LEAFS_BEFORE_THE_TWO_ITEMS {
+        mutator_set.add(&commit(rng.random(), rng.random(), rng.random()));
+    }
+    let mut items = vec![];
+    let mut membership_proofs = vec![];
+
+    let leaf_index_a = LEAFS_BEFORE_THE_TWO_ITEMS;
+    let item_a: Digest = rng.random();
+    let sender_randomness_a: Digest = rng.random();
+    let indices_a = indices(item_a, sender_randomness_a, leaf_index_a);
+    add_item(
+        &mut mutator_set,
+        &mut items,
+        &mut membership_proofs,
+        item_a,
+        sender_randomness_a,
+        receiver_preimage,
+    );
+    let item_b: Digest = rng.random();
+    let (sender_randomness_b, indices_b) = std::iter::repeat_with(|| rng.random::<Digest>())
+        .map(|sender_randomness| {
+            (
+                sender_randomness,
+                indices(item_b, sender_randomness, leaf_index_a + 1),
+            )
+        })
+        .find(|(_, indices)| indices.iter().any(|index| indices_a.contains(index)))
+        .unwrap();
+    add_item(
+        &mut mutator_set,
+        &mut items,
+        &mut membership_proofs,
+        item_b,
+        sender_randomness_b,
+        receiver_preimage,
+    );
+    let shared = *indices_b
+        .iter()
+        .find(|index| indices_a.contains(index))
+        .unwrap();
+
+    // A helper hits the lowest remaining index when the window is about to
+    // slide past it, any remaining index otherwise, and never the shared one.
+    let mut targets: BTreeSet<u128> = indices_a
+        .iter()
+        .chain(&indices_b)
+        .copied()
+        .filter(|&index| index != shared)
+        .collect();
+    while let Some(&lowest) = targets.iter().next() {
+        let leaf_index = mutator_set.aocl.num_leafs();
+        let window_start = u128::from(leaf_index / u64::from(BATCH_SIZE)) * u128::from(CHUNK_SIZE);
+        assert!(lowest >= window_start, "a target slid out of the window");
+        let urgent = lowest < window_start + 2 * u128::from(CHUNK_SIZE);
+        let item: Digest = rng.random();
+        let (sender_randomness, helper_indices) = std::iter::repeat_with(|| rng.random::<Digest>())
+            .map(|sender_randomness| {
+                (
+                    sender_randomness,
+                    indices(item, sender_randomness, leaf_index),
+                )
+            })
+            .find(|(_, indices)| {
+                !indices.contains(&shared)
+                    && if urgent {
+                        indices.contains(&lowest)
+                    } else {
+                        indices.iter().any(|index| targets.contains(index))
+                    }
+            })
+            .unwrap();
+        add_item(
+            &mut mutator_set,
+            &mut items,
+            &mut membership_proofs,
+            item,
+            sender_randomness,
+            receiver_preimage,
+        );
+        let removal_record = mutator_set.drop(item, &membership_proofs.pop().unwrap());
+        items.pop();
+        assert!(mutator_set.can_remove(&removal_record));
+        MsMembershipProof::batch_update_from_remove(
+            &mut membership_proofs.iter_mut().collect_vec(),
+            &removal_record,
+        )
+        .unwrap();
+        mutator_set.remove(&removal_record);
+        for index in helper_indices {
+            targets.remove(&index);
+        }
+    }
+
+    (
+        mutator_set,
+        items.into_iter().zip(membership_proofs).collect(),
+    )
 }
 
 /// Generate a random MSA. For serialization testing. Might not be a consistent or valid object.

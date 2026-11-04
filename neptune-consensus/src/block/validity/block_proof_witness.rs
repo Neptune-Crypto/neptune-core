@@ -67,7 +67,13 @@ impl BlockProofWitness {
         BlockAppendix::new(self.claims())
     }
 
-    pub fn produce(block_primitive_witness: BlockPrimitiveWitness) -> BlockProofWitness {
+    /// The witness with the transaction's claim and the claims the composer
+    /// proved. Networks that mock proofs, and callers that prove nothing, get
+    /// the claims the rules require here, with mock proofs.
+    pub fn produce(
+        block_primitive_witness: BlockPrimitiveWitness,
+        proven: Vec<(Claim, Proof)>,
+    ) -> BlockProofWitness {
         let txk_mast_hash = block_primitive_witness
             .body()
             .transaction_kernel
@@ -92,14 +98,25 @@ impl BlockProofWitness {
         };
 
         // Add more claim/proof pairs here, when softforking.
-        let witness =
+        let mut witness =
             Self::new(block_primitive_witness.body().clone()).with_claim(tx_claim, tx_proof);
+        let nothing_proven = proven.is_empty();
 
-        assert_eq!(
-            BlockAppendix::consensus_claims(block_primitive_witness.body(), consensus_rule_set),
-            witness.claims,
-            "appendix witness must attest to expected claims",
-        );
+        for (claim, proof) in proven {
+            witness = witness.with_claim(claim, proof);
+        }
+
+        let network = block_primitive_witness.network;
+        let predecessor = &block_primitive_witness.predecessor_block;
+        if consensus_rule_set.requires_predecessor_claim()
+            && (network.use_mock_proof() || nothing_proven)
+        {
+            let body = block_primitive_witness.body();
+            let claims = BlockAppendix::mock_consensus_claims(body, predecessor, network);
+            for claim in claims.into_iter().skip(1) {
+                witness = witness.with_claim(claim, Proof::valid_mock());
+            }
+        }
 
         witness
     }

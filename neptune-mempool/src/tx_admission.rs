@@ -35,14 +35,12 @@ use neptune_consensus::transaction::validity::single_proof::link_tx_claim;
 use neptune_primitives::mast_hash::MastHash;
 use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
-use tracing::warn;
 
 use crate::any_tx::AnyTxRef;
 use crate::mempool::MEMPOOL_RETIREMENT_MARGIN;
 use crate::mempool::MEMPOOL_TX_THRESHOLD_AGE;
 use crate::recent_mutator_sets::CatchUpError;
 use crate::recent_mutator_sets::RecentMutatorSets;
-use crate::transaction_kernel_id::Txid;
 
 /// Why a transaction was refused admission to the mempool.
 ///
@@ -225,14 +223,6 @@ pub async fn admissible(
             }
             Err(CatchUpError::UnknownMutatorSet) => {
                 // Unreachable: the mutator set was found above.
-                return Err(TxAdmissionError::NotSynced);
-            }
-            Err(CatchUpError::Inconsistent) => {
-                warn!(
-                    "Could not bring removal records of transaction {} forward to the tip; \
-                     refusing it as unsynced",
-                    kernel.txid()
-                );
                 return Err(TxAdmissionError::NotSynced);
             }
         }
@@ -638,7 +628,26 @@ mod tests {
         let ancestor_hash = msa_and_records.mutator_set_accumulator.hash();
         let records = msa_and_records.unpacked_removal_records();
         let mut recent =
-            RecentMutatorSets::for_mutator_set(msa_and_records.mutator_set_accumulator);
+            RecentMutatorSets::for_mutator_set(msa_and_records.mutator_set_accumulator.clone());
+
+        // The first two records, kept in step with the tip as blocks land.
+        let mut at_the_tip = records[..2].to_vec();
+        let mut synced_to = msa_and_records.mutator_set_accumulator;
+        fn land(
+            recent: &mut RecentMutatorSets,
+            synced_to: &mut MutatorSetAccumulator,
+            at_the_tip: &mut [RemovalRecord],
+            update: MutatorSetUpdate,
+        ) {
+            update
+                .apply_to_accumulator_and_records(
+                    synced_to,
+                    &mut at_the_tip.iter_mut().collect::<Vec<_>>(),
+                    &mut [],
+                )
+                .unwrap();
+            recent.push_update(update);
+        }
 
         // Synced to the tip: the only rejection left is the invalid proof.
         let at_tip = spending(records[..2].to_vec(), ancestor_hash, now);
@@ -650,7 +659,12 @@ mod tests {
         // Addition-only blocks land, as many as the window holds.
         let base = recent.clone();
         for seed in 0..MAX_TX_SYNC_DEPTH as u64 {
-            recent.push_update(MutatorSetUpdate::new(vec![], additions(seed, 9)));
+            land(
+                &mut recent,
+                &mut synced_to,
+                &mut at_the_tip,
+                MutatorSetUpdate::new(vec![], additions(seed, 9)),
+            );
         }
         assert_eq!(Some(MAX_TX_SYNC_DEPTH), recent.depth_of(ancestor_hash));
         assert_eq!(
@@ -675,7 +689,6 @@ mod tests {
 
         // Not built against any mutator set in the window: judged against the
         // tip, where only removal records that validate there will do.
-        let at_the_tip = recent.catch_up(ancestor_hash, &records[..2]).unwrap();
         let unknown = spending(at_the_tip.clone(), Digest::default(), now);
         assert_eq!(
             Err(TxAdmissionError::Invalid),
@@ -697,11 +710,14 @@ mod tests {
 
         // One more block pushes the ancestor out of the window. Removal
         // records that validate against the tip are still enough.
-        let previous_tip = recent.tip_mutator_set_hash();
-        recent.push_update(MutatorSetUpdate::new(vec![], additions(100, 1)));
+        land(
+            &mut recent,
+            &mut synced_to,
+            &mut at_the_tip,
+            MutatorSetUpdate::new(vec![], additions(100, 1)),
+        );
         assert_eq!(None, recent.depth_of(ancestor_hash));
-        let at_the_tip = recent.catch_up(previous_tip, &at_the_tip).unwrap();
-        let evicted = spending(at_the_tip, ancestor_hash, now);
+        let evicted = spending(at_the_tip.clone(), ancestor_hash, now);
         assert_eq!(
             Err(TxAdmissionError::Invalid),
             admission(&evicted, &recent).await

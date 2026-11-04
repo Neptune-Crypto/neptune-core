@@ -19,11 +19,15 @@ use neptune_consensus::block::block_header::BlockHeader;
 use neptune_consensus::block::block_header::BlockHeaderWithBlockHashWitness;
 use neptune_consensus::block::block_header::HeaderToBlockHashWitness;
 use neptune_consensus::block::block_kernel::BlockKernel;
-use neptune_consensus::block::mutator_set_update::MutatorSetUpdate;
+use neptune_consensus::block::mutator_set_update::MutatorSetCatchUp;
+use neptune_consensus::block::validity::knows_mutator_set::KnowsMutatorSetWitness;
+use neptune_consensus::block::validity::knows_mutator_set::sampled_leafs;
+use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
 use neptune_consensus::proof_abstractions::verifier::CHECKPOINT_MAIN;
 use neptune_consensus::proof_abstractions::verifier::CHECKPOINT_TESTNET_0;
 use neptune_consensus::proof_abstractions::verifier::cache_true_claims;
 use neptune_consensus::transaction::lock_script::LockScript;
+use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
 use neptune_consensus::transaction::transaction_kernel::TransactionKernelProxy;
 use neptune_consensus::transaction::utxo::Utxo;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -314,6 +318,20 @@ impl ArchivalState {
         Ok(valid)
     }
 
+    /// Whether the archival mutator set and the archival block MMR can resolve
+    /// lookups back to block height zero.
+    #[cfg(any(test, feature = "test-helpers"))]
+    pub fn tracks_genesis(&self) -> bool {
+        if self.genesis_block.header().height.is_genesis() {
+            return true;
+        }
+        let mut from_outputs = MutatorSetAccumulator::default();
+        for addition_record in &self.genesis_block.body().transaction_kernel.outputs {
+            from_outputs.add(addition_record);
+        }
+        from_outputs.hash() == self.genesis_block.body().mutator_set_accumulator().hash()
+    }
+
     /// Initialize an `ArchivalMutatorSet` by opening or creating its databases.
     pub(crate) async fn initialize_mutator_set(
         data_dir: &DataDirectory,
@@ -450,7 +468,10 @@ impl ArchivalState {
         archival_mutator_set: &mut RustyArchivalMutatorSet,
         genesis_block: &Block,
     ) {
-        for addition_record in &genesis_block.kernel.body.transaction_kernel.outputs {
+        let addition_records = genesis_block
+            .all_addition_records()
+            .expect("genesis block must have addition records");
+        for addition_record in &addition_records {
             archival_mutator_set.ams_mut().add(addition_record).await;
         }
         let genesis_hash = genesis_block.hash();
@@ -489,6 +510,21 @@ impl ArchivalState {
 
         // Add genesis block digest to archival MMR, if empty.
         if archival_block_mmr.ammr().is_empty().await {
+            // A genesis block at another height, as tests may set, sits at
+            // the leaf index of its height; the leaves below are placeholders.
+            #[cfg(any(test, feature = "test-helpers"))]
+            {
+                assert!(
+                    genesis_block.header().height.value() < 250_000,
+                    "a genesis block at another height must be within reach of placeholder leaves"
+                );
+                for _ in 0..genesis_block.header().height.value() {
+                    archival_block_mmr
+                        .ammr_mut()
+                        .append(Digest::default())
+                        .await;
+                }
+            }
             archival_block_mmr
                 .ammr_mut()
                 .append(genesis_block.hash())
@@ -566,11 +602,6 @@ impl ArchivalState {
         self: &mut ArchivalState,
         new_block: &Block,
     ) -> Result<Vec<(BlockIndexKey, BlockIndexValue)>> {
-        // abort early if mutator set update is invalid.
-        if new_block.mutator_set_update(self.network).is_err() {
-            bail!("invalid block: could not get mutator set update");
-        }
-
         // Fetch last file record to find disk location to store block.
         // This record must exist in the DB already, unless this is the first block
         // stored on disk.
@@ -666,9 +697,8 @@ impl ArchivalState {
         let mut block_index_entries: Vec<(BlockIndexKey, BlockIndexValue)> = vec![];
         let block_record_key: BlockIndexKey = BlockIndexKey::Block(new_block.hash());
         let num_additions: u64 = new_block
-            .mutator_set_update(self.network)
-            .expect("MS update for new block must exist")
-            .additions
+            .all_addition_records()
+            .map_err(|err| anyhow::anyhow!("invalid block: {err}"))?
             .len()
             .try_into()
             .expect("Num addition records cannot exceed u64::MAX");
@@ -749,9 +779,17 @@ impl ArchivalState {
     /// - If the new tip does not have a mutator set update.
     /// - If databases are in an inconsistent state.
     pub async fn set_new_tip(&mut self, block: &Block) -> Result<()> {
-        self.write_block_as_tip(block).await?;
-        self.append_to_archival_block_mmr(block).await;
+        self.write_block_not_tip(block).await?;
         self.update_mutator_set(block).await?;
+
+        // Only mark as tip once the mutator set update passed.
+        let mut mark_tip = WriteBatchAsync::new();
+        mark_tip.op_write(
+            BlockIndexKey::BlockTipDigest,
+            BlockIndexValue::BlockTipDigest(block.hash()),
+        );
+        self.block_index_db.batch_write(mark_tip).await;
+        self.append_to_archival_block_mmr(block).await;
         self.update_utxo_index(block).await;
 
         Ok(())
@@ -787,28 +825,14 @@ impl ArchivalState {
         self.write_block_internal(block, false).await
     }
 
-    /// Write a newly found block to database and to disk, and set it as tip.
-    ///
-    /// If block was already written to database, then it is only marked as
-    /// tip, and no write to disk occurs. Instead, the old block database entry
-    /// is assumed to be valid, and so is the block stored on disk.
-    pub(crate) async fn write_block_as_tip(&mut self, new_block: &Block) -> Result<()> {
-        self.write_block_internal(new_block, true).await
-    }
-
     /// Sets a block as tip for the archival block MMR.
     ///
     /// This method handles reorganizations, but all predecessors of this block
     /// must be known and stored in the block index database for it to work.
     pub(crate) async fn append_to_archival_block_mmr(&mut self, new_block: &Block) {
         #[cfg(any(test, feature = "test-helpers"))]
-        {
-            // In tests you're allowed to set a genesis block with a height
-            // different than zero. In such cases, this part of the archival state
-            // update cannot work. So we skip it.
-            if !self.genesis_block.header().height.is_genesis() {
-                return;
-            }
+        if !self.tracks_genesis() {
+            return;
         }
 
         // If the new block is the genesis block, special case and exit early
@@ -1970,123 +1994,124 @@ impl ArchivalState {
         ret
     }
 
-    /// Returns the old mutator set matching the provided digest as well as the
-    /// mutator set update required to go from the old state to that in the tip.
+    /// Return an old mutator set, identified by its hash.
+    ///
+    /// Searches at most `max_search_depth` blocks back. None if no match is
+    /// found.
     ///
     /// # Warning
     ///
     /// This can be a very expensive function to run if it's called with a high
     /// max search depth, as it loads all the blocks in the search path into
     /// memory. A max search depth of 0 means that only the tip is checked.
-    async fn mutator_set_to_tip_internal(
+    pub async fn ancestor_mutator_set(
         &self,
-        old_ms_digest: Digest,
-        old_aocl_num_leafs: Option<u64>,
+        mutator_set_hash: Digest,
         max_search_depth: usize,
-    ) -> Option<(MutatorSetAccumulator, MutatorSetUpdate)> {
+    ) -> Option<MutatorSetAccumulator> {
         let mut search_depth = 0;
-        let mut block_mutations = vec![];
-
         let mut haystack = self.get_tip().await;
-        let mut parent = self.get_tip_parent().await;
-        let old_msa = loop {
+        loop {
             let haystack_msa = haystack
                 .mutator_set_accumulator_after()
                 .expect("Block from state must have mutator set after");
-            if haystack_msa.hash() == old_ms_digest {
-                break haystack_msa;
+            if haystack_msa.hash() == mutator_set_hash {
+                return Some(haystack_msa);
             }
 
             search_depth += 1;
-
-            // Notice that comparing the whole mutator set accumulator and not
-            // just its hash allows us to do early return here. Parent == None
-            // indicates that we've gone all the way back to genesis, with no
-            // match.
-            if old_aocl_num_leafs
-                .is_some_and(|old_num_leafs| old_num_leafs > haystack_msa.aocl.num_leafs())
-                || search_depth > max_search_depth
-                || parent.is_none()
-            {
+            if search_depth > max_search_depth {
                 return None;
             }
-
-            let mutator_set_update = haystack
-                .mutator_set_update(self.network)
-                .expect("Block from state must have mutator set update");
-            let predecessor_msa = parent
-                .as_ref()
-                .unwrap()
-                .mutator_set_accumulator_after()
-                .expect("Block from state must have mutator set after");
-            block_mutations.push((predecessor_msa, mutator_set_update));
-
-            haystack = parent.unwrap();
-            parent = self
+            haystack = self
                 .get_block(haystack.header().prev_block_digest)
                 .await
-                .expect("Must succeed in reading block");
-        };
-
-        let timer = std::time::Instant::now();
-        let mutator_set_update = MutatorSetUpdate::compose(&block_mutations);
-        if block_mutations.len() > 1 {
-            info!(
-                "Composed mutator-set update to tip spanning {} blocks, with {} removals \
-                 and {} additions, in {:?}",
-                block_mutations.len(),
-                mutator_set_update.removals.len(),
-                mutator_set_update.additions.len(),
-                timer.elapsed(),
-            );
+                .expect("Must succeed in reading block")?;
         }
-
-        Some((old_msa, mutator_set_update))
     }
 
-    /// Returns the old mutator set matching the provided digest as well as the
-    /// mutator set update required to go from the old state to that in the tip.
+    /// Return the data required to update a transaction built on the specified
+    /// mutator set hash, with the specified inputs, to a new mutator set.
     ///
-    /// # Warning
-    ///
-    /// This can be a very expensive function to run if it's called with a high
-    /// max search depth, as it loads all the blocks in the search path into
-    /// memory. A max search depth of 0 means that only the tip is checked.
-    pub async fn old_mutator_set_and_mutator_set_update_to_tip(
+    /// Returns the old mutator set, and the catch-up data required to update
+    /// the transaction.
+    pub async fn catch_up_to_tip(
         &self,
-        old_mutator_set_digest: Digest,
+        old_mutator_set_hash: Digest,
+        tx_inputs: &[AbsoluteIndexSet],
         max_search_depth: usize,
-    ) -> Option<(MutatorSetAccumulator, MutatorSetUpdate)> {
-        self.mutator_set_to_tip_internal(old_mutator_set_digest, None, max_search_depth)
-            .await
+    ) -> Option<(MutatorSetAccumulator, MutatorSetCatchUp)> {
+        let old_mutator_set = self
+            .ancestor_mutator_set(old_mutator_set_hash, max_search_depth)
+            .await?;
+        let ams = self.archival_mutator_set.ams();
+        let mutator_set = ams.accumulator().await;
+        let (old_num_leafs, num_leafs) = (
+            old_mutator_set.aocl.num_leafs(),
+            mutator_set.aocl.num_leafs(),
+        );
+        let appended_aocl_leafs = if old_num_leafs < num_leafs {
+            ams.aocl
+                .get_leaf_range_inclusive_async(old_num_leafs..=num_leafs - 1)
+                .await
+        } else {
+            vec![]
+        };
+        let mut catch_up = MutatorSetCatchUp {
+            new_mutator_set: mutator_set,
+            new_inputs: vec![],
+            appended_aocl_leafs,
+        };
+        for &absolute_indices in tx_inputs {
+            catch_up.new_inputs.push(RemovalRecord {
+                absolute_indices,
+                target_chunks: ams.chunk_dictionary(absolute_indices).await,
+            });
+        }
+        Some((old_mutator_set, catch_up))
     }
 
-    /// Returns Some(MutatorSetUpdate) if a path could be found from tip to a
-    /// block with the indicated mutator set.
+    /// Return a primitive witness synced to the tip. Built from the archival
+    /// mutator set and a (potentially) unsynced primitive witness.
     ///
-    /// # Warning
+    /// Assumes that the lock scripts and type scripts stay valid under the new
+    /// block/mutator set.
     ///
-    /// This can be a very expensive function to run if it's called with a high
-    /// max search depth, as it loads all the blocks in the search path into
-    /// memory. A max search depth of 0 means that only the tip is checked.
-    pub async fn get_mutator_set_update_to_tip(
+    /// None if any AOCL leafs are from the future.
+    pub async fn catch_up_primitive_witness(
         &self,
-        mutator_set: &MutatorSetAccumulator,
-        max_search_depth: usize,
-    ) -> Option<MutatorSetUpdate> {
-        self.mutator_set_to_tip_internal(
-            mutator_set.hash(),
-            Some(mutator_set.aocl.num_leafs()),
-            max_search_depth,
+        primitive_witness: &PrimitiveWitness,
+    ) -> Option<PrimitiveWitness> {
+        let ams = self.archival_mutator_set.ams();
+        let mut membership_proofs = vec![];
+        for (utxo, old_proof) in primitive_witness
+            .input_utxos
+            .utxos
+            .iter()
+            .zip(&primitive_witness.input_membership_proofs)
+        {
+            let membership_proof = ams
+                .restore_membership_proof(
+                    Tip5::hash(utxo),
+                    old_proof.sender_randomness,
+                    old_proof.receiver_preimage,
+                    old_proof.aocl_leaf_index,
+                )
+                .await
+                .ok()?;
+            membership_proofs.push(membership_proof);
+        }
+        Some(
+            primitive_witness
+                .clone()
+                .with_mutator_set(ams.accumulator().await, membership_proofs),
         )
-        .await
-        .map(|(_, msa)| msa)
     }
 
     /// Update the archival mutator set with a new block.
     ///
     /// Assumes the block in question has already been stored to the database
-    /// (or else it is the genesis block). This function handles rollback of the
+    /// (or is the genesis block). This function handles rollback of the mutat
     /// mutator set if needed but requires that all blocks that are rolled back
     /// are present in the database. The input block is considered chain tip.
     /// All blocks stored in the database are assumed to be valid. The given
@@ -2101,13 +2126,8 @@ impl ArchivalState {
     #[doc(hidden)]
     pub async fn update_mutator_set(&mut self, new_block: &Block) -> Result<()> {
         #[cfg(any(test, feature = "test-helpers"))]
-        {
-            // In tests you're allowed to set a genesis block with a height
-            // different than zero. In such cases, this part of the archival state
-            // update cannot work. So we skip it.
-            if !self.genesis_block.header().height.is_genesis() {
-                return Ok(());
-            }
+        if !self.tracks_genesis() {
+            return Ok(());
         }
 
         // If new block is genesis block, special case and exit early.
@@ -2123,11 +2143,6 @@ impl ArchivalState {
             .await;
 
             return Ok(());
-        }
-
-        // cannot get the mutator set update from new block, so abort early
-        if new_block.mutator_set_update(self.network).is_err() {
-            bail!("invalid block: could not get mutator set update");
         }
 
         let (forwards, backwards) = {
@@ -2163,22 +2178,16 @@ impl ArchivalState {
                 rollback_block.header().height
             );
 
-            let MutatorSetUpdate {
-                additions,
-                removals,
-            } = rollback_block
-                .mutator_set_update(self.network)
-                .expect("Block from state must have mutator set update");
-
             // Roll back all removal records contained in block
-            for removal_record in &removals {
-                self.archival_mutator_set
-                    .ams_mut()
-                    .revert_remove(removal_record)
-                    .await;
-            }
+            self.archival_mutator_set
+                .ams_mut()
+                .revert_batch_remove(&rollback_block.kernel.removal_index_sets())
+                .await;
 
             // Roll back all addition records contained in block
+            let additions = rollback_block
+                .all_addition_records()
+                .expect("Block from state must have addition records");
             for addition_record in additions.iter().rev() {
                 assert!(
                     self.archival_mutator_set
@@ -2216,37 +2225,35 @@ impl ArchivalState {
                     .standard_format()
             );
 
-            let MutatorSetUpdate {
-                mut additions,
-                mut removals,
-            } = apply_forward_block
-                .mutator_set_update(self.network)
-                .expect("Block from state must have mutator set update");
-            additions.reverse();
-            removals.reverse();
-
-            let mut removals_mutable = removals.iter_mut().collect::<Vec<_>>();
-
-            // Add items, thus adding the output UTXOs to the mutator set
-            while let Some(addition_record) = additions.pop() {
-                // Batch-update all removal records to keep them valid after next addition
-                RemovalRecord::batch_update_from_addition(
-                    &mut removals_mutable,
-                    &self.archival_mutator_set.ams().accumulator().await,
-                );
-
-                // Add the element to the mutator set
+            // Apply removals, with a defense-in-depth sanity check
+            if let Err(double_spend) = self
+                .archival_mutator_set
+                .ams_mut()
+                .batch_remove(&apply_forward_block.kernel.removal_index_sets())
+                .await
+            {
+                // Set right sync label on failure.
                 self.archival_mutator_set
-                    .ams_mut()
-                    .add(&addition_record)
+                    .set_sync_label(apply_forward_block.header().prev_block_digest)
                     .await;
+                self.archival_mutator_set.persist().await;
+                bail!(
+                    "Block {:x} at height {} spends an input twice: {double_spend:?}",
+                    apply_forward_block.hash(),
+                    apply_forward_block.header().height
+                );
             }
 
-            // Remove items, thus removing the input UTXOs from the mutator set
-            self.archival_mutator_set
-                .ams_mut()
-                .batch_remove(removals)
-                .await;
+            // Add items, thus adding the output UTXOs to the mutator set
+            let additions = apply_forward_block
+                .all_addition_records()
+                .expect("Block from state must have addition records");
+            for addition_record in &additions {
+                self.archival_mutator_set
+                    .ams_mut()
+                    .add(addition_record)
+                    .await;
+            }
         }
 
         // Sanity check that archival mutator set has been updated consistently with the new block
@@ -2540,6 +2547,54 @@ impl ArchivalState {
         // Populate true claims cache
         cache_true_claims(historical_block_claims).await;
     }
+
+    fn assert_synced_to(&self, block_digest: Digest) {
+        assert_eq!(
+            block_digest,
+            self.archival_mutator_set.get_sync_label(),
+            "archival mutator set must be synced to the block"
+        );
+    }
+
+    /// The composer's witness to knowing the archival mutator set.
+    ///
+    /// The mutator set must be synced to the expected block.
+    ///
+    /// # Panics
+    /// - If the mutator set is synced to another block than the one called
+    ///   for.
+    pub async fn knows_mutator_set_witness(&self, current_tip: &Block) -> KnowsMutatorSetWitness {
+        let tip_hash = current_tip.hash();
+        self.assert_synced_to(tip_hash);
+        let ams = self.archival_mutator_set.ams();
+        let msa = ams.accumulator().await;
+        let mut chunks = vec![];
+        let mut chunk_paths = vec![];
+        for index in sampled_leafs(tip_hash, msa.swbf_inactive.num_leafs()) {
+            let (path, chunk) = ams
+                .get_chunk_and_auth_path(index)
+                .await
+                .expect("sampled chunk must be in the SWBF");
+            chunks.push(chunk);
+            chunk_paths.push(path.authentication_path);
+        }
+        let mut aocl_leafs = vec![];
+        let mut aocl_paths = vec![];
+        for index in sampled_leafs(tip_hash, msa.aocl.num_leafs()) {
+            aocl_leafs.push(ams.aocl.get_leaf_async(index).await);
+            let path = ams.aocl.prove_membership_async(index).await;
+            aocl_paths.push(path.authentication_path);
+        }
+        KnowsMutatorSetWitness::new(
+            current_tip,
+            &msa,
+            ConsensusRuleSet::knows_mutator_set_activation_height(self.network),
+            chunks,
+            chunk_paths,
+            aocl_leafs,
+            aocl_paths,
+        )
+    }
 }
 
 /// Test-support consistency checks for [`ArchivalState`].
@@ -2638,6 +2693,9 @@ mod tests {
     use neptune_consensus::block::test_helpers::invalid_empty_block_with_announcements;
     use neptune_consensus::block::test_helpers::invalid_empty_block_with_proof_size;
     use neptune_consensus::block::test_helpers::invalid_empty_blocks;
+    use neptune_consensus::block::validity::knows_mutator_set::KnowsMutatorSet;
+    use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+    use neptune_consensus::proof_abstractions::SecretWitness;
     use neptune_consensus::transaction::announcement::Announcement;
     use neptune_mutator_set::addition_record::AdditionRecord;
     use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -2658,6 +2716,7 @@ mod tests {
     use tasm_lib::prelude::Digest;
     use tasm_lib::prelude::Tip5;
     use tasm_lib::triton_vm::prelude::BFieldElement;
+    use tasm_lib::triton_vm::prelude::VM;
     use tasm_lib::twenty_first::bfe;
     use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
     use tracing_test::traced_test;
@@ -2668,6 +2727,14 @@ mod tests {
     use crate::block_index::FileRecord;
     use crate::block_index::LastFileRecord;
     use crate::test_utils::shared_tokio_runtime;
+
+    impl ArchivalState {
+        /// Write a block to database and to disk, and set it as tip, with no
+        /// other part of the archival state updated.
+        async fn write_block_as_tip(&mut self, new_block: &Block) -> Result<()> {
+            self.write_block_internal(new_block, true).await
+        }
+    }
 
     /// A throwaway per-process temp data directory for tests.
     fn unit_test_data_directory(network: Network) -> Result<DataDirectory> {
@@ -2684,6 +2751,47 @@ mod tests {
     async fn make_test_archival_state(network: Network, utxo_index: bool) -> ArchivalState {
         let data_dir = unit_test_data_directory(network).unwrap();
         ArchivalState::new(data_dir, Block::genesis(network), utxo_index, network).await
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn knows_mutator_set_witness_satisfies_its_program() {
+        let network = Network::Main;
+        let mut archival_state = make_test_archival_state(network, false).await;
+        let genesis = Block::genesis(network);
+        let block1 = invalid_empty_block(&genesis, network);
+        let block2 = invalid_empty_block(&block1, network);
+        assert!(
+            archival_state
+                .archival_mutator_set
+                .ams()
+                .swbf_inactive
+                .num_leafs()
+                .await
+                > 0
+        );
+
+        for (parent, child) in [(genesis, &block1), (block1.clone(), &block2)] {
+            let ams = archival_state.archival_mutator_set.ams();
+            let witness = archival_state.knows_mutator_set_witness(&parent).await;
+            let rule_set = ConsensusRuleSet::infer_from(network, child.header().height);
+            let expected = KnowsMutatorSet::claim(
+                parent.hash(),
+                &ams.accumulator().await,
+                ConsensusRuleSet::knows_mutator_set_activation_height(network),
+                rule_set,
+            );
+            let claim = witness.claim();
+            assert_eq!(expected.program_digest, claim.program_digest);
+            assert_eq!(expected.input, claim.input);
+            let run = VM::run(
+                witness.program(),
+                witness.standard_input(),
+                witness.nondeterminism(),
+            );
+            assert!(run.is_ok(), "block {}", parent.header().height.next());
+
+            archival_state.set_new_tip(child).await.unwrap();
+        }
     }
 
     #[traced_test]
@@ -2964,13 +3072,13 @@ mod tests {
             .await;
 
         for i in 0..10 {
-            assert!(
-                archival_state
-                    .get_mutator_set_update_to_tip(&current_msa, i)
-                    .await
-                    .unwrap()
-                    .is_empty()
-            );
+            let (old_msa, catch_up) = archival_state
+                .catch_up_to_tip(current_msa.hash(), &[], i)
+                .await
+                .unwrap();
+            assert_eq!(current_msa, old_msa);
+            assert_eq!(current_msa, catch_up.new_mutator_set);
+            assert!(catch_up.appended_aocl_leafs.is_empty());
         }
     }
 
@@ -3339,16 +3447,22 @@ mod tests {
             .ams()
             .accumulator()
             .await;
-        let mut new_msa = past_msa.to_owned();
+        let inputs = archival_state.get_tip().await.kernel.removal_index_sets();
+        let (old_msa, catch_up) = archival_state
+            .catch_up_to_tip(past_msa.hash(), &inputs, search_depth)
+            .await
+            .unwrap();
+        assert_eq!(*past_msa, old_msa);
+        assert_eq!(tip_msa, catch_up.new_mutator_set);
         assert!(
-            archival_state
-                .get_mutator_set_update_to_tip(&new_msa, search_depth)
-                .await
-                .unwrap()
-                .apply_to_accumulator(&mut new_msa)
-                .is_ok()
+            catch_up
+                .aocl_successor_proof(&past_msa.aocl)
+                .verify(&past_msa.aocl, &tip_msa.aocl)
         );
-        assert_eq!(tip_msa, new_msa);
+        assert_eq!(inputs.len(), catch_up.new_inputs.len());
+        for record in &catch_up.new_inputs {
+            assert!(record.validate(&tip_msa));
+        }
     }
 
     #[traced_test]
@@ -3709,7 +3823,7 @@ mod tests {
             if search_depth < 5 {
                 assert!(
                     archival_state
-                        .get_mutator_set_update_to_tip(&genesis_msa, search_depth)
+                        .catch_up_to_tip(genesis_msa.hash(), &[], search_depth)
                         .await
                         .is_none()
                 );
@@ -3724,7 +3838,7 @@ mod tests {
         for i in 0..10 {
             assert!(
                 genesis_archival_state
-                    .get_mutator_set_update_to_tip(&current_msa, i)
+                    .catch_up_to_tip(current_msa.hash(), &[], i)
                     .await
                     .is_none()
             );
@@ -3862,7 +3976,7 @@ mod tests {
         positive_prop_ms_update_to_tip(block_1a_msa, &mut archival_state, search_depth).await;
         assert!(
             archival_state
-                .get_mutator_set_update_to_tip(block_1b_msa, 1)
+                .catch_up_to_tip(block_1b_msa.hash(), &[], 1)
                 .await
                 .is_none()
         );
@@ -3872,7 +3986,7 @@ mod tests {
         positive_prop_ms_update_to_tip(genesis_msa, &mut archival_state, search_depth).await;
         assert!(
             archival_state
-                .get_mutator_set_update_to_tip(block_1a_msa, 1)
+                .catch_up_to_tip(block_1a_msa.hash(), &[], 1)
                 .await
                 .is_none()
         );
@@ -3906,13 +4020,13 @@ mod tests {
         archival_state.set_new_tip(&block_1a).await.unwrap();
         assert!(
             archival_state
-                .get_mutator_set_update_to_tip(block_2a_msa, search_depth)
+                .catch_up_to_tip(block_2a_msa.hash(), &[], search_depth)
                 .await
                 .is_none()
         );
         assert!(
             archival_state
-                .get_mutator_set_update_to_tip(block_2b_msa, search_depth)
+                .catch_up_to_tip(block_2b_msa.hash(), &[], search_depth)
                 .await
                 .is_none()
         );
@@ -3921,13 +4035,13 @@ mod tests {
         archival_state.set_new_tip(&block_1b).await.unwrap();
         assert!(
             archival_state
-                .get_mutator_set_update_to_tip(block_2a_msa, search_depth)
+                .catch_up_to_tip(block_2a_msa.hash(), &[], search_depth)
                 .await
                 .is_none()
         );
         assert!(
             archival_state
-                .get_mutator_set_update_to_tip(block_2b_msa, search_depth)
+                .catch_up_to_tip(block_2b_msa.hash(), &[], search_depth)
                 .await
                 .is_none()
         );
@@ -3939,13 +4053,13 @@ mod tests {
         positive_prop_ms_update_to_tip(block_2a_msa, &mut archival_state, search_depth).await;
         assert!(
             archival_state
-                .get_mutator_set_update_to_tip(block_1b_msa, search_depth)
+                .catch_up_to_tip(block_1b_msa.hash(), &[], search_depth)
                 .await
                 .is_none()
         );
         assert!(
             archival_state
-                .get_mutator_set_update_to_tip(block_2b_msa, search_depth)
+                .catch_up_to_tip(block_2b_msa.hash(), &[], search_depth)
                 .await
                 .is_none()
         );
@@ -3957,13 +4071,13 @@ mod tests {
         positive_prop_ms_update_to_tip(block_2b_msa, &mut archival_state, search_depth).await;
         assert!(
             archival_state
-                .get_mutator_set_update_to_tip(block_1a_msa, search_depth)
+                .catch_up_to_tip(block_1a_msa.hash(), &[], search_depth)
                 .await
                 .is_none()
         );
         assert!(
             archival_state
-                .get_mutator_set_update_to_tip(block_2a_msa, search_depth)
+                .catch_up_to_tip(block_2a_msa.hash(), &[], search_depth)
                 .await
                 .is_none()
         );
@@ -5419,6 +5533,38 @@ mod tests {
         }
 
         #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn double_spending_block_is_refused() {
+            use neptune_wallet::address::generation_address::GenerationSpendingKey;
+            use neptune_wallet::mock_block::make_mock_block_with_inputs_and_outputs;
+
+            let network = Network::Main;
+            let genesis = Block::genesis(network);
+            let mut archival_state = make_test_archival_state(network, false).await;
+            let block1 = block_with_num_puts(network, &genesis, 2, 3);
+            archival_state.set_new_tip(&block1).await.unwrap();
+
+            let spent_inputs = block1.body().transaction_kernel.inputs.clone();
+            let (block2, _) = make_mock_block_with_inputs_and_outputs(
+                &block1,
+                spent_inputs,
+                vec![],
+                None,
+                GenerationSpendingKey::derive_from_seed(random()),
+                random(),
+                network,
+            );
+            assert!(archival_state.set_new_tip(&block2).await.is_err());
+            assert_eq!(
+                block1.hash(),
+                archival_state.archival_mutator_set.get_sync_label()
+            );
+            assert_eq!(
+                block1.mutator_set_accumulator_after().unwrap().hash(),
+                archival_state.archival_mutator_set.ams().hash().await
+            );
+        }
+
         #[apply(shared_tokio_runtime)]
         async fn canonical_block_with_input_block1() {
             let network = Network::Main;

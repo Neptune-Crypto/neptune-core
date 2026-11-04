@@ -671,16 +671,24 @@ impl TransactionInitiator {
                 {
                     break;
                 }
+                let inputs = link
+                    .kernel
+                    .kernel
+                    .inputs
+                    .iter()
+                    .map(|removal_record| removal_record.absolute_indices)
+                    .collect::<Vec<_>>();
                 state
                     .chain
                     .archival_state()
-                    .old_mutator_set_and_mutator_set_update_to_tip(
+                    .catch_up_to_tip(
                         link.kernel.kernel.mutator_set_hash,
+                        &inputs,
                         SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE,
                     )
                     .await
             };
-            let Some((old_mutator_set_accumulator, mutator_set_update)) = lookup else {
+            let Some((old_mutator_set_accumulator, catch_up)) = lookup else {
                 return Err(error::SendError::Chained(
                     "could not find mutator-set path from chained link to tip".into(),
                 ));
@@ -690,7 +698,7 @@ impl TransactionInitiator {
             link = UpdateLinkJob {
                 link_tx: link,
                 old_mutator_set_accumulator,
-                mutator_set_update,
+                catch_up,
                 consensus_rule_set,
             }
             .upgrade(job_queue.clone(), proof_job_options.clone())

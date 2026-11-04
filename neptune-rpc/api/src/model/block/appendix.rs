@@ -42,14 +42,7 @@ pub struct RpcBlockAppendix(Vec<RpcClaim>);
 
 impl From<&BlockAppendix> for RpcBlockAppendix {
     fn from(appendix: &BlockAppendix) -> Self {
-        RpcBlockAppendix(
-            appendix
-                ._claims()
-                .clone()
-                .into_iter()
-                .map(Into::into)
-                .collect(),
-        )
+        RpcBlockAppendix(appendix.claims().iter().cloned().map(Into::into).collect())
     }
 }
 
