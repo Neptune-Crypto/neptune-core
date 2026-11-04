@@ -1442,10 +1442,11 @@ market maker or a wallet.
 
 ### 4.11 Vaults, and vaulted NPT
 
-Fix a type script `Vaultee` whose coins carry an amount as their state, and a
-**policy** `Policy`, a predicate on transactions. The **vault type script**
-`Vault(Vaultee, Policy)` holds the hashes of `Vaultee` and `Policy` as
-constants, and its coins carry one of two states:
+Fix a type script `Vaultee` whose coins carry an amount as their state, encoded
+as an amount of NPT is, and a **policy** `Policy`, a predicate on transactions.
+The **vault type script** `Vault(Vaultee, Policy)` holds the hash of `Vaultee`
+as a constant and contains the code of `Policy`, and its coins carry one of two
+states:
 
 - a **token** `token(a)`, with `a` an amount of `Vaultee`'s amount type; a
   UTXO carrying it holds `a` tokens;
@@ -1532,8 +1533,8 @@ announcements fields against the former (`authenticate_txk_field`), and
 equal to the holding withdrawn, under conditions it names, such as a signature
 or an attestation from a named party, and may restrict who creates vaults.
 Vaults are interchangeable, so `Policy`'s conditions are terms of the asset, not
-of a deposit, and the tokens are backed only as `Policy` says. `Policy`'s hash
-is a constant of `Vault(Vaultee, Policy)`, so `Vault(Vaultee, Policy)` and
+of a deposit, and the tokens are backed only as `Policy` says. `Policy`'s code
+is part of `Vault(Vaultee, Policy)`, so `Vault(Vaultee, Policy)` and
 `Vault(Vaultee, Policy′)` are different type scripts and their tokens are
 different assets: a token's type script states every condition under which its
 backing can leave.
@@ -1543,6 +1544,15 @@ token's type, so that its holder knows them, and `Bearer` must see the UTXOs,
 while a lock script sees only addition records (§4.2).
 `Vault(Vaultee, Policy)` sees both the UTXOs and the kernel, and divines
 `Policy`'s witness.
+
+**Why `Policy` is code and not a hash.** A type script runs if and only if a
+coin of the transaction names it, so a `Policy` of its own would need a coin of
+its own in every transaction that moves tokens. It would also have to find the
+tokens, whose type script hash depends on `Policy`'s, so it could not hold that
+hash as a constant. Verifying a proof of `Policy` inside `Vault(Vaultee,
+Policy)` avoids both, at a cost many times that of `Bearer` itself. As code,
+`Policy` costs nothing beyond its own checks, and `Vault(Vaultee, Policy)`'s
+hash still names it.
 
 **Why rule 1 fixes the lock script and the coins.** Rule 1 makes `Policy` the
 whole of the conditions on spending a vault. A vault under a lock script of its
@@ -1892,10 +1902,14 @@ any vault.
 - [ ] The fork's activation heights, once known (§5)
 
 ### Phase 2c — vaults and vaulted NPT
-- [ ] `Vault(Vaultee, Policy)` as a type script generic over `Vaultee` and
-      `Policy`, with vNPT as `Vault(NativeCurrency, Bearer)` (§4.11)
-- [ ] Tests: creation, withdrawal, emptying, topping up and transfer
-      accepted; tokens minted without a deposit, a withdrawal without a burn,
+- [x] The reference implementation, `Vault::validate`, with vNPT as
+      `Vault(NativeCurrency, Bearer)`, the vault lock script, and the vault
+      announcement under `VAULT_FLAG` = 1001 (§4.11)
+- [ ] `Vault(Vaultee, Bearer)` as a type script, generic over `Vaultee`, which
+      agrees with `Vault::validate` (§4.11)
+- [x] Tests of `Vault::validate`: creation, withdrawal, emptying, topping up
+      and transfer accepted; tokens minted without a deposit, a withdrawal
+      without a burn,
       tokens minted in a withdrawal, a vNPT transaction spending two vaults or
       outputting two vaults, a vault without its announcement, an
       announcement whose randomnesses do not give the vault's addition record,

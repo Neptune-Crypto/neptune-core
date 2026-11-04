@@ -9,3 +9,4 @@ pub mod chain;
 pub mod driver;
 pub mod plugin;
 pub mod standing_swap_order;
+pub mod vault;
