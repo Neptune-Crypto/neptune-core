@@ -2038,6 +2038,7 @@ pub(crate) mod tests {
 
     use macro_rules_attr::apply;
     use neptune_mutator_set::addition_record::AdditionRecord;
+    use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
     use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
     use neptune_mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
     use neptune_mutator_set::removal_record::RemovalRecord;
@@ -2215,100 +2216,131 @@ pub(crate) mod tests {
         assert_eq!(3, required.len());
     }
 
+    /// The verdict on a block spending these items, whose membership proofs
+    /// are current, on a parent with this mutator set at this height.
+    fn validate_spends(
+        mutator_set: MutatorSetAccumulator,
+        spends: Vec<(Digest, MsMembershipProof)>,
+        parent_height: BlockHeight,
+    ) -> Result<(), BlockValidationError> {
+        use neptune_mutator_set::shared::BATCH_SIZE;
+
+        use crate::transaction::test_helpers::make_mock_transaction_with_mutator_set_hash_and_timestamp;
+
+        let network = Network::Main;
+        let mut parent = Block::fake_genesis_at_height_with_mutator_set(
+            network,
+            parent_height,
+            mutator_set.clone(),
+        );
+        // The items' index sets lie above the first window, so their
+        // possible AOCL range starts a batch past leaf zero: spending
+        // them calls for no lustration under this threshold.
+        let counter = parent.header().pow.lustration_status().unwrap().counter;
+        parent
+            .kernel_mut()
+            .header
+            .pow
+            .set_lustration_status(LustrationStatus {
+                counter,
+                max_lustrating_aocl_leaf_index: u64::from(BATCH_SIZE) - 1,
+            });
+
+        // The parent's guesser fee outputs follow the items; their
+        // membership proofs must know.
+        let mut after_parent = mutator_set;
+        let mut spends = spends;
+        for addition_record in parent.guesser_fee_addition_records().unwrap() {
+            let items = spends.iter().map(|(item, _)| *item).collect_vec();
+            MsMembershipProof::batch_update_from_addition(
+                &mut spends
+                    .iter_mut()
+                    .map(|(_, membership_proof)| membership_proof)
+                    .collect_vec(),
+                &items,
+                &after_parent,
+                &addition_record,
+            )
+            .unwrap();
+            after_parent.add(&addition_record);
+        }
+        assert_eq!(
+            parent.mutator_set_accumulator_after().unwrap().hash(),
+            after_parent.hash()
+        );
+        let inputs = spends
+            .iter()
+            .map(|(item, membership_proof)| after_parent.drop(*item, membership_proof))
+            .collect_vec();
+
+        let timestamp = parent.header().timestamp + Timestamp::hours(1);
+        let transaction = make_mock_transaction_with_mutator_set_hash_and_timestamp(
+            inputs,
+            vec![],
+            after_parent.hash(),
+            timestamp,
+        );
+        let mut block = Block::block_template_invalid_proof(
+            &parent,
+            BlockTransaction::upgrade(transaction),
+            timestamp,
+            None,
+            network,
+        );
+        block.set_appendix(BlockAppendix::new(BlockAppendix::mock_consensus_claims(
+            block.body(),
+            &parent,
+            network,
+        )));
+
+        block.validate_without_proof(&parent, timestamp, network)
+    }
+
     #[test]
     fn inputs_sharing_their_only_unset_index_are_accepted() {
         // Two inputs whose only unset indices coincide: each is a first spend
         // on its own, which rule 2.b and the proven rules accept, though
         // together they have no index that only one of them sets.
-        use neptune_mutator_set::ms_membership_proof::MsMembershipProof;
-        use neptune_mutator_set::shared::BATCH_SIZE;
         use neptune_mutator_set::test_shared::two_items_sharing_their_only_unset_index;
-        use rand::rngs::StdRng;
-        use rand::SeedableRng;
 
         use crate::consensus_rule_set::BLOCK_HEIGHT_HARDFORK_DELTA_MAIN_NET;
         use crate::consensus_rule_set::BLOCK_HEIGHT_SOFTFORK_EPSILON_MAIN_NET;
-        use crate::transaction::test_helpers::make_mock_transaction_with_mutator_set_hash_and_timestamp;
 
-        let network = Network::Main;
         let (mutator_set, spends) =
             two_items_sharing_their_only_unset_index(&mut StdRng::seed_from_u64(0));
         for parent_height in [
             BLOCK_HEIGHT_HARDFORK_DELTA_MAIN_NET,
             BLOCK_HEIGHT_SOFTFORK_EPSILON_MAIN_NET.previous().unwrap(),
         ] {
-            let mut parent = Block::fake_genesis_at_height_with_mutator_set(
-                network,
-                parent_height,
-                mutator_set.clone(),
-            );
-            // The items' index sets lie above the first window, so their
-            // possible AOCL range starts a batch past leaf zero: spending
-            // them calls for no lustration under this threshold.
-            let counter = parent.header().pow.lustration_status().unwrap().counter;
-            parent
-                .kernel_mut()
-                .header
-                .pow
-                .set_lustration_status(LustrationStatus {
-                    counter,
-                    max_lustrating_aocl_leaf_index: u64::from(BATCH_SIZE) - 1,
-                });
-
-            // The parent's guesser fee outputs follow the items; their
-            // membership proofs must know.
-            let mut after_parent = mutator_set.clone();
-            let mut spends = spends.clone();
-            for addition_record in parent.guesser_fee_addition_records().unwrap() {
-                let items = spends.iter().map(|(item, _)| *item).collect_vec();
-                MsMembershipProof::batch_update_from_addition(
-                    &mut spends
-                        .iter_mut()
-                        .map(|(_, membership_proof)| membership_proof)
-                        .collect_vec(),
-                    &items,
-                    &after_parent,
-                    &addition_record,
-                )
-                .unwrap();
-                after_parent.add(&addition_record);
-            }
-            assert_eq!(
-                parent.mutator_set_accumulator_after().unwrap().hash(),
-                after_parent.hash()
-            );
-            let inputs = spends
-                .iter()
-                .map(|(item, membership_proof)| after_parent.drop(*item, membership_proof))
-                .collect_vec();
-            assert!(inputs.iter().all(|input| after_parent.can_remove(input)));
-
-            let timestamp = parent.header().timestamp + Timestamp::hours(1);
-            let transaction = make_mock_transaction_with_mutator_set_hash_and_timestamp(
-                inputs,
-                vec![],
-                after_parent.hash(),
-                timestamp,
-            );
-            let mut block = Block::block_template_invalid_proof(
-                &parent,
-                BlockTransaction::upgrade(transaction),
-                timestamp,
-                None,
-                network,
-            );
-            block.set_appendix(BlockAppendix::new(BlockAppendix::mock_consensus_claims(
-                block.body(),
-                &parent,
-                network,
-            )));
-
             assert_eq!(
                 Ok(()),
-                block.validate_without_proof(&parent, timestamp, network),
+                validate_spends(mutator_set.clone(), spends.clone(), parent_height),
                 "parent at height {parent_height}"
             );
         }
+    }
+
+    #[test]
+    fn input_with_every_index_set_is_rejected() {
+        // Rule 2.b: once the parent's state holds the first of two items
+        // sharing their only unset index, the second has no index left to
+        // set, with every other rule satisfied.
+        use neptune_mutator_set::test_shared::two_items_sharing_their_only_unset_index;
+
+        use crate::consensus_rule_set::BLOCK_HEIGHT_HARDFORK_DELTA_MAIN_NET;
+
+        let (mut mutator_set, mut spends) =
+            two_items_sharing_their_only_unset_index(&mut StdRng::seed_from_u64(0));
+        let (first_item, first_membership_proof) = spends.remove(0);
+        let removal_record = mutator_set.drop(first_item, &first_membership_proof);
+        MsMembershipProof::batch_update_from_remove(&mut [&mut spends[0].1], &removal_record)
+            .unwrap();
+        mutator_set.remove(&removal_record);
+
+        assert_eq!(
+            Err(BlockValidationError::RemovalRecordsValidity),
+            validate_spends(mutator_set, spends, BLOCK_HEIGHT_HARDFORK_DELTA_MAIN_NET)
+        );
     }
 
     #[test]
