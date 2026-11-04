@@ -309,7 +309,7 @@ impl TryFrom<BigUint> for ProofOfWork {
 
     fn try_from(big: BigUint) -> Result<Self, Self::Error> {
         ensure!(
-            !big.iter_u32_digits().count() > Self::NUM_LIMBS,
+            big.iter_u32_digits().count() <= Self::NUM_LIMBS,
             "exceeds maximum ProofOfWork value"
         );
 
@@ -547,6 +547,16 @@ mod tests {
 
     use super::*;
     use crate::network::Network;
+
+    #[test]
+    fn proof_of_work_from_big_uint_refuses_more_than_its_limbs() {
+        let maximum = BigUint::from(ProofOfWork::MAXIMUM);
+        assert_eq!(
+            ProofOfWork::MAXIMUM,
+            ProofOfWork::try_from(maximum.clone()).unwrap()
+        );
+        assert!(ProofOfWork::try_from(maximum + BigUint::one()).is_err());
+    }
 
     impl Difficulty {
         /// Convert a u64 into a difficulty.
