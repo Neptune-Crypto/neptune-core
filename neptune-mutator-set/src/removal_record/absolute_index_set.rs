@@ -32,8 +32,9 @@ use crate::shared::WINDOW_SIZE;
 pub struct AbsoluteIndexSet {
     minimum: u128,
 
-    /// Distances of the indices relative to the minimum. Guaranteed to be in
-    /// the range [0; 2^{20}-1].
+    /// Distances of the indices relative to the minimum. [`Self::new`]
+    /// keeps them below [`WINDOW_SIZE`]. A decoded value is unchecked, and
+    /// the transaction's removal records integrity proof is what binds it.
     #[serde(with = "serde_arrays")]
     distances: [u32; NUM_TRIALS as usize],
 }

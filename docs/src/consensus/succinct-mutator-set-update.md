@@ -858,7 +858,9 @@ the first inputs is zero. The epoch table carries the floor,
 `min_swbf_padded_rows`, zero for none. The target is 2^23 rows, four
 leaves at 2^21 (about 15 seconds each on a fast desktop) and three
 aggregations, which also means that the first 128 or so inputs of a block
-come free.
+come free. The shape is the composer's decision: two leaves at 2^22 or eight
+at 2^20 meet the same floor with the same rows. The aggregations are not
+counted.
 
 The aggregation reads the padded height of each child's proof, which is
 the first item of the proof stream and which verification binds: a proof
