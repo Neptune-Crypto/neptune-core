@@ -1,8 +1,11 @@
 use std::collections::HashMap;
 
 use itertools::Itertools;
+use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
+use neptune_primitives::mast_hash::MastHash;
 use neptune_wallet::coinbase_distribution::CoinbaseDistribution;
 use tasm_lib::prelude::Digest;
+use tokio::sync::watch;
 use tracing::info;
 
 use super::mining_status::MiningStatus;
@@ -16,6 +19,11 @@ pub const MAX_NUM_EXPORTED_BLOCK_PROPOSAL_STORED: usize = 10_000;
 #[derive(Debug, Default)]
 struct OverrideCoinbaseSettings {
     coinbase_distribution: Option<CoinbaseDistribution>,
+
+    /// A coinbase transaction an RPC caller set, which block proposals use in
+    /// place of the one this node builds. A channel, so that the composer can
+    /// wait for the caller to set it.
+    coinbase_tx: watch::Sender<Option<PrimitiveWitness>>,
 }
 
 /// State related to the mining (composing and guessing) of the next block.
@@ -70,5 +78,51 @@ impl MiningState {
 
     pub(crate) fn unset_coinbase_distribution(&mut self) {
         self.override_coinbase_settings.coinbase_distribution = None;
+    }
+
+    pub(crate) fn coinbase_tx(&self) -> Option<PrimitiveWitness> {
+        self.override_coinbase_settings.coinbase_tx.borrow().clone()
+    }
+
+    /// The coinbase transaction an RPC caller set, as it changes.
+    pub(crate) fn watch_coinbase_tx(&self) -> watch::Receiver<Option<PrimitiveWitness>> {
+        self.override_coinbase_settings.coinbase_tx.subscribe()
+    }
+
+    /// Unset the coinbase transaction an RPC caller set if and only if its
+    /// kernel has MAST hash `kernel_mast_hash`, so that a caller who has set
+    /// another one in the meantime keeps it.
+    pub(crate) fn unset_coinbase_tx_if(&mut self, kernel_mast_hash: Digest) {
+        self.override_coinbase_settings
+            .coinbase_tx
+            .send_if_modified(|coinbase_tx| {
+                let unset = coinbase_tx
+                    .as_ref()
+                    .is_some_and(|tx| tx.kernel.mast_hash() == kernel_mast_hash);
+                if unset {
+                    info!(
+                        "Unsetting coinbase transaction set by RPC caller, which no longer fits."
+                    );
+                    *coinbase_tx = None;
+                }
+                unset
+            });
+    }
+
+    /// Have this node's next block proposals use `coinbase_tx` in place of the
+    /// coinbase transaction this node builds, until it is set again. `None`
+    /// unsets it.
+    pub(crate) fn set_coinbase_tx(&mut self, coinbase_tx: Option<PrimitiveWitness>) {
+        info!(
+            "{} coinbase transaction set by RPC caller.",
+            if coinbase_tx.is_some() {
+                "Setting"
+            } else {
+                "Unsetting"
+            }
+        );
+        self.override_coinbase_settings
+            .coinbase_tx
+            .send_replace(coinbase_tx);
     }
 }

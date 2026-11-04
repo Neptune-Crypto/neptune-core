@@ -22,6 +22,7 @@ use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOption
 use neptune_consensus::proof_abstractions::triton_vm_job_queue::vm_job_queue;
 use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobPriority;
 use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue;
+use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
 use neptune_consensus::transaction::transaction_proof::TransactionProofType;
 use neptune_consensus::transaction::*;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -29,6 +30,7 @@ use neptune_job_queue::errors::JobHandleError;
 use neptune_mempool::tx_upgrade_filter::TxUpgradeFilter;
 use neptune_mempool::upgrade_priority::UpgradePriority;
 use neptune_primitives::difficulty_control::difficulty_control;
+use neptune_primitives::mast_hash::MastHash;
 use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 use neptune_wallet::composer_parameters::prepare_coinbase_transaction_stateless;
@@ -101,9 +103,13 @@ pub(crate) async fn compose_block_helper(
     Ok((compose_result, composer_utxos))
 }
 
+/// How long the composer waits for an RPC caller to replace a coinbase
+/// transaction that no longer fits before it composes without one.
+const CALLER_COINBASE_TX_WAIT: Duration = Duration::from_secs(1);
+
 async fn compose_block(
     latest_block: Block,
-    global_state_lock: GlobalStateLock,
+    mut global_state_lock: GlobalStateLock,
     sender: oneshot::Sender<(Block, Vec<ExpectedUtxo>)>,
     cancel_compose_rx: tokio::sync::watch::Receiver<()>,
     now: Timestamp,
@@ -118,8 +124,69 @@ async fn compose_block(
         .proof_job_options(TritonVmJobPriority::High);
     job_options.cancel_job_rx = Some(cancel_compose_rx);
 
-    let (proposal, composer_utxos) =
-        compose_block_helper(latest_block, global_state_lock, timestamp, job_options).await?;
+    // An RPC caller who sets coinbase transactions hears of the new tip after
+    // this node does, so a transaction it set that does not fit this block was
+    // built for an older tip. The composer unsets it and gives the caller a
+    // moment to set one for this tip. A transaction that fits and arrives
+    // later still wins, also when none was set to begin with: the composition
+    // that began without it is dropped, which cancels its proof jobs, and
+    // begins again.
+    let mut caller_tx = global_state_lock
+        .lock_guard()
+        .await
+        .mining_state
+        .watch_coinbase_tx();
+    let stale = caller_tx
+        .borrow_and_update()
+        .as_ref()
+        .map(|tx| tx.kernel.mast_hash());
+    let mut late = true;
+    if let Some(stale) = stale {
+        if caller_coinbase_tx(&latest_block, &global_state_lock)
+            .await
+            .is_some()
+        {
+            late = false;
+        } else {
+            global_state_lock
+                .lock_guard_mut()
+                .await
+                .mining_state
+                .unset_coinbase_tx_if(stale);
+            late = time::timeout(CALLER_COINBASE_TX_WAIT, caller_tx.wait_for(Option::is_some))
+                .await
+                .is_err();
+        }
+    }
+
+    let compose = compose_block_helper(
+        latest_block.clone(),
+        global_state_lock.clone(),
+        timestamp,
+        job_options.clone(),
+    );
+    let composition = if late {
+        tokio::pin!(compose);
+        loop {
+            select! {
+                composition = &mut compose => break Some(composition),
+                Ok(_) = caller_tx.changed() => {
+                    if caller_coinbase_tx(&latest_block, &global_state_lock).await.is_some() {
+                        break None;
+                    }
+                }
+            }
+        }
+    } else {
+        Some(compose.await)
+    };
+    let (proposal, composer_utxos) = match composition {
+        Some(composition) => composition?,
+        None => {
+            info!("Coinbase transaction set by RPC caller arrived late; composing again.");
+            compose_block_helper(latest_block, global_state_lock, timestamp, job_options).await?
+        }
+    };
 
     // Please clap.
     match sender.send((proposal, composer_utxos)) {
@@ -160,6 +227,20 @@ pub(crate) async fn mock_compose_block(
         Some(gs.cli().max_num_compose_mergers.get()),
     );
     drop(gs);
+
+    if let Some(witness) = caller_coinbase_tx(&latest_block, &global_state_lock).await {
+        let coinbase_transaction = MockBlockGenerator::mock_transaction_from_witness(witness);
+        let block = MockBlockGenerator::mock_successor_from_coinbase_tx_no_pow(
+            latest_block,
+            coinbase_transaction,
+            guesser_address,
+            coinbase_timestamp,
+            rand::random(),
+            txs,
+            network,
+        );
+        return (block, vec![]);
+    }
 
     let (block, composer_txos) = MockBlockGenerator::mock_successor_no_pow(
         latest_block,
@@ -489,6 +570,65 @@ pub(crate) async fn make_coinbase_transaction_stateless(
     Ok((transaction, composer_outputs))
 }
 
+/// The witness of the coinbase transaction an RPC caller set, if that
+/// transaction qualifies for the block after `predecessor`, and `None`
+/// otherwise, in which case the composer builds its own.
+///
+/// Let `h` be the height after `predecessor`. The transaction qualifies if
+/// and only if all of the following hold:
+///
+/// - the consensus rules at `h` allow coinbase inputs;
+/// - its mutator set hash is that of the mutator set after `predecessor`;
+/// - its coinbase is present and lies in `[0, Block::block_subsidy(h)]`;
+/// - its fee is non-negative;
+/// - its timestamp is at least `predecessor`'s plus the minimum block time;
+/// - if `predecessor` is at or above the first lustration block, the amount
+///   its inputs lustrate is at most `predecessor`'s lustration counter;
+/// - its witness validates.
+pub(crate) async fn caller_coinbase_tx(
+    predecessor: &Block,
+    global_state_lock: &GlobalStateLock,
+) -> Option<PrimitiveWitness> {
+    let witness = global_state_lock
+        .lock_guard()
+        .await
+        .mining_state
+        .coinbase_tx()?;
+
+    let network = global_state_lock.cli().network;
+    let height = predecessor.header().height.next();
+    let kernel = &witness.kernel;
+    let lustration_status = (ConsensusRuleSet::first_lustration_block(network)
+        <= predecessor.header().height)
+        .then(|| predecessor.header().pow.lustration_status().ok())
+        .flatten();
+    let lustrates = lustration_status.is_none_or(|status| {
+        kernel
+            .verified_lustration_amount(
+                status.max_lustrating_aocl_leaf_index,
+                ConsensusRuleSet::infer_from(network, height).fix_lustration_double_counting(),
+            )
+            .is_ok_and(|amount| amount <= status.counter)
+    });
+    let fits = ConsensusRuleSet::allows_coinbase_inputs(network, height)
+        && lustrates
+        && predecessor
+            .mutator_set_accumulator_after()
+            .is_ok_and(|msa| msa.hash() == kernel.mutator_set_hash)
+        && kernel.coinbase.is_some_and(|coinbase| {
+            !coinbase.is_negative() && coinbase <= Block::block_subsidy(height)
+        })
+        && !kernel.fee.is_negative()
+        && kernel.timestamp >= predecessor.header().timestamp + network.minimum_block_time()
+        && witness.validate().await.is_ok();
+    if !fits {
+        info!("Coinbase transaction set by RPC caller does not fit block {height}; not using it.");
+        return None;
+    }
+
+    Some(witness)
+}
+
 /// Enumerates origins of transactions to be merged into a block transaction.
 ///
 /// In the general case, this is (just) the mempool.
@@ -548,15 +688,39 @@ pub(crate) async fn create_block_transaction_from(
     // A coinbase transaction implies mining. So you *must*
     // be able to create a SingleProof.
     let vm_job_queue = vm_job_queue();
-    let (coinbase_transaction, composer_txos) = make_coinbase_transaction_stateless(
-        predecessor_block,
-        composer_parameters.clone(),
-        coinbase_timestamp,
-        vm_job_queue.clone(),
-        job_options.clone(),
-        new_rules,
-    )
-    .await?;
+    let proof_job_options = TritonVmProofJobOptionsBuilder::new()
+        .template(&job_options)
+        .proof_type(TransactionProofType::SingleProof)
+        .build();
+    let (coinbase_transaction, composer_txos) =
+        match caller_coinbase_tx(predecessor_block, &global_state_lock).await {
+            Some(witness) => {
+                info!("Proving coinbase transaction set by RPC caller");
+                let proof = TransactionProofBuilder::new()
+                    .consensus_rule_set(new_rules)
+                    .primitive_witness_ref(&witness)
+                    .job_queue(vm_job_queue.clone())
+                    .proof_job_options(proof_job_options.clone())
+                    .build()
+                    .await?;
+                let transaction = Transaction {
+                    kernel: witness.kernel,
+                    proof,
+                };
+                (transaction, TxOutputList::default())
+            }
+            None => {
+                make_coinbase_transaction_stateless(
+                    predecessor_block,
+                    composer_parameters.clone(),
+                    coinbase_timestamp,
+                    vm_job_queue.clone(),
+                    job_options.clone(),
+                    new_rules,
+                )
+                .await?
+            }
+        };
 
     // Cap max size of kernel. The mempool accounts for the packing of inputs
     // when applying this limit. The limit does not account for the coinbase
@@ -584,10 +748,6 @@ pub(crate) async fn create_block_transaction_from(
     // If no updated single-proof transaction were found in the mempool, try
     // to find one that's not updated, since updating this is faster than
     // producing a new single proof-backed transaction.
-    let proof_job_options = TritonVmProofJobOptionsBuilder::new()
-        .template(&job_options)
-        .proof_type(TransactionProofType::SingleProof)
-        .build();
     if transactions_to_merge.is_empty()
         && tx_merge_origin == TxMergeOrigin::Mempool
         && new_rules == old_rules
@@ -1655,6 +1815,264 @@ pub(crate) mod tests {
         .unwrap();
         let (block_2, _) = receiver_2.await.unwrap();
         assert!(block_2.is_valid(&block_1, mocked_now, network).await);
+    }
+
+    /// The composer uses the coinbase transaction an RPC caller set if the
+    /// consensus rules allow coinbase inputs and the transaction fits the
+    /// block, and builds its own coinbase transaction otherwise.
+    #[apply(shared_tokio_runtime)]
+    async fn composer_uses_caller_coinbase_tx_if_and_only_if_it_fits() {
+        /// A genesis state whose mining state holds a coinbase transaction
+        /// for block 1, timestamped `caller_tx_timestamp`, paying an address
+        /// outside the wallet.
+        async fn state_with_caller_tx(
+            network: Network,
+            caller_tx_timestamp: Timestamp,
+        ) -> (GlobalStateLock, PrimitiveWitness) {
+            let cli = cli_args::Args::default_with_network(network);
+            let mut state = mock_genesis_global_state(2, WalletEntropy::devnet_wallet(), cli).await;
+
+            let mut rng = rand::rng();
+            let caller_address = GenerationReceivingAddress::derive_from_seed(rng.random());
+            let caller_parameters = ComposerParameters::new(
+                CoinbaseDistribution::solo(caller_address.into()),
+                rng.random(),
+                None,
+                0.5,
+                FeeNotificationPolicy::OnChainGeneration,
+            );
+            let (_, details) = prepare_coinbase_transaction_stateless(
+                &Block::genesis(network),
+                caller_parameters,
+                caller_tx_timestamp,
+                network,
+            );
+            let witness = details.primitive_witness();
+            state
+                .lock_guard_mut()
+                .await
+                .mining_state
+                .set_coinbase_tx(Some(witness.clone()));
+
+            (state, witness)
+        }
+
+        let network = Network::RegTest;
+        let genesis_block = Block::genesis(network);
+        let genesis_timestamp = genesis_block.header().timestamp;
+        let now = genesis_timestamp + Timestamp::hours(2);
+        let in_time = genesis_timestamp + Timestamp::hours(1);
+
+        let (state, witness) = state_with_caller_tx(network, in_time).await;
+        let (block, _) = mock_compose_block(genesis_block.clone(), state, now).await;
+        assert!(block.is_valid(&genesis_block, now, network).await);
+        let block_kernel = &block.body().transaction_kernel;
+        assert_eq!(witness.kernel.coinbase, block_kernel.coinbase);
+        assert!(witness
+            .kernel
+            .outputs
+            .iter()
+            .all(|o| block_kernel.outputs.contains(o)));
+
+        // Timestamped no later than its predecessor, the transaction does
+        // not fit, so the composer builds its own coinbase transaction.
+        let (early_state, early_witness) = state_with_caller_tx(network, genesis_timestamp).await;
+        let (early_block, _) = mock_compose_block(genesis_block.clone(), early_state, now).await;
+        assert!(early_block.is_valid(&genesis_block, now, network).await);
+        let early_block_kernel = &early_block.body().transaction_kernel;
+        assert!(early_block_kernel.coinbase.is_some());
+        assert!(!early_witness
+            .kernel
+            .outputs
+            .iter()
+            .any(|o| early_block_kernel.outputs.contains(o)));
+
+        // The consensus rules of other networks forbid coinbase inputs.
+        let main_genesis_block = Block::genesis(Network::Main);
+        let in_time_on_main = main_genesis_block.header().timestamp + Timestamp::hours(1);
+        let (main_state, _) = state_with_caller_tx(Network::Main, in_time_on_main).await;
+        assert!(caller_coinbase_tx(&main_genesis_block, &main_state)
+            .await
+            .is_none());
+    }
+
+    /// A coinbase transaction an RPC caller set that does not fit the block
+    /// is unset, and the composer waits for the caller to set one that does.
+    /// It uses a transaction set within the wait, and composes without one
+    /// if none is.
+    #[apply(shared_tokio_runtime)]
+    async fn composer_replaces_a_caller_coinbase_tx_that_does_not_fit() {
+        let network = Network::RegTest;
+        let genesis_block = Block::genesis(network);
+        let genesis_timestamp = genesis_block.header().timestamp;
+        let now = genesis_timestamp + Timestamp::hours(2);
+
+        /// A coinbase transaction for block 1, timestamped `timestamp`, paying
+        /// an address outside the wallet.
+        fn caller_tx(genesis_block: &Block, timestamp: Timestamp) -> PrimitiveWitness {
+            let mut rng = rand::rng();
+            let caller_address = GenerationReceivingAddress::derive_from_seed(rng.random());
+            let caller_parameters = ComposerParameters::new(
+                CoinbaseDistribution::solo(caller_address.into()),
+                rng.random(),
+                None,
+                0.5,
+                FeeNotificationPolicy::OnChainGeneration,
+            );
+            let (_, details) = prepare_coinbase_transaction_stateless(
+                genesis_block,
+                caller_parameters,
+                timestamp,
+                Network::RegTest,
+            );
+            details.primitive_witness()
+        }
+
+        /// Compose block 1 on a state holding `stale`, while a caller sets
+        /// `fresh`, if any, a fifth of the wait after composition begins.
+        async fn compose(
+            genesis_block: &Block,
+            now: Timestamp,
+            stale: PrimitiveWitness,
+            fresh: Option<PrimitiveWitness>,
+        ) -> (Block, GlobalStateLock) {
+            let cli = cli_args::Args::default_with_network(Network::RegTest);
+            let mut state = mock_genesis_global_state(2, WalletEntropy::devnet_wallet(), cli).await;
+            state
+                .lock_guard_mut()
+                .await
+                .mining_state
+                .set_coinbase_tx(Some(stale));
+
+            let (sender, receiver) = oneshot::channel();
+            let (_cancel_compose_tx, cancel_compose_rx) = tokio::sync::watch::channel(());
+            let composer = tokio::spawn(compose_block(
+                genesis_block.clone(),
+                state.clone(),
+                sender,
+                cancel_compose_rx,
+                now,
+            ));
+            if let Some(fresh) = fresh {
+                sleep(CALLER_COINBASE_TX_WAIT / 5).await;
+                state
+                    .lock_guard_mut()
+                    .await
+                    .mining_state
+                    .set_coinbase_tx(Some(fresh));
+            }
+            composer.await.unwrap().unwrap();
+
+            (receiver.await.unwrap().0, state)
+        }
+
+        // Timestamped no later than its predecessor, a transaction does not
+        // fit.
+        let stale = caller_tx(&genesis_block, genesis_timestamp);
+        let fresh = caller_tx(&genesis_block, genesis_timestamp + Timestamp::hours(1));
+
+        let (block, _) = compose(&genesis_block, now, stale.clone(), Some(fresh.clone())).await;
+        assert!(block.is_valid(&genesis_block, now, network).await);
+        let block_kernel = &block.body().transaction_kernel;
+        assert!(fresh
+            .kernel
+            .outputs
+            .iter()
+            .all(|o| block_kernel.outputs.contains(o)));
+
+        let (unanswered_block, state) = compose(&genesis_block, now, stale.clone(), None).await;
+        assert!(
+            unanswered_block
+                .is_valid(&genesis_block, now, network)
+                .await
+        );
+        let unanswered_kernel = &unanswered_block.body().transaction_kernel;
+        assert!(!stale
+            .kernel
+            .outputs
+            .iter()
+            .any(|o| unanswered_kernel.outputs.contains(o)));
+        assert!(state
+            .lock_guard()
+            .await
+            .mining_state
+            .coinbase_tx()
+            .is_none());
+    }
+
+    /// The composer ignores a caller's coinbase transaction that claims more
+    /// than the block subsidy, was built against another mutator set, or pays
+    /// a negative fee, however valid it is otherwise, and composes a valid
+    /// block of its own instead.
+    #[apply(shared_tokio_runtime)]
+    async fn composer_ignores_a_caller_coinbase_tx_that_breaks_the_blocks_rules() {
+        use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+        use num_traits::CheckedSub;
+
+        let network = Network::RegTest;
+        let genesis_block = Block::genesis(network);
+        let in_time = genesis_block.header().timestamp + Timestamp::hours(1);
+        let now = genesis_block.header().timestamp + Timestamp::hours(2);
+        let excess = NativeCurrencyAmount::from_nau(1);
+
+        let mut rng = rand::rng();
+        let caller_address = GenerationReceivingAddress::derive_from_seed(rng.random());
+        let caller_parameters = ComposerParameters::new(
+            CoinbaseDistribution::solo(caller_address.into()),
+            rng.random(),
+            None,
+            0.5,
+            FeeNotificationPolicy::OnChainGeneration,
+        );
+        let (_, valid) = prepare_coinbase_transaction_stateless(
+            &genesis_block,
+            caller_parameters,
+            in_time,
+            network,
+        );
+        let subsidy = valid.coinbase.unwrap();
+
+        let mut too_rich = valid.clone();
+        too_rich.coinbase = Some(subsidy + excess);
+        too_rich.fee += excess;
+        assert!(too_rich.validate().await.is_ok());
+
+        let mut elsewhere = valid.clone();
+        elsewhere.mutator_set_accumulator = MutatorSetAccumulator::default();
+        assert!(elsewhere.validate().await.is_ok());
+
+        // The outputs stay; the coinbase shrinks by what the guesser had,
+        // and by `excess` more, which the fee then takes back.
+        let mut negative_fee = valid.clone();
+        negative_fee.coinbase = Some(subsidy.checked_sub(&(valid.fee + excess)).unwrap());
+        negative_fee.fee = -excess;
+
+        for (case, details) in [
+            ("more than the subsidy", too_rich),
+            ("another mutator set", elsewhere),
+            ("a negative fee", negative_fee),
+        ] {
+            let cli = cli_args::Args::default_with_network(network);
+            let mut state = mock_genesis_global_state(2, WalletEntropy::devnet_wallet(), cli).await;
+            let witness = details.primitive_witness();
+            state
+                .lock_guard_mut()
+                .await
+                .mining_state
+                .set_coinbase_tx(Some(witness.clone()));
+
+            let (block, _) = mock_compose_block(genesis_block.clone(), state, now).await;
+            assert!(block.is_valid(&genesis_block, now, network).await, "{case}");
+            let block_kernel = &block.body().transaction_kernel;
+            assert!(
+                !witness
+                    .kernel
+                    .outputs
+                    .iter()
+                    .any(|o| block_kernel.outputs.contains(o)),
+                "{case}"
+            );
+        }
     }
 
     #[apply(shared_tokio_runtime)]
