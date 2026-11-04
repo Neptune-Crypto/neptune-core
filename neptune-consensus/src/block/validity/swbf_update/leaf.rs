@@ -502,6 +502,9 @@ impl CorrectSwbfUpdate {
     /// program rejects a witness above it.
     pub const MAX_IDLE_ITERATIONS: u64 = 1 << 27;
 
+    /// The idle iterations exceed the cap.
+    const IDLE_ITERATIONS_ERROR_ID: i128 = 1_000_650;
+
     /// The claim for a block's inputs on this mutator set as its only leaf,
     /// as its appendix carries it.
     pub fn claim(inputs: &[RemovalRecord], mutator_set: &MutatorSetAccumulator) -> Claim {
@@ -602,7 +605,8 @@ impl TritonProgram for CorrectSwbfUpdate {
             // _ idle_iterations
 
             // Crashes unless the count is a u32 at or below the cap.
-            push {Self::MAX_IDLE_ITERATIONS + 1} dup 1 lt assert
+            push {Self::MAX_IDLE_ITERATIONS + 1} dup 1 lt
+            assert error_id {Self::IDLE_ITERATIONS_ERROR_ID}
             // _ idle_iterations
 
             dup 0 skiz call {idle}
@@ -721,6 +725,7 @@ pub(in crate::block::validity) mod tests {
             for word in output.encode() {
                 tasm::tasmlib_io_write_to_stdout___bfe(word);
             }
+            assert!(witness.idle_iterations.value() <= Self::MAX_IDLE_ITERATIONS);
         }
     }
 
@@ -1853,13 +1858,14 @@ pub(in crate::block::validity) mod tests {
 
     #[test]
     fn program_rejects_idle_iterations_above_the_cap_or_beyond_u32() {
-        for idle_iterations in [CorrectSwbfUpdate::MAX_IDLE_ITERATIONS + 1, 1 << 40] {
-            let mut witness = witness(1, 0);
-            witness.idle_iterations = bfe!(idle_iterations);
-            let result =
-                CorrectSwbfUpdate.run_tasm(&witness.standard_input(), witness.nondeterminism());
-            assert!(result.is_err(), "{idle_iterations} iterations");
-        }
+        let mut witness = witness(1, 0);
+        witness.idle_iterations = bfe!(CorrectSwbfUpdate::MAX_IDLE_ITERATIONS + 1);
+        assert_rejects(&witness, CorrectSwbfUpdate::IDLE_ITERATIONS_ERROR_ID);
+
+        witness.idle_iterations = bfe!(1u64 << 40);
+        let result =
+            CorrectSwbfUpdate.run_tasm(&witness.standard_input(), witness.nondeterminism());
+        assert!(result.is_err());
     }
 
     #[test]
