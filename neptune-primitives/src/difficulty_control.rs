@@ -458,9 +458,9 @@ pub fn difficulty_control(
     let delta_t = new_timestamp - old_timestamp;
 
     // distance to target
-    let absolute_error = (delta_t.0.value() as i64) - (target_block_interval.0.value() as i64);
-    let relative_error =
-        i128::from(absolute_error) * ((1 << 32) / i128::from(target_block_interval.0.value()));
+    let absolute_error =
+        i128::from(delta_t.0.value()) - i128::from(target_block_interval.0.value());
+    let relative_error = absolute_error * ((1 << 32) / i128::from(target_block_interval.0.value()));
     let clamped_error = relative_error.clamp(-1 << 32, 4 << 32);
 
     // Errors smaller than -1 cannot occur because delta_t >= MINIMUM_BLOCK_TIME > 0.

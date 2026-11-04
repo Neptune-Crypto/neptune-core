@@ -426,11 +426,13 @@ mod tests {
 
             let target = targets[rng.random_range(0..targets.len())];
             let old_timestamp = rng.random_range(0..1u64 << 40);
-            let delta = match rng.random_range(0..4) {
+            let delta = match rng.random_range(0..=4) {
                 0 => rng.random_range(60_000..target.max(60_001)),
                 1 => rng.random_range(target..2 * target + 1),
                 2 => rng.random_range(2 * target..100 * target + 1),
-                _ => rng.random_range(60_000..1u64 << 40),
+                3 => rng.random_range(60_000..1u64 << 40),
+                // Up to the field's size, less the old timestamp.
+                _ => rng.random_range(60_000..(1u64 << 63) + (1u64 << 62)),
             };
             let height = BlockHeight::from(rng.random_range(1..4 * u64::from(u32::MAX)));
 
@@ -466,6 +468,9 @@ mod tests {
                 5 * 588_000,
                 5 * 588_000 + 1,
                 1 << 40,
+                // Past the signed boundary.
+                1 << 63,
+                (1 << 63) + 588_001,
             ] {
                 assert_agrees_with_host(
                     old_difficulty,
