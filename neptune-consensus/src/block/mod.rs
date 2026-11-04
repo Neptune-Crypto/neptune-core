@@ -877,7 +877,7 @@ impl Block {
         let parent_mutator_set = previous_block.mutator_set_accumulator_after()?;
         let parent_info = PredecessorIsValid::new().parent_block_info(
             previous_block,
-            ConsensusRuleSet::epoch_table(network).activation_height(),
+            &ConsensusRuleSet::epoch_table(network),
             Block::genesis_digest(network),
         );
         self.validate_except_proof(
@@ -2076,7 +2076,7 @@ pub(crate) mod tests {
             let parent_mutator_set = previous_block.mutator_set_accumulator_after()?;
             let parent_info = PredecessorIsValid::new().parent_block_info(
                 previous_block,
-                ConsensusRuleSet::epoch_table(network).activation_height(),
+                &ConsensusRuleSet::epoch_table(network),
                 Block::genesis_digest(network),
             );
             self.validate_except_proof(

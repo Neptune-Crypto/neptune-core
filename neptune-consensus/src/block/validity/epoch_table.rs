@@ -201,24 +201,24 @@ impl EpochTable {
     }
 }
 
+impl EpochTable {
+    /// Whether the other table holds all of this table's epochs, and any
+    /// epochs it holds beyond those had not started by this height.
+    pub(in crate::block::validity) fn is_prefix_of_up_to(
+        &self,
+        other: &Self,
+        height: BlockHeight,
+    ) -> bool {
+        self.0.iter().zip(&other.0).all(|(own, others)| {
+            own == others || (*own == Epoch::default() && !Self::has_started(others, height))
+        })
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
-
-    impl EpochTable {
-        /// Whether the other table holds all of this table's epochs, and any
-        /// epochs it holds beyond those had not started by this height.
-        pub(in crate::block::validity) fn is_prefix_of_up_to(
-            &self,
-            other: &Self,
-            height: BlockHeight,
-        ) -> bool {
-            self.0.iter().zip(&other.0).all(|(own, others)| {
-                own == others || (*own == Epoch::default() && !Self::has_started(others, height))
-            })
-        }
-    }
 
     fn epoch(height: u64, minimum_block_time: u64) -> Epoch {
         Epoch {

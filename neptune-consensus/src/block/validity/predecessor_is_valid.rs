@@ -535,25 +535,26 @@ impl PredecessorIsValid {
     pub fn parent_block_info(
         &self,
         prev_block: &Block,
-        activation_height: BlockHeight,
+        current_epochs: &EpochTable,
         genesis_digest: Digest,
     ) -> ParentBlockInfo {
-        let own_claim = if prev_block.header().height < activation_height
+        let own_claim = if prev_block.header().height < current_epochs.activation_height()
             || prev_block.hash() == genesis_digest
         {
             None
         } else {
-            let input_start = [
-                prev_block.body().mast_hash().reversed().values().to_vec(),
-                vec![prev_block.header().height.into()],
-                genesis_digest.reversed().values().to_vec(),
-            ]
-            .concat();
             prev_block
                 .appendix()
                 .iter()
                 .find(|claim| {
-                    claim.program_digest == self.hash() && claim.input.starts_with(&input_start)
+                    Self::is_own_claim_about(
+                        self.hash(),
+                        claim,
+                        prev_block.body().mast_hash(),
+                        prev_block.header().height,
+                        genesis_digest,
+                        current_epochs,
+                    )
                 })
                 .and_then(|claim| Self::parse_output(&claim.output))
         };
@@ -564,6 +565,38 @@ impl PredecessorIsValid {
             own_claim.map_or_else(|| prev_block.hash(), |parent| parent.activation_parent_hash);
 
         ParentBlockInfo::of_block(prev_block, work_since_activation, activation_parent_hash)
+    }
+
+    /// Returns true if the claim is about this program, with the specified
+    /// parameters.
+    ///
+    /// The claim must agree with all parameters except the epochs table where
+    /// a prefix is allowed if the new epochs were not yet active at the claim's
+    /// block height.
+    fn is_own_claim_about(
+        own_program_digest: Digest,
+        claim: &Claim,
+        prev_block_body_mh: Digest,
+        prev_block_height: BlockHeight,
+        genesis_digest: Digest,
+        current_epochs: &EpochTable,
+    ) -> bool {
+        let version = ConsensusRuleSet::HardforkDelta
+            .triton_proof_version()
+            .version();
+        let input_start = [
+            prev_block_body_mh.reversed().values().to_vec(),
+            vec![prev_block_height.into()],
+            genesis_digest.reversed().values().to_vec(),
+        ]
+        .concat();
+        claim.program_digest == own_program_digest
+            && claim.version == version
+            && claim.input.len() == Self::input_len()
+            && claim.output.len() == Self::output_len()
+            && claim.input.starts_with(&input_start)
+            && EpochTable::decode(&claim.input[input_start.len()..])
+                .is_ok_and(|found| found.is_prefix_of_up_to(current_epochs, prev_block_height))
     }
 
     /// Number of words in the claim's standard-in stream.
@@ -628,7 +661,7 @@ impl PredecessorIsValid {
             epochs,
         );
         let output = self
-            .parent_block_info(prev_block, epochs.activation_height(), genesis_digest)
+            .parent_block_info(prev_block, epochs, genesis_digest)
             .encode();
 
         Claim::new(self.hash())
@@ -3110,25 +3143,18 @@ mod tests {
                 let prev_minimum_block_time = prev_epoch.minimum_block_time;
                 let prev_target_block_interval = prev_epoch.target_block_interval;
 
-                let expected_input_start = [
-                    prev_block_body_mh.reversed().values().to_vec(),
-                    vec![prev_block_height.into()],
-                    genesis_digest.reversed().values().to_vec(),
-                ]
-                .concat();
                 let parent_claim = witness
                     .prev_block_appendix
                     .iter()
                     .find(|claim| {
-                        claim.program_digest == own_program_digest
-                            && claim.version == version
-                            && claim.input.len() == Self::input_len()
-                            && claim.output.len() == Self::output_len()
-                            && claim.input.starts_with(&expected_input_start)
-                            && EpochTable::decode(&claim.input[expected_input_start.len()..])
-                                .is_ok_and(|table| {
-                                    table.is_prefix_of_up_to(&epochs, prev_block_height)
-                                })
+                        Self::is_own_claim_about(
+                            own_program_digest,
+                            claim,
+                            prev_block_body_mh,
+                            prev_block_height,
+                            genesis_digest,
+                            &epochs,
+                        )
                     })
                     .expect("previous block must carry this claim about itself");
 
@@ -6265,6 +6291,51 @@ ones):
             let (next_body, next_header) = next_body_and_header(&prev_block, 0);
 
             assert_accepts(&skipping(), &prev_block, &next_body, &next_header);
+        }
+
+        #[test]
+        fn decoy_claim_of_this_program_under_another_table_is_ignored() {
+            let (prev_block, _, _) = prev_block_after_activation(minimum_block_time(), &epochs());
+            let prev_prev_block = predecessor_of(&prev_block).unwrap();
+
+            // The previous block's own claim passes on work, which a decoy
+            // under a table whose activation lies ahead does not.
+            let work_offset = PredecessorIsValid::output_work_since_activation_offset();
+            let work_end = PredecessorIsValid::output_activation_parent_offset();
+            let earlier_work = ProofOfWork::zero() + Difficulty::from(1_234u32);
+            let mut claims = prev_block.appendix().claims().to_vec();
+            let own_claim = claims
+                .iter_mut()
+                .find(|claim| claim.program_digest == skipping().hash())
+                .unwrap();
+            own_claim
+                .output
+                .splice(work_offset..work_end, earlier_work.encode());
+            let far_activation = EpochTable::new(&[Epoch {
+                height: bfe!(u64::MAX >> 1),
+                ..activation_epoch()
+            }]);
+            let decoy = own_claim_with_epochs(
+                &skipping(),
+                &prev_prev_block,
+                prev_block.body(),
+                prev_block.header(),
+                &far_activation,
+            );
+            assert_ne!(decoy.output, own_claim.output);
+
+            for position in [0, claims.len()] {
+                let mut claims = claims.clone();
+                claims.insert(position, decoy.clone());
+                let prev_block = block_solved_by_nonce_search(
+                    *prev_block.header(),
+                    prev_block.body().clone(),
+                    BlockAppendix::new(claims),
+                    BlockProof::Invalid,
+                );
+                let (next_body, next_header) = next_body_and_header(&prev_block, 0);
+                assert_accepts(&skipping(), &prev_block, &next_body, &next_header);
+            }
         }
 
         /// An epoch starting right after activation, with this minimum block time.
