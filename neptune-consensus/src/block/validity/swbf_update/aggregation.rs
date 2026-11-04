@@ -192,6 +192,14 @@ pub struct SwbfUpdateAggregation {
 }
 
 impl SwbfUpdateAggregation {
+    /// A child claim is not a leaf's or an aggregation's of the current
+    /// version with the claim layout.
+    const CHILD_CLAIM_SHAPE_ERROR_ID: i128 = 1_000_640;
+    /// The index set digests are not the children's.
+    const INDEX_SET_DIGESTS_ERROR_ID: i128 = 1_000_641;
+    /// The children output different numbers of inactive SWBF peaks.
+    const SWBFI_PEAK_COUNT_ERROR_ID: i128 = 1_000_642;
+
     #[expect(
         clippy::new_without_default,
         reason = "the other variant is for tests only"
@@ -249,7 +257,9 @@ impl SwbfUpdateAggregation {
     where
         Fut: Future<Output = Result<Proof, E>>,
     {
-        assert!(!leaves.is_empty(), "a tree needs a leaf");
+        // A leaf cannot attest its own proof's height; the root must be an
+        // aggregation.
+        assert!(leaves.len() > 1, "a tree needs two leaves");
         let root = self.subtree(leaves, &prove).await?;
         Ok((root.claim, root.proof))
     }
@@ -554,7 +564,7 @@ impl TritonProgram for SwbfUpdateAggregation {
             pick 3 eq
             // _ *w *left_output *right_output *digests left_count right_count (num_digests == (left_count + right_count))
 
-            assert error_id {BlockValidationRule::SwbfUpdateChaining.error_id()}
+            assert error_id {Self::INDEX_SET_DIGESTS_ERROR_ID}
             // _ *w *left_output *right_output *digests left_count right_count
 
             dup 2 push 0 dup 3
@@ -563,14 +573,14 @@ impl TritonProgram for SwbfUpdateAggregation {
             call {digest_peaks}
             {&hash_digest_list}
             dup 9 addi {1 + OUTPUT_NUM_PEAKS} {&hash_digest_list}
-            assert_vector error_id {BlockValidationRule::SwbfUpdateChaining.error_id()}
+            assert_vector error_id {Self::INDEX_SET_DIGESTS_ERROR_ID}
             pop {Digest::LEN}
             // _ *w *left_output *right_output *digests left_count right_count
 
             dup 2 dup 2 dup 2 call {digest_peaks}
             {&hash_digest_list}
             dup 8 addi {1 + OUTPUT_NUM_PEAKS} {&hash_digest_list}
-            assert_vector error_id {BlockValidationRule::SwbfUpdateChaining.error_id()}
+            assert_vector error_id {Self::INDEX_SET_DIGESTS_ERROR_ID}
             pop {Digest::LEN}
             // _ *w *left_output *right_output *digests left_count right_count
 
@@ -608,7 +618,7 @@ impl TritonProgram for SwbfUpdateAggregation {
             dup 1 read_mem 1 pop 1
             // _ *w *left_output *right_swbfi_peaks left_num_swbfi_peaks right_num_swbfi_peaks
 
-            eq assert error_id {BlockValidationRule::SwbfUpdateChaining.error_id()}
+            eq assert error_id {Self::SWBFI_PEAK_COUNT_ERROR_ID}
             // _ *w *left_output *right_swbfi_peaks
 
             dup 0 read_mem 1 pop 1
@@ -641,7 +651,7 @@ impl TritonProgram for SwbfUpdateAggregation {
                 add
                 // _ *claim (is_leaf || is_self)
 
-                assert error_id {BlockValidationRule::SwbfUpdateChaining.error_id()}
+                assert error_id {Self::CHILD_CLAIM_SHAPE_ERROR_ID}
                 // _ *claim
 
                 /* Assert the claim's version matches out version */
@@ -650,7 +660,7 @@ impl TritonProgram for SwbfUpdateAggregation {
                 eq
                 // _ *claim (claim_version == our_version)
 
-                assert error_id {BlockValidationRule::SwbfUpdateChaining.error_id()}
+                assert error_id {Self::CHILD_CLAIM_SHAPE_ERROR_ID}
                 // _ *claim
 
                 dup 0 {&field_with_size!(Claim::input)}
@@ -658,7 +668,7 @@ impl TritonProgram for SwbfUpdateAggregation {
 
                 /* Assert expected length of claim's input */
                 // The size counts the length word the pointer points at.
-                push {1 + INPUT_LEN} eq assert error_id {BlockValidationRule::SwbfUpdateChaining.error_id()}
+                push {1 + INPUT_LEN} eq assert error_id {Self::CHILD_CLAIM_SHAPE_ERROR_ID}
 
                 // _ *claim *claim_input
                 dup 0 addi {1 + INPUT_FIRST_LEAF_INDEX} read_mem 1 pop 1
@@ -718,7 +728,7 @@ impl TritonProgram for SwbfUpdateAggregation {
                 // No MMR has more peaks; crashes unless the count is a u32.
                 dup 1 addi {1 + OUTPUT_NUM_PEAKS} read_mem 1 pop 1
                 push {MAX_PEAKS + 1} dup 1 lt
-                assert error_id {BlockValidationRule::SwbfUpdateChaining.error_id()}
+                assert error_id {Self::CHILD_CLAIM_SHAPE_ERROR_ID}
                 // _ *claim_output size num_peaks
 
                 push {Digest::LEN} mul addi {1 + OUTPUT_PEAKS}
@@ -726,7 +736,7 @@ impl TritonProgram for SwbfUpdateAggregation {
 
                 dup 2 dup 1 add read_mem 1 pop 1
                 push {MAX_PEAKS + 1} dup 1 lt
-                assert error_id {BlockValidationRule::SwbfUpdateChaining.error_id()}
+                assert error_id {Self::CHILD_CLAIM_SHAPE_ERROR_ID}
                 // _ *claim_output size num_swbfi_peaks_offset num_swbfi_peaks
 
                 push {Digest::LEN} mul addi 1 add
@@ -735,7 +745,7 @@ impl TritonProgram for SwbfUpdateAggregation {
                 eq
                 // _ *claim_output (size == expected_claim_output_size)
 
-                assert error_id {BlockValidationRule::SwbfUpdateChaining.error_id()}
+                assert error_id {Self::CHILD_CLAIM_SHAPE_ERROR_ID}
                 return
 
             // INVARIANT: _ *end *peak[i]_previous_word
@@ -941,12 +951,16 @@ pub(in crate::block::validity) mod tests {
         tasm_output
     }
 
-    fn assert_rejects(witness: &SwbfUpdateAggregationWitness, input: Option<PublicInput>) {
+    fn assert_rejects(
+        witness: &SwbfUpdateAggregationWitness,
+        input: Option<PublicInput>,
+        error_id: i128,
+    ) {
         skipping()
             .test_assertion_failure(
                 input.unwrap_or_else(|| witness.standard_input()),
                 witness.nondeterminism_for(&skipping()),
-                &[BlockValidationRule::SwbfUpdateChaining.error_id()],
+                &[error_id],
             )
             .unwrap();
     }
@@ -1030,7 +1044,7 @@ pub(in crate::block::validity) mod tests {
 
     #[test]
     fn trees_of_any_height_chain_their_leaves() {
-        for num_leaves in 1..=6 {
+        for num_leaves in 2..=6 {
             let sizes = (0..num_leaves).map(|i| i % 3).collect::<Vec<_>>();
             let leaves = chained_witnesses(&sizes, 9);
             let (root, _) = block_on(skipping().tree(&leaves, run_and_placeholder)).unwrap();
@@ -1038,13 +1052,8 @@ pub(in crate::block::validity) mod tests {
 
             assert_eq!(bfe!(num_leaves as u64), parsed.last_leaf_index);
             assert_eq!(sizes.iter().sum::<usize>(), parsed.count);
-            let expected_rows = if num_leaves == 1 {
-                0
-            } else {
-                (num_leaves as u64) << CHILD_LOG2_PADDED_HEIGHT
-            };
             assert_eq!(
-                bfe!(expected_rows),
+                bfe!((num_leaves as u64) << CHILD_LOG2_PADDED_HEIGHT),
                 parsed.padded_rows,
                 "{num_leaves} leaves"
             );
@@ -1151,14 +1160,22 @@ pub(in crate::block::validity) mod tests {
         let (witness, _) = witness_over_leaves(2, 2, 5);
         let mut input = witness.standard_input();
         input.individual_tokens[0] += bfe!(1);
-        assert_rejects(&witness, Some(input));
+        assert_rejects(
+            &witness,
+            Some(input),
+            BlockValidationRule::SwbfUpdateChaining.error_id(),
+        );
     }
 
     #[test]
     fn right_child_not_starting_where_left_ends_is_rejected() {
         let (mut witness, _) = witness_over_leaves(2, 2, 5);
         witness.right_claim.input[0] += bfe!(1);
-        assert_rejects(&witness, None);
+        assert_rejects(
+            &witness,
+            None,
+            BlockValidationRule::SwbfUpdateChaining.error_id(),
+        );
     }
 
     #[test]
@@ -1166,14 +1183,22 @@ pub(in crate::block::validity) mod tests {
         let (witness, _) = witness_over_leaves(2, 2, 5);
         let mut input = witness.standard_input();
         input.individual_tokens[INPUT_FIRST_LEAF_INDEX] += bfe!(1);
-        assert_rejects(&witness, Some(input));
+        assert_rejects(
+            &witness,
+            Some(input),
+            BlockValidationRule::SwbfUpdateChaining.error_id(),
+        );
     }
 
     #[test]
     fn right_child_not_following_the_left_childs_last_leaf_is_rejected() {
         let (mut witness, _) = witness_over_leaves(2, 2, 5);
         witness.right_claim.input[INPUT_FIRST_LEAF_INDEX] += bfe!(1);
-        assert_rejects(&witness, None);
+        assert_rejects(
+            &witness,
+            None,
+            BlockValidationRule::SwbfUpdateChaining.error_id(),
+        );
     }
 
     #[test]
@@ -1182,25 +1207,54 @@ pub(in crate::block::validity) mod tests {
         // from chaining with itself.
         let (mut witness, _) = witness_over_leaves(0, 0, 5);
         witness.right_claim = witness.left_claim.clone();
-        assert_rejects(&witness, None);
+        assert_rejects(
+            &witness,
+            None,
+            BlockValidationRule::SwbfUpdateChaining.error_id(),
+        );
     }
 
     #[test]
     fn other_index_set_digests_are_rejected() {
-        let (mut witness, _) = witness_over_leaves(2, 2, 5);
-        witness.index_set_digests[3] = Digest::default();
-        assert_rejects(&witness, None);
+        // One digest in the left child's segment, one in the right's.
+        for index in [0, 3] {
+            let (mut witness, _) = witness_over_leaves(2, 2, 5);
+            witness.index_set_digests[index] = Digest::default();
+            assert_rejects(
+                &witness,
+                None,
+                SwbfUpdateAggregation::INDEX_SET_DIGESTS_ERROR_ID,
+            );
+        }
     }
 
     #[test]
     fn index_set_digests_not_covering_the_children_are_rejected() {
         let (mut witness, _) = witness_over_leaves(2, 2, 5);
         witness.index_set_digests.pop();
-        assert_rejects(&witness, None);
+        assert_rejects(
+            &witness,
+            None,
+            SwbfUpdateAggregation::INDEX_SET_DIGESTS_ERROR_ID,
+        );
     }
 
     #[test]
-    fn child_whose_leaf_range_is_empty_is_rejected_in_both_positions() {
+    fn right_child_whose_leaf_range_is_empty_is_rejected() {
+        let (mut witness, _) = witness_over_leaves(1, 1, 5);
+        let mut output = ClaimOutput::parse(&witness.right_claim.output);
+        // Ends one leaf before it starts.
+        output.last_leaf_index -= bfe!(1);
+        witness.right_claim.output = output.encode();
+        assert_rejects(
+            &witness,
+            None,
+            BlockValidationRule::SwbfUpdateChaining.error_id(),
+        );
+    }
+
+    #[test]
+    fn left_child_whose_leaf_range_is_empty_is_rejected() {
         let leaves = chained_witnesses(&[1, 1], 5);
         let leaf = &leaves[0];
         let mut claim = leaf.versioned_claim();
@@ -1219,28 +1273,71 @@ pub(in crate::block::validity) mod tests {
         .concat();
         let witness =
             SwbfUpdateAggregationWitness::new(left, left_proof, right, right_proof, digests);
-        assert_rejects(&witness, None);
+        assert_rejects(
+            &witness,
+            None,
+            BlockValidationRule::SwbfUpdateChaining.error_id(),
+        );
     }
 
     #[test]
     fn child_of_other_program_is_rejected() {
         let (mut witness, _) = witness_over_leaves(2, 2, 5);
         witness.left_claim.program_digest = Digest::default();
-        assert_rejects(&witness, None);
+        assert_rejects(
+            &witness,
+            None,
+            SwbfUpdateAggregation::CHILD_CLAIM_SHAPE_ERROR_ID,
+        );
     }
 
     #[test]
     fn child_of_other_version_is_rejected() {
         let (mut witness, _) = witness_over_leaves(2, 2, 5);
         witness.right_claim.version += 1;
-        assert_rejects(&witness, None);
+        assert_rejects(
+            &witness,
+            None,
+            SwbfUpdateAggregation::CHILD_CLAIM_SHAPE_ERROR_ID,
+        );
     }
 
     #[test]
     fn child_with_malformed_output_is_rejected() {
         let (mut witness, _) = witness_over_leaves(2, 2, 5);
         witness.left_claim.output.push(bfe!(0));
-        assert_rejects(&witness, None);
+        assert_rejects(
+            &witness,
+            None,
+            SwbfUpdateAggregation::CHILD_CLAIM_SHAPE_ERROR_ID,
+        );
+    }
+
+    #[test]
+    fn child_with_malformed_input_is_rejected() {
+        let (mut witness, _) = witness_over_leaves(2, 2, 5);
+        witness.left_claim.input.push(bfe!(0));
+        assert_rejects(
+            &witness,
+            None,
+            SwbfUpdateAggregation::CHILD_CLAIM_SHAPE_ERROR_ID,
+        );
+    }
+
+    #[test]
+    fn child_claiming_more_peaks_than_an_mmr_has_is_rejected() {
+        let (honest, _) = witness_over_leaves(2, 2, 5);
+        let num_peaks = ClaimOutput::parse(&honest.left_claim.output).peaks.len();
+        let num_swbfi_peaks = OUTPUT_PEAKS + Digest::LEN * num_peaks;
+        for count in [OUTPUT_NUM_PEAKS, num_swbfi_peaks] {
+            let mut witness = honest.clone();
+            witness.left_claim.output[count] = bfe!(MAX_PEAKS as u64 + 1);
+            assert_rejects(
+                &witness,
+                None,
+                SwbfUpdateAggregation::CHILD_CLAIM_SHAPE_ERROR_ID,
+            );
+        }
     }
 
     #[test]
@@ -1253,7 +1350,11 @@ pub(in crate::block::validity) mod tests {
         );
         left.swbfi_peaks.pop();
         witness.left_claim.output = left.encode();
-        assert_rejects(&witness, None);
+        assert_rejects(
+            &witness,
+            None,
+            SwbfUpdateAggregation::SWBFI_PEAK_COUNT_ERROR_ID,
+        );
     }
 
     #[test]
@@ -1264,7 +1365,11 @@ pub(in crate::block::validity) mod tests {
         for off_by in [bfe!(1), -bfe!(1)] {
             let mut witness = honest.clone();
             witness.right_claim.output[count] += off_by;
-            assert_rejects(&witness, None);
+            assert_rejects(
+                &witness,
+                None,
+                SwbfUpdateAggregation::CHILD_CLAIM_SHAPE_ERROR_ID,
+            );
         }
     }
 
