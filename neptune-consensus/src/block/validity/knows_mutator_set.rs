@@ -602,6 +602,14 @@ impl TritonProgram for KnowsMutatorSet {
                 // _ *claim[i]_si num_claims i program_and_version_match *input input_size
                 // The size counts the length word the pointer points at.
                 push {1 + Self::INPUT_LEN} eq
+                // _ *claim[i]_si num_claims i program_and_version_match *input input_size_matches
+
+                // The output is empty: its size is the length word alone.
+                dup 5 addi 1 {&field_with_size!(Claim::output)}
+                push 1 eq
+                place 1 pop 1 mul
+                // _ *claim[i]_si num_claims i program_and_version_match *input size_matches
+
                 pick 2 mul
                 // _ *claim[i]_si num_claims i *input shape_matches
                 dup 0 skiz call {input_matches}
@@ -1092,6 +1100,23 @@ pub(super) mod tests {
     }
 
     #[test]
+    fn claim_with_an_output_is_rejected() {
+        let mut rng = StdRng::seed_from_u64(11);
+        let swbfi = ArchivalSwbfi::random(&mut rng, 35);
+        let aocl = KnownMmr::random(&mut rng, 100);
+        let activation_height = BlockHeight::from(5u64);
+        let honest = parent_with_claim(&mut rng, 5, activation_height);
+        let mut other = claim_of(&honest, activation_height);
+        other.output = vec![bfe!(0)];
+        let mut prev_block = honest.clone();
+        prev_block.set_appendix(BlockAppendix::new(vec![other]));
+        assert_rejects(
+            &witness(&prev_block, &swbfi, &aocl, activation_height),
+            BlockValidationRule::AppendixMissingClaim.error_id(),
+        );
+    }
+
+    #[test]
     fn parent_parts_not_hashing_to_the_parent_are_rejected() {
         let mut rng = StdRng::seed_from_u64(7);
         let swbfi = ArchivalSwbfi::random(&mut rng, 35);
@@ -1173,6 +1198,6 @@ pub(super) mod tests {
 
     test_program_snapshot!(
         KnowsMutatorSet,
-        "677169e1209280e8fe4cff4342dc9b30f0bd969668d7e61ee3815a17ce5f4b08955d6e681801bca6"
+        "15ba2c8e696b7a16605b349a39c65252259797ff2e2f1d3350f1ecbdb77ee960a3142919b394eadd"
     );
 }
