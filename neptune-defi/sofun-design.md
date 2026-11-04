@@ -4,7 +4,7 @@ Status: the lock script, the announcement, the order book and the fill are
 implemented (§9, phases 1 to 2b) for orders paid in NPT; this document now
 specifies orders paid in vaulted NPT (§4.11), which are not implemented, and
 neither is the proposer side.
-Last updated: 2026-10-10.
+Last updated: 2026-11-04.
 
 ---
 
