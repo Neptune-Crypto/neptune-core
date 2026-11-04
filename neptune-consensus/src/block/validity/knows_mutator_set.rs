@@ -306,6 +306,7 @@ impl TritonProgram for KnowsMutatorSet {
         let verify_trees = "knows_mutator_set_verify_trees".to_string();
         let verify_trees_loop = "knows_mutator_set_verify_trees_loop".to_string();
         let climb = "knows_mutator_set_climb".to_string();
+        let authenticate_parent = "knows_mutator_set_authenticate_parent".to_string();
         let parent_contains_claim = "knows_mutator_set_parent_contains_claim".to_string();
         let header_mast_hash = "knows_mutator_set_header_mast_hash".to_string();
         let find_own_claim = "knows_mutator_set_find_own_claim".to_string();
@@ -369,6 +370,10 @@ impl TritonProgram for KnowsMutatorSet {
 
             pick 2 {&read_leaf_count}
             call {verify_trees}
+            // _ *w
+
+            // Bind the parent's header before reading its height.
+            call {authenticate_parent}
             // _ *w
 
             push {activation_height_alloc.read_address()} read_mem 1 pop 1 split
@@ -473,14 +478,10 @@ impl TritonProgram for KnowsMutatorSet {
                 call {merkle_step}
                 recurse
 
-            // The parent's parts must hash to its hash, and its appendix must
-            // contain this program's claim about its parent and transaction
-            // mutator set. The parent mutator set hash is committed to in the
-            // parent's transaction kernel MAST hash.
+            // The parent's parts must hash to its hash.
             // BEFORE: _ *w
             // AFTER:  _ *w
-            {parent_contains_claim}:
-                /* Verify correct witness data for parent block */
+            {authenticate_parent}:
                 dup 0 {&field!(KnowsMutatorSetWitness::prev_block_proof_leaf)} {&read_digest}
                 push 0 push 0 push 0 push 0 push 0
                 // _ *w [proof_leaf] [zero]
@@ -513,7 +514,15 @@ impl TritonProgram for KnowsMutatorSet {
                 assert_vector error_id {Self::PARENT_MISMATCH_ERROR_ID}
                 pop 5
                 // _ *w
+                return
 
+            // The parent's appendix must contain this program's claim about
+            // its parent and transaction mutator set. The parent mutator set
+            // hash is committed to in the parent's transaction kernel MAST
+            // hash.
+            // BEFORE: _ *w
+            // AFTER:  _ *w
+            {parent_contains_claim}:
                 /* Verify correct parent tx-kernel MAST hash */
                 dup 0 {&field!(KnowsMutatorSetWitness::prev_block_body_mast_hash)} {&read_digest}
                 push {BlockBody::MAST_HEIGHT}
@@ -692,18 +701,20 @@ pub(super) mod tests {
                 }
             }
 
+            // Bind the parent's header before reading its height.
+            let header_leaf = Tip5::hash(&witness.prev_block_header.mast_hash());
+            let body_leaf = Tip5::hash(&witness.prev_block_body_mast_hash);
+            let appendix_leaf = Tip5::hash_varlen(&witness.prev_block_appendix.encode());
+            let kernel_mast_hash = Tip5::hash_pair(
+                Tip5::hash_pair(header_leaf, body_leaf),
+                Tip5::hash_pair(appendix_leaf, Digest::default()),
+            );
+            let prev_block_hash =
+                Tip5::hash_pair(Tip5::hash(&kernel_mast_hash), witness.prev_block_proof_leaf);
+            assert_eq!(prev_block_digest, prev_block_hash);
+
             // Self-recursion: Verify presence of own claim in parent block.
             if witness.prev_block_header.height >= activation_height {
-                let header_leaf = Tip5::hash(&witness.prev_block_header.mast_hash());
-                let body_leaf = Tip5::hash(&witness.prev_block_body_mast_hash);
-                let appendix_leaf = Tip5::hash_varlen(&witness.prev_block_appendix.encode());
-                let kernel_mast_hash = Tip5::hash_pair(
-                    Tip5::hash_pair(header_leaf, body_leaf),
-                    Tip5::hash_pair(appendix_leaf, Digest::default()),
-                );
-                let prev_block_hash =
-                    Tip5::hash_pair(Tip5::hash(&kernel_mast_hash), witness.prev_block_proof_leaf);
-                assert_eq!(prev_block_digest, prev_block_hash);
                 tasm::tasmlib_hashing_merkle_verify(
                     witness.prev_block_body_mast_hash,
                     BlockBodyField::TransactionKernel.discriminant() as u32,
@@ -1083,18 +1094,42 @@ pub(super) mod tests {
     #[test]
     fn parent_parts_not_hashing_to_the_parent_are_rejected() {
         let mut rng = StdRng::seed_from_u64(7);
-        let honest = witness_on_activated_parent(&mut rng);
-        let mut other_header = honest.clone();
-        other_header.prev_block_header.timestamp.0 += bfe!(1);
-        let mut other_body = honest.clone();
-        other_body.prev_block_body_mast_hash = rng.random();
-        let mut other_appendix = honest.clone();
-        other_appendix.prev_block_appendix = BlockAppendix::new(vec![]);
-        let mut other_proof = honest.clone();
-        other_proof.prev_block_proof_leaf = rng.random();
-        for other in [other_header, other_body, other_appendix, other_proof] {
-            assert_rejects(&other, KnowsMutatorSet::PARENT_MISMATCH_ERROR_ID);
+        let swbfi = ArchivalSwbfi::random(&mut rng, 35);
+        let aocl = KnownMmr::random(&mut rng, 100);
+        let activation_height = BlockHeight::from(5u64);
+        // With a claim, so that emptying the appendix changes the parent.
+        let below = parent_with_claim(&mut rng, 4, activation_height);
+        for honest in [
+            witness_on_activated_parent(&mut rng),
+            witness(&below, &swbfi, &aocl, activation_height),
+        ] {
+            let mut other_header = honest.clone();
+            other_header.prev_block_header.timestamp.0 += bfe!(1);
+            let mut other_body = honest.clone();
+            other_body.prev_block_body_mast_hash = rng.random();
+            let mut other_appendix = honest.clone();
+            other_appendix.prev_block_appendix = BlockAppendix::new(vec![]);
+            let mut other_proof = honest.clone();
+            other_proof.prev_block_proof_leaf = rng.random();
+            for other in [other_header, other_body, other_appendix, other_proof] {
+                assert_rejects(&other, KnowsMutatorSet::PARENT_MISMATCH_ERROR_ID);
+            }
         }
+    }
+
+    #[test]
+    fn parent_without_the_claim_cannot_be_passed_off_as_below_activation() {
+        let mut rng = StdRng::seed_from_u64(10);
+        let swbfi = ArchivalSwbfi::random(&mut rng, 35);
+        let aocl = KnownMmr::random(&mut rng, 100);
+        let activation_height = BlockHeight::from(5u64);
+        let empty = parent(&mut rng, 5, vec![]);
+        let mut forged = witness(&empty, &swbfi, &aocl, activation_height);
+        forged.prev_block_header.height = BlockHeight::from(4u64);
+        forged
+            .paths
+            .truncate(forged.chunks.len() + forged.aocl_leafs.len());
+        assert_rejects(&forged, KnowsMutatorSet::PARENT_MISMATCH_ERROR_ID);
     }
 
     #[test]
@@ -1138,6 +1173,6 @@ pub(super) mod tests {
 
     test_program_snapshot!(
         KnowsMutatorSet,
-        "e832cc56aa9b4454c966eab1730a6d202890c2d7e2765328f55b5e121f4a2d8e704d6e274b0edc6d"
+        "677169e1209280e8fe4cff4342dc9b30f0bd969668d7e61ee3815a17ce5f4b08955d6e681801bca6"
     );
 }
