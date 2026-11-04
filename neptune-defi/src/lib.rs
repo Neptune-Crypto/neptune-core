@@ -1,3 +1,6 @@
+// The Triton assembly macros recurse once per token.
+#![recursion_limit = "2048"]
+
 // Re-exported at the crate root so the `BFieldCodec`/`TasmObject` derive macros
 // (which generate `crate::twenty_first` / `crate::triton_vm` / `crate::tasm_lib`
 // paths) resolve.

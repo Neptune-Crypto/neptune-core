@@ -5,18 +5,28 @@
 //! coins are tokens, each of which can be redeemed against any vault. Vaulted
 //! NPT is [`Vault::vnpt`].
 
+mod tasm;
+
+use std::sync::OnceLock;
+
 use neptune_consensus::proof_abstractions::tasm::program::TritonProgram;
 use neptune_consensus::transaction::announcement::Announcement;
 use neptune_consensus::transaction::lock_script::LockScript;
+use neptune_consensus::transaction::primitive_witness::SaltedUtxos;
 use neptune_consensus::transaction::transaction_kernel::TransactionKernel;
 use neptune_consensus::transaction::utxo::Coin;
 use neptune_consensus::transaction::utxo::Utxo;
 use neptune_consensus::type_scripts::native_currency::NativeCurrency;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_consensus::type_scripts::TypeScriptAndWitness;
 use neptune_mutator_set::commit;
 use tasm_lib::prelude::Digest;
 use tasm_lib::prelude::Tip5;
 use tasm_lib::triton_vm::prelude::*;
+
+/// The length of the encoding of an amount, which is the state of a coin of
+/// `Vaultee`.
+const AMOUNT_LEN: usize = 4;
 
 /// Element 0 of every vault announcement.
 pub const VAULT_FLAG: BFieldElement = BFieldElement::new(1001);
@@ -38,7 +48,8 @@ pub enum VaultState {
 /// the program, so the program's hash names both `Vaultee` and the policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Vault {
-    pub vaultee: Digest,
+    vaultee: Digest,
+    hash: Digest,
 }
 
 /// The reason [`Vault::validate`] rejects a transaction.
@@ -57,7 +68,8 @@ pub enum VaultError {
     /// Output `i` carries a negative token amount.
     NegativeToken(usize),
 
-    /// A sum of token amounts or of holdings exceeds the largest amount.
+    /// A token amount, a holding, or a sum of either lies outside the range
+    /// from zero to the largest amount.
     OutOfRange,
 
     /// More than one vault is among the inputs, or among the outputs.
@@ -77,27 +89,44 @@ struct Tally {
 }
 
 impl Vault {
-    /// Vaulted NPT, `Vault(NativeCurrency, Bearer)`.
-    pub fn vnpt() -> Self {
+    /// The vault type script of the coins of `vaultee`.
+    pub fn new(vaultee: Digest) -> Self {
         Self {
-            vaultee: NativeCurrency.hash(),
+            vaultee,
+            hash: tasm::program(vaultee).hash(),
         }
     }
 
-    // ponytail: a program that always crashes, so that no coin of this type
-    // script is valid until the type script itself replaces it.
+    /// Vaulted NPT, `Vault(NativeCurrency, Bearer)`.
+    pub fn vnpt() -> Self {
+        static VNPT: OnceLock<Vault> = OnceLock::new();
+        *VNPT.get_or_init(|| Self::new(NativeCurrency.hash()))
+    }
+
+    pub fn vaultee(&self) -> Digest {
+        self.vaultee
+    }
+
     pub fn program(&self) -> Program {
-        let vaultee = self.vaultee.values().map(|e| e.value());
-        triton_program!(
-            push {vaultee[0]} push {vaultee[1]} push {vaultee[2]} push {vaultee[3]}
-            push {vaultee[4]} pop 5
-            push 0 assert
-            halt
-        )
+        tasm::program(self.vaultee)
     }
 
     pub fn hash(&self) -> Digest {
-        self.program().hash()
+        self.hash
+    }
+
+    /// The type script with its witness for a transaction, which halts if and
+    /// only if [`Self::validate`] accepts it.
+    ///
+    /// The witness depends on nothing but its arguments, so it can be generated
+    /// again whenever the kernel changes.
+    pub fn type_script_and_witness(
+        &self,
+        kernel: &TransactionKernel,
+        salted_inputs: &SaltedUtxos,
+        salted_outputs: &SaltedUtxos,
+    ) -> TypeScriptAndWitness {
+        tasm::type_script_and_witness(self, kernel, salted_inputs, salted_outputs)
     }
 
     /// A coin of `a` tokens.
@@ -133,8 +162,9 @@ impl Vault {
     ///  1. every output that carries a vault marker is a vault, and the kernel
     ///     carries a vault announcement of it whose randomnesses give its
     ///     addition record,
-    ///  2. every token amount among the outputs is non-negative, and no sum of
-    ///     token amounts or of holdings exceeds the largest amount,
+    ///  2. every token amount among the outputs is non-negative, and every
+    ///     token amount, every holding of a vault, and every sum of either lies
+    ///     between zero and the largest amount,
     ///  3. at most one vault is among the inputs, and at most one among the
     ///     outputs, and
     ///  4. the tokens among the outputs less those among the inputs equal the
@@ -200,7 +230,7 @@ impl Vault {
         };
         let is_vault = output.lock_script_hash() == vault_lock_script().hash()
             && vaultee.type_script_hash == self.vaultee
-            && NativeCurrencyAmount::decode(&vaultee.state).is_ok()
+            && vaultee.state.len() == AMOUNT_LEN
             && *marker == self.coin(VaultState::Marker);
         if !is_vault {
             return Err(VaultError::NotAVault(i));
@@ -219,34 +249,44 @@ impl Vault {
         Ok(())
     }
 
+    /// The tokens, the holdings of the vaults and the number of vault markers
+    /// among `utxos`.
+    ///
+    /// A UTXO's holding is the sum of its coins of `Vaultee`, and counts if and
+    /// only if the UTXO carries a vault marker.
     fn tally(&self, utxos: &[Utxo]) -> Result<Tally, VaultError> {
-        let max = NativeCurrencyAmount::MAX_NAU;
-        let add = |sum: i128, amount: i128| {
-            sum.checked_add(amount)
-                .filter(|sum| *sum <= max)
+        let range = 0..=NativeCurrencyAmount::MAX_NAU;
+        let in_range = |amount: i128| {
+            Some(amount)
+                .filter(|amount| range.contains(amount))
                 .ok_or(VaultError::OutOfRange)
+        };
+        let add = |sum: i128, amount: NativeCurrencyAmount| {
+            in_range(sum.checked_add(in_range(amount.to_nau())?).unwrap_or(-1))
         };
 
         let mut tally = Tally::default();
         for utxo in utxos {
+            let mut num_markers = 0;
             for state in self.states(utxo)? {
                 match state {
-                    VaultState::Token(amount) => {
-                        tally.tokens = add(tally.tokens, amount.to_nau())?;
-                    }
-                    VaultState::Marker => {
-                        tally.num_vaults += 1;
-                        let holding = utxo
-                            .coins()
-                            .iter()
-                            .filter(|coin| coin.type_script_hash == self.vaultee)
-                            .map(|coin| NativeCurrencyAmount::decode(&coin.state))
-                            .map(|amount| amount.map_err(|_| VaultError::InvalidState))
-                            .try_fold(0, |sum, amount| add(sum, amount?.to_nau()))?;
-                        tally.holding = add(tally.holding, holding)?;
-                    }
+                    VaultState::Token(amount) => tally.tokens = add(tally.tokens, amount)?,
+                    VaultState::Marker => num_markers += 1,
                 }
             }
+            if num_markers == 0 {
+                continue;
+            }
+
+            tally.num_vaults += num_markers;
+            let holding = utxo
+                .coins()
+                .iter()
+                .filter(|coin| coin.type_script_hash == self.vaultee)
+                .map(|coin| NativeCurrencyAmount::decode(&coin.state))
+                .map(|amount| amount.map_err(|_| VaultError::InvalidState))
+                .try_fold(0, |sum, amount| add(sum, *amount?))?;
+            tally.holding = add(tally.holding, NativeCurrencyAmount::from_nau(holding))?;
         }
 
         Ok(tally)
@@ -314,6 +354,8 @@ impl VaultAnnouncement {
 #[cfg(test)]
 mod tests {
     use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier;
+    use neptune_primitives::mast_hash::MastHash;
+    use proptest::collection::vec;
     use proptest::prelude::*;
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
@@ -388,8 +430,73 @@ mod tests {
                 .collect()
         }
 
+        /// The type script with its witness, and its standard input.
+        fn type_script_and_witness(&self) -> (TypeScriptAndWitness, PublicInput) {
+            let salted_inputs = SaltedUtxos::new(self.inputs.clone());
+            let salted_outputs = SaltedUtxos::new(self.outputs.clone());
+            let type_script_and_witness = Vault::vnpt().type_script_and_witness(
+                &self.kernel,
+                &salted_inputs,
+                &salted_outputs,
+            );
+            let standard_input = [
+                self.kernel.mast_hash(),
+                Tip5::hash(&salted_inputs),
+                Tip5::hash(&salted_outputs),
+            ]
+            .into_iter()
+            .flat_map(|digest| digest.reversed().values())
+            .collect::<Vec<_>>();
+
+            (type_script_and_witness, PublicInput::new(standard_input))
+        }
+
+        /// What [`Vault::validate`] says of the transaction, after checking
+        /// that the type script halts if and only if it accepts.
         fn validate(&self) -> Result<(), VaultError> {
-            Vault::vnpt().validate(&self.kernel, &self.inputs, &self.outputs)
+            let verdict = Vault::vnpt().validate(&self.kernel, &self.inputs, &self.outputs);
+            let (type_script_and_witness, standard_input) = self.type_script_and_witness();
+            let run = VM::run(
+                type_script_and_witness.program.clone(),
+                standard_input,
+                type_script_and_witness.nondeterminism(),
+            );
+            match (verdict, run) {
+                (Ok(()), Ok(_)) => (),
+                (Err(error), Err(crash)) => {
+                    let id = match &crash.source {
+                        InstructionError::AssertionFailed(assertion)
+                        | InstructionError::VectorAssertionFailed(_, assertion) => assertion.id,
+                        _ => None,
+                    };
+                    assert_eq!(
+                        Some(error_id(error)),
+                        id,
+                        "reference: {error:?}; type script: {}",
+                        crash.source
+                    );
+                }
+                (verdict, run) => panic!(
+                    "reference: {verdict:?}; type script: {:?}",
+                    run.err().map(|crash| crash.source)
+                ),
+            }
+
+            verdict
+        }
+    }
+
+    /// The assertion on which the type script crashes for a transaction that
+    /// the reference rejects with `error`.
+    fn error_id(error: VaultError) -> i128 {
+        match error {
+            VaultError::InvalidState => tasm::INVALID_STATE_ERROR,
+            VaultError::NotAVault(_) => tasm::NOT_A_VAULT_ERROR,
+            VaultError::MissingAnnouncement(_) => tasm::MISSING_ANNOUNCEMENT_ERROR,
+            // The type script reads a negative amount as one beyond the largest.
+            VaultError::NegativeToken(_) | VaultError::OutOfRange => tasm::OUT_OF_RANGE_ERROR,
+            VaultError::TooManyVaults => tasm::TOO_MANY_VAULTS_ERROR,
+            VaultError::Unbacked => tasm::UNBACKED_ERROR,
         }
     }
 
@@ -660,5 +767,150 @@ mod tests {
             vec![with_third, token_utxo(holding)],
         );
         prop_assert_eq!(Err(VaultError::NotAVault(0)), tx.validate());
+    }
+
+    /// A witness of an accepted transaction with one word changed: a word of
+    /// memory, a divined announcement index, or a digest of an authentication
+    /// path.
+    #[proptest(cases = 40)]
+    fn a_tampered_witness_is_rejected(
+        #[strategy(arb())] kernel: TransactionKernel,
+        #[strategy(1..=MAX)] holding: i128,
+        #[strategy(0..#holding)] withdrawn: i128,
+        #[strategy(0..3usize)] part: usize,
+        #[strategy(arb())] index: usize,
+        #[strategy(arb())] value: BFieldElement,
+    ) {
+        let tx = Tx::new(
+            kernel,
+            vec![vault(holding), token_utxo(withdrawn)],
+            vec![vault(holding - withdrawn), npt_utxo(withdrawn)],
+        );
+        prop_assert_eq!(Ok(()), tx.validate());
+
+        let (witness, standard_input) = tx.type_script_and_witness();
+        let mut nondeterminism = witness.nondeterminism();
+        match part {
+            0 => {
+                let mut addresses = nondeterminism.ram.keys().copied().collect::<Vec<_>>();
+                addresses.sort_by_key(|address| address.value());
+                let address = addresses[index % addresses.len()];
+                prop_assume!(nondeterminism.ram[&address] != value);
+                nondeterminism.ram.insert(address, value);
+            }
+            1 => {
+                let tokens = &mut nondeterminism.individual_tokens;
+                let i = index % tokens.len();
+                prop_assume!(tokens[i] != value);
+                tokens[i] = value;
+            }
+            _ => {
+                let digests = &mut nondeterminism.digests;
+                let i = index % digests.len();
+                let digest = Digest::new([value; Digest::LEN]);
+                prop_assume!(digests[i] != digest);
+                digests[i] = digest;
+            }
+        }
+
+        prop_assert!(VM::run(witness.program, standard_input, nondeterminism).is_err());
+    }
+
+    #[proptest(cases = 20)]
+    fn a_coin_of_neither_state_is_rejected(
+        #[strategy(arb())] kernel: TransactionKernel,
+        #[strategy(arb())] state: Vec<BFieldElement>,
+    ) {
+        prop_assume!(VaultState::decode(&state).is_err());
+        let coin = Coin {
+            type_script_hash: Vault::vnpt().hash(),
+            state,
+        };
+        let tx = Tx::new(
+            kernel,
+            vec![],
+            vec![Utxo::new(Digest::default(), vec![coin])],
+        );
+        prop_assert_eq!(Err(VaultError::InvalidState), tx.validate());
+    }
+
+    #[proptest(cases = 20)]
+    fn a_token_whose_amount_does_not_decode_is_rejected(
+        #[strategy(arb())] kernel: TransactionKernel,
+        #[strategy(0..4usize)] limb: usize,
+        #[strategy(1u64 << 32..BFieldElement::P)] value: u64,
+    ) {
+        let mut coin = Vault::vnpt().token(nau(1));
+        coin.state[1 + limb] = bfe!(value);
+        let tx = Tx::new(
+            kernel,
+            vec![],
+            vec![Utxo::new(Digest::default(), vec![coin])],
+        );
+        prop_assert_eq!(Err(VaultError::InvalidState), tx.validate());
+    }
+
+    #[proptest(cases = 20)]
+    fn a_vault_whose_holding_does_not_decode_is_rejected(
+        #[strategy(arb())] kernel: TransactionKernel,
+        #[strategy(0..4usize)] limb: usize,
+        #[strategy(1u64 << 32..BFieldElement::P)] value: u64,
+    ) {
+        let mut coins = vault(1).coins().to_vec();
+        coins[0].state[limb] = bfe!(value);
+        let tx = Tx::new(
+            kernel,
+            vec![npt_utxo(1)],
+            vec![Utxo::new(vault_lock_script().hash(), coins), token_utxo(1)],
+        );
+        prop_assert_eq!(Err(VaultError::InvalidState), tx.validate());
+    }
+
+    #[proptest(cases = 20)]
+    fn a_vault_whose_holding_has_another_length_is_rejected(
+        #[strategy(arb())] kernel: TransactionKernel,
+        #[strategy(vec(arb::<BFieldElement>(), 0..8))] state: Vec<BFieldElement>,
+    ) {
+        prop_assume!(state.len() != AMOUNT_LEN);
+        let mut coins = vault(1).coins().to_vec();
+        coins[0].state = state;
+        let tx = Tx::new(
+            kernel,
+            vec![npt_utxo(1)],
+            vec![Utxo::new(vault_lock_script().hash(), coins), token_utxo(1)],
+        );
+        prop_assert_eq!(Err(VaultError::NotAVault(0)), tx.validate());
+    }
+
+    #[proptest(cases = 1)]
+    fn cost_by_number_of_token_utxos(#[strategy(arb())] kernel: TransactionKernel) {
+        println!("token UTXOs  cycles  padded height");
+        for log2_num_tokens in 0..7 {
+            let num_tokens = 1 << log2_num_tokens;
+            let holding = 1000 * num_tokens;
+            let tx = Tx::new(
+                kernel.clone(),
+                [
+                    vec![vault(holding)],
+                    vec![token_utxo(1000); num_tokens as usize],
+                ]
+                .concat(),
+                vec![vault(0), npt_utxo(holding)],
+            );
+            prop_assert_eq!(Ok(()), tx.validate());
+
+            let (witness, standard_input) = tx.type_script_and_witness();
+            let (aet, _) = VM::trace_execution(
+                witness.program.clone(),
+                standard_input,
+                witness.nondeterminism(),
+            )
+            .unwrap();
+            println!(
+                "{num_tokens:11}  {:6}  {:13}",
+                aet.processor_trace.nrows(),
+                aet.padded_height()
+            );
+        }
     }
 }

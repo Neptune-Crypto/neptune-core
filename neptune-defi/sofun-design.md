@@ -1466,8 +1466,9 @@ only if
 1. every output that carries a vault marker is a vault, and the transaction
    carries a vault announcement of it whose `sr` and `rp` give its addition
    record, `commit(H(utxo), sr, H(rp))`,
-2. every token amount among the outputs is non-negative, and every sum lies in
-   the range of `Vaultee`'s amount type,
+2. every token amount and every holding of a vault is non-negative, and every
+   one of them and every sum of them lies in the range of `Vaultee`'s amount
+   type,
 3. `Δt ≤ max(0, Δh)`, and
 4. `Policy` accepts the transaction.
 
@@ -1905,8 +1906,12 @@ any vault.
 - [x] The reference implementation, `Vault::validate`, with vNPT as
       `Vault(NativeCurrency, Bearer)`, the vault lock script, and the vault
       announcement under `VAULT_FLAG` = 1001 (§4.11)
-- [ ] `Vault(Vaultee, Bearer)` as a type script, generic over `Vaultee`, which
-      agrees with `Vault::validate` (§4.11)
+- [x] `Vault(Vaultee, Bearer)` as a type script, generic over `Vaultee`, which
+      halts if and only if `Vault::validate` accepts, and crashes on the
+      assertion of the rule the reference names; a witness with one word
+      changed is rejected (§4.11)
+- [x] Proving cost measured: about 3,400 cycles and 390 more per token UTXO,
+      and a padded height of 2^14 up to 16 token UTXOs
 - [x] Tests of `Vault::validate`: creation, withdrawal, emptying, topping up
       and transfer accepted; tokens minted without a deposit, a withdrawal
       without a burn,

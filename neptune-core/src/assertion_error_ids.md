@@ -40,3 +40,4 @@ often.
 |  560..570 | [`Advance`](../../neptune-consensus/src/chaintx/advance.rs)                                                                       |
 |  570..580 | [`Cast`](../../neptune-consensus/src/chaintx/cast.rs)                                                                          |
 |  580..590 | [`SsoLockScript`](../../neptune-defi/src/standing_swap_order/sso_lock_script.rs)                                           |
+|  590..600 | [`Vault`](../../neptune-defi/src/vault/tasm.rs)                                                                                  |
