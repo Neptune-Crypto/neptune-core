@@ -160,6 +160,23 @@ pub enum LustrationRule {
     },
 }
 
+#[cfg(any(test, feature = "test-helpers"))]
+tokio::task_local! {
+    static OVERRIDE: ConsensusRuleSet;
+}
+
+#[cfg(any(test, feature = "test-helpers"))]
+impl ConsensusRuleSet {
+    /// Run the future with this rule set in place of every inferred one. Can
+    /// be used to test block validity under alternative rule sets.
+    pub fn overriding<F: std::future::Future>(
+        self,
+        future: F,
+    ) -> impl std::future::Future<Output = F::Output> {
+        OVERRIDE.scope(self, future)
+    }
+}
+
 impl ConsensusRuleSet {
     /// Infer the [`ConsensusRuleSet`] from the [`Network`] and the
     /// [`BlockHeight`]. The second argument is necessary to take into account
@@ -167,6 +184,11 @@ impl ConsensusRuleSet {
     /// argument is necessary because the forks can activate at different
     /// heights based on the network.
     pub fn infer_from(network: Network, block_height: BlockHeight) -> Self {
+        #[cfg(any(test, feature = "test-helpers"))]
+        if let Ok(overriding) = OVERRIDE.try_with(|rule_set| *rule_set) {
+            return overriding;
+        }
+
         let first_lustration_block = Self::first_lustration_block(network);
         match network {
             Network::Main => {

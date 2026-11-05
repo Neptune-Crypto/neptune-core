@@ -325,6 +325,8 @@ async fn fake_genesis_on_main_net_accepts_a_successor() {
 #[tokio::test]
 async fn blocks_across_epsilon_activation_on_main_net() {
     let network = Network::Main;
+    let delta = ConsensusRuleSet::HardforkDelta;
+    let epsilon = ConsensusRuleSet::SoftforkEpsilon;
     let activation = BLOCK_HEIGHT_SOFTFORK_EPSILON_MAIN_NET;
     let fake_genesis = Block::fake_genesis_at_height(network, activation.checked_sub(2).unwrap());
     let mut rng = StdRng::seed_from_u64(55512345);
@@ -397,10 +399,22 @@ async fn blocks_across_epsilon_activation_on_main_net() {
         .find(&predecessor_claim)
         .is_some());
 
+    // Verify that epsilon is a soft fork: the delta rules must accept an
+    // epsilon block. The epsilon rules must reject a delta block.
+    let under_delta = first_epsilon_block.validate(&last_delta_block, now, network);
+    assert_eq!(Ok(()), delta.overriding(under_delta).await);
+    let under_epsilon = last_delta_block.validate(&fake_genesis, now, network);
+    assert_eq!(
+        Err(BlockValidationError::AppendixMissingClaim),
+        epsilon.overriding(under_epsilon).await
+    );
+
     // One more block, mined.
     now += Timestamp::hours(1);
     let (third, composer_utxos) = mine_to_own_wallet(bob.clone(), now).await;
     assert!(third.is_valid(&first_epsilon_block, now, network).await);
+    let third_under_delta = third.validate(&first_epsilon_block, now, network);
+    assert_eq!(Ok(()), delta.overriding(third_under_delta).await);
     bob.set_new_self_composed_tip(third, composer_utxos)
         .await
         .unwrap();
@@ -424,6 +438,8 @@ async fn blocks_across_epsilon_activation_on_main_net() {
             .unwrap();
         let block = compose_and_guess_for_tests(&bob, vec![tx.transaction.into()], now).await;
         assert!(block.is_valid(&predecessor, now, network).await);
+        let block_under_delta = block.validate(&predecessor, now, network);
+        assert_eq!(Ok(()), delta.overriding(block_under_delta).await);
         bob.set_new_tip(block).await.unwrap();
     }
     assert_eq!(
