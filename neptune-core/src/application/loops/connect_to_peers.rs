@@ -304,7 +304,8 @@ where
     debug!("Established incoming TCP connection with {peer_address}");
 
     // Build the communication/serialization/frame handler
-    let length_delimited = Framed::new(stream, PeerFrameCodec::new(WireEncoding::Bincode));
+    let codec = PeerFrameCodec::awaiting_handshake(WireEncoding::Bincode);
+    let length_delimited = Framed::new(stream, codec);
     let mut peer = SymmetricallyFramed::new(length_delimited, get_bincode_codec());
 
     // Complete Neptune handshake

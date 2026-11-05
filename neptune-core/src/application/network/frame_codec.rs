@@ -162,6 +162,13 @@ impl Decoder for PeerFrameCodec {
             self.checked = true;
         }
 
+        // Hold the frame back until all its bytes arrived. The inner codec
+        // reserves a frame's announced length as soon as it reads the length.
+        let frame_len = u32::from_be_bytes(src[..LENGTH_FIELD_LEN].try_into().unwrap()) as usize;
+        if src.len() < LENGTH_FIELD_LEN + frame_len {
+            return Ok(None);
+        }
+
         let frame = self.inner.decode(src)?;
         if frame.is_some() {
             self.checked = false;
@@ -244,6 +251,70 @@ mod tests {
             assert_eq!(io::ErrorKind::InvalidData, error.kind());
             assert!(error.to_string().contains("Bye message"), "{error}");
         }
+    }
+
+    /// Every kind of message, by its variant index.
+    fn all_kinds() -> Vec<PeerMessageKind> {
+        (0..).map_while(PeerMessageKind::from_repr).collect()
+    }
+
+    /// The start of a frame that announces `frame_len` payload bytes and
+    /// carries a message of the given kind.
+    fn frame_start_of_kind(
+        encoding: WireEncoding,
+        kind: PeerMessageKind,
+        frame_len: u32,
+    ) -> BytesMut {
+        let mut frame = BytesMut::new();
+        frame.extend_from_slice(&frame_len.to_be_bytes());
+        match encoding {
+            WireEncoding::Bincode => frame.extend_from_slice(&[kind as u8; KIND_PEEK_LEN]),
+            WireEncoding::Json => {
+                frame.extend_from_slice(format!("{{\"{kind}\":").as_bytes());
+                frame.extend_from_slice(&[b' '; KIND_PEEK_LEN]);
+            }
+        }
+        frame
+    }
+
+    #[test]
+    fn no_memory_is_reserved_for_bytes_that_have_not_arrived() {
+        for encoding in WireEncoding::SUPPORTED {
+            for kind in all_kinds() {
+                let mut codec = PeerFrameCodec::new(encoding);
+                let largest = u32::try_from(codec.frame_limit(kind)).unwrap();
+                let mut src = frame_start_of_kind(encoding, kind, largest);
+                let capacity = src.capacity();
+                assert!(codec.decode(&mut src).unwrap().is_none(), "{kind}");
+                assert_eq!(capacity, src.capacity(), "{kind}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn large_frames_arrive_intact_through_a_stream() {
+        use futures::StreamExt;
+        use tokio::io::AsyncWriteExt;
+
+        let mut large = vec![PeerMessageKind::Transaction as u8; 1024 * 1024];
+        for (i, byte) in large.iter_mut().enumerate().skip(KIND_PEEK_LEN) {
+            *byte = i as u8;
+        }
+        let small = vec![PeerMessageKind::Bye as u8];
+        let mut wire = vec![];
+        for payload in [&large, &small] {
+            wire.extend((payload.len() as u32).to_be_bytes());
+            wire.extend(payload);
+        }
+
+        let (mut sender, receiver) = tokio::io::duplex(1024);
+        let writer = tokio::spawn(async move { sender.write_all(&wire).await.unwrap() });
+        let codec = PeerFrameCodec::new(WireEncoding::Bincode);
+        let mut frames = tokio_util::codec::FramedRead::new(receiver, codec);
+        assert_eq!(large, frames.next().await.unwrap().unwrap().to_vec());
+        assert_eq!(small, frames.next().await.unwrap().unwrap().to_vec());
+        writer.await.unwrap();
+        assert!(frames.next().await.is_none());
     }
 
     #[test]
