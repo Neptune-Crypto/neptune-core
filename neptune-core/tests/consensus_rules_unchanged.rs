@@ -37,6 +37,8 @@ pub async fn first_few_block_hashes_are_unchanged_main_net() {
     const BLOCK2B_HASH: &str =
         "12e6e69d7447691dba85c462c9b214274064ea1dd8835c2dd731618add0320588706d4cc0b000000";
 
+    logging::tracing_logger();
+
     let network = Network::Main;
     let expected_blk_files = ["blk0.dat"];
     let test_data_dir =
@@ -101,10 +103,9 @@ async fn gamma_hardfork_on_tesnet0() {
     }
 }
 
-/// Assert that a single `blk` file whose blocks span a consensus-rule-set
-/// change (hard fork) validates end to end: every block is valid relative to its
-/// predecessor and carries valid proof-of-work, across the fork boundary.
-async fn assert_hardfork_boundary_blocks_are_valid(
+/// Assert that all blocks in a `blk` file whose blocks span a change of
+/// consensus rules (soft or hard fork) are all valid.
+async fn assert_fork_boundary_blocks_are_valid(
     network: Network,
     sub_dir: &str,
     blk_file: &str,
@@ -164,7 +165,7 @@ async fn assert_hardfork_boundary_blocks_are_valid(
 /// boundary (height 15,000) is valid.
 #[tokio::test(flavor = "multi_thread")]
 async fn alpha_hardfork_on_main_net() {
-    assert_hardfork_boundary_blocks_are_valid(
+    assert_fork_boundary_blocks_are_valid(
         Network::Main,
         "hf-alpha-validity",
         "blk121.dat",
@@ -177,7 +178,7 @@ async fn alpha_hardfork_on_main_net() {
 /// boundary (height 38,000) is valid.
 #[tokio::test(flavor = "multi_thread")]
 async fn beta_hardfork_on_main_net() {
-    assert_hardfork_boundary_blocks_are_valid(
+    assert_fork_boundary_blocks_are_valid(
         Network::Main,
         "hf-beta-validity",
         "blk325.dat",
@@ -190,7 +191,7 @@ async fn beta_hardfork_on_main_net() {
 /// boundary (height 40,300) is valid.
 #[tokio::test(flavor = "multi_thread")]
 async fn gamma_hardfork_on_main_net() {
-    assert_hardfork_boundary_blocks_are_valid(
+    assert_fork_boundary_blocks_are_valid(
         Network::Main,
         "hf-gamma-validity",
         "blk344.dat",
@@ -203,7 +204,7 @@ async fn gamma_hardfork_on_main_net() {
 /// boundary (height 55,000) is valid.
 #[tokio::test(flavor = "multi_thread")]
 async fn delta_hardfork_on_main_net() {
-    assert_hardfork_boundary_blocks_are_valid(
+    assert_fork_boundary_blocks_are_valid(
         Network::Main,
         "hf-delta-validity",
         "blk479.dat",
@@ -214,11 +215,22 @@ async fn delta_hardfork_on_main_net() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn delta_hardfork_on_testnet0() {
-    assert_hardfork_boundary_blocks_are_valid(
+    assert_fork_boundary_blocks_are_valid(
         Network::Testnet(0),
         "hf-delta-validity",
         "blk44.dat",
         ConsensusRuleSet::HardforkDelta,
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn epsilon_softfork_on_testnet0() {
+    assert_fork_boundary_blocks_are_valid(
+        Network::Testnet(0),
+        "sf-epsilon-validity",
+        "blk56.dat",
+        ConsensusRuleSet::SoftforkEpsilon,
     )
     .await;
 }
@@ -325,13 +337,25 @@ async fn ensure_blocks_in_test_data_dir(
     DataDirectory::create_dir_if_not_exists(test_data_dir.as_path())
         .await
         .unwrap();
+    let sub_directory = sub_directory.map(|dir| format!("{network}/{dir}"));
     for file_name in blk_file_names {
         let mut path = test_data_dir.clone();
         path.push(file_name);
         if File::open(&path).is_err() {
-            // Try fetching file from server and write it to disk.
-            let (file, _server) = try_fetch_file_from_server(file_name.to_owned())
-                .unwrap_or_else(|| panic!("File {file_name} must be available from a server"));
+            // Try fetching file from server and write it to disk. First in
+            // expected sub directory. Then in file server's root directory.
+            let file = match try_fetch_file_from_server(file_name.to_owned(), sub_directory.clone())
+            {
+                Some((file, _server)) => file,
+                None => {
+                    info!("Failed match in sub directory. Trying root directory.");
+                    try_fetch_file_from_server(file_name.to_owned(), None)
+                        .unwrap_or_else(|| {
+                            panic!("File {file_name} must be available from a server")
+                        })
+                        .0
+                }
+            };
             let mut f = File::create_new(&path).unwrap();
             f.write_all(&file).unwrap();
         }

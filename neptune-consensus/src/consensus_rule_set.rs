@@ -857,6 +857,7 @@ pub(crate) mod tests {
         assert!(!ConsensusRuleSet::HardforkBeta.use_parent_difficulty());
         assert!(!ConsensusRuleSet::HardforkGamma.use_parent_difficulty());
         assert!(!ConsensusRuleSet::HardforkDelta.use_parent_difficulty());
+        assert!(!ConsensusRuleSet::SoftforkEpsilon.use_parent_difficulty());
     }
 
     #[test]
@@ -867,6 +868,7 @@ pub(crate) mod tests {
         assert!(!ConsensusRuleSet::HardforkBeta.enforce_transaction_retirement());
         assert!(!ConsensusRuleSet::HardforkGamma.enforce_transaction_retirement());
         assert!(ConsensusRuleSet::HardforkDelta.enforce_transaction_retirement());
+        assert!(ConsensusRuleSet::SoftforkEpsilon.enforce_transaction_retirement());
     }
 
     #[test]
@@ -895,10 +897,17 @@ pub(crate) mod tests {
             ConsensusRuleSet::HardforkGamma
                 .triton_proof_version()
                 .version(),
+            "gamma's version is history and must never move"
         );
         assert_eq!(
             8,
             ConsensusRuleSet::HardforkDelta
+                .triton_proof_version()
+                .version(),
+        );
+        assert_eq!(
+            8,
+            ConsensusRuleSet::SoftforkEpsilon
                 .triton_proof_version()
                 .version(),
         );
@@ -909,19 +918,12 @@ pub(crate) mod tests {
     fn newest_rule_set_tracks_the_linked_triton_vm() {
         use tasm_lib::triton_vm::proof::CURRENT_VERSION;
 
-        assert_eq!(
-            CURRENT_VERSION,
-            ConsensusRuleSet::HardforkDelta
-                .triton_proof_version()
-                .version(),
-        );
-        assert_eq!(
-            5,
-            ConsensusRuleSet::HardforkGamma
-                .triton_proof_version()
-                .version(),
-            "gamma's version is history and must never move"
-        );
+        for crs in [
+            ConsensusRuleSet::HardforkDelta,
+            ConsensusRuleSet::SoftforkEpsilon,
+        ] {
+            assert_eq!(CURRENT_VERSION, crs.triton_proof_version().version(),);
+        }
     }
 
     #[test]

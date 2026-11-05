@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use rand::seq::SliceRandom;
 use tracing::debug;
+use tracing::error;
 use tracing::Span;
 
 // Copied from elsewhere because it's under the test flag the other place.
@@ -17,9 +18,11 @@ pub fn test_helper_data_dir() -> PathBuf {
     path
 }
 
-// Copied from elsewhere because it's under the test flag the other place.
 #[allow(dead_code)]
-pub fn try_fetch_file_from_server(filename: String) -> Option<(Vec<u8>, String)> {
+pub fn try_fetch_file_from_server(
+    filename: String,
+    sub_dir: Option<String>,
+) -> Option<(Vec<u8>, String)> {
     const TEST_NAME_HTTP_HEADER_KEY: &str = "Test-Name";
 
     fn get_test_name_from_tracing() -> String {
@@ -47,11 +50,12 @@ pub fn try_fetch_file_from_server(filename: String) -> Option<(Vec<u8>, String)>
         let mut server_list_path = test_helper_data_dir();
         server_list_path.push(Path::new("proof_servers").with_extension("txt"));
         let Ok(mut input_file) = File::open(server_list_path.clone()) else {
-            debug!(
-                "cannot proof-server list '{}' -- file might not exist",
+            let msg = format!(
+                "cannot file proof-server list '{}' -- file might not exist",
                 server_list_path.display()
             );
-            return vec![];
+            error!("{msg}");
+            panic!("{msg}");
         };
         let mut file_contents = vec![];
         if input_file.read_to_end(&mut file_contents).is_err() {
@@ -81,7 +85,10 @@ pub fn try_fetch_file_from_server(filename: String) -> Option<(Vec<u8>, String)>
 
     for server in servers {
         let server_ = server.clone();
-        let filename_ = filename.clone();
+        let filename_ = match &sub_dir {
+            Some(sub_dir) => format!("{sub_dir}/{filename}"),
+            None => filename.clone(),
+        };
         let headers_ = headers.clone();
         let handle = std::thread::spawn(move || {
             let url = format!("{}{}", server_, filename_);
