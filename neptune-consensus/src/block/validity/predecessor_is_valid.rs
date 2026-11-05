@@ -9,7 +9,6 @@ use neptune_primitives::mast_hash::MastHash;
 use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 use num_bigint::BigUint;
-use num_traits::Zero;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::arithmetic::i128::lt::Lt as I128Lt;
@@ -324,8 +323,8 @@ pub struct ParentBlockInfo {
 }
 
 impl ParentBlockInfo {
-    /// Describe this block as the previous block, with this proof of work
-    /// since activation and this latest block below activation.
+    /// Describe this block the way that the output of the `PredecessorIsValid`
+    /// program execution describes its parent.
     pub fn of_block(
         prev_block: &Block,
         work_since_activation: ProofOfWork,
@@ -525,13 +524,18 @@ impl PredecessorIsValid {
         })
     }
 
-    /// The previous block as the claim about it describes it: its header's
-    /// values, the mutator set after it, and what its own claim passes on:
-    /// the proof of work since activation, grown by its difficulty, and the
-    /// latest block below activation. A previous block below the activation
-    /// height, or the genesis block, has no claim to pass anything on: its
-    /// work since activation is zero and it is itself the latest block below
-    /// activation. So is a previous block without the claim.
+    /// Information about the previous block, in the form that the
+    /// `PredecessorIsValid` program execution describes it in its output.
+    ///
+    /// Returns the values the `PredecessorIsValid` would have returned.
+    ///
+    /// Still returns correct values even if the previous block is below the
+    /// activation height of this program since the data can be extracted
+    /// directly from the parent previous block without looking at the output of
+    /// a claim. In this case, work since activation will be zero and activation
+    /// parent hash will be that of the parent block since that's what a
+    /// `PredecessorIsValid` program execution *would* have returned, if it had
+    /// run prior to activation.
     pub fn parent_block_info(
         &self,
         prev_block: &Block,
@@ -558,9 +562,8 @@ impl PredecessorIsValid {
                 })
                 .and_then(|claim| Self::parse_output(&claim.output))
         };
-        let work_since_activation = own_claim.map_or_else(ProofOfWork::zero, |parent| {
-            parent.work_since_activation + prev_block.header().difficulty
-        });
+        let work_since_activation = own_claim
+            .map_or_default(|parent| parent.work_since_activation + prev_block.header().difficulty);
         let activation_parent_hash =
             own_claim.map_or_else(|| prev_block.hash(), |parent| parent.activation_parent_hash);
 

@@ -236,7 +236,17 @@ const POW_NUM_LIMBS: usize = 6;
 /// two forks of different height, a node will choose the one with the greater
 /// amount of proof-of-work.
 #[derive(
-    Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, TasmObject, GetSize,
+    Copy,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    BFieldCodec,
+    TasmObject,
+    GetSize,
+    Default,
 )]
 #[cfg_attr(any(test, feature = "arbitrary-impls"), derive(Arbitrary))]
 pub struct ProofOfWork([u32; POW_NUM_LIMBS]);
