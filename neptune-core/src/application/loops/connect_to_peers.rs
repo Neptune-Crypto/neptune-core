@@ -331,6 +331,8 @@ where
         }
     };
 
+    peer.get_mut().codec_mut().accept_all_kinds();
+
     if magic_value != *MAGIC_STRING_REQUEST {
         // no heavy anyhow::Error, just close
         warn!("No valid magic value from {peer_address}. Closing connection.");
@@ -913,6 +915,47 @@ mod tests {
         )
         .await;
         assert!(answer.is_ok(), "Expect OK on bad magic value");
+
+        Ok(())
+    }
+
+    /// The start of a large frame that is not a handshake ends an incoming
+    /// connection at once, without waiting for the rest of the frame.
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn incoming_connection_refuses_other_messages_before_the_handshake() -> Result<()> {
+        use neptune_p2p::peer::PeerMessageKind;
+        use tokio::io::AsyncWriteExt;
+
+        let network = Network::Main;
+        let cli = cli_args::Args {
+            handshake_timeout: 60,
+            ..cli_args::Args::default_with_network(network)
+        };
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, _, _, state, _hsd) =
+            get_test_genesis_setup(0, cli).await?;
+
+        // Announce a large transaction, send its first bytes only, and keep
+        // the connection open.
+        let (mut remote, local) = tokio::io::duplex(1024);
+        let mut frame_start = (100u32 * 1024 * 1024).to_be_bytes().to_vec();
+        frame_start.extend([PeerMessageKind::Transaction as u8; 64]);
+        remote.write_all(&frame_start).await?;
+
+        let answer = timeout(
+            Duration::from_secs(10),
+            answer_peer_inner(
+                local,
+                state,
+                get_dummy_socket_address(0),
+                from_main_rx_clone,
+                to_main_tx,
+                get_dummy_handshake_data_for_genesis(network),
+                None,
+            ),
+        )
+        .await;
+        assert!(answer.expect("must not wait for the frame").is_ok());
 
         Ok(())
     }

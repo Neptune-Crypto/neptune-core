@@ -61,6 +61,9 @@ pub(crate) struct PeerFrameCodec {
     /// Whether the frame being received has passed the check against the
     /// limit for its kind.
     checked: bool,
+
+    /// Whether every kind of message but the handshake is refused.
+    awaiting_handshake: bool,
 }
 
 impl PeerFrameCodec {
@@ -71,7 +74,21 @@ impl PeerFrameCodec {
             inner,
             encoding,
             checked: false,
+            awaiting_handshake: false,
         }
+    }
+
+    /// A codec that refuses every kind of message but the handshake, until
+    /// [`Self::accept_all_kinds`] is called.
+    pub(crate) fn awaiting_handshake(encoding: WireEncoding) -> Self {
+        Self {
+            awaiting_handshake: true,
+            ..Self::new(encoding)
+        }
+    }
+
+    pub(crate) fn accept_all_kinds(&mut self) {
+        self.awaiting_handshake = false;
     }
 
     /// The most bytes a frame carrying a message of the given kind may have.
@@ -118,6 +135,9 @@ impl PeerFrameCodec {
             Err(_) if available.len() < peek_len => return Ok(false),
             Err(error) => return Err(error),
         };
+        if self.awaiting_handshake && kind != PeerMessageKind::Handshake {
+            return Err(invalid_data(format!("{kind} message before the handshake")));
+        }
         let limit = self.frame_limit(kind);
         if frame_len > limit {
             return Err(invalid_data(OversizedFrame {
@@ -315,6 +335,22 @@ mod tests {
         assert_eq!(small, frames.next().await.unwrap().unwrap().to_vec());
         writer.await.unwrap();
         assert!(frames.next().await.is_none());
+    }
+
+    #[test]
+    fn only_a_handshake_is_accepted_before_the_handshake() {
+        for encoding in WireEncoding::SUPPORTED {
+            for kind in all_kinds() {
+                let mut codec = PeerFrameCodec::awaiting_handshake(encoding);
+                let mut before = frame_start_of_kind(encoding, kind, 1024);
+                let is_handshake = kind == PeerMessageKind::Handshake;
+                assert_eq!(is_handshake, codec.decode(&mut before).is_ok(), "{kind}");
+
+                codec.accept_all_kinds();
+                let mut after = frame_start_of_kind(encoding, kind, 1024);
+                assert!(codec.decode(&mut after).is_ok(), "{kind}");
+            }
+        }
     }
 
     #[test]
