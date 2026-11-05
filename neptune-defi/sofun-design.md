@@ -1880,8 +1880,11 @@ any vault.
       refused (§4.1, §4.9) — superseded by the next item
 - [ ] Orders paid in vNPT: `Y = ⌊C/2⌋`, the pair `{vNPT} → {NativeCurrency,
       TimeLock}`, and the order UTXO holding a vNPT token (§4.1, §4.3)
-- [ ] The transaction builder takes type scripts it does not know, with their
-      witnesses, from its caller (§4.9)
+- [x] `PrimitiveWitness::generate_primitive_witness_with` takes, from its
+      caller, a generator of the witnesses of type scripts it does not know
+      (§4.9)
+- [ ] The wallet's `TransactionDetails` passes such a generator on, so that
+      the fill can pay vNPT (§4.9)
 - [x] A witness-backed transaction with a type script the node does not know
       is dropped when the mutator set changes, rather than crashing the node,
       since only its creator can generate that type script's witness again
@@ -1910,6 +1913,8 @@ any vault.
       halts if and only if `Vault::validate` accepts, and crashes on the
       assertion of the rule the reference names; a witness with one word
       changed is rejected (§4.11)
+- [x] A deposit and a withdrawal valid as whole transactions, and a
+      withdrawal without a burn rejected by the vault type script
 - [x] Proving cost measured: about 3,400 cycles and 390 more per token UTXO,
       and a padded height of 2^14 up to 16 token UTXOs
 - [x] Tests of `Vault::validate`: creation, withdrawal, emptying, topping up

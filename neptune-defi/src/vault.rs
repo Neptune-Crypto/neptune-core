@@ -353,10 +353,19 @@ impl VaultAnnouncement {
 
 #[cfg(test)]
 mod tests {
+    use neptune_consensus::transaction::lock_script::LockScriptAndWitness;
+    use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
+    use neptune_consensus::transaction::primitive_witness::UnknownTypeScript;
+    use neptune_consensus::transaction::primitive_witness::WitnessValidationError;
     use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier;
+    use neptune_consensus::transaction::transaction_kernel::TransactionKernelProxy;
+    use neptune_mutator_set::msa_and_records::MsaAndRecords;
     use neptune_primitives::mast_hash::MastHash;
+    use neptune_primitives::timestamp::Timestamp;
     use proptest::collection::vec;
     use proptest::prelude::*;
+    use proptest::strategy::ValueTree;
+    use proptest::test_runner::TestRunner;
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
 
@@ -880,6 +889,158 @@ mod tests {
             vec![Utxo::new(vault_lock_script().hash(), coins), token_utxo(1)],
         );
         prop_assert_eq!(Err(VaultError::NotAVault(0)), tx.validate());
+    }
+
+    /// A primitive witness of a transaction from `inputs` to `outputs`.
+    ///
+    /// Every input lies in the mutator set and is locked by the lock script
+    /// that halts on every input, every output that carries a vault marker is
+    /// announced, and `other_type_scripts` generates the witnesses of the type
+    /// scripts that are not known ones.
+    fn primitive_witness(
+        inputs: Vec<Utxo>,
+        outputs: Vec<Utxo>,
+        other_type_scripts: impl Fn(
+            Digest,
+            &TransactionKernel,
+            &SaltedUtxos,
+            &SaltedUtxos,
+        ) -> Option<TypeScriptAndWitness>,
+    ) -> Result<PrimitiveWitness, UnknownTypeScript> {
+        let removables = inputs
+            .iter()
+            .enumerate()
+            .map(|(i, utxo)| {
+                let sender_randomness = Tip5::hash(&(i as u64 + 2000));
+                let receiver_preimage = Tip5::hash(&(i as u64 + 3000));
+                (Tip5::hash(utxo), sender_randomness, receiver_preimage)
+            })
+            .collect::<Vec<_>>();
+        let aocl_size = removables.len() as u64;
+        let msa_and_records = MsaAndRecords::arbitrary_with((removables, aocl_size))
+            .new_tree(&mut TestRunner::deterministic())
+            .unwrap()
+            .current();
+
+        let announced = Tx::announcements(&outputs);
+        let marker = Vault::vnpt().coin(VaultState::Marker);
+        let kernel = TransactionKernelProxy {
+            inputs: msa_and_records.unpacked_removal_records(),
+            outputs: announced
+                .iter()
+                .map(VaultAnnouncement::addition_record)
+                .collect(),
+            announcements: announced
+                .iter()
+                .filter(|announced| announced.utxo.coins().contains(&marker))
+                .map(VaultAnnouncement::announcement)
+                .collect(),
+            fee: nau(0),
+            coinbase: None,
+            timestamp: Timestamp::now(),
+            mutator_set_hash: msa_and_records.mutator_set_accumulator.hash(),
+            merge_bit: false,
+        }
+        .into_kernel();
+
+        let unlock = LockScriptAndWitness::new(vault_lock_script().program);
+        let inputs = inputs
+            .into_iter()
+            .zip(msa_and_records.membership_proofs)
+            .map(|(utxo, membership_proof)| (utxo, unlock.clone(), membership_proof))
+            .collect();
+        PrimitiveWitness::generate_primitive_witness_with(
+            inputs,
+            outputs,
+            announced.iter().map(|a| a.sender_randomness).collect(),
+            announced
+                .iter()
+                .map(|a| a.receiver_preimage.hash())
+                .collect(),
+            kernel,
+            msa_and_records.mutator_set_accumulator,
+            other_type_scripts,
+        )
+    }
+
+    /// Generates vNPT's witness, and no other.
+    fn vnpt_witness(
+        type_script_hash: Digest,
+        kernel: &TransactionKernel,
+        salted_inputs: &SaltedUtxos,
+        salted_outputs: &SaltedUtxos,
+    ) -> Option<TypeScriptAndWitness> {
+        let vnpt = Vault::vnpt();
+        (type_script_hash == vnpt.hash())
+            .then(|| vnpt.type_script_and_witness(kernel, salted_inputs, salted_outputs))
+    }
+
+    fn lock_free_npt(amount: i128) -> Utxo {
+        Utxo::new_native_currency(vault_lock_script().hash(), nau(amount))
+    }
+
+    fn lock_free_token(amount: i128) -> Utxo {
+        Utxo::new(
+            vault_lock_script().hash(),
+            vec![Vault::vnpt().token(nau(amount))],
+        )
+    }
+
+    #[proptest(cases = 5, async = "tokio")]
+    async fn a_deposit_is_a_valid_transaction(#[strategy(0..=MAX)] holding: i128) {
+        let witness = primitive_witness(
+            vec![lock_free_npt(holding)],
+            vec![vault(holding), lock_free_token(holding)],
+            vnpt_witness,
+        )
+        .unwrap();
+        prop_assert!(witness.validate().await.is_ok());
+    }
+
+    #[proptest(cases = 5, async = "tokio")]
+    async fn a_withdrawal_is_a_valid_transaction(
+        #[strategy(1..=MAX)] holding: i128,
+        #[strategy(0..=#holding)] withdrawn: i128,
+    ) {
+        let witness = primitive_witness(
+            vec![vault(holding), lock_free_token(withdrawn)],
+            vec![vault(holding - withdrawn), lock_free_npt(withdrawn)],
+            vnpt_witness,
+        )
+        .unwrap();
+        prop_assert!(witness.validate().await.is_ok());
+    }
+
+    #[proptest(cases = 5, async = "tokio")]
+    async fn a_withdrawal_without_a_burn_is_not_a_valid_transaction(
+        #[strategy(1..=MAX)] holding: i128,
+        #[strategy(1..=#holding)] withdrawn: i128,
+    ) {
+        let witness = primitive_witness(
+            vec![vault(holding)],
+            vec![vault(holding - withdrawn), lock_free_npt(withdrawn)],
+            vnpt_witness,
+        )
+        .unwrap();
+        let rejection = witness.validate().await;
+        prop_assert!(
+            matches!(
+                rejection,
+                Err(WitnessValidationError::InvalidTypeScript { type_script_hash, .. })
+                    if type_script_hash == Vault::vnpt().hash()
+            ),
+            "{rejection:?}"
+        );
+    }
+
+    #[test]
+    fn a_vnpt_transaction_needs_a_generator_for_vnpt() {
+        let witness = primitive_witness(
+            vec![lock_free_npt(1)],
+            vec![vault(1), lock_free_token(1)],
+            |_, _, _, _| None,
+        );
+        assert_eq!(Some(UnknownTypeScript(Vault::vnpt().hash())), witness.err());
     }
 
     #[proptest(cases = 1)]
