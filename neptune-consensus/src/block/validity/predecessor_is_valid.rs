@@ -393,6 +393,10 @@ impl PredecessorIsValid {
     /// the modulus, out of the field's 584 million years.
     const TIMESTAMP_HIGH_LIMB_BOUND: u64 = (1 << 32) - (1 << 6);
 
+    /// The previous block's proof field holds more or less than one encoded
+    /// single proof.
+    const PROOF_FIELD_LENGTH_ERROR_ID: i128 = 1_000_660;
+
     /// The sign bit is the top bit of the most significant limb. Crashes
     /// unless every limb is a u32.
     ///
@@ -2460,11 +2464,21 @@ impl TritonProgram for PredecessorIsValid {
         // AFTER:  _ *w [prev_block_hash]
         let rule_1c_prev = triton_asm!(
             dup 5 {&field!(PredecessorIsValidWitnessMemory::prev_block_proof)}
-            addi 1 read_mem 1 pop 1
-            // _ *w [prev_block_hash] block_proof_discriminant
+            addi 3 read_mem 4 pop 1
+            // _ *w [prev_block_hash] proof_len encoded_proof_len discriminant field_len
 
-            push {BlockProof::SINGLE_PROOF_DISCRIMINANT} eq
+            pick 1 push {BlockProof::SINGLE_PROOF_DISCRIMINANT} eq
             assert error_id {BlockValidationRule::ProofQuality.error_id()}
+            // _ *w [prev_block_hash] proof_len encoded_proof_len field_len
+
+            // Require the field to end where the encoded proof ends, and the
+            // encoded proof to end where the proof ends.
+            dup 1 addi {BlockProof::SINGLE_PROOF_PREFIX_LEN} eq
+            assert error_id {Self::PROOF_FIELD_LENGTH_ERROR_ID}
+            // _ *w [prev_block_hash] proof_len encoded_proof_len
+
+            pick 1 addi 1 eq
+            assert error_id {Self::PROOF_FIELD_LENGTH_ERROR_ID}
             // _ *w [prev_block_hash]
         );
 
@@ -6014,6 +6028,155 @@ ones):
             );
         }
 
+        /// The program's input and witness for a previous block whose proof
+        /// field holds these words in place of an encoded block proof. The
+        /// first candidate that leaves the block's hash with proof of work
+        /// is taken.
+        fn input_and_witness_with_proof_field(
+            candidates: impl Fn(u64) -> Vec<BFieldElement>,
+        ) -> (PublicInput, NonDeterminism) {
+            let program = PredecessorIsValid::new();
+            let (prev_block, next_body, next_header) =
+                unproven_prev_block_and_next_body_and_header(0);
+
+            let kernel_leaf = Tip5::hash(&prev_block.kernel.mast_hash());
+            let target = prev_block.header().difficulty.target();
+            let (proof_field, prev_block_hash) = (0..1 << 20)
+                .map(|nonce| {
+                    let proof_field = candidates(nonce);
+                    let proof_leaf = Tip5::hash_varlen(&proof_field);
+                    (proof_field, Tip5::hash_pair(kernel_leaf, proof_leaf))
+                })
+                .find(|(_, hash)| *hash <= target)
+                .expect("one candidate in a million must have proof of work");
+
+            let mut block_mmr_accumulator = prev_block.body().block_mmr_accumulator.clone();
+            block_mmr_accumulator.append(prev_block_hash);
+            let next_body = BlockBody::new(
+                next_body.transaction_kernel.clone(),
+                next_body.mutator_set_accumulator.clone(),
+                next_body.lock_free_mmr_accumulator.clone(),
+                block_mmr_accumulator,
+            );
+
+            let (claim, mut nondeterminism) = claim_and_nondeterminism(
+                &program,
+                &prev_block,
+                &next_body,
+                &next_header,
+                &epochs(),
+            );
+            let memory = PredecessorIsValidWitnessMemory {
+                prev_block_proof: proof_field,
+                ..PredecessorIsValidWitnessMemory::from(&witness_for(&prev_block, &next_body))
+            };
+            nondeterminism.ram.clear();
+            encode_to_memory(
+                &mut nondeterminism.ram,
+                FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+                &memory,
+            );
+
+            (PublicInput::new(claim.input), nondeterminism)
+        }
+
+        /// An encoded single proof of one word, which no verifier accepts.
+        fn encoded_single_proof(word: u64) -> Vec<BFieldElement> {
+            BlockProof::SingleProof(NeptuneProof::from(vec![bfe!(word)])).encode()
+        }
+
+        #[test]
+        fn prev_block_with_words_after_its_proof_fails() {
+            let (input, nondeterminism) = input_and_witness_with_proof_field(|junk| {
+                [encoded_single_proof(0), vec![bfe!(junk)]].concat()
+            });
+
+            PredecessorIsValid::new()
+                .test_assertion_failure(
+                    input,
+                    nondeterminism,
+                    &[PredecessorIsValid::PROOF_FIELD_LENGTH_ERROR_ID],
+                )
+                .unwrap();
+        }
+
+        #[test]
+        fn prev_block_with_proof_field_cut_short_fails() {
+            let (input, nondeterminism) = input_and_witness_with_proof_field(|word| {
+                let proof = NeptuneProof::from(vec![bfe!(word), bfe!(0)]);
+                let mut proof_field = BlockProof::SingleProof(proof).encode();
+                proof_field.pop();
+                proof_field
+            });
+
+            PredecessorIsValid::new()
+                .test_assertion_failure(
+                    input,
+                    nondeterminism,
+                    &[PredecessorIsValid::PROOF_FIELD_LENGTH_ERROR_ID],
+                )
+                .unwrap();
+        }
+
+        #[test]
+        fn prev_block_with_other_encoded_proof_length_fails() {
+            let length_offset = 1;
+            let honest = encoded_single_proof(0);
+            let (input, nondeterminism) = input_and_witness_with_proof_field(|nonce| {
+                let mut proof_field = honest.clone();
+                proof_field[length_offset] += bfe!(1 + nonce);
+                proof_field
+            });
+
+            PredecessorIsValid::new()
+                .test_assertion_failure(
+                    input,
+                    nondeterminism,
+                    &[PredecessorIsValid::PROOF_FIELD_LENGTH_ERROR_ID],
+                )
+                .unwrap();
+        }
+
+        #[test]
+        fn prev_block_with_other_proof_length_fails() {
+            let length_offset = BlockProof::SINGLE_PROOF_PREFIX_LEN as usize;
+            let honest = encoded_single_proof(0);
+            let (input, nondeterminism) = input_and_witness_with_proof_field(|nonce| {
+                let mut proof_field = honest.clone();
+                proof_field[length_offset] += bfe!(1 + nonce);
+                proof_field
+            });
+
+            PredecessorIsValid::new()
+                .test_assertion_failure(
+                    input,
+                    nondeterminism,
+                    &[PredecessorIsValid::PROOF_FIELD_LENGTH_ERROR_ID],
+                )
+                .unwrap();
+        }
+
+        /// The encoding of a single proof passes the checks on the proof
+        /// field's lengths. The proof itself is then refused.
+        #[test]
+        fn prev_block_with_encoded_single_proof_reaches_proof_verification() {
+            use crate::proof_abstractions::tasm::program::TritonError;
+
+            let program = PredecessorIsValid::new();
+            let (input, nondeterminism) = input_and_witness_with_proof_field(encoded_single_proof);
+
+            let Err(TritonError::TritonVMPanic(_, InstructionError::AssertionFailed(failure))) =
+                program.run_tasm(&input, nondeterminism)
+            else {
+                panic!("a proof of one word must fail an assertion");
+            };
+            let checked_before_verification = [
+                BlockValidationRule::ProofQuality.error_id(),
+                PredecessorIsValid::PROOF_FIELD_LENGTH_ERROR_ID,
+            ];
+            assert!(!checked_before_verification.contains(&failure.id.unwrap()));
+        }
+
         /// A genesis parent, unmined and without claims or proof, passes
         /// no rule but the named hash.
         #[test]
@@ -7880,6 +8043,6 @@ ones):
 
     test_program_snapshot!(
         PredecessorIsValid::new(),
-        "ad13955a71331c1829a67bc7dd4ba5a3e243c537976a82bcd21f8c6a872826ad5acd4f4ab697ca16"
+        "11e0d64596d3b0ac36f8a4f6c842d3a0e36756d10732b6cce133f3fe70f5ed243033dbbbf9c5298e"
     );
 }
