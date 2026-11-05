@@ -83,25 +83,31 @@ use crate::upgrade_priority::UpgradePriority;
 /// Transactions with a timestamp older than this are removed from the mempool.
 pub const MEMPOOL_TX_THRESHOLD_AGE: Timestamp = Timestamp::hours(10);
 
-/// How long a transaction that carries a retirement announcement must still
-/// have left before it retires, for this node to hold it and to compose with
-/// it.
+/// How long a transaction with a retirement announcement must still be valid
+/// for this node to hold it and to compose with it.
 ///
 /// Policy, not consensus logic.
-pub const MEMPOOL_RETIREMENT_MARGIN: Timestamp = Timestamp::minutes(100);
+pub const MEMPOOL_RETIREMENT_MARGIN: Timestamp = Timestamp::minutes(125);
 
-/// How long a transaction that carries a retirement announcement must still
-/// have left before it retires, for this node to merge it into another
-/// transaction.
+/// How long a transaction with a retirement announcement must still be valid
+/// for this node to admit it into the mempool.
 ///
-/// Deliberately longer than [`MEMPOOL_RETIREMENT_MARGIN`] since it takes some
-/// time before a merged transaction is picked up by composers: proving time,
-/// tx-propagation, the finding of the next block.
+/// Deliberately longer than [`MEMPOOL_RETIREMENT_MARGIN`] so that an admitted
+/// transaction can be composed with for a while.
 ///
 /// Policy, not consensus logic.
-pub const MERGE_RETIREMENT_MARGIN: Timestamp = Timestamp::minutes(150);
+pub const ADMISSION_RETIREMENT_MARGIN: Timestamp =
+    Timestamp::millis(MEMPOOL_RETIREMENT_MARGIN.to_millis() + Timestamp::minutes(120).to_millis());
 
-pub const TRANSACTION_NOTIFICATION_AGE_LIMIT_IN_SECS: u64 = 60 * 60 * 24;
+/// How long a transaction with a retirement announcement must still be valid
+/// for this node to merge it into another transaction.
+///
+/// Deliberately longer than [`ADMISSION_RETIREMENT_MARGIN`] since merging can
+/// take some time, and transaction should have time to propagate.
+///
+/// Policy, not consensus logic.
+pub const MERGE_RETIREMENT_MARGIN: Timestamp =
+    Timestamp::millis(ADMISSION_RETIREMENT_MARGIN.to_millis() + Timestamp::minutes(90).to_millis());
 
 /// What the value of saving one "merge" proof operation is to a composer.
 pub const COST_OF_MERGE: NativeCurrencyAmount =
@@ -1028,9 +1034,6 @@ impl Mempool {
                 continue;
             };
 
-            // The merged transaction inherits this one's retirement, so a
-            // candidate this close to retiring makes for a transaction that no
-            // composer will pick.
             if candidate_tx
                 .kernel
                 .retires_before(now + MERGE_RETIREMENT_MARGIN)
@@ -2391,6 +2394,7 @@ mod tests {
     use tasm_lib::twenty_first::prelude::BFieldCodec;
     use tracing_test::traced_test;
 
+    use crate::mempool::ADMISSION_RETIREMENT_MARGIN;
     use crate::mempool::COST_OF_MERGE;
     use crate::mempool::MEMPOOL_RETIREMENT_MARGIN;
     use crate::mempool::MERGE_RETIREMENT_MARGIN;
@@ -2912,6 +2916,59 @@ mod tests {
             vec![txs[2].kernel.txid()],
             selected.iter().map(|tx| tx.kernel.txid()).collect_vec()
         );
+    }
+
+    #[test]
+    fn transaction_admitted_at_the_margin_stays_selectable_until_the_mempool_margin() {
+        let network = Network::Main;
+        let genesis_block = Block::genesis(network);
+        let mutator_set_hash = genesis_block
+            .mutator_set_accumulator_after()
+            .unwrap()
+            .hash();
+        let mut mempool = Mempool::new(
+            ByteSize::gb(1),
+            TxProvingCapability::ProofCollection,
+            &genesis_block,
+        );
+
+        let admitted_at = Timestamp::now();
+        let mut tx = make_plenty_mock_transaction_supported_by_invalid_single_proofs(1)
+            .pop()
+            .unwrap();
+        tx.kernel = TransactionKernelModifier::default()
+            .mutator_set_hash(mutator_set_hash)
+            .timestamp(admitted_at)
+            .announcements(vec![Announcement::retirement(
+                admitted_at + ADMISSION_RETIREMENT_MARGIN,
+            )])
+            .modify(tx.kernel);
+        let txid = tx.kernel.txid();
+        mempool.insert(tx, UpgradePriority::Irrelevant);
+
+        let selected = |mempool: &Mempool| {
+            mempool
+                .get_transactions_for_block_composition(
+                    ConsensusRuleSet::default(),
+                    network,
+                    SIZE_20MB_IN_BYTES,
+                    None,
+                    NativeCurrencyAmount::zero(),
+                )
+                .len()
+        };
+        let selectable_for = ADMISSION_RETIREMENT_MARGIN - MEMPOOL_RETIREMENT_MARGIN;
+        assert!(selectable_for >= Timestamp::minutes(30));
+
+        mempool.with_mocked_now(admitted_at + selectable_for - Timestamp::minutes(1));
+        assert_eq!(1, selected(&mempool));
+        mempool.prune_stale_transactions();
+        assert!(mempool.contains(txid));
+
+        mempool.with_mocked_now(admitted_at + selectable_for + Timestamp::minutes(1));
+        assert_eq!(0, selected(&mempool));
+        mempool.prune_stale_transactions();
+        assert!(!mempool.contains(txid));
     }
 
     #[test]

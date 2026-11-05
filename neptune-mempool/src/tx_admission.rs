@@ -37,7 +37,7 @@ use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 
 use crate::any_tx::AnyTxRef;
-use crate::mempool::MEMPOOL_RETIREMENT_MARGIN;
+use crate::mempool::ADMISSION_RETIREMENT_MARGIN;
 use crate::mempool::MEMPOOL_TX_THRESHOLD_AGE;
 use crate::recent_mutator_sets::CatchUpError;
 use crate::recent_mutator_sets::RecentMutatorSets;
@@ -186,10 +186,7 @@ pub async fn admissible(
         return Err(TxAdmissionError::FutureDated);
     }
 
-    // Policy, and so applied under every rule set: a transaction that retires
-    // too soon to be worth composing with is not worth storing and relaying
-    // either.
-    if kernel.retires_before(MEMPOOL_RETIREMENT_MARGIN + now) {
+    if kernel.retires_before(ADMISSION_RETIREMENT_MARGIN + now) {
         return Err(TxAdmissionError::Retired);
     }
 
@@ -345,7 +342,7 @@ mod tests {
         let retirements = [
             now - Timestamp::hours(1),
             now,
-            now + MEMPOOL_RETIREMENT_MARGIN - Timestamp::minutes(1),
+            now + ADMISSION_RETIREMENT_MARGIN - Timestamp::minutes(1),
         ];
         let recent_mutator_sets =
             RecentMutatorSets::for_mutator_set(MutatorSetAccumulator::default());
@@ -372,7 +369,7 @@ mod tests {
     #[apply(shared_tokio_runtime)]
     async fn transaction_retiring_beyond_the_margin_is_not_refused_for_retirement() {
         let now = Timestamp::now();
-        let retirement = now + MEMPOOL_RETIREMENT_MARGIN + Timestamp::minutes(1);
+        let retirement = now + ADMISSION_RETIREMENT_MARGIN + Timestamp::minutes(1);
         let transaction = transaction_retiring_at(retirement, now);
         let recent_mutator_sets =
             RecentMutatorSets::for_mutator_set(MutatorSetAccumulator::default());
