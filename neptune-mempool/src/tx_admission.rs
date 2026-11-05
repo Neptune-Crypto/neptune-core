@@ -96,8 +96,8 @@ pub enum TxAdmissionError {
     /// A link transaction under a rule set without the `Fix` branch.
     NotYetActive,
 
-    /// A link transaction not built against the tip. Also a transaction
-    /// without inputs that is not at the tip, since it can never be updated.
+    /// A link transaction not built against the tip, or a transaction synced to
+    /// a mutator set not recently seen by this node.
     NotSynced,
 
     /// The transaction's proof does not attest to its kernel.
@@ -119,9 +119,9 @@ fn admissible_count(max_num_per_block: usize) -> usize {
 /// Determine whether a transaction, on either pipeline, may be admitted to
 /// the mempool.
 ///
-/// A standard transaction built against a mutator set in
-/// `recent_mutator_sets` is judged against it, any other against the tip's. A
-/// link transaction must be built against the tip's.
+/// A standard transaction must be built against a mutator set in
+/// `recent_mutator_sets`, and is judged against it. A link transaction must be
+/// built against the tip's.
 ///
 /// `already_known` answers whether the mempool already holds this transaction
 /// at no worse proof quality; it is supplied by the caller so that this
@@ -196,8 +196,9 @@ pub async fn admissible(
 
     let synced_to_tip = kernel.mutator_set_hash == tip_mutator_set_hash;
 
-    let synced_to = recent_mutator_sets.mutator_set(kernel.mutator_set_hash);
-    let judged_against = synced_to.unwrap_or_else(|| recent_mutator_sets.tip_mutator_set());
+    let Some(judged_against) = recent_mutator_sets.mutator_set(kernel.mutator_set_hash) else {
+        return Err(TxAdmissionError::NotSynced);
+    };
 
     // Transactions with no inputs must be synced to the tip, since they cannot
     // be updated.
@@ -212,7 +213,7 @@ pub async fn admissible(
     }
 
     // Check if a transaction synced to a tip ancestor is a double spend.
-    if synced_to.is_some() && !synced_to_tip {
+    if !synced_to_tip {
         match recent_mutator_sets.catch_up(kernel.mutator_set_hash, &kernel.inputs) {
             Ok(_) => (),
             Err(CatchUpError::SpentSince(index)) => {
@@ -684,18 +685,16 @@ mod tests {
             "got {rejection:?}"
         );
 
-        // Not built against any mutator set in the window: judged against the
-        // tip, where only removal records that validate there will do.
+        // Not built against any mutator set in the window
         let unknown = spending(at_the_tip.clone(), Digest::default(), now);
         assert_eq!(
-            Err(TxAdmissionError::Invalid),
+            Err(TxAdmissionError::NotSynced),
             admission(&unknown, &recent).await
         );
         let unknown_and_stale = spending(bogus.kernel.inputs.clone(), Digest::default(), now);
-        let rejection = admission(&unknown_and_stale, &recent).await;
-        assert!(
-            matches!(rejection, Err(TxAdmissionError::NotConfirmable(_))),
-            "got {rejection:?}"
+        assert_eq!(
+            Err(TxAdmissionError::NotSynced),
+            admission(&unknown_and_stale, &recent).await
         );
 
         // No inputs and not at the tip: could never be brought up to date.
@@ -705,8 +704,7 @@ mod tests {
             admission(&empty, &recent).await
         );
 
-        // One more block pushes the ancestor out of the window. Removal
-        // records that validate against the tip are still enough.
+        // One more block pushes the ancestor out of the window.
         land(
             &mut recent,
             &mut synced_to,
@@ -716,7 +714,7 @@ mod tests {
         assert_eq!(None, recent.depth_of(ancestor_hash));
         let evicted = spending(at_the_tip.clone(), ancestor_hash, now);
         assert_eq!(
-            Err(TxAdmissionError::Invalid),
+            Err(TxAdmissionError::NotSynced),
             admission(&evicted, &recent).await
         );
 
