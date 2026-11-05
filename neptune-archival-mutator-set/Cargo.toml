@@ -31,7 +31,7 @@ neptune-mutator-set = { version = "0.19.4", path = "../neptune-mutator-set", fea
     "test-helpers",
 ] }
 macro_rules_attr = "0.1.3"
-proptest = "1.7"
+proptest = { version = ">=1.7, <1.12.0" }
 proptest-arbitrary-interop = "0.1"
 rand = "0.10"
 test-strategy = "0.3"

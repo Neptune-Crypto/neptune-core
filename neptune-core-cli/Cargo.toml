@@ -63,7 +63,7 @@ neptune-wallet = { version = "0.19.4", path = "../neptune-wallet", features = [
 ] }
 arbitrary = "1.4.2"
 test-strategy = "0.4.3"
-proptest = "1.7.0"
+proptest = ">=1.7, <1.12.0"
 proptest-arbitrary-interop = "0.1.0"
 
 [lints]
