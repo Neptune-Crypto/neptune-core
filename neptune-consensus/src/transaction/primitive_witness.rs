@@ -152,7 +152,8 @@ impl PrimitiveWitness {
     /// Generate a primitive witness for a transaction from various disparate witness data.
     ///
     /// # Panics
-    /// Panics if transaction validity cannot be satisfied.
+    /// Panics if transaction validity cannot be satisfied, or if a UTXO
+    /// carries a coin of a type script that is not a known one.
     pub fn generate_primitive_witness(
         inputs: Vec<(Utxo, LockScriptAndWitness, MsMembershipProof)>,
         output_utxos: Vec<Utxo>,
@@ -161,6 +162,43 @@ impl PrimitiveWitness {
         transaction_kernel: TransactionKernel,
         mutator_set_accumulator: MutatorSetAccumulator,
     ) -> PrimitiveWitness {
+        Self::generate_primitive_witness_with(
+            inputs,
+            output_utxos,
+            sender_randomnesses,
+            receiver_digests,
+            transaction_kernel,
+            mutator_set_accumulator,
+            |_, _, _, _| None,
+        )
+        .expect("type script hash should be known.")
+    }
+
+    /// Generate a primitive witness, as [`Self::generate_primitive_witness`]
+    /// does, for a transaction whose UTXOs may carry coins of type scripts that
+    /// are not known ones.
+    ///
+    /// `other_type_scripts` takes the hash of a type script that is not a known
+    /// one, the kernel and the salted input and output UTXOs, and returns the
+    /// type script with its witness, or `None` if it cannot generate one. This
+    /// succeeds if and only if it returns one for every such type script.
+    ///
+    /// # Panics
+    /// Panics if transaction validity cannot be satisfied.
+    pub fn generate_primitive_witness_with(
+        inputs: Vec<(Utxo, LockScriptAndWitness, MsMembershipProof)>,
+        output_utxos: Vec<Utxo>,
+        sender_randomnesses: Vec<Digest>,
+        receiver_digests: Vec<Digest>,
+        transaction_kernel: TransactionKernel,
+        mutator_set_accumulator: MutatorSetAccumulator,
+        other_type_scripts: impl Fn(
+            Digest,
+            &TransactionKernel,
+            &SaltedUtxos,
+            &SaltedUtxos,
+        ) -> Option<TypeScriptAndWitness>,
+    ) -> Result<PrimitiveWitness, UnknownTypeScript> {
         /// Generate a salt to use for [SaltedUtxos], deterministically.
         fn generate_secure_pseudorandom_seed(
             input_utxos: &Vec<Utxo>,
@@ -203,10 +241,18 @@ impl PrimitiveWitness {
                     salted_input_utxos.clone(),
                     salted_output_utxos.clone(),
                 )
-                .expect("type script hash should be known.")
+                .or_else(|| {
+                    other_type_scripts(
+                        type_script_hash,
+                        &transaction_kernel,
+                        &salted_input_utxos,
+                        &salted_output_utxos,
+                    )
+                })
+                .ok_or(UnknownTypeScript(type_script_hash))
             })
-            .collect_vec();
-        PrimitiveWitness {
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(PrimitiveWitness {
             input_utxos: salted_input_utxos,
             lock_scripts_and_witnesses: input_lock_scripts_and_witnesses,
             type_scripts_and_witnesses,
@@ -216,7 +262,7 @@ impl PrimitiveWitness {
             output_receiver_digests: receiver_digests.to_vec(),
             mutator_set_accumulator,
             kernel: transaction_kernel,
-        }
+        })
     }
 
     /// Verify the transaction directly from primitive witness
@@ -480,9 +526,12 @@ impl PrimitiveWitness {
     }
 }
 
-/// A type script whose witness only the transaction's creator can generate.
+/// A type script that is not a known one, and whose witness was not generated.
+///
+/// Only the transaction's creator can generate such a witness, so a node that
+/// did not create the transaction cannot generate it again either.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("type script {0} is unknown, so its witness cannot be generated again")]
+#[error("type script {0} is unknown, so its witness cannot be generated")]
 pub struct UnknownTypeScript(pub Digest);
 
 /// enumerates possible witness validation errors
