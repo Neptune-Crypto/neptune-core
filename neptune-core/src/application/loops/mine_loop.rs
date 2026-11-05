@@ -120,11 +120,12 @@ pub(crate) async fn compose_block_helper(
     // created transaction.
     let block_timestamp = transaction.kernel().timestamp;
 
-    let mut composer_witness = global_state_lock
-        .lock_guard()
-        .await
-        .composer_witness(&latest_block)
-        .await?;
+    let state = global_state_lock.lock_guard().await;
+    if state.chain.tip().hash() != latest_block.hash() {
+        return Ok(None);
+    }
+    let mut composer_witness = state.composer_witness(&latest_block).await?;
+    drop(state);
     if let Some(witness) = &mut composer_witness {
         witness.previous = previous;
     }
@@ -1958,6 +1959,35 @@ pub(crate) mod tests {
             .mining_state
             .composer_work
             .is_none());
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn composing_on_a_block_that_is_not_the_tip_yields_no_proposal() {
+        let network = Network::Testnet(42);
+        let alice = mock_genesis_global_state(
+            2,
+            WalletEntropy::devnet_wallet(),
+            cli_args::Args::default_with_network(network),
+        )
+        .await;
+        let genesis_block = Block::genesis(network);
+        let now = genesis_block.header().timestamp + Timestamp::months(7);
+        let job_options = TritonVmProofJobOptions::default_with_network(network);
+
+        // Compose on a block that differs from the tip in its hash only, as
+        // the block transaction is then the one built on the tip.
+        let mut not_the_tip = genesis_block.clone();
+        not_the_tip.set_header_version(BFieldElement::new(1));
+        assert_ne!(genesis_block.hash(), not_the_tip.hash());
+        assert_eq!(
+            genesis_block.mutator_set_accumulator_after().unwrap(),
+            not_the_tip.mutator_set_accumulator_after().unwrap()
+        );
+
+        let proposal = compose_block_helper(not_the_tip, alice, now, job_options)
+            .await
+            .unwrap();
+        assert!(proposal.is_none());
     }
 
     #[apply(shared_tokio_runtime)]
