@@ -920,8 +920,8 @@ pub trait RPC {
     /// because it requires much less space on the blockchain, which can also
     /// potentially lessen fees.
     ///
-    /// Note that by default `KeyType::Symmetric` is used for change outputs
-    /// and block rewards.
+    /// Symmetric keys are deprecated. By default, change outputs go to
+    /// viewing-address keys and block rewards to generation key 0.
     ///
     /// If in any doubt, just use [KeyType::Generation].
     ///
