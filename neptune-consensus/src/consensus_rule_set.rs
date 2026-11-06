@@ -65,11 +65,11 @@ pub const BLOCK_HEIGHT_HARDFORK_DELTA_TESTNET: BlockHeight =
 
 /// Height of the first block that uses the epsilon ruleset, on main net.
 pub const BLOCK_HEIGHT_SOFTFORK_EPSILON_MAIN_NET: BlockHeight =
-    BlockHeight::new(BFieldElement::new(62_000u64));
+    BlockHeight::new(BFieldElement::new(62_500u64));
 
 /// Height of the first block that uses the epsilon ruleset, on testnet-0.
 pub const BLOCK_HEIGHT_SOFTFORK_EPSILON_TESTNET: BlockHeight =
-    BlockHeight::new(BFieldElement::new(6_940u64));
+    BlockHeight::new(BFieldElement::new(7_144u64));
 
 /// Transactions that are more than three days older than the block are
 /// disallowed. Only enforced from hardfork gamma and onwards.
