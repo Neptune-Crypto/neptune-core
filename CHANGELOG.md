@@ -1,5 +1,11 @@
 Note: (!) indicates a breaking change.
 
+## [0.20.1](https://github.com/Neptune-Crypto/neptune-core/compare/v0.20.0..v0.20.1) - 2026-11-06
+
+### ⚙️ Miscellaneous
+
+- *(ci)* Build the Apple Silicon release binaries on `macos-15`, since GitHub retired the `macos-14` runner ([a47627b8](https://github.com/Neptune-Crypto/neptune-core/commit/a47627b8))
+
 ## [0.20.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.19.4..v0.20.0) - 2026-11-05
 
 ### 🔱 Fork
