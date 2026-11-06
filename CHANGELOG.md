@@ -1,5 +1,61 @@
 Note: (!) indicates a breaking change.
 
+## [0.20.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.19.4..v0.20.0) - 2026-11-05
+
+### 🔱 Fork
+
+- Softfork epsilon, succinct block validation: from block height 62,500 on main net and 7,150 on testnet-0, a block's appendix must contain three more claims, all covered by the block proof. `PredecessorIsValid` shows that the previous block satisfies the block validity rules, the SWBF update tree shows that the block's inputs are unspent and removed correctly, and `KnowsMutatorSet` shows that the composer knows the archival mutator set. Earlier versions accept such blocks but do not enforce the claims; composers must upgrade before the activation height ([8365c6f1](https://github.com/Neptune-Crypto/neptune-core/commit/8365c6f1))
+
+### ✨ Features
+
+- *(composer)* Prove the claims of softfork epsilon when composing a block ([768ee827](https://github.com/Neptune-Crypto/neptune-core/commit/768ee827), [9031b032](https://github.com/Neptune-Crypto/neptune-core/commit/9031b032), [c6dd0914](https://github.com/Neptune-Crypto/neptune-core/commit/c6dd0914))
+- *(composer)* Reuse proofs across block proposals on the same tip: a later proposal extends the earlier one with the transactions that pay for it, set by `--min-fee-per-recomposition` ([6895584c](https://github.com/Neptune-Crypto/neptune-core/commit/6895584c))
+- *(mempool)* Price the proving work that an input adds to a block, set by `--min-fee-per-swbf-leaf` ([737c8082](https://github.com/Neptune-Crypto/neptune-core/commit/737c8082))
+- *(validation)* Validate a tip from the mutator set after its parent, without the parent block ([7f31953d](https://github.com/Neptune-Crypto/neptune-core/commit/7f31953d))
+- *(mempool)* Only clear the mempool on forks that change which transactions are valid ([fd61420e](https://github.com/Neptune-Crypto/neptune-core/commit/fd61420e))
+- Log the activation of a new consensus rule set ([e2dee1d0](https://github.com/Neptune-Crypto/neptune-core/commit/e2dee1d0))
+
+### 🐛 Bug Fixes
+
+- *(network)* Raise the Kademlia packet limit, so that peer lookups succeed on main net ([10db7f99](https://github.com/Neptune-Crypto/neptune-core/commit/10db7f99))
+- *(network)* Serve relay reservations only when directly reachable, so that no dead two-hop addresses are advertised ([73a232bc](https://github.com/Neptune-Crypto/neptune-core/commit/73a232bc))
+- *(network)* Legacy network: Don't allocate before the entire message is received ([e7c6b1fe](https://github.com/Neptune-Crypto/neptune-core/commit/e7c6b1fe))
+- *(network)* Legacy network: Reject non-handshake messages before the handshake ([7cd551e1](https://github.com/Neptune-Crypto/neptune-core/commit/7cd551e1))
+- *(mempool)* Don't admit transactions synced to unknown mutator sets ([1a0133e1](https://github.com/Neptune-Crypto/neptune-core/commit/1a0133e1))
+- *(mempool)* Refuse transactions that retire soon, and stop composing with them earlier ([31667189](https://github.com/Neptune-Crypto/neptune-core/commit/31667189))
+- *(consensus)* Judge each input against the mutator set before the block, so that the host and the proven rules agree ([013adf6e](https://github.com/Neptune-Crypto/neptune-core/commit/013adf6e))
+- *(difficulty)* Don't wrap on a block interval exceeding 292 million years ([68ada3d7](https://github.com/Neptune-Crypto/neptune-core/commit/68ada3d7))
+- *(mine_loop)* Don't exit the application if the tip changes while composing ([7ab62c4a](https://github.com/Neptune-Crypto/neptune-core/commit/7ab62c4a))
+
+### 🚀 Performance
+
+- *(archive)* Apply a block's removals from index sets alone ([b00370de](https://github.com/Neptune-Crypto/neptune-core/commit/b00370de))
+
+### 📚 Documentation
+
+- *(succinctness)* Describe succinct block validation and the succinct mutator-set update ([99bf7cf6](https://github.com/Neptune-Crypto/neptune-core/commit/99bf7cf6), [b1c6818e](https://github.com/Neptune-Crypto/neptune-core/commit/b1c6818e))
+
+### 🔒️ Security
+
+- *(archive)* Check that no input is spent twice when applying a block to the archival mutator set, as defense in depth ([92b961eb](https://github.com/Neptune-Crypto/neptune-core/commit/92b961eb))
+
+### ♻️ Refactor
+
+- *(sync_challenge)* Enforce the difficulty requirement of sync challenges on main net only ([49e1408f](https://github.com/Neptune-Crypto/neptune-core/commit/49e1408f))
+
+### ✅ Testing
+
+- Verify the blocks around the activation of softfork epsilon on testnet-0, and that the transition from delta is a soft fork ([38f9c2f5](https://github.com/Neptune-Crypto/neptune-core/commit/38f9c2f5), [101e858b](https://github.com/Neptune-Crypto/neptune-core/commit/101e858b))
+
+### ⚙️ Miscellaneous
+
+- Cargo update ([20722636](https://github.com/Neptune-Crypto/neptune-core/commit/20722636))
+
+### 🪢 Merge
+
+- Merge([#994](https://github.com/Neptune-Crypto/neptune-core/issues/994)): No Nested Relays ([9d7cfbea](https://github.com/Neptune-Crypto/neptune-core/commit/9d7cfbea))
+- Merge([#988](https://github.com/Neptune-Crypto/neptune-core/issues/988)): Neptune-Crypto/epsilon ([8365c6f1](https://github.com/Neptune-Crypto/neptune-core/commit/8365c6f1))
+
 ## [0.19.4](https://github.com/Neptune-Crypto/neptune-core/compare/v0.19.3..v0.19.4) - 2026-10-28
 
 ### ✨ Features
