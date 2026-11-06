@@ -32,10 +32,10 @@ const MAIN_NET_GENESIS_HASH: &str =
 pub async fn first_few_block_hashes_are_unchanged_main_net() {
     const BLOCK1_HASH: &str =
         "2a9b685b2f9cde0d6f258dcd3ab575ddabddd16d70f56e9b3ea7072e77a50aff95ad22c128000000";
-    const BLOCK2A_HASH: &str =
-        "50ed8d790911380c70dcf8e899e5bd92155ad6518ed5e69175f5072fbce5a9d92c61cbed00000000";
-    const BLOCK2B_HASH: &str =
+    const CANONICAL_BLOCK2: &str =
         "12e6e69d7447691dba85c462c9b214274064ea1dd8835c2dd731618add0320588706d4cc0b000000";
+    const CANONICAL_BLOCK3: &str =
+        "b0fd8b7a7cd8f327c50eb60f8c1cafb3a051736e8c2c9e31602f735ea0bf2aac5be11cb917000000";
 
     logging::tracing_logger();
 
@@ -56,14 +56,21 @@ pub async fn first_few_block_hashes_are_unchanged_main_net() {
         block1.header().prev_block_digest.to_hex()
     );
 
-    // block data contains shallow forks. So we have two blocks of height 2.
-    let block2a = &blocks[1];
-    assert_eq!(BLOCK2A_HASH, block2a.hash().to_hex());
-    assert_eq!(BLOCK1_HASH, block2a.header().prev_block_digest.to_hex());
-
-    let block2b = &blocks[2];
-    assert_eq!(BLOCK2B_HASH, block2b.hash().to_hex());
-    assert_eq!(BLOCK1_HASH, block2b.header().prev_block_digest.to_hex());
+    let block2 = blocks
+        .iter()
+        .find(|x| x.hash().to_hex() == CANONICAL_BLOCK2)
+        .cloned()
+        .expect("Early block data must contain canonical block of height 2");
+    assert_eq!(BlockHeight::genesis().next().next(), block2.header().height);
+    let block3 = blocks
+        .iter()
+        .find(|x| x.hash().to_hex() == CANONICAL_BLOCK3)
+        .cloned()
+        .expect("Early block data must contain canonical block of height 2");
+    assert_eq!(
+        BlockHeight::genesis().next().next().next(),
+        block3.header().height
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -229,7 +236,7 @@ async fn epsilon_softfork_on_testnet0() {
     assert_fork_boundary_blocks_are_valid(
         Network::Testnet(0),
         "sf-epsilon-validity",
-        "blk56.dat",
+        "blk57.dat",
         ConsensusRuleSet::SoftforkEpsilon,
     )
     .await;
