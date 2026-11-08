@@ -73,43 +73,6 @@ pub async fn first_few_block_hashes_are_unchanged_main_net() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn gamma_hardfork_on_tesnet0() {
-    // Verify that blocks spanning consensus rule change on testnet are
-    // considered valid.
-    logging::tracing_logger();
-
-    // Add checkpoint. Otherwise pre-hf blocks blocks fail
-    let network = Network::Testnet(0);
-    ArchivalState::accept_checkpoint(network).await;
-
-    let blk_file = ["blk36.dat"];
-    let test_data_dir = ensure_blocks_in_test_data_dir(blk_file.to_vec(), network, None).await;
-    let block_file_paths =
-        ArchivalState::read_block_file_names_from_directory(&test_data_dir).unwrap();
-    let block_file_paths: Vec<_> = block_file_paths
-        .into_iter()
-        .filter(|x| x.to_string_lossy().contains("blk36"))
-        .collect();
-    let blocks = ArchivalState::blocks_from_file_without_record(&block_file_paths[0])
-        .await
-        .unwrap();
-
-    let now = Timestamp::now();
-    let mut latest = blocks[0].clone();
-    for block in blocks.into_iter().skip(1) {
-        let height = block.header().height;
-        let hash = block.hash();
-        info!("Checking validity of testnet block of height {height}; hash: {hash:x}",);
-        assert!(
-            block.is_valid(&latest, now, network).await,
-            "height {height}; hash: {hash:x} must be valid"
-        );
-        assert!(block.has_proof_of_work(network, latest.header()));
-        latest = block;
-    }
-}
-
 /// Assert that all blocks in a `blk` file whose blocks span a change of
 /// consensus rules (soft or hard fork) are all valid.
 async fn assert_fork_boundary_blocks_are_valid(
