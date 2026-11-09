@@ -1,18 +1,24 @@
 # The defi wallet, `neptune-defi-wallet`
 
 Status: design, nothing implemented.
-Last updated: 2026-11-06.
+Last updated: 2026-11-09.
 
 ---
 
 ## 1. What it is
 
-`neptune-defi-wallet` is a plugin of `neptune-defi`. It holds Neptune's native
-currency, NPT, and the coins of smart contracts written for `neptune-defi`,
-such as vaulted NPT (vNPT) or any other defi token. It follows the chain
-through `neptune-defi` as every plugin does, builds its own transactions,
-proves them as far as a proof collection, and submits them to `neptune-core`
-over JSON-RPC.
+`neptune-defi-wallet` is a daemon that runs alongside `neptune-core`, as a
+plugin of `neptune-defi`. It holds Neptune's native currency, NPT, and the
+coins of smart contracts written for `neptune-defi`, such as vaulted NPT (vNPT)
+or any other defi token. It follows the chain through `neptune-defi` as every
+plugin does, builds its own transactions, proves them as far as a proof
+collection, and submits them to `neptune-core` over JSON-RPC.
+
+It reads `neptune-core` through namespaces that a node does not expose to the
+internet: the UTXO index, and the unrestricted limits of `--unsafe-rpc`
+(§3.3, §3.6). So it runs on the same host as `neptune-core`. It holds no user
+interface of its own: graphical wallets talk to it over a JSON-RPC interface
+of the kind through which they talk to `neptune-core` today (§6).
 
 It is defined by three requirements.
 
@@ -252,12 +258,29 @@ before any release.
 
 The wallet accepts a phrase of 18 or of 24 BIP-39 words.
 
-- An **18-word phrase** has both derivations. It is the phrase of a
-  `neptune-core` wallet, and requirement 1 holds for it.
-- A **24-word phrase** has only the defi derivation, and an optional
-  passphrase (§2.2). Its 256 bits of entropy fit no `SecretKeyMaterial`, so no
-  `neptune-core` wallet has it, and it has no core funds. The rules of §4 hold
-  for it by construction.
+- A **24-word phrase** is the standard one. It has only the defi derivation,
+  and an optional passphrase (§2.2). Its 256 bits of entropy fit no
+  `SecretKeyMaterial`, so no `neptune-core` wallet has it, and it has no core
+  funds. The rules of §4 hold for it by construction.
+- An **18-word phrase** exists for legacy use. It has both derivations. It is
+  the phrase of a `neptune-core` wallet, and requirement 1 holds for it.
+
+The 24-word phrase follows BIP-39, BIP-32, BIP-44 and SLIP-44 as closely as
+Neptune's keys allow, so that a hardware wallet that knows Neptune can derive
+its keys under coin type `C` from the same seed from which it derives BTC, ETH
+and other coins. Every step of §2.2 is specified to the byte for that reason.
+
+A hardware wallet spends without releasing a secret. Its key's lock script
+takes as secret input a signature, possibly Falcon, on the transaction kernel's
+MAST hash, which is the lock script's public input, under a public key that the
+lock script's hash commits to. The hardware wallet signs the kernel's MAST
+hash; the software wallet proves the lock script, so the proof shows knowledge
+of a valid signature, not of a preimage. The host that proves learns the
+signature, which authorizes this transaction only, and no key. This takes a key
+type and lock script of the defi wallet's own, which the account's key
+derivation (§2.2) gains as one more key type. They live in `neptune-defi`;
+`neptune-core` neither knows nor needs them, since a lock script's proof names
+the script only by its hash.
 
 The wallet says of a 24-word phrase, when it is entered, that it has no core
 funds and cannot be opened by `neptune-core`. It refuses a typed 18-word phrase
@@ -533,17 +556,25 @@ proves a new proof collection and submits it.
 
 ## 6. Interface
 
-The wallet is a long-running plugin. Its user talks to it through a command line
-client, `neptune-defi-wallet-cli`, over a TCP socket on 127.0.0.1, on a port of
-its configuration, authenticated by a cookie in the wallet's directory that only
-the user can read, as plugins authenticate to `neptune-defi`. The commands are
-`balance`, `receive`, `send`, `deposit`, `withdraw`, `consolidate`, `history`,
-`import-randomness` and `rescan`. `send`, `deposit`, `withdraw` and
-`consolidate` take `--fee`, which overrides the default fee (§5.1). `receive`
-hands out the next unused generation address, the key type for payments from
-others. The wallet itself takes `--guesser-fraction`, the fraction of a composed
-block's reward that the user's composer gave the guesser, for recovering
-composer rewards (§3.1).
+The wallet daemon serves a JSON-RPC interface built like `neptune-core`'s, with
+`neptune-rpc`'s transport and its convention of namespaced methods, on a port of
+its configuration on 127.0.0.1, authenticated by a cookie in the wallet's
+directory that only the user can read, as plugins authenticate to
+`neptune-defi`. Graphical wallets are its clients, as they are `neptune-core`'s
+today; `neptune-defi-wallet-cli` is one more.
+
+The methods are `balance`, `receive`, `send`, `deposit`, `withdraw`,
+`consolidate`, `history`, `importRandomness` and `rescan`. `send`, `deposit`,
+`withdraw` and `consolidate` take an optional fee, which overrides the default
+fee (§5.1). `receive` hands out the next unused generation address, the key
+type for payments from others. The daemon itself takes `--guesser-fraction`,
+the fraction of a composed block's reward that the user's composer gave the
+guesser, for recovering composer rewards (§3.1).
+
+The interface hands out no phrase, passphrase or key file, as `neptune-core`'s
+hands out no seed. A 24-word phrase and its passphrase are entered through the
+daemon's own terminal when the wallet is created, and the passphrase at every
+start (§2.2).
 
 ## 7. Plugins asking each other, and SOFuN
 
@@ -642,9 +673,10 @@ Each phase ends with its tests passing and is committed separately.
    confirmed, the second after a block arrived before its upgrade, without a
    resubmission; a transaction that expired from the mempool is resubmitted
    and confirmed.
-7. **Plugin and client.** The `neptune-defi-wallet` binary on the driver, its
-   socket and cookie, and `neptune-defi-wallet-cli`. Test: the command line
-   end to end on RegTest.
+7. **Daemon and client.** The `neptune-defi-wallet` binary on the driver, its
+   JSON-RPC interface and cookie, and `neptune-defi-wallet-cli`. Tests: every
+   method end to end on RegTest through the command line; a request without
+   the cookie is refused.
 8. **Requests between plugins.** The handshake's list of requests a plugin
    answers, and `neptune-defi` relaying a request and its response. Tests: a
    request reaches the plugin that answers it and the response returns; a
@@ -661,3 +693,5 @@ Each phase ends with its tests passing and is committed separately.
 
 - Whether importing `incoming_randomness.dat` is enough, or whether the wallet
   should read `neptune-core`'s wallet database for UTXOs notified off-chain.
+- The signature scheme of the hardware-wallet key type (§2.5), Falcon or
+  another, and the cost of verifying it in Triton VM.
