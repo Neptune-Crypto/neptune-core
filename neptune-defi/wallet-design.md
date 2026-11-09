@@ -20,27 +20,31 @@ internet: the UTXO index, and the unrestricted limits of `--unsafe-rpc`
 interface of its own: graphical wallets talk to it over a JSON-RPC interface
 of the kind through which they talk to `neptune-core` today (§6).
 
-It is defined by three requirements.
+Its seed is a phrase of 18 or of 24 BIP-39 words, and it is defined by two
+requirements, one for each length.
 
-1. **Backward compatibility.** A phrase entered into it unlocks every UTXO that
-   the same phrase unlocks in `neptune-core`'s built-in wallet and that can be
-   recovered from the phrase. UTXOs notified off-chain cannot be, by either
-   wallet; this wallet imports their randomness from `neptune-core` (§3.1).
-2. **Separation.** Every address this wallet hands out, and every change
-   output it creates, lies under a second derivation, the *defi derivation*
-   (§2.2). Of its own accord, the wallet never puts a coin, of a smart contract
-   or otherwise, under the built-in wallet's derivation, the *core
-   derivation*.
-3. **Deprecation of the core derivation.** This wallet spends what lies under
-   the core derivation, and adds to it only when the user sends to an address
-   of it (§4).
+1. **Backward compatibility, for 18 words.** The wallet's seed is
+   `neptune-core`'s, and every key of a type that `neptune-core` knows equals
+   `neptune-core`'s key of that type and index. So the phrase unlocks in this
+   wallet every UTXO that it unlocks in `neptune-core`'s built-in wallet and
+   that can be recovered from the phrase. UTXOs notified off-chain cannot be, by
+   either wallet; this wallet imports their randomness from `neptune-core`
+   (§3.1).
+2. **Industry standards, for 24 words.** The keys follow BIP-39, BIP-32,
+   BIP-44 and SLIP-44 as closely as Neptune's keys allow (§2.2).
 
 `neptune-core` knows nothing of this wallet, and its own wallet keeps working
-unchanged. `neptune-core`'s wallet holds the core keys; this wallet holds the
-core keys and the defi keys. So running both duplicates the per-block scanning
-of the core derivation, and both can spend the same core UTXOs: a transaction
-of one wallet can spend a UTXO that the other is spending too, and then only
-one of the two is confirmed.
+unchanged. With an 18-word phrase the two wallets hold the same keys, so
+running both duplicates the per-block scanning, and both can spend the same
+UTXOs: a transaction of one wallet can spend a UTXO that the other is spending
+too, and then only one of the two is confirmed. `neptune-core`'s wallet refuses
+a UTXO with a type script it does not know, so a vNPT UTXO under a shared key
+belongs to this wallet alone.
+
+The wallet itself knows NPT and nothing of any smart contract. Every contract
+plugs into it over the same JSON-RPC interface (§4): `neptune-sofun`, which
+holds the vaults that issue vNPT as well as SOFuN's orders, and the token
+contracts of third parties.
 
 ### 1.1 Terms
 
@@ -89,7 +93,27 @@ The *`SecretKeyMaterial`* is `neptune-core`'s secret, which `wallet.dat` stores
 and an 18-word phrase encodes. The *BIP-39 seed* is the 64 bytes that BIP-39
 computes from a phrase's text and a passphrase (§2.2).
 
-### 2.1 The core derivation
+The *seed manager* holds the wallet's *entropy* and derives every key from it.
+For an 18-word phrase the entropy is a `WalletEntropy` (§2.1); for a 24-word
+phrase it is the account entropy of the standard derivation (§2.2). Write `H`
+for `Tip5::hash_varlen`, `e` for the encoding of the entropy as a sequence of
+base-field elements, and `flag_t` for the flag of key type `t`. The key of type
+`t` at index `i` is built by that type's constructor
+(`GenerationSpendingKey::derive_from_seed`, `SymmetricKey::from_seed`,
+`EcHybridKey::from_seed`, `ViewingAddressKey::from_seed`) from the *key seed*
+
+- `H(e ‖ flag_t ‖ i)` for generation and symmetric keys;
+- `H(encode(m_t) ‖ flag_t ‖ i)` with the master key `m_t = H(e ‖ flag_t)` for
+  elliptic-curve hybrid and viewing keys.
+
+These are `WalletEntropy`'s formulas. The key types that `neptune-core` does not
+know, the SOFuN order key and the hardware wallet's signature key (§2.5) among
+them, take flags of their own and the same formulas. The seed manager lives in
+`neptune-defi`; `WalletEntropy` is not changed. Every key type exists at every
+index for either entropy, and the scanning and spending code of §3 and §5,
+which takes keys and not entropy, runs on either.
+
+### 2.1 Eighteen words: `neptune-core`'s seed
 
 `neptune-core`'s phrase is 18 BIP-39 words, the length BIP-39 gives to 192 bits
 of entropy. `neptune-core` uses 192 bits because its secret is an
@@ -97,39 +121,50 @@ of entropy. `neptune-core` uses 192 bits because its secret is an
 `SecretKeyMaterial::from_phrase` reads the entropy as three little-endian
 `u64`s, the phrase's *limbs*, and reduces each modulo `p = 2^64 − 2^32 + 1`.
 The result is the `SecretKeyMaterial` of a `WalletEntropy`
-(`neptune-wallet/src/wallet_entropy.rs`). Every key of the built-in wallet is
-built by its type's constructor from a *key seed* (§2.2 gives the formulas),
-which hashes the `SecretKeyMaterial` with a flag of the key's type and the
-key's index. The key types are generation, symmetric, elliptic-curve hybrid and
-viewing keys. No passphrase enters.
+(`neptune-wallet/src/wallet_entropy.rs`). The key types of the built-in wallet
+are generation, symmetric, elliptic-curve hybrid and viewing keys. No
+passphrase enters, and no BIP-32 or SLIP-44 derivation.
+
+For these key types the seed manager calls `WalletEntropy`'s own functions, so
+compatibility holds by construction and not by a second implementation. For the
+others it applies the formulas above to the `SecretKeyMaterial`'s encoding.
 
 Generation key 0 receives `neptune-core`'s composer and guesser rewards, which
-is why §3.1 recovers those rewards under the core derivation only.
+is why §3.1 recovers those rewards for an 18-word phrase only.
 
-The reduction makes the map from phrases to `SecretKeyMaterial`s many-to-one:
-two phrases whose limbs differ by `p` give the same `SecretKeyMaterial`. The
-*canonical form* of an 18-word phrase is `to_phrase(from_phrase(phrase))`, the
-one phrase among them whose limbs are all below `p`. `neptune-core` generates
-only canonical phrases.
+**An 18-word phrase takes no passphrase,** as in `neptune-core`, so that it
+alone restores everything.
 
-This wallet derives the core derivation's keys by calling the same functions of
-`neptune-wallet`, so compatibility holds by construction and not by a second
-implementation.
+**An 18-word phrase comes from `wallet.dat` only.** The wallet reads the
+`SecretKeyMaterial` from `neptune-core`'s `wallet.dat` directly. No RPC hands
+out the phrase. `neptune-defi` runs `neptune-core`, which creates a random
+`wallet.dat` when there is none, so a `wallet.dat` always exists, and a second
+source of the 18-word phrase could only disagree with it and leave the two
+wallets holding different keys. So the wallet refuses an 18-word phrase typed
+in, and names `neptune-cli import-seed-phrase`, which a user restoring an
+18-word phrase runs before `neptune-core`'s first start.
 
-### 2.2 The defi derivation
+**The wallet takes no Shamir shares.** A user who split an 18-word phrase with
+`neptune-core`'s Shamir secret sharing (`neptune-cli shamir-share`) recombines
+the shares with `neptune-cli shamir-combine`, which writes `wallet.dat` and
+refuses if one exists, before `neptune-core`'s first start. A share is
+itself a valid 18-word phrase, so a share imported in its place opens an empty
+wallet;
+the wallet warns when its first scan of a new phrase, from the birthday to the
+tip, finds no UTXO.
 
-The defi derivation follows a BIP-44 path, whose coin type is Neptune's entry
-in the SLIP-44 registry (§2.4). Fix a passphrase `pw`, which is empty for an
-18-word phrase and optional, by default empty, for a 24-word phrase (§2.5),
-and an account number `a`, 0 by default. The *account entropy* of `a` is
-computed in four steps.
+### 2.2 Twenty-four words: the standard derivation
 
-1. `seed = PBKDF2-HMAC-SHA512(phrase', "mnemonic" ‖ pw, 2048 rounds, 64 bytes)`,
-   the BIP-39 seed. For an 18-word phrase, `phrase'` is its canonical form
-   (§2.1); for a 24-word phrase, it is the phrase itself. A phrase typed in is
-   first lowercased and its words joined by single spaces; then `phrase'` and
-   `pw` are normalized to NFKD, as BIP-39 requires, so a passphrase with
-   non-ASCII characters gives the seed a hardware wallet gives.
+The standard derivation follows a BIP-44 path, whose coin type is Neptune's
+entry in the SLIP-44 registry (§2.4). Fix a passphrase `pw`, optional and by
+default empty (§2.5), and an account number `a`, 0 by default. The *account
+entropy* of `a` is computed in four steps.
+
+1. `seed = PBKDF2-HMAC-SHA512(phrase, "mnemonic" ‖ pw, 2048 rounds, 64 bytes)`,
+   the BIP-39 seed. A phrase typed in is first lowercased and its words joined
+   by single spaces; then the phrase and `pw` are normalized to NFKD, as BIP-39
+   requires, so a passphrase with non-ASCII characters gives the seed a
+   hardware wallet gives.
 2. `(k_0, c_0)` is `HMAC-SHA512("Bitcoin seed", seed)`, split into two halves
    of 32 bytes, BIP-32's master key and chain code.
 3. For each index `j` of the path `44' / C' / a' / 0' / 0'`, where `C` is the
@@ -143,23 +178,8 @@ computed in four steps.
    to 7. The account entropy is `Tip5::hash_varlen(l_0, …, l_7)`, a `Digest`
    of five base-field elements.
 
-The account's keys follow `WalletEntropy`'s formulas with the account entropy
-in place of the `SecretKeyMaterial`. Write `H` for `Tip5::hash_varlen`, `e`
-for the encoding of the entropy, and `flag_t` for the flag of key type `t`.
-The key of type `t` at index `i` is built by that type's constructor
-(`GenerationSpendingKey::derive_from_seed`, `SymmetricKey::from_seed`,
-`EcHybridKey::from_seed`, `ViewingAddressKey::from_seed`) from the key seed
-
-- `H(e ‖ flag_t ‖ i)` for generation and symmetric keys;
-- `H(encode(m_t) ‖ flag_t ‖ i)` with the master key `m_t = H(e ‖ flag_t)` for
-  elliptic-curve hybrid and viewing keys.
-
-The derivation takes the entropy as a sequence of base-field elements, so it
-applies to a `SecretKeyMaterial`'s encoding as well as to a `Digest`'s. It
-lives in `neptune-defi`; `WalletEntropy` stays the core derivation and is not
-changed. Every account is a complete Neptune wallet, with every key type and
-every index, and the scanning and spending code of §3 and §5, which takes keys
-and not entropy, runs on either derivation.
+The seed manager derives the account's keys from the account entropy by the
+formulas of §2. Every account is a complete Neptune wallet.
 
 The wallet uses account 0 only. The account number stays in the path, and the
 wallet's state is kept per account (§3.5), so that further accounts can be
@@ -194,54 +214,24 @@ select the change chain and the address index, and are not hardened. Here the
 account's own derivation selects keys by type and index, so both are fixed at
 0, and hardened so that no public derivation is ever needed.
 
-**An 18-word phrase takes no passphrase,** so that it alone restores
-everything, as it does in `neptune-core`. A passphrase would protect the defi
-funds and not the core funds, and would be a second secret to back up for
-only half of the wallet.
-
 **A 24-word phrase takes an optional passphrase**, as BIP-39 allows and as
-hardware wallets offer. It has no core funds, so the passphrase protects all of
-its funds. The keys depend on the passphrase, so a wallet with one asks for it
-at every start; it never stores the passphrase. Every string is a valid
-passphrase and gives a valid BIP-39 seed, and nothing in the phrase records
-which one was used, so a mistyped passphrase would silently open empty
-accounts. The wallet's key file (§3.5) prevents that: it is encrypted under
-the passphrase, so a wrong passphrase fails to decrypt it and is
-refused. When the phrase is first entered, the wallet asks for the passphrase
-twice.
+hardware wallets offer. The keys depend on the passphrase, so a wallet with one
+asks for it at every start; it never stores the passphrase. Every string is a
+valid passphrase and gives a valid BIP-39 seed, and nothing in the phrase
+records which one was used, so a mistyped passphrase would silently open empty
+accounts. The wallet's key file (§3.5) prevents that: it is encrypted under the
+passphrase, so a wrong passphrase fails to decrypt it and is refused. When the
+phrase is first entered, the wallet asks for the passphrase twice. A 24-word
+phrase comes from the user.
 
-**An 18-word phrase comes from `wallet.dat` only; a 24-word phrase comes from
-the user.** The wallet reads the `SecretKeyMaterial` from `neptune-core`'s
-`wallet.dat` directly and turns it into its phrase with `to_phrase`, as
-`neptune-cli export-seed-phrase` does. No RPC hands out the phrase.
-`neptune-defi` runs `neptune-core`, which creates a random `wallet.dat` when
-there is none, so a `wallet.dat` always exists, and a second source of the
-18-word phrase could only disagree with it and leave the two wallets holding
-different core funds. So the wallet refuses an 18-word phrase typed in, and
-names `neptune-cli import-seed-phrase`, which a user restoring an 18-word
-phrase runs before `neptune-core`'s first start. `import-seed-phrase` accepts
-a phrase whose limbs are `p` or more and stores its reduction, and `to_phrase`
-returns the canonical form, so step 1 sees the canonical form either way: a
-phrase whose limbs differ by `p` unlocks the same core funds and the same defi
-funds.
+### 2.3 Which keys it hands out
 
-**The wallet takes no Shamir shares.** A user who split an 18-word phrase with
-`neptune-core`'s Shamir secret sharing (`neptune-cli shamir-share`) recombines
-the shares with `neptune-cli shamir-combine`, which writes `wallet.dat` and
-refuses if one exists, before `neptune-core`'s first start. A share is
-itself a valid 18-word phrase, so a share imported in its place opens an empty
-wallet;
-the wallet warns when its first scan of a new phrase, from the birthday to the
-tip, finds no UTXO.
-
-### 2.3 Which derivation receives what
-
-A *core key* is a key of the core derivation, and a *defi key* is a key of an
-account. The wallet derives core spending keys, to find and spend core UTXOs,
-but no core address. It hands out defi keys only: every receiving address and
-every change output it creates is a defi key's. Change goes to viewing-address
-keys, as in `neptune-core`; the wallet never hands out a symmetric key. It
-spends UTXOs under either derivation.
+The wallet hands out generation addresses to receive payments from others, and
+pays change to viewing-address keys, as `neptune-core` does; it never hands out
+a symmetric key. With an 18-word phrase these are `neptune-core`'s keys too,
+and each wallet advances its own index, so the two wallets can hand out the
+same address. A payment to it reaches both wallets, and is spendable by both;
+what it costs is that two payers of one address are linked on chain.
 
 ### 2.4 The coin type
 
@@ -258,12 +248,12 @@ before any release.
 
 The wallet accepts a phrase of 18 or of 24 BIP-39 words.
 
-- A **24-word phrase** is the standard one. It has only the defi derivation,
+- A **24-word phrase** is the standard one. It has the standard derivation
   and an optional passphrase (§2.2). Its 256 bits of entropy fit no
-  `SecretKeyMaterial`, so no `neptune-core` wallet has it, and it has no core
-  funds. The rules of §4 hold for it by construction.
-- An **18-word phrase** exists for legacy use. It has both derivations. It is
-  the phrase of a `neptune-core` wallet, and requirement 1 holds for it.
+  `SecretKeyMaterial`, so no `neptune-core` wallet has it.
+- An **18-word phrase** exists for legacy use. It is the phrase of a
+  `neptune-core` wallet, its entropy is that wallet's `WalletEntropy` (§2.1),
+  and requirement 1 holds for it.
 
 The 24-word phrase follows BIP-39, BIP-32, BIP-44 and SLIP-44 as closely as
 Neptune's keys allow, so that a hardware wallet that knows Neptune can derive
@@ -277,24 +267,24 @@ lock script's hash commits to. The hardware wallet signs the kernel's MAST
 hash; the software wallet proves the lock script, so the proof shows knowledge
 of a valid signature, not of a preimage. The host that proves learns the
 signature, which authorizes this transaction only, and no key. This takes a key
-type and lock script of the defi wallet's own, which the account's key
-derivation (§2.2) gains as one more key type. They live in `neptune-defi`;
-`neptune-core` neither knows nor needs them, since a lock script's proof names
-the script only by its hash.
+type and lock script of the defi wallet's own, which the seed manager (§2)
+derives as one more key type. They live in `neptune-defi`; `neptune-core`
+neither knows nor needs them, since a lock script's proof names the script only
+by its hash.
 
-The wallet says of a 24-word phrase, when it is entered, that it has no core
-funds and cannot be opened by `neptune-core`. It refuses a typed 18-word phrase
-(§2.2) and every length but 24. A 12-word phrase carries 128 bits, which
-Grover's algorithm searches in about 2^64 steps.
+The wallet says of a 24-word phrase, when it is entered, that `neptune-core`
+cannot open it. It refuses a typed 18-word phrase (§2.1) and every other
+length. A 12-word phrase carries 128 bits, which Grover's algorithm searches in
+about 2^64 steps.
 
 A 24-word phrase is the one most holders of other coins already have, and the
-one SLIP-44 serves: with it, an existing phrase holds Neptune's defi coins
-under coin type `C` next to its other coins. Entering such a phrase into this
-wallet, which is software, exposes every coin under it, on every chain, to
-whatever can read this wallet's memory and files; a phrase that guards coins on
-a hardware wallet is safer left there. A 24-word phrase has no core derivation
-to deprecate. And it carries 256 bits, the usual width for 128 bits of
-security against a quantum computer; 192 bits give about 96.
+one SLIP-44 serves: with it, an existing phrase holds Neptune's defi coins under
+coin type `C` next to its other coins. Entering such a phrase into this wallet,
+which is software, exposes every coin under it, on every chain, to whatever can
+read this wallet's memory and files; a phrase that guards coins on a hardware
+wallet is safer left there. And a 24-word phrase carries 256 bits, the usual
+width for 128 bits of security against a quantum computer; 192 bits give about
+96.
 
 ## 3. What the wallet tracks
 
@@ -303,12 +293,12 @@ security against a quantum computer; 192 bits give about 96.
 The wallet finds the UTXOs that `neptune-core`'s wallet finds when it recovers
 from a phrase:
 
-- under either derivation, UTXOs announced on chain to a key whose index is at
-  most the highest index at which a UTXO has been found, plus a look-ahead of
-  future keys (`ScanModeConfiguration::num_future_keys`, 25 by default);
-- under the core derivation, the guesser-fee UTXOs of blocks that
-  `neptune-core` guessed;
-- under the core derivation, the composer-reward UTXOs of blocks that
+- UTXOs announced on chain to a key whose index is at most the highest index
+  at which a UTXO has been found, plus a look-ahead of future keys
+  (`ScanModeConfiguration::num_future_keys`, 25 by default);
+- for an 18-word phrase, the guesser-fee UTXOs of blocks that `neptune-core`
+  guessed;
+- for an 18-word phrase, the composer-reward UTXOs of blocks that
   `neptune-core` composed, which carry no notification and are found by
   computing them again from the guesser fraction the composer used
   (`ScanModeConfiguration::maybe_guesser_fraction`).
@@ -328,10 +318,8 @@ UTXOs notified off-chain cannot be recovered from a phrase by either wallet.
 `neptune-core` keeps their randomness in `incoming_randomness.dat`; this wallet
 imports that file on request.
 
-Under a defi key the wallet accepts a UTXO with coins of any type script it
-knows: `NativeCurrency`, `TimeLock`, and those of `neptune-defi`, such as
-vNPT. Under a core key it accepts the same, so that a token sent there by
-someone else is not lost (§4).
+The wallet accepts a UTXO whose coins are NPT, `NativeCurrency` and
+`TimeLock`, or of a type script that a plugged-in contract registered (§3.4).
 
 ### 3.2 Spends
 
@@ -352,32 +340,26 @@ index (§3.6). One request restores at most 256
 membership proofs over the restricted RPC and at most 1,000 over the
 unrestricted one, so the wallet batches its requests by that limit.
 
-### 3.4 Vaults
+### 3.4 Coins of plugged-in contracts
 
-Every vault is announced on chain, with its UTXO and both randomnesses, so that
-anyone can spend it. The wallet records every vault announcement of the vault
-type scripts it knows, and drops a vault when it is spent. vNPT is redeemable
-against any vault, so a withdrawal may spend any vault holding enough. The
-wallet chooses one at random among them, so that withdrawals made at the same
-time rarely spend the same vault, of which only one could be confirmed. It
-excludes the vaults that its own unconfirmed transactions spend.
-
-A transaction spends at most one vault and creates at most one, by the vault
-type script's rules. So a withdrawal of less than the chosen vault holds
-outputs a new vault with the rest, announced like every vault, and a
-withdrawal of more than any one vault holds takes several transactions.
+A contract that plugs into the wallet (§4) registers its type scripts. The
+wallet then tracks UTXOs under its own keys that carry their coins as it tracks
+NPT: it finds them, notices when they are spent, and spends them. What the
+coins mean is the contract's. A UTXO that carries a coin of no registered type
+script is kept and reported, not spent, so that registering its contract later
+makes it spendable without a rescan.
 
 ### 3.5 State
 
-The wallet persists its UTXOs, the vaults, the highest index at which a UTXO
+The wallet persists its UTXOs, the highest index at which a UTXO
 has been found, its unconfirmed transactions, and the block it has applied, in
 its own directory under `neptune-defi`'s data directory, per network. It
 finds `wallet.dat` in `neptune-core`'s data directory for the same network
 (`DataDirectory::wallet_directory_path`). UTXOs and indices are kept per
-account and key type, the core derivation counting as one account of its own,
-so that adding accounts (§2.2) needs no migration.
+account and key type, an 18-word phrase having one account, so that adding
+accounts (§2.2) needs no migration.
 
-An 18-word phrase is read from `wallet.dat` at every start (§2.2). A 24-word
+An 18-word phrase is read from `wallet.dat` at every start (§2.1). A 24-word
 phrase is not stored. The wallet stores instead the BIP-32 node `m/44'/C'`, the
 coin type's key and chain code, computed by steps 1 to 3 of §2.2 when the
 phrase is entered; every account is a hardened child of it. A 24-word phrase
@@ -434,56 +416,91 @@ those and not every block:
   queried in turn, until no query finds a new block.
 - **Spends:** `utxoindex_blockHeightsByAbsoluteIndexSets` for the UTXOs
   tracked.
-- **Vaults:** a new RPC, `utxoindex_blockHeightsByFlag(flag, receiver_id, from,
-  to)`, with the vault flag and no receiver id. The index keys announcements by
-  flag and receiver id, the first two elements of an announcement, and a vault
-  announcement's second element is its sender randomness, so no receiver id
-  finds all vaults. The new RPC walks the index's per-block lists of flags and
-  receiver ids (`AnnouncementsByBlock`) over the range and returns the heights
-  whose list holds the flag, and the receiver id if one is given. It reads no
-  block, changes no part of the index's schema, and needs no migration. It
-  serves any protocol that announces under one flag with varying second
-  elements, and knows nothing of vaults.
 - **Guesser fees and composer rewards** carry no announcement. The wallet scans
   for them by height range, as `neptune-core`'s `rescan_guesser_rewards` does,
   when `--guesser-fraction` is set or the user asks.
 
 The index keeps at most 10,000 heights per flag and receiver id
 (`MAX_NUM_BLOCKS_IN_LOOKUP_LIST`). For a key that reached the cap, the wallet
-asks `utxoindex_blockHeightsByFlag` with the key's flag and receiver id, which
-has no cap, and warns.
+asks a new RPC, `utxoindex_blockHeightsByFlag(flag, receiver_id, from, to)`,
+with the key's flag and receiver id, and warns. The index keys announcements
+by flag and receiver id, the first two elements of an announcement. The new
+RPC walks the index's per-block lists of flags and receiver ids
+(`AnnouncementsByBlock`) over the range and returns the heights whose list
+holds the flag, and the receiver id if one is given; it has no cap. It reads
+no block, changes no part of the index's schema, and needs no migration. It
+also serves any protocol that announces under one flag with varying second
+elements, such as vaults (§4.1).
 
-## 4. Deprecating the core derivation
+## 4. Contracts that plug into the wallet
 
-The wallet obeys four rules.
+Every smart contract is a process of its own, as `neptune-sofun` is, that plugs
+into the defi wallet over its JSON-RPC interface (§6), and may also follow the
+chain as a plugin of `neptune-defi`. `neptune-sofun` is the first: it holds
+vaults (§4.1) and SOFuN's orders. The token contracts of third parties plug in
+the same way. The wallet holds their coins and keys and proves and submits their
+transactions; the contract knows what its coins mean, and what its transactions
+must contain. Placing a SOFuN order, for instance, deposits NPT for the vNPT the
+order offers, and the order's key is a key type of its own, which the seed
+manager derives (§2). Without a defi wallet there are no SOFuN trades.
 
-1. It derives no core address, and so hands out none.
-2. It pays an output to whatever address the user gives, as it would any
-   other: it does not ask whether the address is a core key's, even of this
-   phrase.
-3. It spends UTXOs under core keys like any other, and pays their change to
-   defi keys.
-4. A UTXO under a core key that carries a coin of a smart contract came from
-   a payment to a core address, by the user or by someone else. The wallet
-   tracks it, warns, and offers to move it to a defi key.
+What a contract needs from the wallet is, at least:
 
-So of its own accord this wallet only ever takes from the core derivation,
-and the core derivation grows only by payments to its addresses, which
-`neptune-core` hands out. One such payment is part of this design: until
-plugins pay the composer's NPT to this wallet, a SOFuN fill pays it to
-`neptune-core`'s wallet (§7).
+- keys of a key type of its own, from the seed manager;
+- a way to register its type scripts, so that the wallet accepts their coins
+  (§3.4);
+- requests from the wallet for the witnesses of those type scripts, which the
+  wallet needs to build any transaction that carries their coins (§5.1), and
+  which only the contract can compute;
+- the UTXOs it owns;
+- transactions built from the inputs and outputs it names, to which the wallet
+  adds NPT inputs, change and the fee, and which it proves and submits.
+
+The methods that serve these are open (§9). The wallet asks a contract for
+witnesses, so a coin whose contract is not running cannot be spent until it runs
+again.
+
+### 4.1 Vaults, in `neptune-sofun`
+
+Vaults are more general than SOFuN, but SOFuN is for now their only user, so
+`neptune-sofun` holds them. It holds the vault type scripts,
+`Vault(NativeCurrency, Bearer)` for vNPT among them, registers them with the
+wallet, and answers the wallet's requests for their witnesses with
+`Vault::type_script_and_witness`. Spending vNPT therefore needs `neptune-sofun`
+running (§4). Should another contract come to use vaults, they move to a
+contract of their own.
+
+Every vault is announced on chain, with its UTXO and both randomnesses, so that
+anyone can spend it. `neptune-sofun` records every vault announcement of its
+type scripts, and drops a vault when it is spent. It catches up with
+`utxoindex_blockHeightsByFlag` (§3.6), with the vault flag and no receiver id: a
+vault announcement's second element is its sender randomness, so no receiver id
+finds all vaults.
+
+A deposit outputs a new vault holding NPT and a vNPT token of as much. A
+withdrawal burns vNPT and takes as much NPT from a vault. vNPT is redeemable
+against any vault, so a withdrawal may spend any vault holding enough.
+`neptune-sofun` chooses one at random among them, so that withdrawals made at
+the same time rarely spend the same vault, of which only one could be confirmed.
+It excludes the vaults that its own unconfirmed transactions spend.
+
+A transaction spends at most one vault and creates at most one, by the vault
+type script's rules. So a withdrawal of less than the chosen vault holds
+outputs a new vault with the rest, announced like every vault, and a
+withdrawal of more than any one vault holds takes several transactions.
 
 ## 5. Transactions
 
 ### 5.1 Building
 
 The wallet builds a primitive witness with
-`PrimitiveWitness::generate_primitive_witness_with`, whose generator returns
-the witness of every type script of `neptune-defi` that the transaction's
-UTXOs name, such as `Vault::type_script_and_witness` for vNPT. Lock scripts are
-the standard ones of each key type. Inputs are chosen among the tracked UTXOs,
-and for a withdrawal of vNPT the vault is chosen at random among those holding
-enough (§3.4). The wallet validates the primitive witness before proving it.
+`PrimitiveWitness::generate_primitive_witness_with`, whose generator returns the
+witness of every registered type script that the transaction's UTXOs name by
+asking the contract that registered it (§4), which computes it, for vNPT with
+`Vault::type_script_and_witness`. Lock scripts are the standard ones of each key
+type. Inputs are chosen among the tracked UTXOs, besides those a contract names,
+such as the vault of a withdrawal (§4.1). The wallet validates the primitive
+witness before proving it.
 
 The fee is the `--fee` given to the command or, by default, the least fee that
 an upgrader and a relaying node take at `neptune-core`'s default settings. An
@@ -548,10 +565,10 @@ proves a new proof collection and submits it.
 
 ### 5.3 What it can do
 
-- Send NPT, from either derivation, to any address.
-- Deposit NPT into a new vault, receiving vNPT.
-- Withdraw NPT from a vault, burning vNPT.
-- Send vNPT to any address.
+- Send NPT to any address.
+- Send the coins of a registered type script, such as vNPT, to any address.
+- Build, prove and submit a contract's transaction, such as a deposit into a
+  vault or a withdrawal from one (§4.1).
 - Consolidate small UTXOs into one (§5.1).
 
 ## 6. Interface
@@ -563,13 +580,15 @@ directory that only the user can read, as plugins authenticate to
 `neptune-defi`. Graphical wallets are its clients, as they are `neptune-core`'s
 today; `neptune-defi-wallet-cli` is one more.
 
-The methods are `balance`, `receive`, `send`, `deposit`, `withdraw`,
-`consolidate`, `history`, `importRandomness` and `rescan`. `send`, `deposit`,
-`withdraw` and `consolidate` take an optional fee, which overrides the default
-fee (§5.1). `receive` hands out the next unused generation address, the key
-type for payments from others. The daemon itself takes `--guesser-fraction`,
-the fraction of a composed block's reward that the user's composer gave the
-guesser, for recovering composer rewards (§3.1).
+The methods are `balance`, `receive`, `send`, `consolidate`, `history`,
+`importRandomness` and `rescan`, and those through which contracts plug in (§4).
+`send` and `consolidate` take an optional fee, which overrides the default fee
+(§5.1). Depositing into a vault and withdrawing from one are `neptune-sofun`'s
+operations (§4.1), not the wallet's; how a graphical wallet reaches a contract's
+operations is open (§9). `receive` hands out the next unused generation address,
+the key type for payments from others. The daemon itself takes
+`--guesser-fraction`, the fraction of a composed block's reward that the user's
+composer gave the guesser, for recovering composer rewards (§3.1).
 
 The interface hands out no phrase, passphrase or key file, as `neptune-core`'s
 hands out no seed. A 24-word phrase and its passphrase are entered through the
@@ -582,8 +601,8 @@ A fill pays the composer two things, and they go to two places.
 
 - The composer's share of NPT goes to `neptune-core`'s wallet, through
   `personal_generateAddress`, as it does today.
-- The order's vNPT is a coin of a smart contract, so it goes to a defi key, an
-  address this wallet hands out.
+- The order's vNPT is a coin of a smart contract, which `neptune-core`'s
+  wallet refuses, so it goes to an address this wallet hands out.
 
 `neptune-sofun` asks this wallet for that address, and `neptune-defi` carries
 the request. A plugin names, in its handshake, the requests it answers; this
@@ -611,27 +630,26 @@ Each phase ends with its tests passing and is committed separately.
    `neptune-wallet`, behaviour unchanged, taking keys rather than a
    `WalletEntropy` wherever they need only keys. `neptune-core`'s wallet tests
    are the check.
-2. **Keys.** `neptune-defi/src/wallet/keys.rs`: the BIP-39 seed through
-   `tiny-bip39`, BIP-32 hardened derivation with `hmac`, `sha2` and `k256` for
-   the addition modulo `n`, the account entropy and its keys, reading the
-   phrase from `wallet.dat`, and the key file of a 24-word phrase, with
+2. **Keys.** `neptune-defi/src/wallet/keys.rs`: the seed manager, the BIP-39
+   seed through `tiny-bip39`, BIP-32 hardened derivation with `hmac`, `sha2` and
+   `k256` for the addition modulo `n`, the account entropy and its keys, reading
+   the phrase from `wallet.dat`, and the key file of a 24-word phrase, with
    `aes-gcm` and `pbkdf2`. `hmac` and `pbkdf2` are in the tree only through
-   other crates, so they become direct dependencies of `neptune-defi`, at
-   pinned versions. Tests:
+   other crates, so they become direct dependencies of `neptune-defi`, at pinned
+   versions. Tests:
    - BIP-32's published test vectors for hardened children;
-   - the core derivation equals `WalletEntropy::from_phrase` key for key;
+   - for an 18-word phrase, every key of a type `neptune-core` knows equals
+     `WalletEntropy`'s, key for key;
    - distinct accounts give disjoint keys, and so do distinct passphrases of a
      24-word phrase;
-   - the account derivation, given the encoding of a `SecretKeyMaterial` in
-     place of a `Digest`'s, returns `WalletEntropy`'s keys of every type, which
-     shows the formulas are the same;
+   - the formulas of §2, given the encoding of a `SecretKeyMaterial` in place
+     of a `Digest`'s, return `WalletEntropy`'s keys of every type, which shows
+     the formulas are the same;
+   - a key type of `neptune-defi`'s own gives keys distinct from those of every
+     type `neptune-core` knows, for either phrase length;
    - a passphrase with non-ASCII characters gives BIP-39's seed for its NFKD
      form, and a phrase typed with capitals or extra spaces gives the seed of
      the same phrase written plainly;
-   - an 18-word phrase with a limb of `p` or more, imported into a
-     `wallet.dat` with `import-seed-phrase`, reaches the same accounts as its
-     canonical form;
-   - a 24-word phrase has no core derivation;
    - a typed 18-word phrase is refused with a message naming
      `import-seed-phrase`, and so is every length but 24 typed in;
    - the key file of a 24-word phrase, without a passphrase, gives the same
@@ -642,10 +660,9 @@ Each phase ends with its tests passing and is committed separately.
      the phrase, for `a` = 0 and 1.
 3. **Scanner.** First, `ObservedBlock` gains the height, `was_guessed_by`
    and the guesser's outputs with their leaf indices; test: on a RegTest
-   block, they equal the block's own. Then, given a block update and the keys
-   of both derivations, the UTXOs found, the UTXOs spent and the vault
-   announcements. Test: on the same
-   blocks and phrase, the core derivation finds exactly what `neptune-core`'s
+   block, they equal the block's own. Then, given a block update and the seed
+   manager's keys, the UTXOs found and the UTXOs spent. Test: on the same
+   blocks and 18-word phrase, the scanner finds exactly what `neptune-core`'s
    wallet finds, on a RegTest chain with on-chain, guesser-fee and
    composer-reward UTXOs.
 4. **State and catching up.** Persistence, keyed by account, the birthday, and
@@ -655,39 +672,47 @@ Each phase ends with its tests passing and is committed separately.
    where it stopped; `utxoindex_blockHeightsByFlag` returns exactly the heights
    in its range whose blocks announce under the flag, with any second element or
    the one given; catching up from a birthday on RegTest finds exactly the
-   UTXOs, spends and vaults that following the chain block by block finds; a
+   UTXOs and spends that following the chain block by block finds; a
    reorganization during the catch-up is followed.
-5. **Building.** NPT sends, deposits, withdrawals and vNPT sends, and the
-   random choice of vault. Tests: every kind validates as a primitive witness;
-   change goes to a defi key, also when every input is under a core key; a
-   payment to a core address of the same phrase is built like any other; a
-   partial withdrawal outputs a vault with the rest; selection takes the
+5. **Building.** NPT sends and consolidation. Tests: both validate as a
+   primitive witness; change goes to a viewing-address key; selection takes the
    largest UTXOs up to the input cap and refuses an amount beyond them;
-   `consolidate` merges the smallest UTXOs into one; the default fee passes
-   both thresholds at 1 input and at the most inputs a raisable proof
-   collection allows, and `--fee` overrides it.
+   `consolidate` merges the smallest UTXOs into one; the default fee passes both
+   thresholds at 1 input and at the most inputs a raisable proof collection
+   allows, and `--fee` overrides it.
 6. **Proving and submitting.** The proof collection, `wallet_submitTransaction`,
    and rebuilding and resubmitting a transaction that left the mempool
-   unconfirmed or fell 100 blocks behind. Tests,
-   on RegTest with `--tx-proof-upgrading`: a deposit and a withdrawal are
-   confirmed, the second after a block arrived before its upgrade, without a
-   resubmission; a transaction that expired from the mempool is resubmitted
-   and confirmed.
+   unconfirmed or fell 100 blocks behind. Tests, on RegTest with
+   `--tx-proof-upgrading`: two NPT sends are confirmed, the second after a block
+   arrived before its upgrade, without a resubmission; a transaction that
+   expired from the mempool is resubmitted and confirmed.
 7. **Daemon and client.** The `neptune-defi-wallet` binary on the driver, its
    JSON-RPC interface and cookie, and `neptune-defi-wallet-cli`. Tests: every
    method end to end on RegTest through the command line; a request without
    the cookie is refused.
-8. **Requests between plugins.** The handshake's list of requests a plugin
-   answers, and `neptune-defi` relaying a request and its response. Tests: a
-   request reaches the plugin that answers it and the response returns; a
-   request to a name no plugin answers is refused; a plugin that disconnects
-   mid-request yields an error, not a hang.
-9. **SOFuN.** `neptune-sofun` asks the wallet for its address. In
-   `sofun-design.md`, the paragraph "The wallet must hold vNPT" of the section
-   "How a composer executes a fill", which has `neptune-core`'s wallet learn
-   vNPT, is replaced by a reference to this design, and the wallet items of
-   its progress phases 2b and 2c move here.
-10. **Coin type.** Freeze `C` at the coin type the SLIP-44 registry assigns.
+8. **Plugging in.** The methods of §4: a contract's key type, the registration
+   of its type scripts, the wallet's requests for their witnesses, its UTXOs,
+   and transactions built from the inputs and outputs it names. Tests, with a
+   test contract on RegTest: its coins are accepted under the wallet's keys only
+   once it has registered, a UTXO carrying them before then is kept and becomes
+   spendable at registration, and a transaction it names is confirmed.
+9. **Vaults in `neptune-sofun`** (§4.1). Vault tracking, catching up with
+   `utxoindex_blockHeightsByFlag`, the random choice of vault, deposits,
+   withdrawals and vNPT sends. Tests: every kind validates as a primitive
+   witness; a partial withdrawal outputs a vault with the rest; a withdrawal
+   never chooses a vault that an unconfirmed transaction of its own spends;
+   catching up finds exactly the vaults that following the chain finds; on
+   RegTest with `--tx-proof-upgrading`, a deposit and a withdrawal are
+   confirmed.
+10. **Requests between plugins.** The handshake's list of requests a plugin
+    answers, and `neptune-defi` relaying a request and its response. Tests: a
+    request reaches the plugin that answers it and the response returns; a
+    request to a name no plugin answers is refused; a plugin that disconnects
+    mid-request yields an error, not a hang.
+11. **SOFuN.** `neptune-sofun` asks the wallet for its address, and the SOFuN
+    proposer plugs into the wallet (§4), which takes the proposer side of
+    `sofun-design.md` (its progress phase 3).
+12. **Coin type.** Freeze `C` at the coin type the SLIP-44 registry assigns.
 
 ## 9. Open questions
 
@@ -695,3 +720,7 @@ Each phase ends with its tests passing and is committed separately.
   should read `neptune-core`'s wallet database for UTXOs notified off-chain.
 - The signature scheme of the hardware-wallet key type (§2.5), Falcon or
   another, and the cost of verifying it in Triton VM.
+- The JSON-RPC methods through which contracts plug into the wallet (§4):
+  their namespace, how a contract registers its type scripts, how the wallet
+  asks a contract for a witness, and how a
+  graphical wallet reaches a contract's operations, such as a deposit.

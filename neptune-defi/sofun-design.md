@@ -3,8 +3,9 @@
 Status: the lock script, the announcement, the order book and the fill are
 implemented (§9, phases 1 to 2b) for orders paid in NPT; this document now
 specifies orders paid in vaulted NPT (§4.11), which are not implemented, and
-neither is the proposer side.
-Last updated: 2026-11-04.
+neither is the proposer side. Everything that holds vNPT or an order's keys is
+the defi wallet's, `neptune-defi-wallet`, specified in `wallet-design.md`.
+Last updated: 2026-11-09.
 
 ---
 
@@ -709,8 +710,8 @@ whose reward output still counts toward the mandatory lock, with a margin
 ordinary transaction, never the coinbase transaction: the vault input carries
 NPT, and in a coinbase transaction half of it would have to be time-locked.
 
-**Claim.** The proposer's wallet matches a block's addition records against the
-watch set, hits one, recovers `k` and hence the full reward UTXO, and registers
+**Claim.** The proposer's wallet, the defi wallet, matches a block's addition
+records against the watch set, hits one, recovers `k` and hence the full reward UTXO, and registers
 it as an `ExpectedUtxo` (`neptune-wallet/src/expected_utxo.rs`). A wallet that
 has lost that state recovers the same thing from its seed (§4.5).
 
@@ -731,9 +732,12 @@ question is whether anything replaces it.
 
 Something does, and it is simpler, because an order is *published*. **Everything
 per-order comes from one derivation index.** The proposer takes a key at index
-`i` the ordinary way — `Tip5::hash_varlen(secret_seed ‖ [FLAG, i])`,
-`neptune-wallet/src/wallet_entropy.rs:98-110`, with a flag of its own — and that
-one key supplies both secrets an order needs and the public seed of §4.3:
+`i` from the defi wallet's seed manager, which wraps `neptune-core`'s
+`WalletEntropy` for an 18-word phrase and the standard derivation's account
+entropy for a 24-word one (`wallet-design.md`). The key is derived the ordinary
+way — `Tip5::hash_varlen(entropy ‖ [FLAG, i])`, as
+`neptune-wallet/src/wallet_entropy.rs:98-110` does, with a flag of its own — and
+that one key supplies both secrets an order needs and the public seed of §4.3:
 
 ```
 cancel_post_image        =  H(key_i's unlock preimage)
@@ -969,8 +973,9 @@ any of the above. It is not built yet (§9).
 
 **Indexing needs no archival state.** Admitting an order needs its own block's
 outputs, retiring one needs the inputs of the block that spends it, and both are
-in the block the notification names. So a light node can index, as well as place
-and cancel orders, which are ordinary wallet operations on its own UTXOs.
+in the block the notification names. So a light node can index. Placing and
+cancelling orders are operations of the defi wallet, which needs an archival
+node to restore its membership proofs (`wallet-design.md`).
 
 **Filling needs a membership proof, and the node restores it on demand.**
 Spending the order UTXO needs a mutator-set membership proof for a UTXO the
@@ -997,10 +1002,12 @@ about orders. Only the hard fork of §5 makes such a transaction valid.
 - *Outputs:* the reward at the grid point §4.6 picks; the composer's share of
   NPT, paid to an address of the node's own wallet, which the plugin asks
   `personal_generateAddress` for once, when it starts; and a token of the
-  order's `X` vNPT, paid to the same address.
+  order's `X` vNPT, paid to an address of the defi wallet, which the plugin
+  asks for before every fill, through `neptune-defi`. If the defi wallet does
+  not answer, the plugin fills no vNPT order for that block.
   The node registers no expected UTXOs for a transaction it did not build, so
-  the composer's outputs carry on-chain notifications, which is how the wallet
-  finds them.
+  the composer's outputs carry on-chain notifications, which is how the two
+  wallets find them.
 - *Coinbase:* the block subsidy. *Fee:* none, so the composer keeps the
   guesser's share; filling pays only a composer who guesses their own blocks
   (§4.7).
@@ -1041,12 +1048,13 @@ when `C` is odd the reward is the smaller half and the composer keeps the
 larger. The `X` vNPT pass from the order input to the composer's token, and
 vNPT's type script (§4.11) checks that they all arrive.
 
-**The wallet must hold vNPT.** The node's wallet refuses to register a UTXO
+**The defi wallet holds vNPT.** The node's wallet refuses to register a UTXO
 carrying a coin of a type script it does not know (`state/mod.rs:2211`) and
-considers one unspendable (`utxo.rs:199-203`). So the wallet learns vNPT: it
-registers the composer's token, and it builds the transaction that withdraws
-NPT from a vault with it (§4.4), which the builder change above makes
-possible.
+considers one unspendable (`utxo.rs:199-203`), and it stays that way: the node
+knows nothing of overlay protocols. The defi wallet holds the composer's token,
+and `neptune-sofun`, which plugs into it and holds the vaults, builds the
+transaction that withdraws NPT from a vault with it (§4.4), with the builder
+change above (`wallet-design.md`).
 
 **What the plugin checks before setting the transaction.** The book verified the
 order when it admitted it (§4.8), but a block may have arrived since. So the
@@ -1883,13 +1891,12 @@ any vault.
 - [x] `PrimitiveWitness::generate_primitive_witness_with` takes, from its
       caller, a generator of the witnesses of type scripts it does not know
       (§4.9)
-- [ ] The wallet's `TransactionDetails` passes such a generator on, so that
-      the fill can pay vNPT (§4.9)
 - [x] A witness-backed transaction with a type script the node does not know
       is dropped when the mutator set changes, rather than crashing the node,
       since only its creator can generate that type script's witness again
-- [ ] The fill pays the order's vNPT to the composer's wallet, and the wallet
-      registers vNPT tokens and withdraws from vaults with them (§4.4, §4.9)
+- [ ] The fill pays the order's vNPT to an address of the defi wallet,
+      requested through `neptune-defi` before every fill (§4.9); holding and
+      redeeming vNPT is the defi wallet's (`wallet-design.md`)
 - [x] `ConsensusRuleSet::allows_coinbase_inputs`: true on RegTest, false
       elsewhere until the fork (§4.9)
 - [x] `mining_setCoinbaseTx`, honored by every composer, with a fallback to the
@@ -1925,14 +1932,17 @@ any vault.
       announcement whose randomnesses do not give the vault's addition record,
       a negative token, a vault under another lock script and a vault with a
       third coin rejected
-- [ ] The wallet tracks vault announcements, and withdraws from a vault chosen
-      at random among those holding enough
+- [ ] `neptune-sofun`, plugged into the defi wallet, holds the vaults: it
+      registers the vault type scripts, answers the wallet's requests for
+      their witnesses, tracks vault announcements, and withdraws from a vault
+      chosen at random among those holding enough (`wallet-design.md`)
 
-### Phase 3 — proposer side (wallet / `neptune-cli`)
+### Phase 3 — proposer side (plugged into the defi wallet)
 - [ ] Wallet API to place an order, depositing NPT for any vNPT it lacks in the
       same transaction (§4.4)
-- [ ] Order key derived at an index, with a flag of its own; freshness of the
-      seed follows from the index rather than from an RNG (§4.5, §7.1)
+- [ ] Order key derived by the defi wallet's seed manager at an index, with a
+      flag of its own; freshness of the seed follows from the index rather
+      than from an RNG (§4.5, §7.1)
 - [ ] Randomnesses derived from the public seed, matching §4.3's three domains
 - [ ] Recovery test: wipe the wallet database, restore from the seed, and
       recover both an open order and a filled one (§4.5)
