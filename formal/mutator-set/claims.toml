@@ -1,0 +1,85 @@
+# Claims registry for the mutator set (neptune-mutator-set, v0.19.0).
+# status: open | stated | checked | refuted
+# A claim is "checked" only if `./check.sh` passes: the theorem compiles, uses
+# no `sorry`, and depends only on propext, Quot.sound and Classical.choice.
+
+[[claim]]
+id = "MS-1"
+statement = "Once the removal record of a UTXO has been applied, no later removal record for the same UTXO is removable, whatever other removal records are applied in between."
+theorem = "MutatorSet.no_double_spend"
+status = "checked"
+assumptions = ["The SWBF is modelled as one bit set over absolute indices (window, chunks and their MMR are representations of it)."]
+binding = ["neptune-mutator-set/src/removal_record/absolute_index_set.rs@v0.19.0", "docs/src/consensus/block.md rule 2(b)"]
+scope_note = "Does not prove that the active-window/chunk/MMR representation implements the bit set faithfully (MS-6)."
+
+[[claim]]
+id = "MS-1b"
+statement = "Applying an unrelated removal record leaves an item removable if one of its bits is set by neither."
+theorem = "MutatorSet.removable_after_unrelated"
+status = "checked"
+assumptions = ["Same bit-set model as MS-1."]
+binding = ["neptune-mutator-set/src/removal_record/absolute_index_set.rs@v0.19.0"]
+scope_note = "Says nothing about the probability of false positives."
+
+[[claim]]
+id = "MS-2"
+statement = "The absolute index set is a function of (item, sender randomness, receiver preimage, AOCL index) only."
+theorem = "MutatorSet.compute_deterministic"
+status = "checked"
+assumptions = ["The Tip5 sampler is a function (deterministic)."]
+binding = ["AbsoluteIndexSet::compute"]
+scope_note = "Structural; holds by construction of the model."
+
+[[claim]]
+id = "MS-W"
+statement = "Every index of the removal record for AOCL index i lies in [floor(i/8)*2^12, floor(i/8)*2^12 + 2^20)."
+theorem = "MutatorSet.compute_in_window"
+status = "checked"
+assumptions = ["sample_indices(WINDOW_SIZE, NUM_TRIALS) returns NUM_TRIALS values below WINDOW_SIZE."]
+binding = ["AbsoluteIndexSet::compute"]
+scope_note = ""
+
+[[claim]]
+id = "MS-3"
+statement = "For every item, randomness, preimage and AOCL index i, aocl_range of the removal record succeeds and contains i."
+theorem = "MutatorSet.compute_aoclRange_contains"
+status = "checked"
+assumptions = ["Same sampler assumption as MS-W.", "Lean Nat is unbounded; Rust's u64 overflow errors in aocl_range are not modelled."]
+binding = ["AbsoluteIndexSet::aocl_range", "vectors/aocl_range.csv (checked by the Rust test lean_model_vectors)"]
+scope_note = "The model of aocl_range is tied to the Rust code by 2110 shared vectors, not by a proof."
+
+[[claim]]
+id = "MS-4a"
+statement = "The AOCL range of a removal record has between 8 and 2048 positions; with index spread s it has at most ((2^20 - s)/2^12 + 1)*8."
+theorem = ["MutatorSet.compute_aoclRange_width", "MutatorSet.aoclRange_width"]
+status = "checked"
+assumptions = ["Same as MS-3."]
+binding = ["AbsoluteIndexSet::aocl_range"]
+scope_note = "Deterministic bounds. The distribution of the width (median about 72 by simulation) is MS-4b."
+
+[[claim]]
+id = "MS-4b"
+statement = "With Tip5 modelled as a random oracle, a probability bound on the width of the AOCL range (simulation suggests a median of about 72)."
+theorem = ""
+status = "open"
+assumptions = ["Random-oracle model of Tip5."]
+binding = ["AbsoluteIndexSet::compute", "AbsoluteIndexSet::aocl_range"]
+scope_note = "Needs probability theory; planned once Mathlib can be used."
+
+[[claim]]
+id = "MS-5"
+statement = "Without the sender randomness and receiver preimage, an adversary has negligible advantage in linking an addition record to a removal record beyond the AOCL range of MS-4."
+theorem = ""
+status = "open"
+assumptions = ["Random-oracle model of Tip5."]
+binding = ["commit", "AbsoluteIndexSet::compute"]
+scope_note = "The core privacy claim. Requires a game-based security model."
+
+[[claim]]
+id = "MS-6"
+statement = "The active window, archived chunks and SWBF MMR implement the bit-set model, and membership-proof updates preserve validity."
+theorem = ""
+status = "open"
+assumptions = ["Collision resistance of Tip5 for the MMR."]
+binding = ["neptune-mutator-set/src/mutator_set_accumulator.rs", "neptune-mutator-set/src/ms_membership_proof.rs"]
+scope_note = "Connects MS-1 to the actual accumulator."
