@@ -12,6 +12,7 @@
 //! the claim that proves it for the current block.
 
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
 use neptune_mutator_set::removal_record::RemovalRecord;
 use neptune_mutator_set::shared::CHUNK_SIZE;
@@ -278,8 +279,8 @@ impl SwbfiPeaksAfterRemovals {
         Self::try_apply_removals(inputs, mutator_set).expect("inputs must be removable")
     }
 
-    /// The mutator set with the packed inputs removed, if they unpack and
-    /// can be removed from it.
+    /// The mutator set with the inputs removed, if the inputs unpack and can be
+    /// removed from it.
     pub(in crate::block) fn try_apply_removals(
         inputs: &[RemovalRecord],
         mutator_set: &MutatorSetAccumulator,
@@ -306,11 +307,40 @@ impl SwbfiPeaksAfterRemovals {
         mutator_set_after.batch_remove(unpacked_inputs, &mut []);
         Some(mutator_set_after)
     }
+
+    /// The mutator set with the index sets removed, given the inactive
+    /// SWBF's peaks after the removals, assuming no index points into a future
+    /// Bloom filter.
+    ///
+    /// Does not require chunk data since the peaks after removals are part of
+    /// the input.
+    pub(in crate::block) fn try_apply_removals_from_peaks(
+        inputs: &[AbsoluteIndexSet],
+        mutator_set: &MutatorSetAccumulator,
+        swbfi_peaks_after: Vec<Digest>,
+    ) -> Option<MutatorSetAccumulator> {
+        let window_start = Self::window_start(mutator_set);
+        let window_end = window_start + u128::from(WINDOW_SIZE);
+        let mut mutator_set_after = mutator_set.clone();
+        for index in inputs.iter().flat_map(|index_set| index_set.to_array()) {
+            if index >= window_end {
+                return None;
+            }
+            if index >= window_start {
+                let relative_index = u32::try_from(index - window_start).ok()?;
+                mutator_set_after.swbf_active.insert(relative_index);
+            }
+        }
+        mutator_set_after.swbf_inactive =
+            MmrAccumulator::init(swbfi_peaks_after, mutator_set.swbf_inactive.num_leafs());
+        Some(mutator_set_after)
+    }
 }
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(in crate::block::validity) mod tests {
+    use itertools::Itertools;
     use neptune_mutator_set::shared::NUM_TRIALS;
 
     use super::super::update_tree_leaf::UpdateTreeLeaf;
@@ -426,6 +456,41 @@ pub(in crate::block::validity) mod tests {
                 peaks[peak_index] = new_root;
             }
             peaks
+        }
+    }
+
+    #[test]
+    fn removals_from_peaks_agree_with_removals_from_chunks() {
+        use rand::rngs::StdRng;
+        use rand::RngExt;
+        use rand::SeedableRng;
+
+        use super::super::chunk_witness::tests::random_msa_and_records;
+
+        let mut rng = StdRng::seed_from_u64(0x2e7a);
+        for _ in 0..20 {
+            let num_records = rng.random_range(1..6);
+            let aocl_size = rng.random_range(8..(1_u64 << 20));
+            let msa_and_records = random_msa_and_records(&mut rng, num_records, aocl_size);
+            let mutator_set = &msa_and_records.mutator_set_accumulator;
+            let inputs = msa_and_records.unpacked_removal_records();
+            let allow_big_chunks = ConsensusRuleSet::HardforkDelta.allow_big_chunks();
+
+            let from_chunks = SwbfiPeaksAfterRemovals::try_apply_removals(
+                &RemovalRecordList::pack(inputs.clone(), allow_big_chunks),
+                mutator_set,
+            )
+            .unwrap();
+
+            let inputs = inputs.into_iter().map(|x| x.absolute_indices).collect_vec();
+            let from_peaks = SwbfiPeaksAfterRemovals::try_apply_removals_from_peaks(
+                &inputs,
+                mutator_set,
+                from_chunks.swbf_inactive.peaks(),
+            )
+            .unwrap();
+            assert_eq!(from_chunks.hash(), from_peaks.hash());
+            assert_eq!(from_chunks.swbf_active, from_peaks.swbf_active);
         }
     }
 }

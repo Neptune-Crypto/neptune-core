@@ -585,6 +585,21 @@ impl ConsensusRuleSet {
         }
     }
 
+    /// Whether the inputs of a block's transaction kernel carry chunk data
+    /// (`target_chunks`) that validation can use.
+    pub fn block_carries_chunk_data(&self) -> bool {
+        match self {
+            ConsensusRuleSet::Reboot
+            | ConsensusRuleSet::HardforkAlpha
+            | ConsensusRuleSet::TvmProofVersion1
+            | ConsensusRuleSet::HardforkBeta
+            | ConsensusRuleSet::HardforkGamma
+            | ConsensusRuleSet::HardforkDelta
+            | ConsensusRuleSet::SoftforkEpsilon => true,
+            ConsensusRuleSet::HardforkZeta => false,
+        }
+    }
+
     pub fn allow_inputs_in_coinbase(&self) -> bool {
         match self {
             ConsensusRuleSet::Reboot

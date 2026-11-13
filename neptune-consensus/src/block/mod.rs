@@ -981,32 +981,63 @@ impl Block {
         .map_err(BlockValidationError::from)?;
 
         // 2.b)
+        let verify_chunk_data = consensus_rule_set.block_carries_chunk_data();
         let msa_before = parent_mutator_set.clone();
-        for removal_record in &inputs {
-            if !msa_before.can_remove(removal_record) {
-                return Err(BlockValidationError::RemovalRecordsValidity);
+        if verify_chunk_data {
+            for removal_record in &inputs {
+                if !msa_before.can_remove(removal_record) {
+                    return Err(BlockValidationError::RemovalRecordsValidity);
+                }
             }
         }
 
-        // 2.t) mutator set matches parent commitment, and transaction.
+        // 2.t)
         if msa_before.hash() != parent.mutator_set_hash
             || msa_before.hash() != self.body().transaction_kernel.mutator_set_hash
         {
             return Err(BlockValidationError::TransactionMutatorSetMismatch);
         }
 
-        let mutator_set_update = MutatorSetUpdate::new(
-            inputs.clone(),
-            self.body().transaction_kernel.outputs.clone(),
-        );
-        let after_removals = SwbfiPeaksAfterRemovals::try_apply_removals(
-            &self.body().transaction_kernel.inputs,
-            &msa_before,
-        );
+        let after_removals = if verify_chunk_data {
+            SwbfiPeaksAfterRemovals::try_apply_removals(
+                &self.body().transaction_kernel.inputs,
+                &msa_before,
+            )
+        } else {
+            // Read the mutator set after the removals from the claim that
+            // covers the SWBF update. It's part of the output
+            let inputs = inputs.iter().map(|x| x.absolute_indices).collect_vec();
+            required_claims
+                .last()
+                .and_then(|shape| self.appendix().find(shape))
+                .and_then(|claim| ClaimOutput::try_parse(&claim.output))
+                .and_then(|output| {
+                    SwbfiPeaksAfterRemovals::try_apply_removals_from_peaks(
+                        &inputs,
+                        &msa_before,
+                        output.swbfi_peaks,
+                    )
+                })
+        };
 
         // 2.d)
-        let mut msa = msa_before;
-        mutator_set_update.apply_to_accumulator_unsafe(&mut msa);
+        let msa = if verify_chunk_data {
+            let mutator_set_update = MutatorSetUpdate::new(
+                inputs.clone(),
+                self.body().transaction_kernel.outputs.clone(),
+            );
+            let mut msa = msa_before;
+            mutator_set_update.apply_to_accumulator_unsafe(&mut msa);
+            msa
+        } else {
+            let mut msa = after_removals
+                .clone()
+                .ok_or(BlockValidationError::MutatorSetUpdateIntegrity)?;
+            for output in &self.body().transaction_kernel.outputs {
+                msa.add(output);
+            }
+            msa
+        };
 
         // 2.e)
         if msa.hash() != self.body().mutator_set_accumulator.hash() {
