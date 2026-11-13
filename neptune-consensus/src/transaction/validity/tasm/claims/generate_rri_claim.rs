@@ -63,7 +63,11 @@ impl BasicSnippet for GenerateRriClaim {
                 push {d0}
             }
         };
-        let push_rri_program_hash = push_digest(RemovalRecordsIntegrity.program().hash());
+        let push_rri_program_hash = push_digest(
+            RemovalRecordsIntegrity::new(self.consensus_rule_set)
+                .program()
+                .hash(),
+        );
 
         let proof_collection_field_salted_inputs_hash = field!(ProofCollection::salted_inputs_hash);
 

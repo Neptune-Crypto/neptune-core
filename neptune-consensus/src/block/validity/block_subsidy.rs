@@ -191,7 +191,8 @@ mod tests {
     #[test]
     fn main_net_epochs_with_two_halvings_of_the_block_interval() {
         let activation = BLOCK_HEIGHT_SOFTFORK_EPSILON_MAIN_NET.value();
-        let initial = ConsensusRuleSet::epoch_table(Network::Main).in_force_at(activation.into());
+        let initial = ConsensusRuleSet::epoch_table(Network::Main, activation.into())
+            .in_force_at(activation.into());
         assert_eq!(Timestamp::millis(588_000), initial.target_block_interval);
 
         // Blocks come twice as fast from four blocks past activation on, so

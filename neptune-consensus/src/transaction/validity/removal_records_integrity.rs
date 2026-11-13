@@ -35,6 +35,7 @@ use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembership
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 
+use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::proof_abstractions::tasm::program::TritonProgram;
 use crate::proof_abstractions::SecretWitness;
 use crate::transaction::primitive_witness::SaltedUtxos;
@@ -179,15 +180,27 @@ impl SecretWitness for RemovalRecordsIntegrityWitness {
         Tip5::hash(&self.input_utxos).values().to_vec()
     }
 
+    /// # Panics
+    ///
+    /// Always. The program depends on the consensus rule set, which the
+    /// witness does not know: Witness validity does not depend on the rule set.
+    /// Use [`RemovalRecordsIntegrity::new`] and
+    /// [`RemovalRecordsIntegrity::program`] instead.
     fn program(&self) -> Program {
-        RemovalRecordsIntegrity.program()
+        panic!("RemovalRecordsIntegrity's program depends on the consensus rule set")
     }
 }
 
-#[derive(
-    Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize, FieldCount, BFieldCodec,
-)]
-pub struct RemovalRecordsIntegrity;
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct RemovalRecordsIntegrity {
+    consensus_rule_set: ConsensusRuleSet,
+}
+
+impl RemovalRecordsIntegrity {
+    pub const fn new(consensus_rule_set: ConsensusRuleSet) -> Self {
+        Self { consensus_rule_set }
+    }
+}
 
 impl RemovalRecordsIntegrityWitness {
     pub fn pseudorandom_merkle_root_with_authentication_paths(
@@ -556,6 +569,11 @@ impl TritonProgram for RemovalRecordsIntegrity {
             assert error_id {COINBASE_HAS_INPUTS_ERROR}
             // _ [txk_mast_hash] *witness
         );
+        let coinbase_input_check = if self.consensus_rule_set.allow_inputs_in_coinbase() {
+            vec![]
+        } else {
+            assert_that_coinbase_transaction_does_not_have_inputs
+        };
 
         let audit_preloaded_data = library.import(Box::new(VerifyNdSiIntegrity::<
             RemovalRecordsIntegrityWitnessMemory,
@@ -591,7 +609,7 @@ impl TritonProgram for RemovalRecordsIntegrity {
             {&authenticate_coinbase_against_txkmh}
             // _ [txk_mast_hash] *witness
 
-            {&assert_that_coinbase_transaction_does_not_have_inputs}
+            {&coinbase_input_check}
             // _ [txk_mast_hash] *witness
 
             /* Prepare for main loop */
@@ -1116,8 +1134,9 @@ mod tests {
                 TransactionKernel::MAST_HEIGHT as u32,
             );
 
-            // Assert that a coinbase transaction has no inputs.
-            assert!(coinbase.is_none() || input_utxos.is_empty());
+            if !self.consensus_rule_set.allow_inputs_in_coinbase() {
+                assert!(coinbase.is_none() || input_utxos.is_empty());
+            }
 
             // iterate over all input UTXOs
             let mut input_index: usize = 0;
@@ -1163,7 +1182,7 @@ mod tests {
         removal_records_integrity_witness: RemovalRecordsIntegrityWitness,
     ) -> TestCaseResult {
         let salted_inputs_utxos_hash = removal_records_integrity_witness.output();
-        let rust_result = RemovalRecordsIntegrity
+        let rust_result = RemovalRecordsIntegrity::new(ConsensusRuleSet::SoftforkEpsilon)
             .run_rust(
                 &removal_records_integrity_witness.standard_input(),
                 removal_records_integrity_witness.nondeterminism(),
@@ -1171,7 +1190,7 @@ mod tests {
             .unwrap();
         prop_assert_eq!(salted_inputs_utxos_hash, rust_result.clone());
 
-        let tasm_result = RemovalRecordsIntegrity
+        let tasm_result = RemovalRecordsIntegrity::new(ConsensusRuleSet::SoftforkEpsilon)
             .run_tasm(
                 &removal_records_integrity_witness.standard_input(),
                 removal_records_integrity_witness.nondeterminism(),
@@ -1251,7 +1270,7 @@ mod tests {
         let removal_records_integrity_witness =
             RemovalRecordsIntegrityWitness::from(&primitive_witness);
         let salted_inputs_utxos_hash = removal_records_integrity_witness.output();
-        let rust_result = RemovalRecordsIntegrity
+        let rust_result = RemovalRecordsIntegrity::new(ConsensusRuleSet::SoftforkEpsilon)
             .run_rust(
                 &removal_records_integrity_witness.standard_input(),
                 removal_records_integrity_witness.nondeterminism(),
@@ -1285,11 +1304,12 @@ mod tests {
             .current();
         let mut bad_witness = RemovalRecordsIntegrityWitness::from(&primitive_witness);
         bad_witness.mast_path_mutator_set[1] = Digest::default();
-        let assertion_failure = RemovalRecordsIntegrity.test_assertion_failure(
-            bad_witness.standard_input(),
-            bad_witness.nondeterminism(),
-            &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
-        );
+        let assertion_failure = RemovalRecordsIntegrity::new(ConsensusRuleSet::SoftforkEpsilon)
+            .test_assertion_failure(
+                bad_witness.standard_input(),
+                bad_witness.nondeterminism(),
+                &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
+            );
         assert!(let Ok(_) = assertion_failure);
     }
 
@@ -1303,11 +1323,12 @@ mod tests {
             .current();
         let mut bad_witness = RemovalRecordsIntegrityWitness::from(&primitive_witness);
         bad_witness.mast_path_inputs[1] = Digest::default();
-        let assertion_failure = RemovalRecordsIntegrity.test_assertion_failure(
-            bad_witness.standard_input(),
-            bad_witness.nondeterminism(),
-            &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
-        );
+        let assertion_failure = RemovalRecordsIntegrity::new(ConsensusRuleSet::SoftforkEpsilon)
+            .test_assertion_failure(
+                bad_witness.standard_input(),
+                bad_witness.nondeterminism(),
+                &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
+            );
         assert!(let Ok(_) = assertion_failure);
     }
 
@@ -1321,11 +1342,12 @@ mod tests {
             .current();
         let mut bad_witness = RemovalRecordsIntegrityWitness::from(&primitive_witness);
         bad_witness.mast_path_coinbase[1] = Digest::default();
-        let assertion_failure = RemovalRecordsIntegrity.test_assertion_failure(
-            bad_witness.standard_input(),
-            bad_witness.nondeterminism(),
-            &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
-        );
+        let assertion_failure = RemovalRecordsIntegrity::new(ConsensusRuleSet::SoftforkEpsilon)
+            .test_assertion_failure(
+                bad_witness.standard_input(),
+                bad_witness.nondeterminism(),
+                &[MerkleVerify::ROOT_MISMATCH_ERROR_ID],
+            );
         assert!(let Ok(_) = assertion_failure);
     }
 
@@ -1345,12 +1367,40 @@ mod tests {
             .unwrap()
             .current();
         let bad_witness = RemovalRecordsIntegrityWitness::from(&bad_primitive_witness);
-        let assertion_failure = RemovalRecordsIntegrity.test_assertion_failure(
-            bad_witness.standard_input(),
-            bad_witness.nondeterminism(),
-            &[COINBASE_HAS_INPUTS_ERROR],
-        );
+        let assertion_failure = RemovalRecordsIntegrity::new(ConsensusRuleSet::SoftforkEpsilon)
+            .test_assertion_failure(
+                bad_witness.standard_input(),
+                bad_witness.nondeterminism(),
+                &[COINBASE_HAS_INPUTS_ERROR],
+            );
         assert!(let Ok(_) = assertion_failure);
+    }
+
+    #[test]
+    fn coinbase_tx_can_have_inputs_from_hardfork_zeta() {
+        let network = Network::Main;
+        let mut test_runner = TestRunner::deterministic();
+
+        let timestamp = network.launch_date() + Timestamp::months(12);
+        let [primitive_witness] =
+            PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets_and_given_coinbase(
+                [(1, 1, 1)],
+                Some((NativeCurrencyAmount::coins(1), 0, timestamp)),
+            )
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let witness = RemovalRecordsIntegrityWitness::from(&primitive_witness);
+        let program = RemovalRecordsIntegrity::new(ConsensusRuleSet::HardforkZeta);
+
+        let rust_result = program
+            .run_rust(&witness.standard_input(), witness.nondeterminism())
+            .unwrap();
+        let tasm_result = program
+            .run_tasm(&witness.standard_input(), witness.nondeterminism())
+            .unwrap();
+        assert_eq!(witness.output(), rust_result);
+        assert_eq!(rust_result, tasm_result);
     }
 
     #[test]
@@ -1375,11 +1425,12 @@ mod tests {
                 .modify(bad_pw.kernel.clone());
             bad_pw.kernel = bad_kernel;
             let bad_witness = RemovalRecordsIntegrityWitness::from(&bad_pw);
-            let assertion_failure = RemovalRecordsIntegrity.test_assertion_failure(
-                bad_witness.standard_input(),
-                bad_witness.nondeterminism(),
-                &[COMPUTED_AND_CLAIMED_INDICES_DISAGREE_ERROR],
-            );
+            let assertion_failure = RemovalRecordsIntegrity::new(ConsensusRuleSet::SoftforkEpsilon)
+                .test_assertion_failure(
+                    bad_witness.standard_input(),
+                    bad_witness.nondeterminism(),
+                    &[COMPUTED_AND_CLAIMED_INDICES_DISAGREE_ERROR],
+                );
             assert!(let Ok(_) = assertion_failure);
         }
     }
@@ -1407,11 +1458,12 @@ mod tests {
                 .modify(bad_pw.kernel.clone());
             bad_pw.kernel = bad_kernel;
             let bad_witness = RemovalRecordsIntegrityWitness::from(&bad_pw);
-            RemovalRecordsIntegrity.test_assertion_failure(
-                bad_witness.standard_input(),
-                bad_witness.nondeterminism(),
-                &[COMPUTED_AND_CLAIMED_INDICES_DISAGREE_ERROR],
-            )?;
+            RemovalRecordsIntegrity::new(ConsensusRuleSet::SoftforkEpsilon)
+                .test_assertion_failure(
+                    bad_witness.standard_input(),
+                    bad_witness.nondeterminism(),
+                    &[COMPUTED_AND_CLAIMED_INDICES_DISAGREE_ERROR],
+                )?;
         }
     }
 
@@ -1436,16 +1488,26 @@ mod tests {
                 .modify(bad_pw.kernel.clone());
             bad_pw.kernel = bad_kernel;
             let bad_witness = RemovalRecordsIntegrityWitness::from(&bad_pw);
-            RemovalRecordsIntegrity.test_assertion_failure(
-                bad_witness.standard_input(),
-                bad_witness.nondeterminism(),
-                &[COMPUTED_AND_CLAIMED_INDICES_DISAGREE_ERROR],
-            )?;
+            RemovalRecordsIntegrity::new(ConsensusRuleSet::SoftforkEpsilon)
+                .test_assertion_failure(
+                    bad_witness.standard_input(),
+                    bad_witness.nondeterminism(),
+                    &[COMPUTED_AND_CLAIMED_INDICES_DISAGREE_ERROR],
+                )?;
         }
     }
 
     test_program_snapshot!(
-        RemovalRecordsIntegrity,
+        RemovalRecordsIntegrity::new(ConsensusRuleSet::SoftforkEpsilon),
         "e8f3b005318d3cdfa22a8e73c363a3c54a027b41eb1200e2b3fbd191fa4fbf9b5ea35d69d50f0604"
     );
+
+    mod zeta_program {
+        use super::*;
+
+        test_program_snapshot!(
+            RemovalRecordsIntegrity::new(ConsensusRuleSet::HardforkZeta),
+            "6bad8d4738d286e8db7a8da71f25ccb9fde0f58337ebf6caf24aed9cfbbb3f789d4d11f49078058f"
+        );
+    }
 }

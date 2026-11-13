@@ -9,6 +9,7 @@ mod transaction {
     use std::path::Path;
     use std::path::PathBuf;
 
+    use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
     use neptune_consensus::proof_abstractions::tasm::program::TritonProgram;
     use neptune_consensus::proof_abstractions::SecretWitness;
     use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
@@ -112,7 +113,7 @@ mod transaction {
             RemovalRecordsIntegrityWitness::from(&primitive_witness);
 
         bench_and_profile_consensus_program(
-            RemovalRecordsIntegrity,
+            RemovalRecordsIntegrity::new(ConsensusRuleSet::SoftforkEpsilon),
             &removal_records_integrity_witness.standard_input(),
             removal_records_integrity_witness.nondeterminism(),
             &format!("RemovalRecordsIntegrity-{num_inputs}in-{num_outputs}out"),

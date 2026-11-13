@@ -3,6 +3,7 @@ use neptune_primitives::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
 use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
 use num_traits::Zero;
+use strum::IntoEnumIterator;
 use tasm_lib::twenty_first::bfe;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 
@@ -67,9 +68,17 @@ pub const BLOCK_HEIGHT_HARDFORK_DELTA_TESTNET: BlockHeight =
 pub const BLOCK_HEIGHT_SOFTFORK_EPSILON_MAIN_NET: BlockHeight =
     BlockHeight::new(BFieldElement::new(62_500u64));
 
+/// Height of the first block that uses the zeta ruleset, on main net.
+pub const BLOCK_HEIGHT_HARDFORK_ZETA_MAIN_NET: BlockHeight =
+    BlockHeight::new(BFieldElement::new(70_000u64));
+
 /// Height of the first block that uses the epsilon ruleset, on testnet-0.
 pub const BLOCK_HEIGHT_SOFTFORK_EPSILON_TESTNET: BlockHeight =
     BlockHeight::new(BFieldElement::new(7_144u64));
+
+/// Height of the first block that uses the zeta ruleset, on testnet-0.
+pub const BLOCK_HEIGHT_HARDFORK_ZETA_TESTNET: BlockHeight =
+    BlockHeight::new(BFieldElement::new(7_333u64));
 
 /// Transactions that are more than three days older than the block are
 /// disallowed. Only enforced from hardfork gamma and onwards.
@@ -128,6 +137,19 @@ pub enum ConsensusRuleSet {
     /// A soft fork because adding more required claims is accepted by old
     /// nodes.
     SoftforkEpsilon,
+
+    /// Closing gaps in block validation.
+    ///
+    /// Recursive block validation made to match archival (AKA incremental) block
+    /// validation:
+    ///   - remove chunk witness data from transaction kernel's inputs
+    ///   - Add BlockExtraData structure to store removed chunk witness data
+    ///   - New required claim in appendix: KnowsBlockExtraData for the previous
+    ///     block.
+    ///
+    /// Additionally, inputs in the coinbase transaction are allowed, to
+    /// accommodate certain defi/timelock contracts.
+    HardforkZeta,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
@@ -167,8 +189,8 @@ tokio::task_local! {
 
 #[cfg(any(test, feature = "test-helpers"))]
 impl ConsensusRuleSet {
-    /// Run the future with this rule set in place of every inferred one. Can
-    /// be used to test block validity under alternative rule sets.
+    /// Run the future with this rule set instead of the inferred one. Can be
+    /// used to test block validity under alternative rule sets.
     pub fn overriding<F: std::future::Future>(
         self,
         future: F,
@@ -204,8 +226,10 @@ impl ConsensusRuleSet {
                     ConsensusRuleSet::HardforkGamma
                 } else if block_height < BLOCK_HEIGHT_SOFTFORK_EPSILON_MAIN_NET {
                     ConsensusRuleSet::HardforkDelta
-                } else {
+                } else if block_height < BLOCK_HEIGHT_HARDFORK_ZETA_MAIN_NET {
                     ConsensusRuleSet::SoftforkEpsilon
+                } else {
+                    ConsensusRuleSet::HardforkZeta
                 }
             }
             Network::Testnet(0) => {
@@ -221,11 +245,55 @@ impl ConsensusRuleSet {
                     ConsensusRuleSet::HardforkGamma
                 } else if block_height < BLOCK_HEIGHT_SOFTFORK_EPSILON_TESTNET {
                     ConsensusRuleSet::HardforkDelta
-                } else {
+                } else if block_height < BLOCK_HEIGHT_HARDFORK_ZETA_TESTNET {
                     ConsensusRuleSet::SoftforkEpsilon
+                } else {
+                    ConsensusRuleSet::HardforkZeta
                 }
             }
-            _ => ConsensusRuleSet::SoftforkEpsilon,
+            _ => ConsensusRuleSet::HardforkZeta,
+        }
+    }
+
+    /// First block with this rule set, if any. None if the network has never
+    /// used this rule set.
+    fn first_block(&self, network: Network) -> Option<BlockHeight> {
+        match network {
+            Network::Main => match self {
+                ConsensusRuleSet::Reboot => Some(BlockHeight::genesis()),
+                ConsensusRuleSet::HardforkAlpha => Some(BLOCK_HEIGHT_HARDFORK_ALPHA_MAIN_NET),
+                ConsensusRuleSet::TvmProofVersion1 => {
+                    Some(BLOCK_HEIGHT_HARDFORK_TVMV_PROOF_V1_MAIN_NET)
+                }
+                ConsensusRuleSet::HardforkBeta => Some(BLOCK_HEIGHT_HARDFORK_BETA_MAIN_NET),
+                ConsensusRuleSet::HardforkGamma => Some(BLOCK_HEIGHT_HARDFORK_GAMMA_MAIN_NET),
+                ConsensusRuleSet::HardforkDelta => Some(BLOCK_HEIGHT_HARDFORK_DELTA_MAIN_NET),
+                ConsensusRuleSet::SoftforkEpsilon => Some(BLOCK_HEIGHT_SOFTFORK_EPSILON_MAIN_NET),
+                ConsensusRuleSet::HardforkZeta => Some(BLOCK_HEIGHT_HARDFORK_ZETA_MAIN_NET),
+            },
+            Network::Testnet(0) => match self {
+                ConsensusRuleSet::Reboot => Some(BlockHeight::genesis()),
+                ConsensusRuleSet::HardforkAlpha => Some(BLOCK_HEIGHT_HARDFORK_ALPHA_TESTNET),
+                ConsensusRuleSet::TvmProofVersion1 => {
+                    Some(BLOCK_HEIGHT_HARDFORK_TVMV_PROOF_V1_TESTNET)
+                }
+                ConsensusRuleSet::HardforkBeta => Some(BLOCK_HEIGHT_HARDFORK_BETA_TESTNET),
+                ConsensusRuleSet::HardforkGamma => Some(BLOCK_HEIGHT_HARDFORK_GAMMA_TESTNET),
+                ConsensusRuleSet::HardforkDelta => Some(BLOCK_HEIGHT_HARDFORK_DELTA_TESTNET),
+                ConsensusRuleSet::SoftforkEpsilon => Some(BLOCK_HEIGHT_SOFTFORK_EPSILON_TESTNET),
+                ConsensusRuleSet::HardforkZeta => Some(BLOCK_HEIGHT_HARDFORK_ZETA_TESTNET),
+            },
+            _ => match self {
+                // Not genesis: an epoch cannot start there.
+                ConsensusRuleSet::HardforkZeta => Some(BlockHeight::genesis().next()),
+                ConsensusRuleSet::Reboot
+                | ConsensusRuleSet::HardforkAlpha
+                | ConsensusRuleSet::TvmProofVersion1
+                | ConsensusRuleSet::HardforkBeta
+                | ConsensusRuleSet::HardforkGamma
+                | ConsensusRuleSet::HardforkDelta
+                | ConsensusRuleSet::SoftforkEpsilon => None,
+            },
         }
     }
 
@@ -254,7 +322,7 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::HardforkBeta
             | ConsensusRuleSet::HardforkGamma
             | ConsensusRuleSet::HardforkDelta => false,
-            ConsensusRuleSet::SoftforkEpsilon => true,
+            ConsensusRuleSet::SoftforkEpsilon | ConsensusRuleSet::HardforkZeta => true,
         }
     }
 
@@ -268,7 +336,7 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::HardforkBeta
             | ConsensusRuleSet::HardforkGamma
             | ConsensusRuleSet::HardforkDelta => false,
-            ConsensusRuleSet::SoftforkEpsilon => {
+            ConsensusRuleSet::SoftforkEpsilon | ConsensusRuleSet::HardforkZeta => {
                 // Testnet(1) is excluded from this rule to allow for the
                 // construction of "genesis blocks" with another block height
                 // than 0. Without this exclusion, all tests would have to start
@@ -282,7 +350,7 @@ impl ConsensusRuleSet {
     /// Minimum proving work associated with the SWBF update claim.
     ///
     /// A minimum value for the sum of padded heights of all leaf proofs in the
-    /// SWBF update tree. Enforced to avoid that the composer who build empty
+    /// SWBF update tree. Enforced to avoid that the composer who builds empty
     /// blocks can build the block proposal faster than those who include
     /// transactions.
     pub fn min_swbf_padded_rows(&self, network: Network) -> u64 {
@@ -293,7 +361,7 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::HardforkBeta
             | ConsensusRuleSet::HardforkGamma
             | ConsensusRuleSet::HardforkDelta => 0,
-            ConsensusRuleSet::SoftforkEpsilon => match network {
+            ConsensusRuleSet::SoftforkEpsilon | ConsensusRuleSet::HardforkZeta => match network {
                 Network::Main | Network::Testnet(0) => 1 << 23,
                 Network::Testnet(1) => 1 << 22,
                 _ if network.use_mock_proof() => 0,
@@ -302,45 +370,70 @@ impl ConsensusRuleSet {
         }
     }
 
-    /// The table a network's blocks carry in the `PredecessorIsValid` claim
-    /// from hard fork epsilon on, with the parameters of the latest rule set.
-    pub fn epoch_table(network: Network) -> EpochTable {
-        let activation_height = Self::epsilon_activation_block_height(network);
-        let rule_set = Self::infer_from(network, activation_height);
-        let initial_counter = Self::lustration_counter_initial(network, activation_height)
-            .expect("all hard fork epsilon blocks lustrate");
-        let epoch_resets_lustration = Self::resets_lustration_status(network, activation_height);
-        EpochTable::new(&[Epoch {
-            height: activation_height.into(),
-            minimum_block_time: network.minimum_block_time(),
-            target_block_interval: network.target_block_interval(),
-            max_num_inputs: bfe!(rule_set.max_num_inputs() as u64),
-            max_num_outputs: bfe!(rule_set.max_num_outputs() as u64),
-            max_num_announcements: bfe!(rule_set.max_num_announcements() as u64),
-            max_block_size: bfe!(rule_set.max_block_size() as u64),
-            transaction_backdating_threshold: rule_set
-                .transaction_backdating_threshold()
-                .expect("epsilon limits backdating"),
-            speedup_log2: bfe!(0),
-            equivalent_height_offset: bfe!(0),
-            lustration_counter_initial: initial_counter,
-            resets_lustration_status: bfe!(u64::from(epoch_resets_lustration)),
-            min_swbf_padded_rows: bfe!(rule_set.min_swbf_padded_rows(network)),
-            block_program_digest: BlockProgram.hash(),
-            single_proof_digest: SingleProof::new(rule_set).hash(),
-            swbf_aggregation_digest: SwbfUpdateAggregation::new().hash(),
-        }])
+    /// The table a network's block at this height carries in the
+    /// `PredecessorIsValid` claim, from softfork epsilon on.
+    ///
+    /// Holds the first epoch, plus every later epoch that has started by
+    /// `height`. Epochs that have not started yet are left out.
+    pub fn epoch_table(network: Network, height: BlockHeight) -> EpochTable {
+        let mut epochs = vec![];
+        for rules in ConsensusRuleSet::iter() {
+            // Skip rule sets before succinctness was activated
+            if !rules.requires_predecessor_claim() {
+                continue;
+            }
+
+            // Skip rules that never applied on this network
+            let Some(activation_height) = rules.first_block(network) else {
+                continue;
+            };
+
+            // Skip rules that are not yet active
+            if !epochs.is_empty() && activation_height > height {
+                continue;
+            }
+
+            let initial_counter = Self::lustration_counter_initial(network, activation_height)
+                .expect("all blocks with epoch tables lustrate");
+            let epoch_resets_lustration =
+                Self::resets_lustration_status(network, activation_height);
+
+            let epoch = Epoch {
+                height: activation_height.into(),
+                minimum_block_time: network.minimum_block_time(),
+                target_block_interval: network.target_block_interval(),
+                max_num_inputs: bfe!(rules.max_num_inputs() as u64),
+                max_num_outputs: bfe!(rules.max_num_outputs() as u64),
+                max_num_announcements: bfe!(rules.max_num_announcements() as u64),
+                max_block_size: bfe!(rules.max_block_size() as u64),
+                transaction_backdating_threshold: rules
+                    .transaction_backdating_threshold()
+                    .expect("epsilon limits backdating"),
+                speedup_log2: bfe!(0),
+                equivalent_height_offset: bfe!(0),
+                lustration_counter_initial: initial_counter,
+                resets_lustration_status: bfe!(u64::from(epoch_resets_lustration)),
+                min_swbf_padded_rows: bfe!(rules.min_swbf_padded_rows(network)),
+                block_program_digest: BlockProgram.hash(),
+                single_proof_digest: SingleProof::new(rules).hash(),
+                swbf_aggregation_digest: SwbfUpdateAggregation::new().hash(),
+            };
+            epochs.push(epoch);
+        }
+
+        EpochTable::new(&epochs)
     }
 
     pub fn memory_hard_pow(&self) -> bool {
         match self {
-            ConsensusRuleSet::Reboot => true,
-            ConsensusRuleSet::HardforkAlpha => true,
-            ConsensusRuleSet::TvmProofVersion1 => true,
-            ConsensusRuleSet::HardforkBeta => false,
-            ConsensusRuleSet::HardforkGamma => false,
-            ConsensusRuleSet::HardforkDelta => false,
-            ConsensusRuleSet::SoftforkEpsilon => false,
+            ConsensusRuleSet::Reboot
+            | ConsensusRuleSet::HardforkAlpha
+            | ConsensusRuleSet::TvmProofVersion1 => true,
+            ConsensusRuleSet::HardforkBeta
+            | ConsensusRuleSet::HardforkGamma
+            | ConsensusRuleSet::HardforkDelta
+            | ConsensusRuleSet::SoftforkEpsilon
+            | ConsensusRuleSet::HardforkZeta => false,
         }
     }
 
@@ -348,13 +441,14 @@ impl ConsensusRuleSet {
     /// and false if it is defined relative to own difficulty value.
     pub fn use_parent_difficulty(&self) -> bool {
         match self {
-            ConsensusRuleSet::Reboot => true,
-            ConsensusRuleSet::HardforkAlpha => true,
-            ConsensusRuleSet::TvmProofVersion1 => true,
-            ConsensusRuleSet::HardforkBeta => false,
-            ConsensusRuleSet::HardforkGamma => false,
-            ConsensusRuleSet::HardforkDelta => false,
-            ConsensusRuleSet::SoftforkEpsilon => false,
+            ConsensusRuleSet::Reboot
+            | ConsensusRuleSet::HardforkAlpha
+            | ConsensusRuleSet::TvmProofVersion1 => true,
+            ConsensusRuleSet::HardforkBeta
+            | ConsensusRuleSet::HardforkGamma
+            | ConsensusRuleSet::HardforkDelta
+            | ConsensusRuleSet::SoftforkEpsilon
+            | ConsensusRuleSet::HardforkZeta => false,
         }
     }
 
@@ -363,10 +457,11 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::Reboot
             | ConsensusRuleSet::HardforkAlpha
             | ConsensusRuleSet::TvmProofVersion1 => false,
-            ConsensusRuleSet::HardforkBeta => true,
-            ConsensusRuleSet::HardforkGamma => true,
-            ConsensusRuleSet::HardforkDelta => true,
-            ConsensusRuleSet::SoftforkEpsilon => true,
+            ConsensusRuleSet::HardforkBeta
+            | ConsensusRuleSet::HardforkGamma
+            | ConsensusRuleSet::HardforkDelta
+            | ConsensusRuleSet::SoftforkEpsilon
+            | ConsensusRuleSet::HardforkZeta => true,
         }
     }
 
@@ -375,10 +470,11 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::Reboot
             | ConsensusRuleSet::HardforkAlpha
             | ConsensusRuleSet::TvmProofVersion1 => false,
-            ConsensusRuleSet::HardforkBeta => true,
-            ConsensusRuleSet::HardforkGamma => true,
-            ConsensusRuleSet::HardforkDelta => true,
-            ConsensusRuleSet::SoftforkEpsilon => true,
+            ConsensusRuleSet::HardforkBeta
+            | ConsensusRuleSet::HardforkGamma
+            | ConsensusRuleSet::HardforkDelta
+            | ConsensusRuleSet::SoftforkEpsilon
+            | ConsensusRuleSet::HardforkZeta => true,
         }
     }
 
@@ -390,7 +486,8 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::HardforkBeta => None,
             ConsensusRuleSet::HardforkGamma
             | ConsensusRuleSet::HardforkDelta
-            | ConsensusRuleSet::SoftforkEpsilon => Some(TX_BACKDATING_LIMIT),
+            | ConsensusRuleSet::SoftforkEpsilon
+            | ConsensusRuleSet::HardforkZeta => Some(TX_BACKDATING_LIMIT),
         }
     }
 
@@ -406,12 +503,14 @@ impl ConsensusRuleSet {
     /// invalid.
     pub fn enforce_transaction_retirement(&self) -> bool {
         match self {
-            ConsensusRuleSet::Reboot => false,
-            ConsensusRuleSet::HardforkAlpha => false,
-            ConsensusRuleSet::TvmProofVersion1 => false,
-            ConsensusRuleSet::HardforkBeta => false,
-            ConsensusRuleSet::HardforkGamma => false,
-            ConsensusRuleSet::HardforkDelta | ConsensusRuleSet::SoftforkEpsilon => true,
+            ConsensusRuleSet::Reboot
+            | ConsensusRuleSet::HardforkAlpha
+            | ConsensusRuleSet::TvmProofVersion1
+            | ConsensusRuleSet::HardforkBeta
+            | ConsensusRuleSet::HardforkGamma => false,
+            ConsensusRuleSet::HardforkDelta
+            | ConsensusRuleSet::SoftforkEpsilon
+            | ConsensusRuleSet::HardforkZeta => true,
         }
     }
 
@@ -433,7 +532,9 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::TvmProofVersion1
             | ConsensusRuleSet::HardforkBeta
             | ConsensusRuleSet::HardforkGamma => false,
-            ConsensusRuleSet::HardforkDelta | ConsensusRuleSet::SoftforkEpsilon => true,
+            ConsensusRuleSet::HardforkDelta
+            | ConsensusRuleSet::SoftforkEpsilon
+            | ConsensusRuleSet::HardforkZeta => true,
         }
     }
 
@@ -455,7 +556,9 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::TvmProofVersion1 => unreachable!("Lustration not active"),
             ConsensusRuleSet::HardforkBeta => false,
             ConsensusRuleSet::HardforkGamma => true,
-            ConsensusRuleSet::HardforkDelta | ConsensusRuleSet::SoftforkEpsilon => true,
+            ConsensusRuleSet::HardforkDelta
+            | ConsensusRuleSet::SoftforkEpsilon
+            | ConsensusRuleSet::HardforkZeta => true,
         }
     }
 
@@ -476,7 +579,22 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::TvmProofVersion1 => false,
             ConsensusRuleSet::HardforkBeta => false,
             ConsensusRuleSet::HardforkGamma => false,
-            ConsensusRuleSet::HardforkDelta | ConsensusRuleSet::SoftforkEpsilon => true,
+            ConsensusRuleSet::HardforkDelta
+            | ConsensusRuleSet::SoftforkEpsilon
+            | ConsensusRuleSet::HardforkZeta => true,
+        }
+    }
+
+    pub fn allow_inputs_in_coinbase(&self) -> bool {
+        match self {
+            ConsensusRuleSet::Reboot
+            | ConsensusRuleSet::HardforkAlpha
+            | ConsensusRuleSet::TvmProofVersion1
+            | ConsensusRuleSet::HardforkBeta
+            | ConsensusRuleSet::HardforkGamma
+            | ConsensusRuleSet::HardforkDelta
+            | ConsensusRuleSet::SoftforkEpsilon => false,
+            ConsensusRuleSet::HardforkZeta => true,
         }
     }
 
@@ -488,9 +606,9 @@ impl ConsensusRuleSet {
             ConsensusRuleSet::TvmProofVersion1 => TritonProofVersion::V1,
             ConsensusRuleSet::HardforkBeta => TritonProofVersion::V1,
             ConsensusRuleSet::HardforkGamma => TritonProofVersion::V5,
-            ConsensusRuleSet::HardforkDelta | ConsensusRuleSet::SoftforkEpsilon => {
-                TritonProofVersion::V8
-            }
+            ConsensusRuleSet::HardforkDelta
+            | ConsensusRuleSet::SoftforkEpsilon
+            | ConsensusRuleSet::HardforkZeta => TritonProofVersion::V8,
         }
     }
 
@@ -503,7 +621,8 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::HardforkBeta
             | ConsensusRuleSet::HardforkGamma
             | ConsensusRuleSet::HardforkDelta
-            | ConsensusRuleSet::SoftforkEpsilon => {
+            | ConsensusRuleSet::SoftforkEpsilon
+            | ConsensusRuleSet::HardforkZeta => {
                 // This size is 8MB which should keep it feasible to run archival nodes for
                 // many years without requiring excessive disk space.
                 1_000_000
@@ -536,7 +655,8 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::HardforkBeta
             | ConsensusRuleSet::HardforkGamma
             | ConsensusRuleSet::HardforkDelta
-            | ConsensusRuleSet::SoftforkEpsilon => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
+            | ConsensusRuleSet::SoftforkEpsilon
+            | ConsensusRuleSet::HardforkZeta => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
         }
     }
     pub fn max_num_outputs(&self) -> usize {
@@ -547,7 +667,8 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::HardforkBeta
             | ConsensusRuleSet::HardforkGamma
             | ConsensusRuleSet::HardforkDelta
-            | ConsensusRuleSet::SoftforkEpsilon => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
+            | ConsensusRuleSet::SoftforkEpsilon
+            | ConsensusRuleSet::HardforkZeta => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
         }
     }
     pub fn max_num_announcements(&self) -> usize {
@@ -558,7 +679,8 @@ impl ConsensusRuleSet {
             | ConsensusRuleSet::HardforkBeta
             | ConsensusRuleSet::HardforkGamma
             | ConsensusRuleSet::HardforkDelta
-            | ConsensusRuleSet::SoftforkEpsilon => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
+            | ConsensusRuleSet::SoftforkEpsilon
+            | ConsensusRuleSet::HardforkZeta => MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS,
         }
     }
 
@@ -711,6 +833,20 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn first_block_of_rule_set_main_net() {
+        for network in [Network::Main, Network::Testnet(0)] {
+            for rules in ConsensusRuleSet::iter() {
+                let activation = rules.first_block(network).unwrap();
+                assert_eq!(rules, ConsensusRuleSet::infer_from(network, activation));
+                let Some(parent) = activation.previous() else {
+                    continue;
+                };
+                assert_ne!(rules, ConsensusRuleSet::infer_from(network, parent));
+            }
+        }
+    }
+
+    #[test]
     fn future_and_past_memory_hardness() {
         assert!(ConsensusRuleSet::infer_from(Network::Main, 1_000u64.into()).memory_hard_pow());
         assert!(!ConsensusRuleSet::infer_from(Network::Main, 100_000u64.into()).memory_hard_pow());
@@ -764,8 +900,9 @@ pub(crate) mod tests {
 
     #[test]
     fn epoch_on_main_net() {
-        let table = ConsensusRuleSet::epoch_table(Network::Main);
-        let expected = Epoch {
+        let epsilon_table =
+            ConsensusRuleSet::epoch_table(Network::Main, BLOCK_HEIGHT_SOFTFORK_EPSILON_MAIN_NET);
+        let expected_epsilon = Epoch {
             height: bfe!(BLOCK_HEIGHT_SOFTFORK_EPSILON_MAIN_NET.value()),
             minimum_block_time: Timestamp::seconds(60),
             target_block_interval: Timestamp::millis(588_000),
@@ -783,12 +920,32 @@ pub(crate) mod tests {
             single_proof_digest: SingleProof::new(ConsensusRuleSet::SoftforkEpsilon).hash(),
             swbf_aggregation_digest: SwbfUpdateAggregation::new().hash(),
         };
-        assert_eq!(EpochTable::new(&[expected]), table);
+        assert_eq!(EpochTable::new(&[expected_epsilon]), epsilon_table);
         assert_eq!(
-            expected,
-            table.in_force_at(BLOCK_HEIGHT_SOFTFORK_EPSILON_MAIN_NET)
+            expected_epsilon,
+            epsilon_table.in_force_at(BLOCK_HEIGHT_SOFTFORK_EPSILON_MAIN_NET)
         );
-        assert_eq!(expected, table.in_force_at(1_000_000.into()));
+        assert_eq!(
+            expected_epsilon,
+            epsilon_table.in_force_at(1_000_000.into())
+        );
+
+        let mut expected_zeta = expected_epsilon;
+        expected_zeta.height = BLOCK_HEIGHT_HARDFORK_ZETA_MAIN_NET.into();
+        expected_zeta.single_proof_digest = SingleProof::new(ConsensusRuleSet::HardforkZeta).hash();
+
+        for height in [
+            BLOCK_HEIGHT_HARDFORK_ZETA_MAIN_NET,
+            BLOCK_HEIGHT_HARDFORK_ZETA_MAIN_NET.next(),
+        ] {
+            let zeta_table = ConsensusRuleSet::epoch_table(Network::Main, height);
+            assert_eq!(
+                EpochTable::new(&[expected_epsilon, expected_zeta]),
+                zeta_table
+            );
+            assert_eq!(expected_zeta, zeta_table.in_force_at(height));
+            assert_eq!(expected_zeta, zeta_table.in_force_at(height.next()));
+        }
     }
 
     /// The host reads rule 2.g's subsidy and rules 0.d and 0.e's block times
@@ -798,7 +955,8 @@ pub(crate) mod tests {
     #[test]
     fn every_epoch_agrees_with_what_the_host_reads_from_the_network() {
         for network in Network::all_networks() {
-            for epoch in ConsensusRuleSet::epoch_table(network).epochs() {
+            let far_future = BlockHeight::new(bfe!(u64::from(u32::MAX)));
+            for epoch in ConsensusRuleSet::epoch_table(network, far_future).epochs() {
                 assert_eq!(
                     network.minimum_block_time(),
                     epoch.minimum_block_time,
@@ -829,19 +987,37 @@ pub(crate) mod tests {
 
     #[test]
     fn epoch_on_testnet_0() {
-        let table = ConsensusRuleSet::epoch_table(Network::Testnet(0));
+        let table = ConsensusRuleSet::epoch_table(
+            Network::Testnet(0),
+            BLOCK_HEIGHT_SOFTFORK_EPSILON_TESTNET,
+        );
         let expected = Epoch {
             height: BLOCK_HEIGHT_SOFTFORK_EPSILON_TESTNET.into(),
             lustration_counter_initial: NativeCurrencyAmount::coins(4_154_368),
-            ..ConsensusRuleSet::epoch_table(Network::Main).in_force_at(65_000.into())
+            ..ConsensusRuleSet::epoch_table(Network::Main, 65_000.into()).in_force_at(65_000.into())
         };
         assert_eq!(EpochTable::new(&[expected]), table);
     }
 
     #[test]
+    fn zeta_table_around_zeta_activation() {
+        for (network, zeta) in [
+            (Network::Main, BLOCK_HEIGHT_HARDFORK_ZETA_MAIN_NET),
+            (Network::Testnet(0), BLOCK_HEIGHT_HARDFORK_ZETA_TESTNET),
+        ] {
+            let before = ConsensusRuleSet::epoch_table(network, zeta.previous().unwrap());
+            assert_eq!(1, before.epochs().count(), "{network:?}");
+
+            let from = ConsensusRuleSet::epoch_table(network, zeta);
+            assert_eq!(2, from.epochs().count(), "{network:?}");
+            assert_eq!(before.activation_height(), from.activation_height());
+        }
+    }
+
+    #[test]
     fn network_table_activates_with_epsilon() {
         for network in Network::all_networks() {
-            let table = ConsensusRuleSet::epoch_table(network);
+            let table = ConsensusRuleSet::epoch_table(network, BlockHeight::genesis());
             let height = table.activation_height();
             let rule_set = ConsensusRuleSet::infer_from(network, height);
             assert!(rule_set.requires_predecessor_claim());
@@ -880,6 +1056,7 @@ pub(crate) mod tests {
         assert!(!ConsensusRuleSet::HardforkGamma.use_parent_difficulty());
         assert!(!ConsensusRuleSet::HardforkDelta.use_parent_difficulty());
         assert!(!ConsensusRuleSet::SoftforkEpsilon.use_parent_difficulty());
+        assert!(!ConsensusRuleSet::HardforkZeta.use_parent_difficulty());
     }
 
     #[test]
@@ -891,6 +1068,7 @@ pub(crate) mod tests {
         assert!(!ConsensusRuleSet::HardforkGamma.enforce_transaction_retirement());
         assert!(ConsensusRuleSet::HardforkDelta.enforce_transaction_retirement());
         assert!(ConsensusRuleSet::SoftforkEpsilon.enforce_transaction_retirement());
+        assert!(ConsensusRuleSet::HardforkZeta.enforce_transaction_retirement());
     }
 
     #[test]
@@ -933,9 +1111,14 @@ pub(crate) mod tests {
                 .triton_proof_version()
                 .version(),
         );
+        assert_eq!(
+            8,
+            ConsensusRuleSet::HardforkZeta
+                .triton_proof_version()
+                .version(),
+        );
     }
 
-    /// The newest rule set must name the version the *linked* Triton VM uses.
     #[test]
     fn newest_rule_set_tracks_the_linked_triton_vm() {
         use tasm_lib::triton_vm::proof::CURRENT_VERSION;

@@ -151,7 +151,9 @@ mod tests {
             transaction::validity::collect_type_scripts::CollectTypeScripts,
             transaction::validity::kernel_to_outputs::KernelToOutputs,
             type_scripts::native_currency::NativeCurrency,
-            transaction::validity::removal_records_integrity::RemovalRecordsIntegrity,
+            transaction::validity::removal_records_integrity::RemovalRecordsIntegrity::new(
+                crate::consensus_rule_set::ConsensusRuleSet::SoftforkEpsilon
+            ),
             transaction::validity::single_proof::SingleProof::new(
                 crate::consensus_rule_set::ConsensusRuleSet::HardforkDelta
             ),

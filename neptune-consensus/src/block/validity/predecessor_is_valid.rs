@@ -114,7 +114,8 @@ impl PredecessorIsValidWitness {
 
     /// Under the network's table.
     pub fn nondeterminism(&self, program: &PredecessorIsValid, network: Network) -> NonDeterminism {
-        self.nondeterminism_under(program, &ConsensusRuleSet::epoch_table(network))
+        let height = self.prev_block.header().height.next();
+        self.nondeterminism_under(program, &ConsensusRuleSet::epoch_table(network, height))
     }
 
     fn nondeterminism_under(
@@ -427,7 +428,7 @@ impl PredecessorIsValid {
             next_block_body_mh,
             height,
             Block::genesis_digest(network),
-            &ConsensusRuleSet::epoch_table(network),
+            &ConsensusRuleSet::epoch_table(network, height),
         );
         let version = ConsensusRuleSet::infer_from(network, height)
             .triton_proof_version()
@@ -647,7 +648,7 @@ impl PredecessorIsValid {
             height,
             prev_block,
             Block::genesis_digest(network),
-            &ConsensusRuleSet::epoch_table(network),
+            &ConsensusRuleSet::epoch_table(network, height),
             ConsensusRuleSet::infer_from(network, height),
         )
     }
@@ -2950,6 +2951,7 @@ mod tests {
     use crate::block::BlockProof;
     use crate::block::BlockValidationError;
     use crate::consensus_rule_set::LustrationRule;
+    use crate::consensus_rule_set::BLOCK_HEIGHT_SOFTFORK_EPSILON_MAIN_NET;
     use crate::proof_abstractions::tasm::builtins as tasm;
     use crate::proof_abstractions::tasm::builtins::verify_stark;
     use crate::proof_abstractions::tasm::program::proof_cache::load_proof_or_produce_and_save;
@@ -3470,7 +3472,7 @@ mod tests {
     }
 
     fn epochs() -> EpochTable {
-        ConsensusRuleSet::epoch_table(Network::Main)
+        ConsensusRuleSet::epoch_table(Network::Main, BLOCK_HEIGHT_SOFTFORK_EPSILON_MAIN_NET)
     }
 
     /// Give the header the difficulty and cumulative proof of work its

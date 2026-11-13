@@ -383,12 +383,18 @@ pub async fn produce_single_proof(
     consensus_rule_set: ConsensusRuleSet,
 ) -> Result<Proof, CreateProofError> {
     match consensus_rule_set {
-        ConsensusRuleSet::HardforkDelta | ConsensusRuleSet::SoftforkEpsilon => {
+        ConsensusRuleSet::HardforkDelta
+        | ConsensusRuleSet::SoftforkEpsilon
+        | ConsensusRuleSet::HardforkZeta => {
             SingleProof::new(consensus_rule_set)
                 .produce(primitive_witness, triton_vm_job_queue, proof_job_options)
                 .await
         }
-        _ => Err(CreateProofError::DeprecatedConsensusRules),
+        ConsensusRuleSet::Reboot
+        | ConsensusRuleSet::HardforkAlpha
+        | ConsensusRuleSet::TvmProofVersion1
+        | ConsensusRuleSet::HardforkBeta
+        | ConsensusRuleSet::HardforkGamma => Err(CreateProofError::DeprecatedConsensusRules),
     }
 }
 
@@ -418,7 +424,9 @@ pub fn single_proof_claim(
             Claim::new(Digest::try_from_hex(SINGLE_PROOF_PROGRAM_DIGEST_HF_GAMMA).unwrap())
                 .with_input(tx_kernel_mast_hash.reversed().values().to_vec())
         }
-        ConsensusRuleSet::HardforkDelta | ConsensusRuleSet::SoftforkEpsilon => {
+        ConsensusRuleSet::HardforkDelta
+        | ConsensusRuleSet::SoftforkEpsilon
+        | ConsensusRuleSet::HardforkZeta => {
             SingleProof::new(consensus_rule_set).claim(tx_kernel_mast_hash)
         }
     };
@@ -1619,6 +1627,15 @@ pub(crate) mod tests {
         test_program_snapshot!(
             SingleProof::new(ConsensusRuleSet::HardforkDelta),
             "a084f6941fccdfc324bbea82a5dcbf83c0927ccfadce224501873bb540dfd95f2bf67e9008c9478d"
+        );
+    }
+
+    mod zeta_program {
+        use super::*;
+
+        test_program_snapshot!(
+            SingleProof::new(ConsensusRuleSet::HardforkZeta),
+            "399459348c12831e1dd1617cc91a8d746de3d3967f3da486a2d0ea7589ad843b300d5868d918bb60"
         );
     }
 }

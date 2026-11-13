@@ -418,19 +418,19 @@ impl<const MERKLE_TREE_HEIGHT: usize> Pow<MERKLE_TREE_HEIGHT> {
     ) -> Result<(), PowValidationError> {
         let pow_digest = auth_paths.fast_mast_hash(self);
         let meets_threshold = pow_digest <= target;
+
+        if !consensus_rule_set.memory_hard_pow() {
+            if !meets_threshold {
+                return Err(PowValidationError::ThresholdNotMet);
+            }
+
+            return Ok(());
+        }
+
         let leaf_prefix = match consensus_rule_set {
             ConsensusRuleSet::Reboot => auth_paths.commit(),
             ConsensusRuleSet::HardforkAlpha | ConsensusRuleSet::TvmProofVersion1 => parent_digest,
-            ConsensusRuleSet::HardforkBeta
-            | ConsensusRuleSet::HardforkGamma
-            | ConsensusRuleSet::HardforkDelta
-            | ConsensusRuleSet::SoftforkEpsilon => {
-                if !meets_threshold {
-                    return Err(PowValidationError::ThresholdNotMet);
-                }
-
-                return Ok(());
-            }
+            _ => unreachable!("Non-memory hard guessing handled above"),
         };
 
         let index_picker_preimage = Tip5::hash_pair(self.root, auth_paths.commit());

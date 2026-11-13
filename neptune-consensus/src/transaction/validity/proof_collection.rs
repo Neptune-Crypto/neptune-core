@@ -116,10 +116,16 @@ impl ProofCollection {
 
         // prove
         debug!("proving RemovalRecordsIntegrity");
-        let removal_records_integrity = RemovalRecordsIntegrity
+        let rri_program = RemovalRecordsIntegrity::new(consensus_rule_set);
+        let removal_records_integrity = rri_program
             .prove(
-                removal_records_integrity_witness
-                    .claim()
+                Claim::about_program(&rri_program.program())
+                    .with_input(
+                        removal_records_integrity_witness
+                            .standard_input()
+                            .individual_tokens,
+                    )
+                    .with_output(removal_records_integrity_witness.output())
                     .about_version(proof_version),
                 removal_records_integrity_witness.nondeterminism(),
                 triton_vm_job_queue.clone(),
@@ -339,7 +345,7 @@ impl ProofCollection {
 
         // compile claims
         let removal_records_integrity_claim =
-            Claim::about_program(&RemovalRecordsIntegrity.program())
+            Claim::about_program(&RemovalRecordsIntegrity::new(consensus_rule_set).program())
                 .about_version(proof_version)
                 .with_input(self.kernel_mast_hash.reversed().values())
                 .with_output(self.salted_inputs_hash.values().to_vec());
@@ -457,7 +463,7 @@ impl ProofCollection {
     }
 
     pub fn removal_records_integrity_claim(&self, consensus_rule_set: ConsensusRuleSet) -> Claim {
-        Claim::about_program(&RemovalRecordsIntegrity.program())
+        Claim::about_program(&RemovalRecordsIntegrity::new(consensus_rule_set).program())
             .about_version(consensus_rule_set.triton_proof_version().version())
             .with_input(self.kernel_mast_hash.reversed().values())
             .with_output(self.salted_inputs_hash.values().to_vec())
@@ -859,8 +865,10 @@ pub mod tests {
                 collect_type_scripts_witness,
             ) = Self::extract_specific_witnesses(primitive_witness);
 
-            witness_halts_gracefully(RemovalRecordsIntegrity, removal_records_integrity_witness)
-                && witness_halts_gracefully(CollectLockScripts, collect_lock_scripts_witness)
+            witness_halts_gracefully(
+                RemovalRecordsIntegrity::new(ConsensusRuleSet::SoftforkEpsilon),
+                removal_records_integrity_witness,
+            ) && witness_halts_gracefully(CollectLockScripts, collect_lock_scripts_witness)
                 && witness_halts_gracefully(KernelToOutputs, kernel_to_outputs_witness)
                 && witness_halts_gracefully(CollectTypeScripts, collect_type_scripts_witness)
                 && all_lock_scripts_halt

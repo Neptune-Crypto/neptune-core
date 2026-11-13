@@ -1874,7 +1874,8 @@ pub(crate) mod tests {
     /// [`rebase_static_addresses`] normalizes away.
     #[test]
     fn forge_confirmed_loop_matches_rri() {
-        let (_, rri_code) = RemovalRecordsIntegrity.library_and_code();
+        let (_, rri_code) =
+            RemovalRecordsIntegrity::new(ConsensusRuleSet::SoftforkEpsilon).library_and_code();
         let (_, forge_code) = LinkProof.library_and_code();
 
         let rri_loop = extract_loop_body(&rri_code, "for_all_utxos");
