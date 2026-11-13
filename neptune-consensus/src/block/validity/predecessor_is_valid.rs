@@ -308,7 +308,7 @@ pub struct ParentBlockInfo {
     pub timestamp: Timestamp,
     pub cumulative_proof_of_work: ProofOfWork,
     pub difficulty: Difficulty,
-    pub mutator_set_hash: Digest,
+    pub mutator_set_hash_after: Digest,
 
     /// Total proof-of-word since activation of this program.
     ///
@@ -335,7 +335,7 @@ impl ParentBlockInfo {
         // The mutator set the next block's transaction is built on. A
         // previous block whose fee is negative is rejected regardless, so
         // any value serves for it.
-        let mutator_set_after_prev_block = prev_block
+        let mutator_set_hash_after = prev_block
             .mutator_set_accumulator_after()
             .map(|mutator_set| mutator_set.hash())
             .unwrap_or_default();
@@ -345,7 +345,7 @@ impl ParentBlockInfo {
             timestamp: header.timestamp,
             cumulative_proof_of_work: header.cumulative_proof_of_work,
             difficulty: header.difficulty,
-            mutator_set_hash: mutator_set_after_prev_block,
+            mutator_set_hash_after,
             work_since_activation,
             activation_parent_hash,
         }
@@ -363,7 +363,7 @@ impl ParentBlockInfo {
             vec![self.timestamp.0],
             self.cumulative_proof_of_work.encode(),
             self.difficulty.encode(),
-            self.mutator_set_hash.values().to_vec(),
+            self.mutator_set_hash_after.values().to_vec(),
             self.work_since_activation.encode(),
             self.activation_parent_hash.values().to_vec(),
         ]
@@ -516,7 +516,7 @@ impl PredecessorIsValid {
             )
             .ok()?,
             difficulty: *Difficulty::decode(&output[difficulty_offset..mutator_set_offset]).ok()?,
-            mutator_set_hash: Digest::new(
+            mutator_set_hash_after: Digest::new(
                 output[mutator_set_offset..work_offset].try_into().unwrap(),
             ),
             work_since_activation: *ProofOfWork::decode(
@@ -7733,7 +7733,7 @@ ones):
             assert_eq!(prev_block.header().difficulty, parsed.difficulty);
             assert_eq!(
                 prev_block.mutator_set_accumulator_after().unwrap().hash(),
-                parsed.mutator_set_hash
+                parsed.mutator_set_hash_after
             );
             assert_eq!(
                 prev_block.header().prev_block_digest,

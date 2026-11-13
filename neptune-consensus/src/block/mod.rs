@@ -992,7 +992,7 @@ impl Block {
         }
 
         // 2.t)
-        if msa_before.hash() != parent.mutator_set_hash
+        if msa_before.hash() != parent.mutator_set_hash_after
             || msa_before.hash() != self.body().transaction_kernel.mutator_set_hash
         {
             return Err(BlockValidationError::TransactionMutatorSetMismatch);
