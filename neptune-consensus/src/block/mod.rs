@@ -1,5 +1,6 @@
 pub mod block_appendix;
 pub mod block_body;
+pub mod block_extra_data;
 pub mod block_header;
 #[cfg(test)]
 mod block_height_tests;
