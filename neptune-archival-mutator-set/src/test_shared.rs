@@ -6,8 +6,12 @@
 
 use neptune_database::storage::storage_vec::traits::*;
 use neptune_database::NeptuneLevelDb;
+use neptune_mutator_set::commit;
+use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use neptune_mutator_set::removal_record::chunk::Chunk;
 use neptune_mutator_set::shared::CHUNK_SIZE;
+use tasm_lib::prelude::Tip5;
+use tasm_lib::triton_vm::prelude::BFieldElement;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 
 use crate::archival_mutator_set::ArchivalMutatorSet;
@@ -34,6 +38,46 @@ pub async fn get_all_indices_with_duplicates<
     }
 
     ret
+}
+
+/// A mutator set with `num_additions` items added, deterministically
+/// derived from `seed`, and every `removal_stride`-th of them removed. Returns
+/// the absolute index sets of the items not removed, in order of addition.
+pub async fn populated_rusty_mutator_set(
+    num_additions: u64,
+    removal_stride: u64,
+    seed: u64,
+) -> (RustyArchivalMutatorSet, Vec<AbsoluteIndexSet>) {
+    let mut rms = empty_rusty_mutator_set().await;
+    let digest = |i: u64, k: u64| {
+        Tip5::hash_varlen(&[
+            BFieldElement::new(seed),
+            BFieldElement::new(i),
+            BFieldElement::new(k),
+        ])
+    };
+
+    let mut removed = vec![];
+    let mut kept = vec![];
+    for i in 0..num_additions {
+        let (item, sender_randomness, receiver_preimage) =
+            (digest(i, 0), digest(i, 1), digest(i, 2));
+        rms.ams_mut()
+            .add(&commit(item, sender_randomness, receiver_preimage.hash()))
+            .await;
+        let index_set = AbsoluteIndexSet::compute(item, sender_randomness, receiver_preimage, i);
+        if i % removal_stride == 0 {
+            removed.push(index_set);
+        } else {
+            kept.push(index_set);
+        }
+    }
+    rms.ams_mut()
+        .batch_remove(&removed)
+        .await
+        .expect("distinct items are no double spends");
+
+    (rms, kept)
 }
 
 pub async fn empty_rusty_mutator_set() -> RustyArchivalMutatorSet {

@@ -1,3 +1,4 @@
+use neptune_consensus::block::block_extra_data::BlockExtraData;
 use neptune_consensus::block::Block;
 use neptune_mempool::recent_mutator_sets::RecentMutatorSets;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -30,6 +31,10 @@ pub struct LightState {
 
     /// The mutator set after the tip, and after its nearest ancestors.
     recent_mutator_sets: RecentMutatorSets,
+
+    /// The tip's [`BlockExtraData`], if the rules strip chunk data from the
+    /// tip's transaction kernel and the data is known.
+    tip_extra_data: Option<BlockExtraData>,
 }
 
 impl LightState {
@@ -40,6 +45,7 @@ impl LightState {
             tip: block,
             time_to_mine: None,
             network,
+            tip_extra_data: None,
         }
     }
 
@@ -63,6 +69,16 @@ impl LightState {
         self.recent_mutator_sets.tip_mutator_set().clone()
     }
 
+    /// The tip's [`BlockExtraData`], if known.
+    pub fn tip_extra_data(&self) -> Option<&BlockExtraData> {
+        self.tip_extra_data.as_ref()
+    }
+
+    /// Set the tip's [`BlockExtraData`]. Must belong to the current tip.
+    pub(super) fn set_tip_extra_data(&mut self, tip_extra_data: Option<BlockExtraData>) {
+        self.tip_extra_data = tip_extra_data;
+    }
+
     /// The time it took miners to mine the current tip.
     pub fn time_to_mine(&self) -> Option<Timestamp> {
         self.time_to_mine
@@ -81,6 +97,7 @@ impl LightState {
 
         self.tip = new_block;
         self.time_to_mine = time_to_mine;
+        self.tip_extra_data = None;
     }
 }
 

@@ -3831,6 +3831,7 @@ dependencies = [
  "memmap2",
  "multistream-select",
  "neptune-archival-mmr",
+ "neptune-archival-mutator-set",
  "neptune-archive",
  "neptune-cash",
  "neptune-consensus",

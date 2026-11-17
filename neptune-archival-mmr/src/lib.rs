@@ -44,6 +44,7 @@ use itertools::Itertools;
 use neptune_database::storage::storage_schema::DbtVec;
 use neptune_database::storage::storage_vec::traits::*;
 use tasm_lib::prelude::Tip5;
+use tasm_lib::twenty_first::prelude::MerkleTree;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
@@ -491,6 +492,67 @@ impl<Storage: StorageVec<Digest>> ArchivalMmr<Storage> {
         let authentication_path = self.digests.get_many(&sibling_indices).await;
 
         MmrMembershipProof::new(authentication_path)
+    }
+
+    /// The authentication structure of each tree in the MMR for the given
+    /// leafs: the nodes that, together with the leafs, determine the tree's
+    /// peak, ordered as by [`MerkleTree::authentication_structure_node_indices`].
+    /// One (possibly empty) structure per tree, smallest tree first.
+    ///
+    /// # Panics
+    ///
+    /// - If a leaf index is out of range.
+    pub async fn authentication_structures(&self, leaf_indices: &[u64]) -> Vec<Vec<Digest>> {
+        let num_leafs = self.num_leafs().await;
+        let tree_heights = shared_advanced::get_peak_heights(num_leafs);
+
+        let mut merkle_leaf_indices = vec![vec![]; tree_heights.len()];
+        for &leaf_index in leaf_indices.iter().unique() {
+            assert!(
+                leaf_index < num_leafs,
+                "leaf index {leaf_index} out of range"
+            );
+            let (merkle_tree_index, peak_index) =
+                leaf_index_to_mt_index_and_peak_index(leaf_index, num_leafs);
+            let height = tree_heights[peak_index as usize];
+            merkle_leaf_indices[peak_index as usize].push(merkle_tree_index - (1 << height));
+        }
+
+        // Merkle tree node indices (root 1) of each structure, as MMR node
+        // indices. The root of a subtree of height k whose leftmost leaf has
+        // MMR node index n has node index n + 2^(k+1) - 2.
+        let mut first_leaf = 0;
+        let mut node_indices_per_tree = vec![];
+        for (&height, merkle_leaf_indices) in tree_heights.iter().zip(&merkle_leaf_indices) {
+            let node_indices = MerkleTree::authentication_structure_node_indices(
+                1_u64 << height,
+                merkle_leaf_indices,
+            )
+            .expect("leaf indices are smaller than the tree's width")
+            .map(|merkle_node_index| {
+                let depth = merkle_node_index.ilog2();
+                let subtree_height = height - depth;
+                let position = merkle_node_index - (1 << depth);
+                let leftmost_leaf = first_leaf + (position << subtree_height);
+                leaf_index_to_node_index(leftmost_leaf) + (1 << (subtree_height + 1)) - 2
+            })
+            .collect_vec();
+            node_indices_per_tree.push(node_indices);
+            first_leaf += 1 << height;
+        }
+
+        let mut digests = self
+            .digests
+            .get_many(&node_indices_per_tree.concat())
+            .await
+            .into_iter();
+        let mut authentication_structures = node_indices_per_tree
+            .iter()
+            .map(|node_indices| digests.by_ref().take(node_indices.len()).collect_vec())
+            .collect_vec();
+        authentication_structures.reverse();
+
+        authentication_structures
     }
 
     /// Returns the right-most leaf of the MMR, the leaf that was added the

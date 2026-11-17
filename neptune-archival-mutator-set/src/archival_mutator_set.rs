@@ -328,6 +328,33 @@ where
         target_chunks
     }
 
+    /// The chunk data of removal records with these index sets, deduplicated
+    /// across them, as [`RemovalRecordList::deconstruct`](neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList::deconstruct) gives it: one
+    /// authentication structure per tree of the inactive SWBF, smallest tree
+    /// first, and the (unpacked) chunks in ascending chunk index. Reads each
+    /// chunk and node once.
+    pub async fn chunk_witness_data(
+        &self,
+        index_sets: &[AbsoluteIndexSet],
+    ) -> (Vec<Vec<Digest>>, Vec<Chunk>) {
+        let window_start = self.get_batch_index_async().await * u128::from(CHUNK_SIZE);
+        let chunk_indices = index_sets
+            .iter()
+            .flat_map(|index_set| index_set.iter())
+            .filter(|index| *index < window_start)
+            .map(|index| (index / u128::from(CHUNK_SIZE)) as u64)
+            .sorted()
+            .dedup()
+            .collect_vec();
+        let authentication_structures = self
+            .swbf_inactive
+            .authentication_structures(&chunk_indices)
+            .await;
+        let chunks = self.chunks.get_many(&chunk_indices).await;
+
+        (authentication_structures, chunks)
+    }
+
     /// Restore a mutator set membership proof in a privacy-preserving manner,
     /// only leaking a fuzzy-timestamp.
     pub async fn restore_membership_proof_privacy_preserving(
@@ -620,6 +647,37 @@ mod tests {
                 .await
         );
         assert!(!archival_mutator_set.bloom_filter_contains(0u128).await);
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn chunk_data_agrees_with_deconstructed_chunk_dictionaries() {
+        use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
+
+        use crate::test_shared::populated_rusty_mutator_set;
+
+        let (rms, unspent) = populated_rusty_mutator_set(3000, 3, 0).await;
+        let ams = rms.ams();
+        let num_leafs_swbfi = ams.swbf_inactive.num_leafs().await;
+        assert!(num_leafs_swbfi > 0);
+
+        // Old and young inputs, so that some chunks are shared, some
+        // inactive, and some in the active window.
+        let index_sets = unspent.iter().step_by(37).copied().collect_vec();
+        let mut removal_records = vec![];
+        for &absolute_indices in &index_sets {
+            removal_records.push(RemovalRecord {
+                absolute_indices,
+                target_chunks: ams.chunk_dictionary(absolute_indices).await,
+            });
+        }
+        let (_, expected_structures, expected_chunks) =
+            RemovalRecordList::deconstruct(removal_records, num_leafs_swbfi, true);
+
+        let (structures, chunks) = ams.chunk_witness_data(&index_sets).await;
+        let chunks = chunks.iter().map(|chunk| chunk.pack(true)).collect_vec();
+        assert!(!chunks.is_empty());
+        assert_eq!(expected_structures, structures);
+        assert_eq!(expected_chunks, chunks);
     }
 
     #[apply(shared_tokio_runtime)]

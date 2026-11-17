@@ -16,6 +16,7 @@ use crate::network::Network;
 pub const BLOCK_FILENAME_PREFIX: &str = "blk";
 pub const BLOCK_FILENAME_EXTENSION: &str = "dat";
 pub const DIR_NAME_FOR_BLOCKS: &str = "blocks";
+pub const TIP_BLOCK_EXTRA_DATA_FILE_NAME: &str = "tip_extra_data.dat";
 pub const BANNED_IPS_DB_NAME: &str = "banned_ips";
 pub const BLOCK_INDEX_DB_NAME: &str = "block_index";
 pub const MUTATOR_SET_DIRECTORY_NAME: &str = "mutator_set";
@@ -270,6 +271,14 @@ impl DataDirectory {
         let block_file_name = format!("{prefix}{file_index}.{extension}");
 
         self.block_dir_path().join(Path::new(&block_file_name))
+    }
+
+    /// The file holding the tip's block extra data, written on shutdown.
+    ///
+    /// This file lives within `DataDirectory::block_dir_path()`.
+    pub fn tip_block_extra_data_file_path(&self) -> PathBuf {
+        self.block_dir_path()
+            .join(Path::new(TIP_BLOCK_EXTRA_DATA_FILE_NAME))
     }
 }
 

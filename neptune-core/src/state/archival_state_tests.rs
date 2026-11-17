@@ -18,6 +18,7 @@ pub(super) mod tests {
     use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use neptune_database::storage::storage_vec::traits::*;
     use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+    use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
     use neptune_primitives::block_height::BlockHeight;
     use neptune_primitives::data_directory::DataDirectory;
     use neptune_primitives::network::Network;
@@ -38,6 +39,7 @@ pub(super) mod tests {
     use crate::application::config::cli_args::Args;
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
+    use crate::state::GlobalState;
     use crate::tests::shared::blocks::guess_for_tests;
     use crate::tests::shared::files::unit_test_data_directory;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
@@ -179,6 +181,84 @@ pub(super) mod tests {
             .sbf
             .len();
         assert_ne!(0, swbf_active_sbf_len);
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn new_tip_keeps_its_block_extra_data_across_restart() {
+        let network = Network::RegTest;
+        let mut rng = StdRng::seed_from_u64(107221549302u64);
+        let cli_args = Args::default_with_network(network);
+        let alice_wallet = WalletEntropy::devnet_wallet();
+        let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
+        let mut alice = mock_genesis_global_state(0, alice_wallet, cli_args).await;
+
+        let genesis_block = Block::genesis(network);
+        let (block1, _) = make_mock_block(&genesis_block, None, alice_key, rng.random(), network);
+        alice.set_new_tip(block1.clone()).await.unwrap();
+
+        let in_seven_months = block1.kernel.header.timestamp + Timestamp::months(7);
+        let utxo = Utxo::new_native_currency(
+            LockScript::anyone_can_spend().hash(),
+            NativeCurrencyAmount::coins(4),
+        );
+        let output = TxOutput::no_notification(utxo, rng.random(), rng.random(), false);
+        let config = TxCreationConfig::default()
+            .recover_change_on_chain(alice_key.into())
+            .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+        let block_height_2 = block1.header().height.next();
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height_2);
+        assert!(!consensus_rule_set.block_carries_chunk_data());
+        let sender_tx = alice
+            .api()
+            .tx_initiator_internal()
+            .create_transaction(
+                vec![output].into(),
+                NativeCurrencyAmount::coins(2),
+                in_seven_months,
+                config,
+                consensus_rule_set,
+            )
+            .await
+            .unwrap()
+            .transaction;
+        let transaction = BlockTransaction::upgrade((*sender_tx).clone());
+        let block2 = Block::block_template_invalid_proof(
+            &block1,
+            transaction,
+            in_seven_months,
+            None,
+            network,
+        );
+        alice.set_new_tip(block2.clone()).await.unwrap();
+
+        // The mock block's kernel still carries the chunk data, which the
+        // extra data from the archival mutator set must reproduce.
+        let inputs = RemovalRecordList::try_unpack(
+            block2.body().transaction_kernel.inputs.clone(),
+            consensus_rule_set.allow_big_chunks(),
+        )
+        .unwrap();
+        assert!(!inputs.is_empty());
+        let state = alice.lock_guard().await;
+        let extra_data = state.chain.light_state().tip_extra_data().unwrap().clone();
+        let parent_mutator_set = block1.mutator_set_accumulator_after().unwrap();
+        let rebuilt = extra_data
+            .try_rebuild(&inputs, &parent_mutator_set, consensus_rule_set)
+            .unwrap();
+        assert_eq!(inputs, rebuilt);
+
+        // Written on shutdown, read back on startup for the same tip only.
+        state.persist_tip_extra_data().await.unwrap();
+        let data_dir = state.chain.archival_state().data_dir();
+        assert_eq!(
+            Some(extra_data),
+            GlobalState::load_tip_extra_data(data_dir, block2.hash()).await
+        );
+        assert_eq!(
+            None,
+            GlobalState::load_tip_extra_data(data_dir, block1.hash()).await
+        );
     }
 
     #[traced_test]

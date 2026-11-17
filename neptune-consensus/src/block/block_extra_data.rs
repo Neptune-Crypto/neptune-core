@@ -66,6 +66,24 @@ impl BlockExtraData {
         }
     }
 
+    /// Build from the parts as [`RemovalRecordList::deconstruct`] returns them,
+    /// but with unpacked chunks: one authentication structure per SWBFI
+    /// tree, smallest tree first, and the chunks in ascending chunk index.
+    pub fn from_parts(
+        authentication_structures: Vec<Vec<Digest>>,
+        chunks: Vec<Chunk>,
+        consensus_rule_set: ConsensusRuleSet,
+    ) -> Self {
+        let allow_big_chunks = consensus_rule_set.allow_big_chunks();
+        Self {
+            authentication_structures,
+            chunks: chunks
+                .iter()
+                .map(|chunk| chunk.pack(allow_big_chunks))
+                .collect(),
+        }
+    }
+
     /// Rebuild the full removal records from the inputs of a block's
     /// transaction kernel and verify them against `mutator_set`, the mutator
     /// set the kernel is valid against.
