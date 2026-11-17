@@ -1995,12 +1995,12 @@ mod tests {
     #[proptest(cases = 10)]
     fn deconstruct_try_construct_happy_path(
         #[strategy(0usize..10)] _num_records: usize,
-        #[strategy(arb::<u64>())] _num_leafs_aocl: u64,
-        #[strategy(RemovalRecord::arbitrary_synchronized_set(#_num_leafs_aocl, #_num_records))]
+        #[strategy(arb::<u64>())] num_leafs_aocl: u64,
+        #[strategy(RemovalRecord::arbitrary_synchronized_set(#num_leafs_aocl, #_num_records))]
         removal_records: Vec<RemovalRecord>,
         allow_big_chunks: bool,
     ) {
-        let num_leafs_swbfi = aocl_to_swbfi_leaf_counts(_num_leafs_aocl);
+        let num_leafs_swbfi = aocl_to_swbfi_leaf_counts(num_leafs_aocl);
         let (index_sets, authentication_structures, packed_chunks) = RemovalRecordList::deconstruct(
             removal_records.clone(),
             num_leafs_swbfi,

@@ -32,6 +32,7 @@ use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::commit;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
+use neptune_mutator_set::removal_record::RemovalRecord;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::block_height::BLOCKS_PER_GENERATION;
 use neptune_primitives::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
@@ -322,7 +323,7 @@ impl Block {
                 .await?,
             );
             let swbf_update = Self::prove_swbf_update(
-                &body,
+                primitive_witness.transaction().inputs_with_chunk_data(),
                 &primitive_witness.predecessor_block,
                 header.height,
                 previous_swbf_update,
@@ -420,15 +421,15 @@ impl Block {
         Ok((claim, proof))
     }
 
-    /// The SWBF update root claim of a block with this body on this
-    /// predecessor, with its proof. Given the root of an earlier proposal's
-    /// tree, over the body's first inputs, the tree is extended by the
-    /// inputs after those instead of proven from the start.
+    /// The SWBF update root claim of a block with these inputs (packed, with
+    /// their chunk data) on this predecessor, with its proof. Given the root
+    /// of an earlier proposal's tree, over the first inputs, the tree is
+    /// extended by the inputs after those instead of proven from the start.
     ///
     /// Proof verifies the leaf proofs [`CorrectSwbfUpdateWitness::leaves`], and
     /// guarantees to meet the required proof complexity.
     async fn prove_swbf_update(
-        body: &BlockBody,
+        inputs: &[RemovalRecord],
         predecessor: &Block,
         height: BlockHeight,
         previous_root: Option<(Claim, Proof)>,
@@ -437,7 +438,6 @@ impl Block {
     ) -> anyhow::Result<(Claim, Proof)> {
         let network = proof_job_options.job_settings.network;
         let floor = ConsensusRuleSet::infer_from(network, height).min_swbf_padded_rows(network);
-        let inputs = &body.transaction_kernel.inputs;
         let mutator_set = predecessor.mutator_set_accumulator_after()?;
         let start = std::time::Instant::now();
         let prove = |claim, program, nondeterminism| {
@@ -456,7 +456,7 @@ impl Block {
                     anyhow::anyhow!("the root must have the SWBF update claim's layout")
                 })?;
                 let allow_big_chunks = ConsensusRuleSet::HardforkDelta.allow_big_chunks();
-                let unpacked = RemovalRecordList::try_unpack(inputs.clone(), allow_big_chunks)?;
+                let unpacked = RemovalRecordList::try_unpack(inputs.to_vec(), allow_big_chunks)?;
                 let (covered_inputs, gained) = unpacked.split_at(covered.count);
                 let gained = RemovalRecordList::pack(gained.to_vec(), allow_big_chunks);
                 let after_covered = SwbfiPeaksAfterRemovals::try_apply_removals(
