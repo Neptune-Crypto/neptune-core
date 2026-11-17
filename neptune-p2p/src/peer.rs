@@ -21,6 +21,7 @@ use handshake_data::HandshakeData;
 use itertools::Itertools;
 use link_tx_notification::LinkTxNotification;
 use neptune_consensus::block::Block;
+use neptune_consensus::block::block_extra_data::BlockExtraData;
 use neptune_consensus::block::block_header::BlockHeader;
 use neptune_consensus::block::block_header::BlockHeaderWithBlockHashWitness;
 use neptune_mempool::transaction_kernel_id::TransactionKernelId;
@@ -154,6 +155,9 @@ pub enum NegativePeerSanction {
 
     /// The archival mutator set the peer sent does not validate.
     InvalidArchivalMutatorSet,
+
+    /// The extra data the peer sent with a block does not belong to it.
+    InvalidBlockExtraData,
 }
 
 /// The reason for improving a peer's standing
@@ -219,6 +223,7 @@ impl Sanction for NegativePeerSanction {
             NegativePeerSanction::StalledRequest => -1,
             NegativePeerSanction::ExcessiveBlockRequests => -1,
             NegativePeerSanction::InvalidArchivalMutatorSet => -1000,
+            NegativePeerSanction::InvalidBlockExtraData => -50,
             NegativePeerSanction::ArchivalMutatorSetRequest(frames) => {
                 let frames = u32::try_from(std::cmp::max(frames, 1)).unwrap_or(u32::MAX);
                 -i32::try_from(500_u32.div_ceil(frames)).unwrap_or(i32::MAX)
@@ -616,6 +621,12 @@ pub enum PeerMessage {
     /// current block proposal, if it has one. Only peers with a version
     /// exceeding 0.19.3 understand this message.
     BlockProposalNotificationRequest,
+
+    /// A block together with its [`BlockExtraData`], sent in place of
+    /// [`PeerMessage::Block`] when the block's transaction kernel does not
+    /// carry chunk data and the sender knows the block's extra data. Only
+    /// peers whose version is at least 0.21.0 understand this message.
+    BlockWithExtraData(Box<(TransferBlock, BlockExtraData)>),
     // New variants must be added here at the bottom to be backwards compatible.
 }
 
@@ -664,7 +675,7 @@ impl PeerMessageKind {
             | Self::BlockProposal
             | Self::ValidatedBlock
             | Self::TipWithParentAccumulator => 20 * MIB,
-            Self::LinkTx => 64 * MIB,
+            Self::LinkTx | Self::BlockWithExtraData => 64 * MIB,
             Self::ArchivalMutatorSet => 65 * MIB,
             Self::Transaction | Self::SyncChallengeResponse => 270 * MIB,
             Self::BlockResponseBatch => return None,
@@ -679,6 +690,7 @@ impl PeerMessage {
         match self {
             PeerMessage::Handshake { .. } => "handshake",
             PeerMessage::Block(_) => "block",
+            PeerMessage::BlockWithExtraData(_) => "block with extra data",
             PeerMessage::TipWithParentAccumulator(_) => "tip with parent accumulator",
             PeerMessage::BlockNotificationRequest => "block notification request",
             PeerMessage::BlockNotification(_) => "block notification",
@@ -720,6 +732,7 @@ impl PeerMessage {
         match self {
             PeerMessage::Handshake { .. } => false,
             PeerMessage::Block(_) => false,
+            PeerMessage::BlockWithExtraData(_) => false,
             PeerMessage::TipWithParentAccumulator(_) => false,
             PeerMessage::BlockNotificationRequest => false,
             PeerMessage::BlockNotification(_) => false,
@@ -759,6 +772,7 @@ impl PeerMessage {
         match self {
             PeerMessage::Handshake { .. } => false,
             PeerMessage::Block(_) => false,
+            PeerMessage::BlockWithExtraData(_) => false,
             PeerMessage::TipWithParentAccumulator(_) => false,
             PeerMessage::BlockNotificationRequest => false,
             PeerMessage::BlockNotification(_) => false,
@@ -799,6 +813,7 @@ impl PeerMessage {
         match self {
             PeerMessage::Handshake { .. } => false,
             PeerMessage::Block(_) => true,
+            PeerMessage::BlockWithExtraData(_) => true,
             PeerMessage::TipWithParentAccumulator(_) => true,
             PeerMessage::BlockNotificationRequest => true,
             PeerMessage::BlockNotification(_) => true,
@@ -1263,6 +1278,7 @@ impl rand::distr::Distribution<NegativePeerSanction> for rand::distr::StandardUn
             43 => NegativePeerSanction::ExcessiveBlockRequests,
             44 => NegativePeerSanction::ArchivalMutatorSetRequest(rng.random_range(1..=100)),
             45 => NegativePeerSanction::InvalidArchivalMutatorSet,
+            46 => NegativePeerSanction::InvalidBlockExtraData,
 
             _ => unreachable!(),
         }

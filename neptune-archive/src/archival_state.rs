@@ -2301,7 +2301,7 @@ impl ArchivalState {
     /// The block's [`BlockExtraData`], from the archival mutator set, which
     /// must be the one after the block's parent. `None` if the rules require
     /// the chunk data to be present in the block.
-    async fn block_extra_data(&self, block: &Block) -> Option<BlockExtraData> {
+    pub async fn block_extra_data(&self, block: &Block) -> Option<BlockExtraData> {
         let consensus_rule_set = ConsensusRuleSet::infer_from(self.network, block.header().height);
         if consensus_rule_set.block_carries_chunk_data() {
             return None;

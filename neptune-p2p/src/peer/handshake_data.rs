@@ -64,6 +64,13 @@ impl VersionString {
         semver::Version::parse(&self).is_ok_and(|version| version > semver::Version::new(0, 19, 3))
     }
 
+    /// Whether a peer of this version understands
+    /// [`PeerMessage::BlockWithExtraData`](super::PeerMessage::BlockWithExtraData).
+    /// True for every version from 0.21.0 on.
+    pub fn understands_block_extra_data(self) -> bool {
+        semver::Version::parse(&self).is_ok_and(|version| version >= semver::Version::new(0, 21, 0))
+    }
+
     pub fn versions_are_compatible(own: Self, other: Self) -> bool {
         let own = semver::Version::parse(&own)
             .unwrap_or_else(|_| panic!("Must be able to parse own version string. Got: {own}"));

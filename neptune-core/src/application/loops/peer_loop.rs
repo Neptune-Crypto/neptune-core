@@ -17,6 +17,7 @@ use futures::FutureExt;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
 use neptune_archive::archival_state::ArchivalState;
+use neptune_consensus::block::block_extra_data::BlockExtraData;
 use neptune_consensus::block::block_header::BlockHeader;
 use neptune_consensus::block::block_header::BlockHeaderWithBlockHashWitness;
 use neptune_consensus::block::block_header::HeaderToBlockHashWitness;
@@ -33,6 +34,7 @@ use neptune_mempool::transaction_proof_quality::TransactionProofQualityExt;
 use neptune_mempool::tx_admission;
 use neptune_mempool::tx_admission::TxAdmissionError;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
 use neptune_mutator_set::removal_record::RemovalRecordValidityError;
 use neptune_mutator_set::shared::NUM_TRIALS;
 use neptune_p2p::block_proposal_notification::BlockProposalNotification;
@@ -230,6 +232,86 @@ impl PeerLoopHandler {
             instance_id: self.peer_handshake_data.instance_id,
             peer_id: self.peer_id,
         }
+    }
+
+    /// The message that sends `block`, a block from the archival state, to the
+    /// connected peer. Bundled with the block's extra data if that data is
+    /// available and the peer understands it.
+    async fn block_message(&self, block: Block) -> PeerMessage {
+        let extra_data = if self
+            .peer_handshake_data
+            .version
+            .understands_block_extra_data()
+        {
+            let state = self.global_state_lock.lock_guard().await;
+            if state.chain.tip().hash() == block.hash() {
+                // block extra data is always read from memory so should be
+                // very fast.
+                state.chain.light_state().tip_extra_data().cloned()
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let transfer_block =
+            TransferBlock::try_from(block).expect("block from archival state should be valid");
+        match extra_data {
+            Some(extra_data) => {
+                PeerMessage::BlockWithExtraData(Box::new((transfer_block, extra_data)))
+            }
+            None => PeerMessage::Block(Box::new(transfer_block)),
+        }
+    }
+
+    /// Whether `extra_data` is the extra data of the received block.
+    /// Extra data of a block whose parent is unknown cannot be checked
+    /// yet.
+    async fn block_extra_data_is_valid(
+        &self,
+        transfer_block: &TransferBlock,
+        extra_data: &BlockExtraData,
+    ) -> Result<bool> {
+        let network = self.global_state_lock.cli().network;
+        let consensus_rule_set =
+            ConsensusRuleSet::infer_from(network, transfer_block.header.height);
+        if consensus_rule_set.block_carries_chunk_data() {
+            return Ok(false);
+        }
+        let Ok(block) = Block::try_from(transfer_block.clone()) else {
+            return Ok(false);
+        };
+
+        let state = self.global_state_lock.lock_guard().await;
+        let parent_digest = block.header().prev_block_digest;
+        if parent_digest == state.chain.tip().hash() {
+            // Check if the extra data is what our node would have constructed
+            // from its archival mutator set.
+            let own = state.chain.archival_state().block_extra_data(&block).await;
+            return Ok(own.as_ref() == Some(extra_data));
+        }
+
+        let Some(parent) = state
+            .chain
+            .archival_state()
+            .get_block(parent_digest)
+            .await?
+        else {
+            return Ok(true);
+        };
+        drop(state);
+        let parent_mutator_set = parent.mutator_set_accumulator_after()?;
+        let inputs = RemovalRecordList::try_unpack(
+            block.body().transaction_kernel.inputs.clone(),
+            consensus_rule_set.allow_big_chunks(),
+        );
+
+        Ok(inputs.is_ok_and(|inputs| {
+            extra_data
+                .try_rebuild(&inputs, &parent_mutator_set, consensus_rule_set)
+                .is_ok()
+        }))
     }
 
     /// The message that notifies the connected peer of `block`, in the form
@@ -1135,6 +1217,30 @@ impl PeerLoopHandler {
         <S as TryStream>::Error: std::error::Error,
     {
         debug!("Received {} from peer {}", msg.get_type(), self.peer_id);
+
+        // Bundled extra data is verified here, and the block is then handled
+        // as a plain block. This node gets its own copy of the extra data
+        // from the archival mutator set when the block becomes tip.
+        let msg = match msg {
+            PeerMessage::BlockWithExtraData(bundle) => {
+                let (transfer_block, extra_data) = *bundle;
+                if !self
+                    .block_extra_data_is_valid(&transfer_block, &extra_data)
+                    .await?
+                {
+                    warn!(
+                        "Peer {} sent block {} with invalid extra data",
+                        self.peer_id, transfer_block.header.height
+                    );
+                    self.punish(NegativePeerSanction::InvalidBlockExtraData)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+                PeerMessage::Block(Box::new(transfer_block))
+            }
+            msg => msg,
+        };
+
         match msg {
             PeerMessage::Bye => {
                 // Note that the current peer is not removed from the connected peers here
@@ -1789,7 +1895,6 @@ impl PeerLoopHandler {
                             self.punish(NegativePeerSanction::RequestForUnknownBlock)
                                 .await?;
                         }
-                        // TODO: Consider punishing here
                         warn!("Peer requested unknown block with hash {:x}", block_digest);
                         Ok(KEEP_CONNECTION_ALIVE)
                     }
@@ -1800,8 +1905,7 @@ impl PeerLoopHandler {
                             return Ok(KEEP_CONNECTION_ALIVE);
                         }
 
-                        peer.send(PeerMessage::Block(Box::new(b.try_into().unwrap())))
-                            .await?;
+                        peer.send(self.block_message(b).await).await?;
                         Ok(KEEP_CONNECTION_ALIVE)
                     }
                 }
@@ -1844,10 +1948,7 @@ impl PeerLoopHandler {
                         .expect("block should live in archival state because fetching the block digest from height worked");
 
                     debug!("Sending block");
-                    let transfer_block = TransferBlock::try_from(block)
-                        .expect("block fetched from archival state should be valid");
-                    peer.send(PeerMessage::Block(Box::new(transfer_block)))
-                        .await?;
+                    peer.send(self.block_message(block).await).await?;
                     debug!("Sent block");
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
@@ -5952,6 +6053,184 @@ mod tests {
                 .unwrap();
 
             drop(to_main_rx1);
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn tip_is_sent_with_extra_data_to_peers_that_understand_it() {
+            let network = Network::Testnet(42);
+            let mut rng = StdRng::seed_from_u64(5552402);
+            let (
+                _peer_broadcast_tx,
+                from_main_rx_clone,
+                to_main_tx,
+                to_main_rx1,
+                _,
+                _,
+                mut state_lock,
+                mut hsd,
+            ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network))
+                .await
+                .unwrap();
+            hsd.version = VersionString::new_from_str("0.21.0");
+            let blocks: [Block; 2] = fake_valid_sequence_of_blocks_for_tests(
+                &Block::genesis(network),
+                Timestamp::hours(1),
+                rng.random(),
+                network,
+            )
+            .await;
+            for block in &blocks {
+                state_lock.set_new_tip(block.to_owned()).await.unwrap();
+            }
+            let tip = blocks[1].clone();
+            let extra_data = state_lock
+                .lock_guard()
+                .await
+                .chain
+                .light_state()
+                .tip_extra_data()
+                .cloned()
+                .expect("a zeta tip has extra data");
+
+            let mock = Mock::new(vec![
+                Action::Read(PeerMessage::BlockRequestByHeight(2u64.into())),
+                Action::Write(PeerMessage::BlockWithExtraData(Box::new((
+                    tip.try_into().unwrap(),
+                    extra_data,
+                )))),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let peer_address = get_dummy_socket_address(0);
+            let mut peer_loop_handler = PeerLoopHandler::new(
+                to_main_tx.clone(),
+                state_lock.clone(),
+                pseudorandom_peer_id(&peer_address),
+                socketaddr_to_multiaddr(peer_address),
+                hsd,
+                false,
+            );
+            peer_loop_handler
+                .run_wrapper(mock, from_main_rx_clone)
+                .await
+                .unwrap();
+
+            drop(to_main_rx1);
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn block_with_valid_extra_data_is_handled_as_block() -> Result<()> {
+            let network = Network::Testnet(42);
+            let mut rng = StdRng::seed_from_u64(5550002);
+            let (
+                _peer_broadcast_tx,
+                from_main_rx_clone,
+                to_main_tx,
+                mut to_main_rx1,
+                _,
+                _,
+                state_lock,
+                hsd,
+            ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network)).await?;
+            let peer_address = get_dummy_socket_address(0);
+
+            let block_1 = fake_valid_block_for_tests(&state_lock, rng.random()).await;
+            let extra_data = state_lock
+                .lock_guard()
+                .await
+                .chain
+                .archival_state()
+                .block_extra_data(&block_1)
+                .await
+                .expect("a zeta block has extra data");
+            let mock = Mock::new(vec![
+                Action::Read(PeerMessage::BlockWithExtraData(Box::new((
+                    block_1.clone().try_into().unwrap(),
+                    extra_data,
+                )))),
+                Action::Read(PeerMessage::Bye),
+            ]);
+
+            let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
+                to_main_tx.clone(),
+                state_lock.clone(),
+                pseudorandom_peer_id(&peer_address),
+                socketaddr_to_multiaddr(peer_address),
+                hsd,
+                false,
+                block_1.header().timestamp,
+            );
+            peer_loop_handler
+                .run_wrapper(mock, from_main_rx_clone)
+                .await?;
+
+            match to_main_rx1.recv().await {
+                Some(PeerTaskToMain::NewBlocks(_block)) => (),
+                _ => bail!("Did not find msg sent to main task"),
+            };
+
+            Ok(())
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn block_with_invalid_extra_data_is_punished() -> Result<()> {
+            let network = Network::Testnet(42);
+            let mut rng = StdRng::seed_from_u64(5550003);
+            let (
+                _peer_broadcast_tx,
+                from_main_rx_clone,
+                to_main_tx,
+                mut to_main_rx1,
+                _,
+                _,
+                state_lock,
+                hsd,
+            ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network)).await?;
+            let peer_address = get_dummy_socket_address(0);
+
+            // One authentication structure too many: the inactive SWBF of the
+            // genesis block's mutator set has no trees.
+            let block_1 = fake_valid_block_for_tests(&state_lock, rng.random()).await;
+            let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_1.header().height);
+            let extra_data = BlockExtraData::from_parts(vec![vec![]], vec![], consensus_rule_set);
+            let mock = Mock::new(vec![
+                Action::Read(PeerMessage::BlockWithExtraData(Box::new((
+                    block_1.clone().try_into().unwrap(),
+                    extra_data,
+                )))),
+                Action::Read(PeerMessage::Bye),
+            ]);
+
+            let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
+                to_main_tx.clone(),
+                state_lock.clone(),
+                pseudorandom_peer_id(&peer_address),
+                socketaddr_to_multiaddr(peer_address),
+                hsd,
+                false,
+                block_1.header().timestamp,
+            );
+            peer_loop_handler
+                .run_wrapper(mock, from_main_rx_clone)
+                .await?;
+
+            match to_main_rx1.try_recv() {
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => (),
+                Ok(msg) => bail!("Unexpected message of type {} to main loop", msg.get_type()),
+                Err(err) => bail!("Unexpected error: {err}"),
+            };
+            drop(to_main_tx);
+
+            let standing = state_lock
+                .peers()
+                .stored_standing(peer_address.ip())
+                .await
+                .unwrap();
+            assert!(standing.standing < 0, "invalid extra data must be punished");
+
+            Ok(())
         }
 
         #[traced_test]
