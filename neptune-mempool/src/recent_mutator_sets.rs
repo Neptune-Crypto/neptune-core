@@ -139,6 +139,10 @@ impl RecentMutatorSets {
     /// oldest ancestors until all held extra data fits within
     /// [`MAX_EXTRA_DATA_SIZE`]; the tip's is kept regardless.
     pub fn set_tip_extra_data(&mut self, extra_data: Option<BlockExtraData>) {
+        self.set_tip_extra_data_within(extra_data, MAX_EXTRA_DATA_SIZE);
+    }
+
+    fn set_tip_extra_data_within(&mut self, extra_data: Option<BlockExtraData>, max_size: usize) {
         let tip = self
             .entries
             .back_mut()
@@ -152,7 +156,7 @@ impl RecentMutatorSets {
         let mut total: usize = self.entries.iter().map(|entry| size(entry)).sum();
         let num_ancestors = self.num_ancestors();
         for entry in self.entries.iter_mut().take(num_ancestors) {
-            if total <= MAX_EXTRA_DATA_SIZE {
+            if total <= max_size {
                 break;
             }
             total -= size(entry);
@@ -315,6 +319,45 @@ mod tests {
     use proptest::test_runner::TestRunner;
 
     use super::*;
+
+    #[test]
+    fn oldest_extra_data_is_dropped_first_but_the_tips_is_kept() {
+        use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+
+        let extra_data = |num_digests| {
+            BlockExtraData::from_parts(
+                vec![vec![Digest::default(); num_digests]],
+                vec![],
+                ConsensusRuleSet::HardforkZeta,
+            )
+        };
+        let size = extra_data(100).get_size();
+        let max_size = 2 * size + size / 2;
+
+        let mut sets = RecentMutatorSets::for_mutator_set(MutatorSetAccumulator::default());
+        let mut block_hashes = vec![sets.tip_block_hash()];
+        sets.set_tip_extra_data_within(Some(extra_data(100)), max_size);
+        for _ in 0..MAX_TX_SYNC_DEPTH {
+            sets.push_update(MutatorSetUpdate::new(vec![], vec![]));
+            block_hashes.push(sets.tip_block_hash());
+            sets.set_tip_extra_data_within(Some(extra_data(100)), max_size);
+        }
+        let held = |sets: &RecentMutatorSets| {
+            block_hashes
+                .iter()
+                .map(|block_hash| sets.extra_data(*block_hash).is_some())
+                .collect::<Vec<_>>()
+        };
+        let mut expected = vec![false; MAX_TX_SYNC_DEPTH - 1];
+        expected.extend([true, true]);
+        assert_eq!(expected, held(&sets));
+
+        // Larger than the cap on its own: the tip's is still kept.
+        sets.set_tip_extra_data_within(Some(extra_data(300)), max_size);
+        let mut expected = vec![false; MAX_TX_SYNC_DEPTH];
+        expected.push(true);
+        assert_eq!(expected, held(&sets));
+    }
 
     const _: () = assert!(
         MAX_TX_SYNC_DEPTH >= 1,

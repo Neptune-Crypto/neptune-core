@@ -263,6 +263,131 @@ pub(super) mod tests {
 
     #[traced_test]
     #[apply(shared_tokio_runtime)]
+    async fn block_extra_data_carries_inactive_chunks() {
+        use neptune_archive::archival_state::ArchivalState;
+        use neptune_mutator_set::addition_record::AdditionRecord;
+        use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+        use neptune_mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
+        use neptune_mutator_set::removal_record::RemovalRecord;
+        use neptune_wallet::mock_block::make_mock_block_with_inputs_and_outputs;
+        use tasm_lib::prelude::Tip5;
+        use tasm_lib::twenty_first::prelude::Mmr;
+
+        let network = Network::RegTest;
+        let mut rng = StdRng::seed_from_u64(107221549303u64);
+        let mut cli_args = Args::default_with_network(network);
+        cli_args.store_block_extra_data = true;
+        let wallet = WalletEntropy::devnet_wallet();
+        let key = wallet.nth_generation_spending_key_for_tests(0);
+        let mut alice = mock_genesis_global_state(0, wallet, cli_args).await;
+
+        // A UTXO that need not lustrate, so far enough past block 1's AOCL
+        // leafs, then enough outputs after it that the window slides past
+        // some of its Bloom filter indices.
+        let random_outputs = |source: &mut StdRng, n| {
+            (0..n)
+                .map(|_| AdditionRecord::new(source.random()))
+                .collect_vec()
+        };
+        let genesis = Block::genesis(network);
+        let (block1, _) = make_mock_block(&genesis, None, key, rng.random(), network);
+        let (block2, _) = make_mock_block_with_inputs_and_outputs(
+            &block1,
+            vec![],
+            random_outputs(&mut rng, 2100),
+            None,
+            key,
+            rng.random(),
+            network,
+        );
+        let (block3, expected) = make_mock_block(&block2, None, key, rng.random(), network);
+        let (block4, _) = make_mock_block_with_inputs_and_outputs(
+            &block3,
+            vec![],
+            random_outputs(&mut rng, 600),
+            None,
+            key,
+            rng.random(),
+            network,
+        );
+        for block in [&block1, &block2, &block3, &block4] {
+            alice.set_new_tip(block.clone()).await.unwrap();
+        }
+
+        let utxo = &expected[0];
+        let aocl_leaf_index = block2
+            .mutator_set_accumulator_after()
+            .unwrap()
+            .aocl
+            .num_leafs()
+            + block3
+                .all_addition_records()
+                .unwrap()
+                .iter()
+                .position(|addition_record| *addition_record == utxo.addition_record)
+                .unwrap() as u64;
+        let absolute_indices = AbsoluteIndexSet::compute(
+            Tip5::hash(&utxo.utxo),
+            utxo.sender_randomness,
+            utxo.receiver_preimage,
+            aocl_leaf_index,
+        );
+        let target_chunks = alice
+            .lock_guard()
+            .await
+            .chain
+            .archival_state()
+            .archival_mutator_set
+            .ams()
+            .chunk_dictionary(absolute_indices)
+            .await;
+        assert!(!target_chunks.is_empty(), "some chunks must be inactive");
+        let input = RemovalRecord {
+            absolute_indices,
+            target_chunks,
+        };
+
+        // The mock block's kernel still carries the chunk data.
+        let (block5, _) = make_mock_block_with_inputs_and_outputs(
+            &block4,
+            vec![input.clone()],
+            vec![],
+            None,
+            key,
+            rng.random(),
+            network,
+        );
+        alice.set_new_tip(block5.clone()).await.unwrap();
+
+        let state = alice.lock_guard().await;
+        let extra_data = state.chain.light_state().tip_extra_data().unwrap().clone();
+        let stripped = RemovalRecord {
+            absolute_indices,
+            target_chunks: ChunkDictionary::empty(),
+        };
+        let rebuilt = extra_data
+            .try_rebuild(
+                &[stripped],
+                &block4.mutator_set_accumulator_after().unwrap(),
+                ConsensusRuleSet::infer_from(network, block5.header().height),
+            )
+            .unwrap();
+        assert_eq!(vec![input], rebuilt);
+
+        let (path, location) = state
+            .chain
+            .archival_state()
+            .block_extra_data_location(block5.hash())
+            .await
+            .unwrap();
+        let stored = ArchivalState::read_block_extra_data(path, location)
+            .await
+            .unwrap();
+        assert_eq!(extra_data, stored);
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
     async fn update_mutator_set_rollback_ms_block_sync_multiple_inputs_outputs_in_block_test() {
         // Make a rollback of one block that contains multiple inputs and outputs.
         // This test is intended to verify that rollbacks work for non-trivial
