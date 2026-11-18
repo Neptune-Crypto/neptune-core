@@ -81,7 +81,7 @@ impl LightState {
     }
 
     /// Set the tip's [`BlockExtraData`]. Must belong to the current tip.
-    pub(super) fn set_tip_extra_data(&mut self, tip_extra_data: Option<BlockExtraData>) {
+    pub(crate) fn set_tip_extra_data(&mut self, tip_extra_data: Option<BlockExtraData>) {
         self.recent_mutator_sets.set_tip_extra_data(tip_extra_data);
     }
 

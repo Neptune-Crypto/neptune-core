@@ -154,14 +154,16 @@ pub async fn initialize(
     let mut global_state_lock =
         GlobalStateLock::from_global_state(global_state, rpc_server_to_main_tx.clone(), peers);
 
-    // Ensure archival state is consistent.
-    global_state_lock
-        .lock_guard_mut()
-        .await
-        .chain
-        .archival_state_mut()
-        .recover()
-        .await?;
+    // Ensure archival state is consistent. Applying the tip again also
+    // recomputes its block extra data, which composing on it requires.
+    {
+        let mut state = global_state_lock.lock_guard_mut().await;
+        let tip_extra_data = state.chain.archival_state_mut().recover().await?;
+        state
+            .chain
+            .light_state_mut()
+            .set_tip_extra_data(tip_extra_data);
+    }
 
     // Construct the broadcast channel to communicate from the main task to peer tasks
     let (main_to_peer_broadcast_tx, _main_to_peer_broadcast_rx) =

@@ -21,7 +21,7 @@
 
 mod absorb_blocks;
 pub mod aggregation;
-mod chunk_insertions;
+pub(super) mod chunk_insertions;
 pub(super) mod chunk_witness;
 mod copy_words;
 // The chunk form of proposal f), kept to measure a window slide; no program
@@ -32,7 +32,7 @@ mod counter_tree_leaf;
 mod counter_tree_removals;
 #[cfg(test)]
 mod counter_tree_root;
-mod divined_chunk_indices;
+pub(super) mod divined_chunk_indices;
 mod hash_blocks;
 mod hash_chunk_with_insertions;
 mod insert_into_window;

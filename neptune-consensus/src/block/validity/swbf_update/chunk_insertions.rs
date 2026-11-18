@@ -49,7 +49,7 @@ use crate::block::block_validation_error::BlockValidationRule;
 /// divined position, and with the error ID of rule 2.e if the prover's
 /// lists are not the sorted lists of the indices per chunk.
 #[derive(Debug, Copy, Clone)]
-pub(super) struct ChunkInsertions;
+pub(in crate::block::validity) struct ChunkInsertions;
 
 impl ChunkInsertions {
     const LOG2_CHUNK_SIZE: u8 = CHUNK_SIZE.ilog2() as u8;

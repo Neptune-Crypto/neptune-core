@@ -19,7 +19,7 @@ use crate::block::block_validation_error::BlockValidationRule;
 /// Reads two tokens per chunk index: its high limb, then its low limb.
 /// Crashes if a limb is not a u32 or the indices do not strictly increase.
 #[derive(Debug, Copy, Clone)]
-pub(super) struct DivinedChunkIndices;
+pub(in crate::block::validity) struct DivinedChunkIndices;
 
 impl DivinedChunkIndices {
     /// The tokens the prover supplies for these chunk indices.

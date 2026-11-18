@@ -2262,17 +2262,6 @@ impl MainLoopHandler {
         // Flush all databases
         self.global_state_lock.flush_databases().await?;
 
-        // Keep the tip's block extra data across the restart.
-        if let Err(e) = self
-            .global_state_lock
-            .lock_guard()
-            .await
-            .persist_tip_extra_data()
-            .await
-        {
-            warn!("Could not write the tip's block extra data to disk: {e}.");
-        }
-
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         // Child tasks should have finished by now. If not, abort them.

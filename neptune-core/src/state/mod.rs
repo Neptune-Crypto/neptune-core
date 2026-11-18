@@ -39,7 +39,6 @@ use mining::mining_state::MiningState;
 use mining::mining_status::ComposingWorkInfo;
 use mining::mining_status::GuessingWorkInfo;
 use mining::mining_status::MiningStatus;
-use neptune_consensus::block::block_extra_data::BlockExtraData;
 use neptune_consensus::block::block_header::BlockHeader;
 use neptune_consensus::block::block_header::BlockHeaderWithBlockHashWitness;
 use neptune_consensus::block::guesser_receiver_data::GuesserReceiverData;
@@ -989,9 +988,7 @@ impl GlobalState {
 
         let net = NetworkingState::new();
 
-        let tip_extra_data = Self::load_tip_extra_data(&data_directory, latest_block.hash()).await;
-        let mut light_state: LightState = LightState::new(latest_block, cli.network);
-        light_state.set_tip_extra_data(tip_extra_data);
+        let light_state: LightState = LightState::new(latest_block, cli.network);
         let chain = BlockchainArchivalState {
             light_state,
             archival_state,
@@ -1019,39 +1016,6 @@ impl GlobalState {
             #[cfg(test)]
             force_wallet_membership_proof_maintance: false,
         }
-    }
-
-    /// Write the tip's [`BlockExtraData`], if known, to disk, so that it
-    /// survives a restart. Replaces the file written earlier; only the tip's
-    /// is kept.
-    pub(crate) async fn persist_tip_extra_data(&self) -> Result<()> {
-        let Some(extra_data) = self.chain.light_state().tip_extra_data() else {
-            return Ok(());
-        };
-        let path = self
-            .chain
-            .archival_state()
-            .data_dir()
-            .tip_block_extra_data_file_path();
-        let temporary_path = path.with_extension("tmp");
-        let bytes = bincode::serialize(&(self.chain.tip().hash(), extra_data))?;
-        tokio::fs::write(&temporary_path, bytes).await?;
-        tokio::fs::rename(&temporary_path, &path).await?;
-
-        Ok(())
-    }
-
-    /// The tip's [`BlockExtraData`] as written by
-    /// [`Self::persist_tip_extra_data`], if it belongs to the given tip.
-    async fn load_tip_extra_data(
-        data_directory: &DataDirectory,
-        tip: Digest,
-    ) -> Option<BlockExtraData> {
-        let path = data_directory.tip_block_extra_data_file_path();
-        let bytes = tokio::fs::read(path).await.ok()?;
-        let (digest, extra_data): (Digest, BlockExtraData) = bincode::deserialize(&bytes).ok()?;
-
-        (digest == tip).then_some(extra_data)
     }
 
     /// Return a seed used to randomize shuffling.

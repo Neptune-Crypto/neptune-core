@@ -9,8 +9,9 @@
 //! from their inputs' index sets alone, so it needs no chunk data. A
 //! reorganization reduces the window to the new tip.
 //!
-//! Also holds the blocks' [`BlockExtraData`], if known, so that the node
-//! can serve it to peers.
+//! Also holds the blocks' [`BlockExtraData`], so that the node can serve it
+//! to peers. The tip's is always held on an archival node: composing a block
+//! on the tip requires it, to prove `KnowsBlockExtraData`.
 
 use std::collections::HashSet;
 use std::collections::VecDeque;

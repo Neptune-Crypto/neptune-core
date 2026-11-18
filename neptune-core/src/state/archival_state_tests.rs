@@ -39,7 +39,6 @@ pub(super) mod tests {
     use crate::application::config::cli_args::Args;
     use crate::application::loops::mine_loop::tests::make_coinbase_transaction_from_state_lock;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
-    use crate::state::GlobalState;
     use crate::tests::shared::blocks::guess_for_tests;
     use crate::tests::shared::files::unit_test_data_directory;
     use crate::tests::shared::globalstate::mock_genesis_global_state;
@@ -185,7 +184,7 @@ pub(super) mod tests {
 
     #[traced_test]
     #[apply(shared_tokio_runtime)]
-    async fn new_tip_keeps_its_block_extra_data_across_restart() {
+    async fn tip_block_extra_data_is_recomputed_on_recovery() {
         let network = Network::RegTest;
         let mut rng = StdRng::seed_from_u64(107221549302u64);
         let cli_args = Args::default_with_network(network);
@@ -248,17 +247,17 @@ pub(super) mod tests {
             .unwrap();
         assert_eq!(inputs, rebuilt);
 
-        // Written on shutdown, read back on startup for the same tip only.
-        state.persist_tip_extra_data().await.unwrap();
-        let data_dir = state.chain.archival_state().data_dir();
-        assert_eq!(
-            Some(extra_data),
-            GlobalState::load_tip_extra_data(data_dir, block2.hash()).await
-        );
-        assert_eq!(
-            None,
-            GlobalState::load_tip_extra_data(data_dir, block1.hash()).await
-        );
+        // Recovery on startup applies the tip again, which recomputes it.
+        drop(state);
+        let recomputed = alice
+            .lock_guard_mut()
+            .await
+            .chain
+            .archival_state_mut()
+            .recover()
+            .await
+            .unwrap();
+        assert_eq!(Some(extra_data), recomputed);
     }
 
     #[traced_test]

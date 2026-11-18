@@ -95,6 +95,26 @@ impl BlockExtraData {
         mutator_set: &MutatorSetAccumulator,
         consensus_rule_set: ConsensusRuleSet,
     ) -> Result<Vec<RemovalRecord>, BlockExtraDataError> {
+        let removal_records = self.try_rebuild_unsafe(inputs, mutator_set, consensus_rule_set)?;
+
+        for (index, removal_record) in removal_records.iter().enumerate() {
+            removal_record
+                .validate_inner(mutator_set)
+                .map_err(|error| BlockExtraDataError::InvalidRemovalRecord { index, error })?;
+        }
+
+        Ok(removal_records)
+    }
+
+    /// As [`Self::try_rebuild`], without verifying the rebuilt records against
+    /// the mutator set, which costs far more than rebuilding them. For extra
+    /// data from a trusted source, such as this node's archival mutator set.
+    pub fn try_rebuild_unsafe(
+        &self,
+        inputs: &[RemovalRecord],
+        mutator_set: &MutatorSetAccumulator,
+        consensus_rule_set: ConsensusRuleSet,
+    ) -> Result<Vec<RemovalRecord>, BlockExtraDataError> {
         let index_sets = inputs.iter().map(|rr| rr.absolute_indices).collect_vec();
         let removal_records = RemovalRecordList::try_construct(
             index_sets,
@@ -103,12 +123,6 @@ impl BlockExtraData {
             mutator_set.swbf_inactive.num_leafs(),
             consensus_rule_set.allow_big_chunks(),
         )?;
-
-        for (index, removal_record) in removal_records.iter().enumerate() {
-            removal_record
-                .validate_inner(mutator_set)
-                .map_err(|error| BlockExtraDataError::InvalidRemovalRecord { index, error })?;
-        }
 
         Ok(removal_records)
     }

@@ -816,15 +816,17 @@ impl ArchivalState {
     /// example if the node is shut down after the block index database has been
     /// updated and the block written to disk but before the rest of the
     /// archival state update is finished.
-    pub async fn recover(&mut self) -> Result<()> {
+    ///
+    /// Returns the tip's [`BlockExtraData`], which applying the tip again
+    /// recomputes: the archival mutator set is rolled back to the tip's parent
+    /// and the tip applied anew. See [`Self::update_mutator_set`].
+    pub async fn recover(&mut self) -> Result<Option<BlockExtraData>> {
         let tip = self.get_tip().await;
 
         // Since the sub-parts of the archival state handle reorganizations,
         // all we have to do is to call the tip updater again. Then all parts
         // will agree with the block index database.
-        self.set_new_tip(&tip).await?;
-
-        Ok(())
+        self.set_new_tip(&tip).await
     }
 
     /// Write a newly found block to database and to disk, without setting it as
