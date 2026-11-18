@@ -675,9 +675,12 @@ impl PeerMessageKind {
             | Self::BlockProposal
             | Self::ValidatedBlock
             | Self::TipWithParentAccumulator => 20 * MIB,
-            Self::LinkTx | Self::BlockWithExtraData => 64 * MIB,
+            Self::LinkTx => 64 * MIB,
             Self::ArchivalMutatorSet => 65 * MIB,
             Self::Transaction | Self::SyncChallengeResponse => 270 * MIB,
+            // About 140-200 MB for a block with 5000 inputs spending old
+            // outputs, after ten years of such blocks.
+            Self::BlockWithExtraData => 300 * MIB,
             Self::BlockResponseBatch => return None,
         };
 

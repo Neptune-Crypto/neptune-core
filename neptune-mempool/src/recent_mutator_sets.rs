@@ -8,12 +8,17 @@
 //! Derived from blocks as they become the tip, so it needs no archive, and
 //! from their inputs' index sets alone, so it needs no chunk data. A
 //! reorganization reduces the window to the new tip.
+//!
+//! Also holds the blocks' [`BlockExtraData`], if known, so that the node
+//! can serve it to peers.
 
 use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::sync::Arc;
 
+use get_size2::GetSize;
 use neptune_consensus::block::Block;
+use neptune_consensus::block::block_extra_data::BlockExtraData;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_mutator_set::removal_record::RemovalRecord;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
@@ -26,6 +31,11 @@ use tasm_lib::prelude::Digest;
 /// sets, under a kilobyte per input.
 pub const MAX_TX_SYNC_DEPTH: usize = 3;
 
+/// The most memory, in bytes, that the in-memory stored [`BlockExtraData`] may
+/// take together. The tip's is always held; the oldest ancestors' are dropped
+/// first when the total exceeds this. Policy, not consensus.
+pub const MAX_EXTRA_DATA_SIZE: usize = 200 * 1024 * 1024;
+
 /// The index sets a block removed and the mutator set that resulted.
 #[derive(Debug, Clone)]
 struct Entry {
@@ -35,6 +45,10 @@ struct Entry {
 
     /// `None` for the oldest entry.
     removed: Option<Vec<AbsoluteIndexSet>>,
+
+    /// The block's extra data, if known and within
+    /// [`MAX_EXTRA_DATA_SIZE`].
+    extra_data: Option<Arc<BlockExtraData>>,
 }
 
 /// The mutator set at the tip and at up to [`MAX_TX_SYNC_DEPTH`] of its
@@ -80,6 +94,7 @@ impl RecentMutatorSets {
             mutator_set_hash: mutator_set_after.hash(),
             mutator_set_after,
             removed: Some(block.kernel.removal_index_sets()),
+            extra_data: None,
         }
     }
 
@@ -115,8 +130,45 @@ impl RecentMutatorSets {
                 mutator_set_hash: oldest.mutator_set_hash,
                 mutator_set_after: oldest.mutator_set_after.clone(),
                 removed: None,
+                extra_data: oldest.extra_data.clone(),
             });
         }
+    }
+
+    /// Set the tip's [`BlockExtraData`]. Then drops the extra data of the
+    /// oldest ancestors until all held extra data fits within
+    /// [`MAX_EXTRA_DATA_SIZE`]; the tip's is kept regardless.
+    pub fn set_tip_extra_data(&mut self, extra_data: Option<BlockExtraData>) {
+        let tip = self
+            .entries
+            .back_mut()
+            .expect("Window always holds at least the tip");
+        *tip = Arc::new(Entry {
+            extra_data: extra_data.map(Arc::new),
+            ..(**tip).clone()
+        });
+
+        let size = |entry: &Entry| entry.extra_data.as_ref().map_or(0, |data| data.get_size());
+        let mut total: usize = self.entries.iter().map(|entry| size(entry)).sum();
+        let num_ancestors = self.num_ancestors();
+        for entry in self.entries.iter_mut().take(num_ancestors) {
+            if total <= MAX_EXTRA_DATA_SIZE {
+                break;
+            }
+            total -= size(entry);
+            *entry = Arc::new(Entry {
+                extra_data: None,
+                ..(**entry).clone()
+            });
+        }
+    }
+
+    /// [`BlockExtraData`] of recent blocks, if known.
+    pub fn extra_data(&self, block_hash: Digest) -> Option<&BlockExtraData> {
+        self.entries
+            .iter()
+            .find(|entry| entry.block_hash == block_hash)
+            .and_then(|entry| entry.extra_data.as_deref())
     }
 
     fn tip_entry(&self) -> &Entry {
@@ -220,6 +272,7 @@ impl RecentMutatorSets {
             mutator_set_hash: mutator_set_after.hash(),
             mutator_set_after,
             removed: None,
+            extra_data: None,
         };
         Self {
             entries: VecDeque::from([Arc::new(entry)]),
@@ -242,6 +295,7 @@ impl RecentMutatorSets {
             mutator_set_hash: mutator_set_after.hash(),
             mutator_set_after,
             removed: Some(removed),
+            extra_data: None,
         };
         self.push(entry);
     }

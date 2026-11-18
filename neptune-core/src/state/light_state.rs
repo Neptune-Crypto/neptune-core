@@ -31,10 +31,6 @@ pub struct LightState {
 
     /// The mutator set after the tip, and after its nearest ancestors.
     recent_mutator_sets: RecentMutatorSets,
-
-    /// The tip's [`BlockExtraData`], if the rules strip chunk data from the
-    /// tip's transaction kernel and the data is known.
-    tip_extra_data: Option<BlockExtraData>,
 }
 
 impl LightState {
@@ -45,7 +41,6 @@ impl LightState {
             tip: block,
             time_to_mine: None,
             network,
-            tip_extra_data: None,
         }
     }
 
@@ -71,12 +66,12 @@ impl LightState {
 
     /// The tip's [`BlockExtraData`], if known.
     pub fn tip_extra_data(&self) -> Option<&BlockExtraData> {
-        self.tip_extra_data.as_ref()
+        self.recent_mutator_sets.extra_data(self.tip.hash())
     }
 
     /// Set the tip's [`BlockExtraData`]. Must belong to the current tip.
     pub(super) fn set_tip_extra_data(&mut self, tip_extra_data: Option<BlockExtraData>) {
-        self.tip_extra_data = tip_extra_data;
+        self.recent_mutator_sets.set_tip_extra_data(tip_extra_data);
     }
 
     /// The time it took miners to mine the current tip.
@@ -97,7 +92,6 @@ impl LightState {
 
         self.tip = new_block;
         self.time_to_mine = time_to_mine;
-        self.tip_extra_data = None;
     }
 }
 
