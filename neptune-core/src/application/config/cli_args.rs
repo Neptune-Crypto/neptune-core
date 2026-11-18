@@ -726,6 +726,17 @@ pub struct Args {
     #[clap(long)]
     pub utxo_index: bool,
 
+    /// Store the extra data of every block on disk, and serve it to peers.
+    ///
+    /// Without this flag, a node holds the extra data of its tip and its most
+    /// recent blocks in memory only. With it, the extra data of each block
+    /// that becomes the tip is also stored next to the blocks, from the moment
+    /// the flag is set; earlier blocks are not filled in. Expect a few
+    /// megabytes per block, and well over 100 MB for blocks with thousands of
+    /// inputs.
+    #[clap(long)]
+    pub store_block_extra_data: bool,
+
     /// Enable JSON/HTTP RPC.
     /// You can optionally specify an address and port (default: 127.0.0.1:9797).
     /// If not given, RPC is disabled.

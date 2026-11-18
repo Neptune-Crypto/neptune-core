@@ -93,14 +93,27 @@ pub struct LastFileRecord {
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub enum BlockIndexKey {
-    Block(Digest),       // points to block headers and file locations
-    File(u32),           // points to file information
-    Height(BlockHeight), // Maps from block height to list of blocks
-    LastFile,            // points to last file used
+    /// Points to block headers and file locations
+    Block(Digest),
+
+    /// Points to file information
+    File(u32),
+
+    /// Map from block height to list of blocks
+    Height(BlockHeight),
+
+    /// Points to last block file used
+    LastFile,
 
     // Tip-hash could also be fetched from archival block MMR instead. Maybe
     // this key is superfluous?
     BlockTipDigest, // points to block digest of most canonical block known
+
+    /// Points to where a block's extra data is stored
+    ExtraData(Digest),
+
+    /// Points to last file used for block extra data
+    LastExtraDataFile,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -110,6 +123,7 @@ pub enum BlockIndexValue {
     Height(Vec<Digest>),
     LastFile(LastFileRecord),
     BlockTipDigest(Digest),
+    ExtraData(BlockFileLocation),
 }
 
 impl BlockIndexValue {
@@ -138,6 +152,13 @@ impl BlockIndexValue {
         match self {
             BlockIndexValue::LastFile(rec) => rec.to_owned(),
             _ => panic!("Requested BlockTipDigest, found {:?}", self),
+        }
+    }
+
+    pub fn as_extra_data_location(&self) -> BlockFileLocation {
+        match self {
+            BlockIndexValue::ExtraData(location) => location.to_owned(),
+            _ => panic!("Requested ExtraData, found {:?}", self),
         }
     }
 

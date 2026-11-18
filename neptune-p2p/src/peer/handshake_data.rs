@@ -114,6 +114,17 @@ const AMS_WORK_POSITION: usize = 1;
 const NO_AMS: char = '0';
 const AMS_WORK_BASE: u8 = b'1';
 
+/// The character at this position holds six one-bit flags, as
+/// [`FLAG_BITS_BASE`] plus the bits. A missing character, or one outside
+/// that range, means no flag is set.
+const FLAG_BITS_POSITION: usize = 2;
+const FLAG_BITS_BASE: u8 = b'@';
+const NUM_FLAG_BITS: u32 = 6;
+
+/// Set if the node stores the extra data of blocks older than its recent
+/// ones.
+const BLOCK_EXTRA_DATA_HISTORY_BIT: u8 = 1 << 0;
+
 /// Datastruct defining the handshake peers exchange when establishing a new
 /// connection.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -164,6 +175,7 @@ impl HandshakeData {
     pub fn extra_data(
         relay_transactions: bool,
         archival_mutator_set_work: Option<u8>,
+        stores_block_extra_data_history: bool,
     ) -> ExtraDataString {
         let tx_relay_flag = if relay_transactions {
             TX_RELAY
@@ -174,7 +186,28 @@ impl HandshakeData {
             Some(work) => char::from(AMS_WORK_BASE + work),
             None => NO_AMS,
         };
-        ExtraDataString::from_chars([tx_relay_flag, ams_flag])
+        let mut flag_bits = 0;
+        if stores_block_extra_data_history {
+            flag_bits |= BLOCK_EXTRA_DATA_HISTORY_BIT;
+        }
+        let flag_bits = char::from(FLAG_BITS_BASE + flag_bits);
+        ExtraDataString::from_chars([tx_relay_flag, ams_flag, flag_bits])
+    }
+
+    /// The one-bit flags; all unset if the peer sends none.
+    fn flag_bits(&self) -> u8 {
+        self.extra_data
+            .chars()
+            .nth(FLAG_BITS_POSITION)
+            .and_then(|flag_bits| u8::try_from(flag_bits).ok()?.checked_sub(FLAG_BITS_BASE))
+            .filter(|flag_bits| u32::from(*flag_bits) < 1 << NUM_FLAG_BITS)
+            .unwrap_or(0)
+    }
+
+    /// Whether the peer stores the extra data of blocks older than its recent
+    /// ones, and can answer requests for it.
+    pub fn stores_block_extra_data_history(&self) -> bool {
+        self.flag_bits() & BLOCK_EXTRA_DATA_HISTORY_BIT != 0
     }
 
     /// Whether the peer accepts transactions and their announcements. It
@@ -402,9 +435,9 @@ mod tests {
     fn tx_relay_flag_is_the_first_character_of_the_extra_data(
         #[strategy(HandshakeData::arbitrary())] mut handshake: HandshakeData,
     ) {
-        handshake.extra_data = HandshakeData::extra_data(true, None);
+        handshake.extra_data = HandshakeData::extra_data(true, None, false);
         prop_assert!(handshake.relays_transactions());
-        handshake.extra_data = HandshakeData::extra_data(false, None);
+        handshake.extra_data = HandshakeData::extra_data(false, None, false);
         prop_assert!(!handshake.relays_transactions());
 
         // Peers that predate the flag send no extra data.
@@ -439,11 +472,26 @@ mod tests {
             .current();
         for relays in [false, true] {
             for work in [None, Some(0), Some(26), Some(63)] {
-                handshake.extra_data = HandshakeData::extra_data(relays, work);
-                assert_eq!(relays, handshake.relays_transactions());
-                assert_eq!(work, handshake.archival_mutator_set_work());
+                for history in [false, true] {
+                    handshake.extra_data = HandshakeData::extra_data(relays, work, history);
+                    assert_eq!(relays, handshake.relays_transactions());
+                    assert_eq!(work, handshake.archival_mutator_set_work());
+                    assert_eq!(history, handshake.stores_block_extra_data_history());
+                }
             }
         }
+
+        // Peers that predate the flag bits, or send a character outside
+        // their range, set no flag.
+        for extra_data in ["10", "10@", "100", "10\u{80}"] {
+            handshake.extra_data = ExtraDataString::from_chars(extra_data.chars());
+            assert!(
+                !handshake.stores_block_extra_data_history(),
+                "{extra_data:?}"
+            );
+        }
+        handshake.extra_data = ExtraDataString::from_chars("10A".chars());
+        assert!(handshake.stores_block_extra_data_history());
 
         // Peers that predate the field announce no work.
         handshake.extra_data = ExtraDataString::from_chars("1".chars());

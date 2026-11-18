@@ -2183,6 +2183,7 @@ impl GlobalState {
             extra_data: HandshakeData::extra_data(
                 relay_transactions,
                 serve_ams.then(|| self.cli().archival_mutator_set_work()),
+                self.cli().store_block_extra_data,
             ),
         }
     }
@@ -3137,6 +3138,18 @@ impl GlobalState {
             .archival_state_mut()
             .set_new_tip(&new_tip)
             .await?;
+        if let Some(extra_data) = &tip_extra_data {
+            if self.cli().store_block_extra_data {
+                if let Err(e) = self
+                    .chain
+                    .archival_state_mut()
+                    .store_block_extra_data(new_tip.hash(), extra_data)
+                    .await
+                {
+                    warn!("Could not store the new tip's block extra data: {e}.");
+                }
+            }
+        }
 
         debug!("Getting parent MSA.");
         let parent_ms_accumulator =

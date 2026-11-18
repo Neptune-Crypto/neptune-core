@@ -54,6 +54,7 @@ use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::twenty_first::bfe_array;
 use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::tip5::digest::Digest;
+use tokio::io::AsyncReadExt;
 use tokio::io::AsyncSeekExt;
 use tokio::io::AsyncWriteExt;
 use tokio::io::SeekFrom;
@@ -71,7 +72,7 @@ use crate::block_index::FileRecord;
 use crate::block_index::LastFileRecord;
 use crate::rusty_archival_block_mmr::RustyArchivalBlockMmr;
 use crate::rusty_utxo_index::RustyUtxoIndex;
-use crate::shared::new_block_file_is_needed;
+use crate::shared::new_file_is_needed;
 
 /// Provides interface to historic blockchain data which consists of
 ///  * block-data stored in individual files (append-only)
@@ -621,7 +622,7 @@ impl ArchivalState {
         let mut block_file = DataDirectory::open_ensure_parent_dir_exists(&block_file_path).await?;
 
         // Check if we should use the last file, or we need a new one.
-        if new_block_file_is_needed(&block_file, serialized_block_size).await {
+        if new_file_is_needed(&block_file, serialized_block_size).await {
             last_rec = LastFileRecord {
                 last_file: last_rec.last_file + 1,
             };
@@ -1621,6 +1622,99 @@ impl ArchivalState {
                 let record = x.as_block_record();
                 BlockHeaderWithBlockHashWitness::new(record.block_header, record.block_hash_witness)
             })
+    }
+
+    /// Append a block's [`BlockExtraData`] to the extra-data files, which
+    /// roll over like the block files, and record where it is. Does nothing
+    /// if it is stored already.
+    pub async fn store_block_extra_data(
+        &mut self,
+        block_hash: Digest,
+        extra_data: &BlockExtraData,
+    ) -> Result<()> {
+        let key = BlockIndexKey::ExtraData(block_hash);
+        if self.block_index_db.get(key).await.is_some() {
+            return Ok(());
+        }
+
+        let mut last_file: LastFileRecord = self
+            .block_index_db
+            .get(BlockIndexKey::LastExtraDataFile)
+            .await
+            .map(|value| value.as_last_file_record())
+            .unwrap_or_default();
+        let bytes = bincode::serialize(extra_data)?;
+        let path = self
+            .data_dir
+            .block_extra_data_file_path(last_file.last_file);
+        let mut file = DataDirectory::open_ensure_parent_dir_exists(&path).await?;
+
+        // Extra data larger than a whole file goes into an empty one.
+        if new_file_is_needed(&file, bytes.len() as u64).await && file.metadata().await?.len() > 0 {
+            last_file.last_file += 1;
+            let path = self
+                .data_dir
+                .block_extra_data_file_path(last_file.last_file);
+            file = DataDirectory::open_ensure_parent_dir_exists(&path).await?;
+        }
+
+        let offset = file.seek(SeekFrom::End(0)).await?;
+        file.write_all(&bytes).await?;
+        file.sync_data().await?;
+
+        let location = BlockFileLocation {
+            file_index: last_file.last_file,
+            offset,
+            block_length: bytes.len(),
+        };
+        let mut batch = WriteBatchAsync::new();
+        batch.op_write(key, BlockIndexValue::ExtraData(location));
+        batch.op_write(
+            BlockIndexKey::LastExtraDataFile,
+            BlockIndexValue::LastFile(last_file),
+        );
+        self.block_index_db.batch_write(batch).await;
+
+        Ok(())
+    }
+
+    /// Where a block's [`BlockExtraData`] is stored, if it is: the file and
+    /// the location within it, for [`Self::read_block_extra_data`].
+    pub async fn block_extra_data_location(
+        &self,
+        block_hash: Digest,
+    ) -> Option<(PathBuf, BlockFileLocation)> {
+        let location = self
+            .block_index_db
+            .get(BlockIndexKey::ExtraData(block_hash))
+            .await?
+            .as_extra_data_location();
+        let path = self
+            .data_dir
+            .block_extra_data_file_path(location.file_index);
+
+        Some((path, location))
+    }
+
+    /// Read [`BlockExtraData`] stored by [`Self::store_block_extra_data`],
+    /// from the location [`Self::block_extra_data_location`] gives. Needs no
+    /// access to the archival state, so it can run without holding a lock.
+    pub async fn read_block_extra_data(
+        path: PathBuf,
+        location: BlockFileLocation,
+    ) -> Result<BlockExtraData> {
+        let mut file = tokio::fs::File::open(&path).await?;
+        let end = location.offset.saturating_add(location.block_length as u64);
+        ensure!(
+            end <= file.metadata().await?.len(),
+            "Data corruption: block extra data extends beyond the end of '{}'",
+            path.display()
+        );
+        file.seek(SeekFrom::Start(location.offset)).await?;
+        let mut bytes = vec![0; location.block_length];
+        file.read_exact(&mut bytes).await?;
+
+        Ok(bincode::deserialize(&bytes)?)
     }
 
     /// Get the block record from the block digest, if it is stored.

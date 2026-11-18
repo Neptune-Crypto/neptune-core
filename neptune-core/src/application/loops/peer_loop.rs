@@ -240,12 +240,7 @@ impl PeerLoopHandler {
     /// otherwise the plain block.
     async fn block_message(&self, block: Block, with_extra_data: bool) -> PeerMessage {
         let extra_data = if with_extra_data {
-            self.global_state_lock
-                .lock_guard()
-                .await
-                .chain
-                .light_state()
-                .extra_data(block.hash())
+            self.block_extra_data(block.hash()).await
         } else {
             None
         };
@@ -258,6 +253,35 @@ impl PeerLoopHandler {
                 Arc::unwrap_or_clone(extra_data),
             ))),
             None => PeerMessage::Block(Box::new(transfer_block)),
+        }
+    }
+
+    /// The extra data of the block with this hash: from memory if held,
+    /// otherwise from disk if this node stores the history. The file is read
+    /// without holding the state lock.
+    async fn block_extra_data(&self, block_hash: Digest) -> Option<Arc<BlockExtraData>> {
+        let location = {
+            let state = self.global_state_lock.lock_guard().await;
+            if let Some(extra_data) = state.chain.light_state().extra_data(block_hash) {
+                return Some(extra_data);
+            }
+            if !state.cli().store_block_extra_data {
+                return None;
+            }
+            state
+                .chain
+                .archival_state()
+                .block_extra_data_location(block_hash)
+                .await?
+        };
+
+        let (path, location) = location;
+        match ArchivalState::read_block_extra_data(path, location).await {
+            Ok(extra_data) => Some(Arc::new(extra_data)),
+            Err(e) => {
+                warn!("Could not read stored block extra data: {e}");
+                None
+            }
         }
     }
 
@@ -1918,13 +1942,7 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                let extra_data = self
-                    .global_state_lock
-                    .lock_guard()
-                    .await
-                    .chain
-                    .light_state()
-                    .extra_data(block_digest);
+                let extra_data = self.block_extra_data(block_digest).await;
                 peer.send(PeerMessage::BlockExtraData(Box::new((
                     block_digest,
                     extra_data.map(Arc::unwrap_or_clone),
@@ -6225,6 +6243,86 @@ mod tests {
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
+        async fn stored_block_extra_data_is_served_from_disk() {
+            let network = Network::Testnet(42);
+            let mut rng = StdRng::seed_from_u64(5552404);
+            let mut cli = cli_args::Args::default_with_network(network);
+            cli.store_block_extra_data = true;
+            let (
+                _peer_broadcast_tx,
+                from_main_rx_clone,
+                to_main_tx,
+                to_main_rx1,
+                _,
+                _,
+                mut state_lock,
+                hsd,
+            ) = get_test_genesis_setup(0, cli).await.unwrap();
+
+            // More blocks than are held in memory, so that the oldest block's
+            // extra data is only on disk.
+            let blocks: [Block; 6] = fake_valid_sequence_of_blocks_for_tests(
+                &Block::genesis(network),
+                Timestamp::hours(1),
+                rng.random(),
+                network,
+            )
+            .await;
+            let mut oldest_extra_data = None;
+            for block in &blocks {
+                state_lock.set_new_tip(block.to_owned()).await.unwrap();
+                if oldest_extra_data.is_none() {
+                    oldest_extra_data = state_lock
+                        .lock_guard()
+                        .await
+                        .chain
+                        .light_state()
+                        .tip_extra_data()
+                        .cloned();
+                    assert!(oldest_extra_data.is_some(), "a zeta tip has extra data");
+                }
+            }
+            let oldest = blocks[0].clone();
+            assert!(state_lock
+                .lock_guard()
+                .await
+                .chain
+                .light_state()
+                .extra_data(oldest.hash())
+                .is_none());
+
+            let mock = Mock::new(vec![
+                Action::Read(PeerMessage::BlockExtraDataRequest(oldest.hash())),
+                Action::Write(PeerMessage::BlockExtraData(Box::new((
+                    oldest.hash(),
+                    oldest_extra_data.clone(),
+                )))),
+                Action::Read(PeerMessage::BlockWithExtraDataRequestByHeight(1u64.into())),
+                Action::Write(PeerMessage::BlockWithExtraData(Box::new((
+                    oldest.try_into().unwrap(),
+                    oldest_extra_data.unwrap(),
+                )))),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let peer_address = get_dummy_socket_address(0);
+            let mut peer_loop_handler = PeerLoopHandler::new(
+                to_main_tx.clone(),
+                state_lock.clone(),
+                pseudorandom_peer_id(&peer_address),
+                socketaddr_to_multiaddr(peer_address),
+                hsd,
+                false,
+            );
+            peer_loop_handler
+                .run_wrapper(mock, from_main_rx_clone)
+                .await
+                .unwrap();
+
+            drop(to_main_rx1);
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
         async fn block_with_valid_extra_data_is_handled_as_block() -> Result<()> {
             let network = Network::Testnet(42);
             let mut rng = StdRng::seed_from_u64(5550002);
@@ -7343,7 +7441,7 @@ mod tests {
         async fn receiving_node() -> TestSetup {
             let mut setup = genesis_setup(cli_args::Args::default_with_network(NETWORK)).await;
             setup.peer_loop_handler.peer_handshake_data.extra_data =
-                HandshakeData::extra_data(true, Some(0));
+                HandshakeData::extra_data(true, Some(0), false);
             for block in blocks().await {
                 setup
                     .peer_loop_handler
@@ -7781,7 +7879,7 @@ mod tests {
         async fn a_peer_that_wants_too_much_work_is_not_asked() {
             let mut receiver = receiving_node().await;
             receiver.peer_loop_handler.peer_handshake_data.extra_data =
-                HandshakeData::extra_data(true, Some(MAX_ARCHIVAL_MUTATOR_SET_WORK + 1));
+                HandshakeData::extra_data(true, Some(MAX_ARCHIVAL_MUTATOR_SET_WORK + 1), false);
             let mut mock = Mock::new(vec![]);
             let target_peer = receiver.peer_loop_handler.peer_id;
             receiver
@@ -8665,7 +8763,8 @@ mod tests {
                 };
                 let mut setup = genesis_setup(cli).await;
                 let mut peer_handshake_data = setup.peer_loop_handler.peer_handshake_data;
-                peer_handshake_data.extra_data = HandshakeData::extra_data(peer_relays, None);
+                peer_handshake_data.extra_data =
+                    HandshakeData::extra_data(peer_relays, None, false);
                 setup.peer_loop_handler = PeerLoopHandler::new(
                     setup.to_main_tx.clone(),
                     setup.peer_loop_handler.global_state_lock.clone(),
