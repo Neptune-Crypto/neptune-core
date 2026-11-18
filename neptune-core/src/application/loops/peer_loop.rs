@@ -3,6 +3,7 @@ pub(crate) mod channel;
 use std::cmp;
 use std::marker::Unpin;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
 
@@ -235,22 +236,16 @@ impl PeerLoopHandler {
     }
 
     /// The message that sends `block`, a block from the archival state, to the
-    /// connected peer. Bundled with the block's extra data if that data is
-    /// available and the peer understands it.
-    async fn block_message(&self, block: Block) -> PeerMessage {
-        let extra_data = if self
-            .peer_handshake_data
-            .version
-            .understands_block_extra_data()
-        {
-            let state = self.global_state_lock.lock_guard().await;
-            if state.chain.tip().hash() == block.hash() {
-                // block extra data is always read from memory so should be
-                // very fast.
-                state.chain.light_state().tip_extra_data().cloned()
-            } else {
-                None
-            }
+    /// connected peer: with the block's extra data if asked for and known,
+    /// otherwise the plain block.
+    async fn block_message(&self, block: Block, with_extra_data: bool) -> PeerMessage {
+        let extra_data = if with_extra_data {
+            self.global_state_lock
+                .lock_guard()
+                .await
+                .chain
+                .light_state()
+                .extra_data(block.hash())
         } else {
             None
         };
@@ -258,9 +253,10 @@ impl PeerLoopHandler {
         let transfer_block =
             TransferBlock::try_from(block).expect("block from archival state should be valid");
         match extra_data {
-            Some(extra_data) => {
-                PeerMessage::BlockWithExtraData(Box::new((transfer_block, extra_data)))
-            }
+            Some(extra_data) => PeerMessage::BlockWithExtraData(Box::new((
+                transfer_block,
+                Arc::unwrap_or_clone(extra_data),
+            ))),
             None => PeerMessage::Block(Box::new(transfer_block)),
         }
     }
@@ -1241,6 +1237,11 @@ impl PeerLoopHandler {
             msg => msg,
         };
 
+        let wants_extra_data = matches!(
+            msg,
+            PeerMessage::BlockWithExtraDataRequestByHash(_)
+                | PeerMessage::BlockWithExtraDataRequestByHeight(_)
+        );
         match msg {
             PeerMessage::Bye => {
                 // Note that the current peer is not removed from the connected peers here
@@ -1868,7 +1869,8 @@ impl PeerLoopHandler {
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
-            PeerMessage::BlockRequestByHash(block_digest) => {
+            PeerMessage::BlockRequestByHash(block_digest)
+            | PeerMessage::BlockWithExtraDataRequestByHash(block_digest) => {
                 if !self.may_serve_blocks(1).await? {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
@@ -1905,12 +1907,38 @@ impl PeerLoopHandler {
                             return Ok(KEEP_CONNECTION_ALIVE);
                         }
 
-                        peer.send(self.block_message(b).await).await?;
+                        peer.send(self.block_message(b, wants_extra_data).await)
+                            .await?;
                         Ok(KEEP_CONNECTION_ALIVE)
                     }
                 }
             }
-            PeerMessage::BlockRequestByHeight(block_height) => {
+            PeerMessage::BlockExtraDataRequest(block_digest) => {
+                if !self.may_serve_blocks(1).await? {
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                let extra_data = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .chain
+                    .light_state()
+                    .extra_data(block_digest);
+                peer.send(PeerMessage::BlockExtraData(Box::new((
+                    block_digest,
+                    extra_data.map(Arc::unwrap_or_clone),
+                ))))
+                .await?;
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            PeerMessage::BlockExtraData(_) => {
+                // This node computes its own extra data and never asks for it.
+                debug!("Ignoring unrequested block extra data");
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            PeerMessage::BlockRequestByHeight(block_height)
+            | PeerMessage::BlockWithExtraDataRequestByHeight(block_height) => {
                 log_slow_scope!(fn_name!() + "::PeerMessage::BlockRequestByHeight");
 
                 if !self.may_serve_blocks(1).await? {
@@ -1948,7 +1976,8 @@ impl PeerLoopHandler {
                         .expect("block should live in archival state because fetching the block digest from height worked");
 
                     debug!("Sending block");
-                    peer.send(self.block_message(block).await).await?;
+                    peer.send(self.block_message(block, wants_extra_data).await)
+                        .await?;
                     debug!("Sent block");
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
@@ -6057,7 +6086,7 @@ mod tests {
 
         #[traced_test]
         #[apply(shared_tokio_runtime)]
-        async fn tip_is_sent_with_extra_data_to_peers_that_understand_it() {
+        async fn block_is_sent_with_extra_data_only_when_asked_for() {
             let network = Network::Testnet(42);
             let mut rng = StdRng::seed_from_u64(5552402);
             let (
@@ -6068,11 +6097,84 @@ mod tests {
                 _,
                 _,
                 mut state_lock,
-                mut hsd,
+                hsd,
             ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network))
                 .await
                 .unwrap();
-            hsd.version = VersionString::new_from_str("0.21.0");
+
+            // More blocks than `RecentMutatorSets` holds, so that the oldest
+            // block's extra data is no longer held.
+            let blocks: [Block; 6] = fake_valid_sequence_of_blocks_for_tests(
+                &Block::genesis(network),
+                Timestamp::hours(1),
+                rng.random(),
+                network,
+            )
+            .await;
+            for block in &blocks {
+                state_lock.set_new_tip(block.to_owned()).await.unwrap();
+            }
+            let tip = blocks[5].clone();
+            let extra_data = state_lock
+                .lock_guard()
+                .await
+                .chain
+                .light_state()
+                .tip_extra_data()
+                .cloned()
+                .expect("a zeta tip has extra data");
+            let plain =
+                |block: &Block| PeerMessage::Block(Box::new(block.clone().try_into().unwrap()));
+            let bundle = PeerMessage::BlockWithExtraData(Box::new((
+                tip.clone().try_into().unwrap(),
+                extra_data,
+            )));
+
+            let mock = Mock::new(vec![
+                Action::Read(PeerMessage::BlockRequestByHeight(6u64.into())),
+                Action::Write(plain(&tip)),
+                Action::Read(PeerMessage::BlockWithExtraDataRequestByHeight(6u64.into())),
+                Action::Write(bundle.clone()),
+                Action::Read(PeerMessage::BlockWithExtraDataRequestByHash(tip.hash())),
+                Action::Write(bundle),
+                Action::Read(PeerMessage::BlockWithExtraDataRequestByHeight(1u64.into())),
+                Action::Write(plain(&blocks[0])),
+                Action::Read(PeerMessage::Bye),
+            ]);
+            let peer_address = get_dummy_socket_address(0);
+            let mut peer_loop_handler = PeerLoopHandler::new(
+                to_main_tx.clone(),
+                state_lock.clone(),
+                pseudorandom_peer_id(&peer_address),
+                socketaddr_to_multiaddr(peer_address),
+                hsd,
+                false,
+            );
+            peer_loop_handler
+                .run_wrapper(mock, from_main_rx_clone)
+                .await
+                .unwrap();
+
+            drop(to_main_rx1);
+        }
+
+        #[traced_test]
+        #[apply(shared_tokio_runtime)]
+        async fn block_extra_data_request_is_answered_from_memory() {
+            let network = Network::Testnet(42);
+            let mut rng = StdRng::seed_from_u64(5552403);
+            let (
+                _peer_broadcast_tx,
+                from_main_rx_clone,
+                to_main_tx,
+                to_main_rx1,
+                _,
+                _,
+                mut state_lock,
+                hsd,
+            ) = get_test_genesis_setup(0, cli_args::Args::default_with_network(network))
+                .await
+                .unwrap();
             let blocks: [Block; 2] = fake_valid_sequence_of_blocks_for_tests(
                 &Block::genesis(network),
                 Timestamp::hours(1),
@@ -6090,15 +6192,18 @@ mod tests {
                 .chain
                 .light_state()
                 .tip_extra_data()
-                .cloned()
-                .expect("a zeta tip has extra data");
+                .cloned();
+            assert!(extra_data.is_some());
+            let unknown: Digest = rng.random();
 
             let mock = Mock::new(vec![
-                Action::Read(PeerMessage::BlockRequestByHeight(2u64.into())),
-                Action::Write(PeerMessage::BlockWithExtraData(Box::new((
-                    tip.try_into().unwrap(),
+                Action::Read(PeerMessage::BlockExtraDataRequest(tip.hash())),
+                Action::Write(PeerMessage::BlockExtraData(Box::new((
+                    tip.hash(),
                     extra_data,
                 )))),
+                Action::Read(PeerMessage::BlockExtraDataRequest(unknown)),
+                Action::Write(PeerMessage::BlockExtraData(Box::new((unknown, None)))),
                 Action::Read(PeerMessage::Bye),
             ]);
             let peer_address = get_dummy_socket_address(0);

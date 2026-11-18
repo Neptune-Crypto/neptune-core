@@ -164,11 +164,11 @@ impl RecentMutatorSets {
     }
 
     /// [`BlockExtraData`] of recent blocks, if known.
-    pub fn extra_data(&self, block_hash: Digest) -> Option<&BlockExtraData> {
+    pub fn extra_data(&self, block_hash: Digest) -> Option<&Arc<BlockExtraData>> {
         self.entries
             .iter()
             .find(|entry| entry.block_hash == block_hash)
-            .and_then(|entry| entry.extra_data.as_deref())
+            .and_then(|entry| entry.extra_data.as_ref())
     }
 
     fn tip_entry(&self) -> &Entry {

@@ -622,11 +622,32 @@ pub enum PeerMessage {
     /// exceeding 0.19.3 understand this message.
     BlockProposalNotificationRequest,
 
-    /// A block together with its [`BlockExtraData`], sent in place of
-    /// [`PeerMessage::Block`] when the block's transaction kernel does not
-    /// carry chunk data and the sender knows the block's extra data. Only
-    /// peers whose version is at least 0.21.0 understand this message.
+    /// A block together with its [`BlockExtraData`]. Response to
+    /// [`PeerMessage::BlockWithExtraDataRequestByHash`] and
+    /// [`PeerMessage::BlockWithExtraDataRequestByHeight`] if the sender has
+    /// the block's extra data. Only peers whose version is at least 0.21.0
+    /// understand this message.
     BlockWithExtraData(Box<(TransferBlock, BlockExtraData)>),
+
+    /// As [`PeerMessage::BlockRequestByHash`], but asks for the block's extra
+    /// data too. Answered with [`PeerMessage::BlockWithExtraData`] if the
+    /// receiver has it, and with [`PeerMessage::Block`] otherwise. Only peers
+    /// whose version is at least 0.21.0 understand this message.
+    BlockWithExtraDataRequestByHash(Digest),
+
+    /// As [`PeerMessage::BlockRequestByHeight`], but asks for the block's
+    /// extra data too. Answered as
+    /// [`PeerMessage::BlockWithExtraDataRequestByHash`].
+    BlockWithExtraDataRequestByHeight(BlockHeight),
+
+    /// Request the [`BlockExtraData`] of the block with this hash, without the
+    /// block. Answered with [`PeerMessage::BlockExtraData`]. Only peers whose
+    /// version is at least 0.21.0 understand this message.
+    BlockExtraDataRequest(Digest),
+
+    /// Response to [`PeerMessage::BlockExtraDataRequest`]: the block's hash and
+    /// its extra data, or `None` if the sender does not hold it.
+    BlockExtraData(Box<(Digest, Option<BlockExtraData>)>),
     // New variants must be added here at the bottom to be backwards compatible.
 }
 
@@ -654,6 +675,9 @@ impl PeerMessageKind {
             | Self::BlockNotification
             | Self::BlockRequestByHeight
             | Self::BlockRequestByHash
+            | Self::BlockWithExtraDataRequestByHeight
+            | Self::BlockWithExtraDataRequestByHash
+            | Self::BlockExtraDataRequest
             | Self::UnableToSatisfyBatchRequest
             | Self::SyncChallenge
             | Self::BlockProposalNotification
@@ -680,7 +704,7 @@ impl PeerMessageKind {
             Self::Transaction | Self::SyncChallengeResponse => 270 * MIB,
             // About 140-200 MB for a block with 5000 inputs spending old
             // outputs, after ten years of such blocks.
-            Self::BlockWithExtraData => 300 * MIB,
+            Self::BlockWithExtraData | Self::BlockExtraData => 300 * MIB,
             Self::BlockResponseBatch => return None,
         };
 
@@ -694,6 +718,12 @@ impl PeerMessage {
             PeerMessage::Handshake { .. } => "handshake",
             PeerMessage::Block(_) => "block",
             PeerMessage::BlockWithExtraData(_) => "block with extra data",
+            PeerMessage::BlockWithExtraDataRequestByHash(_) => "block with extra data req by hash",
+            PeerMessage::BlockExtraDataRequest(_) => "block extra data req",
+            PeerMessage::BlockExtraData(_) => "block extra data",
+            PeerMessage::BlockWithExtraDataRequestByHeight(_) => {
+                "block with extra data req by height"
+            }
             PeerMessage::TipWithParentAccumulator(_) => "tip with parent accumulator",
             PeerMessage::BlockNotificationRequest => "block notification request",
             PeerMessage::BlockNotification(_) => "block notification",
@@ -742,6 +772,10 @@ impl PeerMessage {
             PeerMessage::BlockNotificationWithPowWitness(_) => false,
             PeerMessage::BlockRequestByHeight(_) => false,
             PeerMessage::BlockRequestByHash(_) => false,
+            PeerMessage::BlockWithExtraDataRequestByHeight(_) => false,
+            PeerMessage::BlockWithExtraDataRequestByHash(_) => false,
+            PeerMessage::BlockExtraDataRequest(_) => false,
+            PeerMessage::BlockExtraData(_) => false,
             PeerMessage::TipWithParentAccumulatorRequest => false,
             PeerMessage::ArchivalMutatorSetRequest(_) => false,
             PeerMessage::ArchivalMutatorSet(_) => false,
@@ -782,6 +816,10 @@ impl PeerMessage {
             PeerMessage::BlockNotificationWithPowWitness(_) => false,
             PeerMessage::BlockRequestByHeight(_) => false,
             PeerMessage::BlockRequestByHash(_) => false,
+            PeerMessage::BlockWithExtraDataRequestByHeight(_) => false,
+            PeerMessage::BlockWithExtraDataRequestByHash(_) => false,
+            PeerMessage::BlockExtraDataRequest(_) => false,
+            PeerMessage::BlockExtraData(_) => false,
             PeerMessage::TipWithParentAccumulatorRequest => false,
             PeerMessage::ArchivalMutatorSetRequest(_) => true,
             PeerMessage::ArchivalMutatorSet(_) => false,
@@ -823,6 +861,10 @@ impl PeerMessage {
             PeerMessage::BlockNotificationWithPowWitness(_) => true,
             PeerMessage::BlockRequestByHeight(_) => true,
             PeerMessage::BlockRequestByHash(_) => true,
+            PeerMessage::BlockWithExtraDataRequestByHeight(_) => true,
+            PeerMessage::BlockWithExtraDataRequestByHash(_) => true,
+            PeerMessage::BlockExtraDataRequest(_) => true,
+            PeerMessage::BlockExtraData(_) => true,
             PeerMessage::TipWithParentAccumulatorRequest => true,
             PeerMessage::ArchivalMutatorSetRequest(_) => true,
             PeerMessage::ArchivalMutatorSet(_) => true,

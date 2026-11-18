@@ -1,9 +1,12 @@
+use std::sync::Arc;
+
 use neptune_consensus::block::block_extra_data::BlockExtraData;
 use neptune_consensus::block::Block;
 use neptune_mempool::recent_mutator_sets::RecentMutatorSets;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_primitives::network::Network;
 use neptune_primitives::timestamp::Timestamp;
+use tasm_lib::prelude::Digest;
 
 /// LightState represents the latest accepted block,
 /// along with bookkeeping information about it
@@ -64,9 +67,17 @@ impl LightState {
         self.recent_mutator_sets.tip_mutator_set().clone()
     }
 
+    /// The [`BlockExtraData`] of the tip or of a recent ancestor, if held.
+    /// Shared, so that a caller holding a lock on the state need not copy it.
+    pub fn extra_data(&self, block_hash: Digest) -> Option<Arc<BlockExtraData>> {
+        self.recent_mutator_sets.extra_data(block_hash).cloned()
+    }
+
     /// The tip's [`BlockExtraData`], if known.
     pub fn tip_extra_data(&self) -> Option<&BlockExtraData> {
-        self.recent_mutator_sets.extra_data(self.tip.hash())
+        self.recent_mutator_sets
+            .extra_data(self.tip.hash())
+            .map(|extra_data| extra_data.as_ref())
     }
 
     /// Set the tip's [`BlockExtraData`]. Must belong to the current tip.
