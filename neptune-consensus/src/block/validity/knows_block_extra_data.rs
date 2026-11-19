@@ -15,9 +15,12 @@ use std::sync::OnceLock;
 use get_size2::GetSize;
 use itertools::Itertools;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
 use neptune_mutator_set::removal_record::chunk::Chunk;
+use neptune_mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
 use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
 use neptune_mutator_set::removal_record::RemovalRecord;
+use neptune_mutator_set::shared::NUM_TRIALS;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::mast_hash::HasDiscriminant;
 use neptune_primitives::mast_hash::MastHash;
@@ -77,9 +80,10 @@ fn seed(prev_block_digest: Digest, j: usize) -> u64 {
 /// otherwise one per stretch of `num_inputs / NUM_SAMPLES` inputs, at an
 /// offset the parent's hash picks.
 pub fn sampled_inputs(prev_block_digest: Digest, num_inputs: usize) -> Vec<usize> {
-    let stride = (num_inputs / NUM_SAMPLES).max(1);
-    (0..num_inputs.min(NUM_SAMPLES))
-        .map(|j| j * stride + (seed(prev_block_digest, j) % stride as u64) as usize)
+    let step = std::cmp::max(num_inputs / NUM_SAMPLES, 1);
+    let num_samples = std::cmp::min(num_inputs, NUM_SAMPLES);
+    (0..num_samples)
+        .map(|j| j * step + (seed(prev_block_digest, j) % step as u64) as usize)
         .collect()
 }
 
@@ -368,6 +372,12 @@ impl TritonProgram for KnowsBlockExtraData {
         let activation_height_alloc = library.kmalloc(1);
         let own_program_digest_alloc = library.kmalloc(Digest::LEN as u32);
         let inputs_alloc = library.kmalloc(1);
+        let empty_record_len = RemovalRecord {
+            absolute_indices: AbsoluteIndexSet::new_raw(0, [0; NUM_TRIALS as usize]),
+            target_chunks: ChunkDictionary::empty(),
+        }
+        .encode()
+        .len();
         let stride_alloc = library.kmalloc(1);
         let chunk_indices_alloc = library.kmalloc(1);
         let leaf_count_alloc = library.kmalloc(2);
@@ -534,6 +544,15 @@ impl TritonProgram for KnowsBlockExtraData {
                 dup 8 {&field!(KnowsBlockExtraDataMemory::prev_block_inputs_len)} read_mem 1 pop 1
                 call {hash_varlen}
                 call {merkle_verify}
+                // _ *m
+
+                // No input carries chunk data: each then has the smallest
+                // encoding a removal record can have, so the list's length
+                // is 1 + num_inputs·(1 + that size).
+                {&read_word(&inputs_alloc)} read_mem 1 pop 1
+                push {1 + empty_record_len} mul addi 1
+                dup 1 {&field!(KnowsBlockExtraDataMemory::prev_block_inputs_len)} read_mem 1 pop 1
+                eq assert error_id {BlockValidationRule::RemovalRecordsCarryChunkData.error_id()}
                 // _ *m
 
                 dup 0 {&field!(KnowsBlockExtraDataMemory::prev_block_txk_mast_hash)} {&read_digest}
@@ -752,7 +771,6 @@ impl TritonProgram for KnowsBlockExtraData {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use neptune_mutator_set::msa_and_records::MsaAndRecords;
-    use neptune_mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
     use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
     use neptune_primitives::network::Network;
     use proptest::prelude::Arbitrary;
@@ -783,9 +801,9 @@ mod tests {
                 Tip5::hash_pair(header_leaf, body_leaf),
                 Tip5::hash_pair(appendix_leaf, Digest::default()),
             );
-            let prev_block_hash =
+            let prev_block_hash_calculated =
                 Tip5::hash_pair(Tip5::hash(&kernel_mast_hash), memory.prev_block_proof_leaf);
-            assert_eq!(prev_block_digest, prev_block_hash);
+            assert_eq!(prev_block_digest, prev_block_hash_calculated);
 
             tasm::tasmlib_hashing_merkle_verify(
                 memory.prev_block_body_mast_hash,
@@ -797,6 +815,7 @@ mod tests {
                 + bfe!(memory.encode().len() as u64);
             let inputs: Vec<RemovalRecord> = tasm::decode_from_memory(inputs_address);
             assert_eq!(inputs.encode().len(), memory.prev_block_inputs_len as usize);
+            assert!(inputs.iter().all(|input| input.target_chunks.is_empty()));
             tasm::tasmlib_hashing_merkle_verify(
                 memory.prev_block_txk_mast_hash,
                 TransactionKernelField::Inputs.discriminant() as u32,
@@ -1040,6 +1059,29 @@ mod tests {
         let mut witness = honest;
         witness.memory.mutator_set = self::msa_and_records(6, 3, 100).mutator_set_accumulator;
         assert_rejects(&witness, &[MerkleVerify::ROOT_MISMATCH_ERROR_ID]);
+    }
+
+    #[test]
+    fn parent_inputs_with_chunk_data_are_rejected() {
+        let mut rng = StdRng::seed_from_u64(8);
+        let (mut prev_block, msa_and_records, activation_height) = activated_parent(&mut rng);
+        let target_chunks = msa_and_records
+            .unpacked_removal_records()
+            .into_iter()
+            .map(|record| record.target_chunks)
+            .find(|chunks| !chunks.is_empty())
+            .unwrap();
+        let mut inputs = prev_block.body().transaction_kernel.inputs.clone();
+        inputs[0].target_chunks = target_chunks;
+        let kernel = TransactionKernelModifier::default()
+            .inputs(inputs)
+            .modify(prev_block.body().transaction_kernel.clone());
+        prev_block.set_transaction_kernel(kernel);
+        let witness = witness(&prev_block, &msa_and_records, activation_height);
+        assert_rejects(
+            &witness,
+            &[BlockValidationRule::RemovalRecordsCarryChunkData.error_id()],
+        );
     }
 
     #[test]

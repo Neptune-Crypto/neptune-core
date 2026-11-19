@@ -164,6 +164,10 @@ pub enum BlockValidationError {
     ///      claim commits to.
     #[error("Removal records must match the claim's index commitment")]
     RemovalIndexCommitmentMismatch,
+
+    /// 2.y) From hardfork zeta on, the removal records carry no chunk data.
+    #[error("Removal records must not carry chunk data")]
+    RemovalRecordsCarryChunkData,
 }
 
 impl From<RemovalRecordListUnpackError> for BlockValidationError {

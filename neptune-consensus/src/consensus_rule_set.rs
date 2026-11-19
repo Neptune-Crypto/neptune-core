@@ -303,6 +303,25 @@ impl ConsensusRuleSet {
         Self::epsilon_activation_block_height(network)
     }
 
+    /// The first block that must contain the composer's claim to know its
+    /// parent's block extra data, `KnowsBlockExtraData`: the first block
+    /// whose parent is a zeta block.
+    pub fn knows_block_extra_data_activation_height(network: Network) -> BlockHeight {
+        ConsensusRuleSet::HardforkZeta
+            .first_block(network)
+            .expect("zeta has a first block on every network")
+            .next()
+    }
+
+    /// Whether a block at this height must contain the `KnowsBlockExtraData`
+    /// claim about its parent.
+    pub fn miners_must_prove_extra_data_knowledge(network: Network, height: BlockHeight) -> bool {
+        // Only enforce where the ruleset requires AMS knowledge. Allows some
+        // tests to run on top of fake genesis blocks at heights other than 0.
+        Self::infer_from(network, height).miners_must_prove_ams_knowledge(network)
+            && height >= Self::knows_block_extra_data_activation_height(network)
+    }
+
     /// The first block that must contain the succinctness claims
     pub fn epsilon_activation_block_height(network: Network) -> BlockHeight {
         match network {
@@ -845,6 +864,23 @@ pub(crate) mod tests {
             ),
             "Updated lustration rule must follow initial"
         );
+    }
+
+    #[test]
+    fn block_extra_data_claim_activates_one_block_after_zeta() {
+        for network in Network::all_networks() {
+            let zeta = ConsensusRuleSet::HardforkZeta.first_block(network).unwrap();
+            let activation = ConsensusRuleSet::knows_block_extra_data_activation_height(network);
+            assert_eq!(zeta.next(), activation);
+            assert!(!ConsensusRuleSet::miners_must_prove_extra_data_knowledge(
+                network, zeta
+            ));
+            assert_eq!(
+                ConsensusRuleSet::HardforkZeta.miners_must_prove_ams_knowledge(network),
+                ConsensusRuleSet::miners_must_prove_extra_data_knowledge(network, activation),
+                "{network}"
+            );
+        }
     }
 
     #[test]
