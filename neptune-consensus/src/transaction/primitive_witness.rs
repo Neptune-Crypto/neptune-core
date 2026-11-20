@@ -25,8 +25,12 @@ use super::transaction_kernel::TransactionKernel;
 use super::transaction_kernel::TransactionKernelModifier;
 use super::utxo::Utxo;
 use crate::block::mutator_set_update::MutatorSetUpdate;
+use crate::proof_abstractions::tasm::program::TritonProgram;
+use crate::transaction::validity::collect_type_scripts::burns_time_locked_coins;
+use crate::transaction::validity::collect_type_scripts::is_exempt_from_time_lock;
 use crate::type_scripts::known_type_scripts;
 use crate::type_scripts::known_type_scripts::match_type_script_and_generate_witness;
+use crate::type_scripts::time_lock::TimeLock;
 use crate::type_scripts::TypeScriptAndWitness;
 
 /// A list of UTXOs with an associated salt.
@@ -188,13 +192,21 @@ impl PrimitiveWitness {
             generate_secure_pseudorandom_seed(&input_utxos, &output_utxos, &sender_randomnesses);
 
         let mut rng = StdRng::from_seed(salt_seed);
-        let salted_output_utxos = SaltedUtxos::new_with_rng(output_utxos.to_vec(), &mut rng);
+        let mut salted_output_utxos = SaltedUtxos::new_with_rng(output_utxos.to_vec(), &mut rng);
         let salted_input_utxos = SaltedUtxos::new_with_rng(input_utxos.clone(), &mut rng);
+
+        // A burn of time-locked coins needs no time lock if it is canonical,
+        // which takes a zero salt.
+        if burns_time_locked_coins(&input_utxos, &output_utxos) {
+            salted_output_utxos.salt = [BFieldElement::new(0); 3];
+        }
+        let is_exempt = is_exempt_from_time_lock(&salted_input_utxos, &salted_output_utxos);
 
         let type_script_hashes =
             Utxo::type_script_hashes(input_utxos.iter().chain(output_utxos.iter()));
         let type_scripts_and_witnesses = type_script_hashes
             .into_iter()
+            .filter(|&hash| !is_exempt || hash != TimeLock.hash())
             .map(|type_script_hash| {
                 match_type_script_and_generate_witness(
                     type_script_hash,
@@ -277,12 +289,16 @@ impl PrimitiveWitness {
         }
 
         // verify that all type required scripts are present.
+        let is_exempt = is_exempt_from_time_lock(&self.input_utxos, &self.output_utxos);
         let required_type_script_hashes = Utxo::type_script_hashes(
             self.output_utxos
                 .utxos
                 .iter()
                 .chain(&self.input_utxos.utxos),
-        );
+        )
+        .into_iter()
+        .filter(|&hash| !is_exempt || hash != TimeLock.hash())
+        .collect_vec();
         let type_script_dictionary = self
             .type_scripts_and_witnesses
             .iter()

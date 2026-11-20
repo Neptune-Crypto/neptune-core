@@ -43,6 +43,7 @@ use neptune_consensus::block::block_header::BlockHeader;
 use neptune_consensus::block::block_header::BlockHeaderWithBlockHashWitness;
 use neptune_consensus::block::guesser_receiver_data::GuesserReceiverData;
 use neptune_consensus::block::mutator_set_update::MutatorSetUpdate;
+use neptune_consensus::block::validity::knows_block_extra_data::KnowsBlockExtraDataWitness;
 use neptune_consensus::block::Block;
 use neptune_consensus::block::ComposerWitness;
 use neptune_consensus::chaintx::link_tx::LinkTx;
@@ -1669,9 +1670,40 @@ impl GlobalState {
             .await
             .unwrap_or_default();
 
+        let knows_block_extra_data =
+            if ConsensusRuleSet::miners_must_prove_extra_data_knowledge(network, next_height) {
+                let activation_height =
+                    ConsensusRuleSet::knows_block_extra_data_activation_height(network);
+                let predecessor_rules =
+                    ConsensusRuleSet::infer_from(network, predecessor.header().height);
+                let witness = match self.chain.light_state().tip_extra_data() {
+                    Some(extra_data) => KnowsBlockExtraDataWitness::from_extra_data(
+                        predecessor,
+                        &prev_block_transaction_mutator_set,
+                        extra_data,
+                        activation_height,
+                        predecessor_rules,
+                    )?,
+                    // A predecessor without inputs has no extra data to know.
+                    None if predecessor.body().transaction_kernel.inputs.is_empty() => {
+                        KnowsBlockExtraDataWitness::new(
+                            predecessor,
+                            &prev_block_transaction_mutator_set,
+                            &[],
+                            activation_height,
+                        )
+                    }
+                    None => bail!("the tip's block extra data is missing"),
+                };
+                Some(witness)
+            } else {
+                None
+            };
+
         Ok(Some(ComposerWitness {
             knows_ams,
             prev_block_transaction_mutator_set,
+            knows_block_extra_data,
             previous: None,
         }))
     }
@@ -2147,6 +2179,7 @@ impl GlobalState {
             extra_data: HandshakeData::extra_data(
                 relay_transactions,
                 serve_ams.then(|| self.cli().archival_mutator_set_work()),
+                self.cli().store_block_extra_data,
             ),
         }
     }
@@ -3096,10 +3129,23 @@ impl GlobalState {
         );
 
         debug!("Applying block to archival state.");
-        self.chain
+        let tip_extra_data = self
+            .chain
             .archival_state_mut()
             .set_new_tip(&new_tip)
             .await?;
+        if let Some(extra_data) = &tip_extra_data {
+            if self.cli().store_block_extra_data {
+                if let Err(e) = self
+                    .chain
+                    .archival_state_mut()
+                    .store_block_extra_data(new_tip.hash(), extra_data)
+                    .await
+                {
+                    warn!("Could not store the new tip's block extra data: {e}.");
+                }
+            }
+        }
 
         debug!("Getting parent MSA.");
         let parent_ms_accumulator =
@@ -3122,6 +3168,9 @@ impl GlobalState {
 
         debug!("Updating light state.");
         self.chain.light_state_mut().update(new_tip);
+        self.chain
+            .light_state_mut()
+            .set_tip_extra_data(tip_extra_data);
         let tip: &Block = self.chain.tip();
 
         // Update mempool with UTXOs from this block. This is done by

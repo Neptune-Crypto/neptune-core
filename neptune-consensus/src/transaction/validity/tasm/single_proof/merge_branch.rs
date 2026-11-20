@@ -10,6 +10,7 @@ use anyhow::Result;
 use authenticate_coinbase_fields::AuthenticateCoinbaseFields;
 use itertools::Itertools;
 use neptune_mutator_set::addition_record::AdditionRecord;
+use neptune_mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
 use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
 use neptune_primitives::mast_hash::MastHash;
 use neptune_primitives::timestamp::Timestamp;
@@ -246,10 +247,14 @@ impl MergeWitness {
 
         let mut new_kernel = Self::new_kernel(&lhs, right_kernel, shuffle_seed, shuffle_inputs);
 
-        let inputs = RemovalRecordList::pack(
-            new_kernel.inputs.clone(),
-            consensus_rule_set.allow_big_chunks(),
-        );
+        let mut inputs = new_kernel.inputs.clone();
+        if !consensus_rule_set.block_carries_chunk_data() {
+            for input in &mut inputs {
+                input.target_chunks = ChunkDictionary::empty();
+            }
+        }
+
+        let inputs = RemovalRecordList::pack(inputs, consensus_rule_set.allow_big_chunks());
         new_kernel = TransactionKernelModifier::default()
             .inputs(inputs)
             .modify(new_kernel);
@@ -1381,6 +1386,87 @@ pub(crate) mod tests {
                 .into_iter()
                 .sorted()
                 .collect_vec()
+        );
+    }
+
+    #[test]
+    fn zeta_strips_chunks_from_block_transaction_inputs() {
+        let mut test_runner = TestRunner::deterministic();
+        let [first, second, third] =
+            PrimitiveWitness::arbitrary_tuple_with_matching_mutator_sets([
+                (3, 2, 1),
+                (2, 1, 0),
+                (2, 1, 0),
+            ])
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let shuffle_seed = arb::<[u8; 32]>()
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let index_sets = |inputs: &[RemovalRecord]| {
+            inputs
+                .iter()
+                .map(|input| input.absolute_indices.to_array())
+                .collect_vec()
+        };
+        let unpacked_inputs = |kernel: BlockTransactionKernel, rule_set: ConsensusRuleSet| {
+            RemovalRecordList::try_unpack(
+                TransactionKernel::from(kernel).inputs.clone(),
+                rule_set.allow_big_chunks(),
+            )
+            .unwrap()
+        };
+        let merge = |left, right: &TransactionKernel, rule_set| {
+            MergeWitness::new_block_transaction_kernel(&left, right, shuffle_seed, rule_set, false)
+        };
+
+        let epsilon = ConsensusRuleSet::SoftforkEpsilon;
+        let with_chunks = unpacked_inputs(
+            merge(
+                BlockOrRegularTransactionKernel::Regular(first.kernel.clone()),
+                &second.kernel,
+                epsilon,
+            ),
+            epsilon,
+        );
+        assert!(
+            with_chunks
+                .iter()
+                .any(|input| !input.target_chunks.is_empty()),
+            "test needs inputs with chunk data"
+        );
+
+        let zeta = ConsensusRuleSet::HardforkZeta;
+        let stripped = merge(
+            BlockOrRegularTransactionKernel::Regular(first.kernel.clone()),
+            &second.kernel,
+            zeta,
+        );
+        let stripped_inputs = unpacked_inputs(stripped.clone(), zeta);
+        assert!(stripped_inputs
+            .iter()
+            .all(|input| input.target_chunks.is_empty()));
+        assert_eq!(index_sets(&with_chunks), index_sets(&stripped_inputs));
+
+        // Merging onto a stripped block transaction keeps all inputs stripped.
+        let extended = unpacked_inputs(
+            merge(
+                BlockOrRegularTransactionKernel::Block(stripped),
+                &third.kernel,
+                zeta,
+            ),
+            zeta,
+        );
+        assert!(extended.iter().all(|input| input.target_chunks.is_empty()));
+        assert_eq!(
+            [
+                index_sets(&stripped_inputs),
+                index_sets(&third.kernel.inputs)
+            ]
+            .concat(),
+            index_sets(&extended)
         );
     }
 

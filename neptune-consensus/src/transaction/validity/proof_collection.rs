@@ -116,10 +116,16 @@ impl ProofCollection {
 
         // prove
         debug!("proving RemovalRecordsIntegrity");
-        let removal_records_integrity = RemovalRecordsIntegrity
+        let rri_program = RemovalRecordsIntegrity::new(consensus_rule_set);
+        let removal_records_integrity = rri_program
             .prove(
-                removal_records_integrity_witness
-                    .claim()
+                Claim::about_program(&rri_program.program())
+                    .with_input(
+                        removal_records_integrity_witness
+                            .standard_input()
+                            .individual_tokens,
+                    )
+                    .with_output(removal_records_integrity_witness.output())
                     .about_version(proof_version),
                 removal_records_integrity_witness.nondeterminism(),
                 triton_vm_job_queue.clone(),
@@ -152,16 +158,17 @@ impl ProofCollection {
             .await?;
 
         debug!("proving CollectTypeScripts");
-        let collect_type_scripts = CollectTypeScripts
-            .prove(
-                collect_type_scripts_witness
-                    .claim()
-                    .about_version(proof_version),
-                collect_type_scripts_witness.nondeterminism(),
-                triton_vm_job_queue.clone(),
-                proof_job_options.clone(),
-            )
-            .await?;
+        let collect_type_scripts =
+            CollectTypeScripts::new(consensus_rule_set.burns_are_exempt_from_time_locks())
+                .prove(
+                    collect_type_scripts_witness
+                        .claim_under(consensus_rule_set)
+                        .about_version(proof_version),
+                    collect_type_scripts_witness.nondeterminism(),
+                    triton_vm_job_queue.clone(),
+                    proof_job_options.clone(),
+                )
+                .await?;
 
         debug!("proving lock scripts");
         let mut lock_scripts_halt = vec![];
@@ -339,7 +346,7 @@ impl ProofCollection {
 
         // compile claims
         let removal_records_integrity_claim =
-            Claim::about_program(&RemovalRecordsIntegrity.program())
+            Claim::about_program(&RemovalRecordsIntegrity::new(consensus_rule_set).program())
                 .about_version(proof_version)
                 .with_input(self.kernel_mast_hash.reversed().values())
                 .with_output(self.salted_inputs_hash.values().to_vec());
@@ -360,20 +367,23 @@ impl ProofCollection {
                     .flat_map(|d| d.values())
                     .collect(),
             );
-        let collect_type_scripts_claim = Claim::about_program(&CollectTypeScripts.program())
-            .about_version(proof_version)
-            .with_input(
-                [self.salted_inputs_hash, self.salted_outputs_hash]
-                    .into_iter()
-                    .flat_map(|d| d.reversed().values())
-                    .collect::<Vec<_>>(),
-            )
-            .with_output(
-                self.type_script_hashes
-                    .iter()
-                    .flat_map(|d| d.values())
-                    .collect_vec(),
-            );
+        let collect_type_scripts_claim = Claim::about_program(
+            &CollectTypeScripts::new(consensus_rule_set.burns_are_exempt_from_time_locks())
+                .program(),
+        )
+        .about_version(proof_version)
+        .with_input(
+            [self.salted_inputs_hash, self.salted_outputs_hash]
+                .into_iter()
+                .flat_map(|d| d.reversed().values())
+                .collect::<Vec<_>>(),
+        )
+        .with_output(
+            self.type_script_hashes
+                .iter()
+                .flat_map(|d| d.values())
+                .collect_vec(),
+        );
         trace!("collect_type_scripts_claim:\n{collect_type_scripts_claim:?}\n\n");
         let lock_script_claims = self
             .lock_script_hashes
@@ -457,7 +467,7 @@ impl ProofCollection {
     }
 
     pub fn removal_records_integrity_claim(&self, consensus_rule_set: ConsensusRuleSet) -> Claim {
-        Claim::about_program(&RemovalRecordsIntegrity.program())
+        Claim::about_program(&RemovalRecordsIntegrity::new(consensus_rule_set).program())
             .about_version(consensus_rule_set.triton_proof_version().version())
             .with_input(self.kernel_mast_hash.reversed().values())
             .with_output(self.salted_inputs_hash.values().to_vec())
@@ -500,14 +510,17 @@ impl ProofCollection {
             }
             i += 1;
         }
-        Claim::about_program(&CollectTypeScripts.program())
-            .about_version(consensus_rule_set.triton_proof_version().version())
-            .with_input(
-                [self.salted_inputs_hash, self.salted_outputs_hash]
-                    .map(|digest| digest.reversed().values())
-                    .concat(),
-            )
-            .with_output(type_script_hashes_as_output)
+        Claim::about_program(
+            &CollectTypeScripts::new(consensus_rule_set.burns_are_exempt_from_time_locks())
+                .program(),
+        )
+        .about_version(consensus_rule_set.triton_proof_version().version())
+        .with_input(
+            [self.salted_inputs_hash, self.salted_outputs_hash]
+                .map(|digest| digest.reversed().values())
+                .concat(),
+        )
+        .with_output(type_script_hashes_as_output)
     }
 
     pub fn lock_script_claims(&self, consensus_rule_set: ConsensusRuleSet) -> Vec<Claim> {
@@ -655,6 +668,7 @@ pub mod tests {
     use crate::proof_abstractions::test_runtime::shared_tokio_runtime;
     use crate::proof_abstractions::triton_vm_job_queue::vm_job_queue;
     use crate::transaction::transaction_kernel::TransactionKernelModifier;
+    use crate::type_scripts::native_currency::NativeCurrency;
     use crate::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
     #[traced_test]
@@ -789,6 +803,46 @@ pub mod tests {
         );
     }
 
+    /// Regression test: the type scripts of a transaction without inputs and
+    /// outputs must still include the native currency's, which enforces the
+    /// fee. With real proofs, since mock proofs don't bind their claims.
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn verify_rejects_empty_transaction_without_native_currency() {
+        let mut test_runner = TestRunner::deterministic();
+        let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(0), 0, 0)
+            .new_tree(&mut test_runner)
+            .unwrap()
+            .current();
+        let txk = primitive_witness.kernel.mast_hash();
+
+        for consensus_rule_set in [
+            ConsensusRuleSet::HardforkDelta,
+            ConsensusRuleSet::HardforkZeta,
+        ] {
+            let honest = ProofCollection::produce(
+                &primitive_witness,
+                consensus_rule_set,
+                vm_job_queue(),
+                TritonVmProofJobOptions::default(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(vec![NativeCurrency.hash()], honest.type_script_hashes);
+            assert!(honest.verify(txk, Network::Main, consensus_rule_set).await);
+
+            let mut without_native_currency = honest;
+            without_native_currency.type_script_hashes.clear();
+            without_native_currency.type_scripts_halt.clear();
+            assert!(
+                !without_native_currency
+                    .verify(txk, Network::Main, consensus_rule_set)
+                    .await,
+                "{consensus_rule_set}: an empty transaction must require native currency"
+            );
+        }
+    }
+
     #[proptest(cases = 5)]
     fn can_produce_valid_collection(
         #[strategy(0usize..7)] _num_inputs_own: usize,
@@ -859,10 +913,15 @@ pub mod tests {
                 collect_type_scripts_witness,
             ) = Self::extract_specific_witnesses(primitive_witness);
 
-            witness_halts_gracefully(RemovalRecordsIntegrity, removal_records_integrity_witness)
-                && witness_halts_gracefully(CollectLockScripts, collect_lock_scripts_witness)
+            witness_halts_gracefully(
+                RemovalRecordsIntegrity::new(ConsensusRuleSet::SoftforkEpsilon),
+                removal_records_integrity_witness,
+            ) && witness_halts_gracefully(CollectLockScripts, collect_lock_scripts_witness)
                 && witness_halts_gracefully(KernelToOutputs, kernel_to_outputs_witness)
-                && witness_halts_gracefully(CollectTypeScripts, collect_type_scripts_witness)
+                && witness_halts_gracefully(
+                    CollectTypeScripts::new(true),
+                    collect_type_scripts_witness,
+                )
                 && all_lock_scripts_halt
                 && all_type_scripts_halt
         }

@@ -1,5 +1,6 @@
 pub mod block_appendix;
 pub mod block_body;
+pub mod block_extra_data;
 pub mod block_header;
 #[cfg(test)]
 mod block_height_tests;
@@ -31,6 +32,7 @@ use neptune_mutator_set::addition_record::AdditionRecord;
 use neptune_mutator_set::commit;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
+use neptune_mutator_set::removal_record::RemovalRecord;
 use neptune_primitives::block_height::BlockHeight;
 use neptune_primitives::block_height::BLOCKS_PER_GENERATION;
 use neptune_primitives::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
@@ -60,6 +62,8 @@ use tracing::warn;
 use validity::block_primitive_witness::BlockPrimitiveWitness;
 use validity::block_program::BlockProgram;
 use validity::block_proof_witness::BlockProofWitness;
+use validity::knows_block_extra_data::KnowsBlockExtraData;
+use validity::knows_block_extra_data::KnowsBlockExtraDataWitness;
 use validity::knows_mutator_set::KnowsMutatorSet;
 use validity::knows_mutator_set::KnowsMutatorSetWitness;
 use validity::predecessor_is_valid::ParentBlockInfo;
@@ -146,18 +150,25 @@ pub struct ComposerWitness {
     pub knows_ams: KnowsMutatorSetWitness,
     pub prev_block_transaction_mutator_set: MutatorSetAccumulator,
 
+    /// For the claim to know the predecessor's block extra data. None if the
+    /// rules do not require it.
+    pub knows_block_extra_data: Option<KnowsBlockExtraDataWitness>,
+
     /// What the composer proved for an earlier proposal on the same
     /// predecessor, to build on.
     pub previous: Option<ComposerProofs>,
 }
 
-/// The claims a composer proved for a proposal, with their proofs, for the
-/// next proposal on the same predecessor to build on.
+/// The claims a composer proved for a proposal, with their proofs.
 #[derive(Debug, Clone)]
 pub struct ComposerProofs {
     /// The composer's claim to know the mutator set after the predecessor.
     /// None where the rules do not ask for it.
     pub knows_mutator_set: Option<(Claim, Proof)>,
+
+    /// The composer's claim to know the predecessor's block extra data. None if
+    /// not required by the rules.
+    pub knows_block_extra_data: Option<(Claim, Proof)>,
 
     /// The root of the SWBF update tree over the block transaction's first
     /// inputs, as many as the root's output counts.
@@ -265,10 +276,9 @@ impl PartialEq for Block {
 impl Eq for Block {}
 
 impl Block {
-    /// The composer's witness is required from hard fork epsilon on where
-    /// the network proves. Returns the block along with proofs built for it
-    /// such that later proposals built on the same block can reuse expensive
-    /// to produce proofs.
+    /// The composer's witness is required from hard fork epsilon on. Returns
+    /// the block along with proofs built for it such that a later proposal
+    /// built on the same block can reuse expensive proofs.
     pub async fn block_template_from_block_primitive_witness(
         primitive_witness: BlockPrimitiveWitness,
         timestamp: Timestamp,
@@ -289,10 +299,17 @@ impl Block {
                     header.height
                 )
             })?;
-            let (previous_knows_mutator_set, previous_swbf_update) = composer_witness
-                .previous
-                .map(|previous| (previous.knows_mutator_set, Some(previous.swbf_update)))
-                .unwrap_or_default();
+            let (previous_knows_mutator_set, previous_knows_block_extra_data, previous_swbf_update) =
+                composer_witness
+                    .previous
+                    .map(|previous| {
+                        (
+                            previous.knows_mutator_set,
+                            previous.knows_block_extra_data,
+                            Some(previous.swbf_update),
+                        )
+                    })
+                    .unwrap_or_default();
             let knows_mutator_set = if consensus_rule_set.miners_must_prove_ams_knowledge(network) {
                 Some(match previous_knows_mutator_set {
                     Some(proven) => proven,
@@ -310,6 +327,32 @@ impl Block {
                 None
             };
             proven.extend(knows_mutator_set.clone());
+            let knows_block_extra_data =
+                if ConsensusRuleSet::miners_must_prove_extra_data_knowledge(network, header.height)
+                {
+                    Some(match previous_knows_block_extra_data {
+                        Some(proven) => proven,
+                        None => {
+                            let witness =
+                                composer_witness.knows_block_extra_data.ok_or_else(|| {
+                                    anyhow::anyhow!(
+                                    "a block at height {} needs the predecessor's block extra data",
+                                    header.height
+                                )
+                                })?;
+                            Self::prove_knows_block_extra_data(
+                                witness,
+                                consensus_rule_set,
+                                triton_vm_job_queue.clone(),
+                                proof_job_options.clone(),
+                            )
+                            .await?
+                        }
+                    })
+                } else {
+                    None
+                };
+            proven.extend(knows_block_extra_data.clone());
             proven.push(
                 Self::prove_predecessor_is_valid(
                     &primitive_witness.predecessor_block,
@@ -321,7 +364,7 @@ impl Block {
                 .await?,
             );
             let swbf_update = Self::prove_swbf_update(
-                &body,
+                primitive_witness.transaction().inputs_with_chunk_data(),
                 &primitive_witness.predecessor_block,
                 header.height,
                 previous_swbf_update,
@@ -332,6 +375,7 @@ impl Block {
             proven.push(swbf_update.clone());
             composer_proofs = Some(ComposerProofs {
                 knows_mutator_set,
+                knows_block_extra_data,
                 swbf_update,
             });
         }
@@ -419,15 +463,38 @@ impl Block {
         Ok((claim, proof))
     }
 
-    /// The SWBF update root claim of a block with this body on this
-    /// predecessor, with its proof. Given the root of an earlier proposal's
-    /// tree, over the body's first inputs, the tree is extended by the
-    /// inputs after those instead of proven from the start.
+    /// The composer's claim to know the predecessor's block extra data, with
+    /// its proof.
+    async fn prove_knows_block_extra_data(
+        witness: KnowsBlockExtraDataWitness,
+        consensus_rule_set: ConsensusRuleSet,
+        triton_vm_job_queue: Arc<TritonVmJobQueue>,
+        proof_job_options: TritonVmProofJobOptions,
+    ) -> anyhow::Result<(Claim, Proof)> {
+        let claim = witness
+            .claim()
+            .about_version(consensus_rule_set.triton_proof_version().version());
+        info!("Proving knowledge of the predecessor's block extra data");
+        let proof = ProofBuilder::new()
+            .program(KnowsBlockExtraData.program())
+            .claim(claim.clone())
+            .nondeterminism(|| witness.nondeterminism())
+            .job_queue(triton_vm_job_queue)
+            .proof_job_options(proof_job_options)
+            .build()
+            .await?;
+        Ok((claim, proof))
+    }
+
+    /// The SWBF update root claim of a block with these inputs (packed, with
+    /// their chunk data) on this predecessor, with its proof. Given the root
+    /// of an earlier proposal's tree, over the first inputs, the tree is
+    /// extended by the inputs after those instead of proven from the start.
     ///
     /// Proof verifies the leaf proofs [`CorrectSwbfUpdateWitness::leaves`], and
     /// guarantees to meet the required proof complexity.
     async fn prove_swbf_update(
-        body: &BlockBody,
+        inputs: &[RemovalRecord],
         predecessor: &Block,
         height: BlockHeight,
         previous_root: Option<(Claim, Proof)>,
@@ -436,7 +503,6 @@ impl Block {
     ) -> anyhow::Result<(Claim, Proof)> {
         let network = proof_job_options.job_settings.network;
         let floor = ConsensusRuleSet::infer_from(network, height).min_swbf_padded_rows(network);
-        let inputs = &body.transaction_kernel.inputs;
         let mutator_set = predecessor.mutator_set_accumulator_after()?;
         let start = std::time::Instant::now();
         let prove = |claim, program, nondeterminism| {
@@ -455,7 +521,7 @@ impl Block {
                     anyhow::anyhow!("the root must have the SWBF update claim's layout")
                 })?;
                 let allow_big_chunks = ConsensusRuleSet::HardforkDelta.allow_big_chunks();
-                let unpacked = RemovalRecordList::try_unpack(inputs.clone(), allow_big_chunks)?;
+                let unpacked = RemovalRecordList::try_unpack(inputs.to_vec(), allow_big_chunks)?;
                 let (covered_inputs, gained) = unpacked.split_at(covered.count);
                 let gained = RemovalRecordList::pack(gained.to_vec(), allow_big_chunks);
                 let after_covered = SwbfiPeaksAfterRemovals::try_apply_removals(
@@ -877,7 +943,7 @@ impl Block {
         let parent_mutator_set = previous_block.mutator_set_accumulator_after()?;
         let parent_info = PredecessorIsValid::new().parent_block_info(
             previous_block,
-            &ConsensusRuleSet::epoch_table(network),
+            &ConsensusRuleSet::epoch_table(network, self.header().height),
             Block::genesis_digest(network),
         );
         self.validate_except_proof(
@@ -981,32 +1047,75 @@ impl Block {
         .map_err(BlockValidationError::from)?;
 
         // 2.b)
+        let verify_chunk_data = consensus_rule_set.block_carries_chunk_data();
         let msa_before = parent_mutator_set.clone();
-        for removal_record in &inputs {
-            if !msa_before.can_remove(removal_record) {
-                return Err(BlockValidationError::RemovalRecordsValidity);
+        if verify_chunk_data {
+            for removal_record in &inputs {
+                if !msa_before.can_remove(removal_record) {
+                    return Err(BlockValidationError::RemovalRecordsValidity);
+                }
             }
         }
 
-        // 2.t) mutator set matches parent commitment, and transaction.
-        if msa_before.hash() != parent.mutator_set_hash
+        // 2.y)
+        if !verify_chunk_data
+            && self
+                .body()
+                .transaction_kernel
+                .inputs
+                .iter()
+                .any(|input| !input.target_chunks.is_empty())
+        {
+            return Err(BlockValidationError::RemovalRecordsCarryChunkData);
+        }
+
+        // 2.t)
+        if msa_before.hash() != parent.mutator_set_hash_after
             || msa_before.hash() != self.body().transaction_kernel.mutator_set_hash
         {
             return Err(BlockValidationError::TransactionMutatorSetMismatch);
         }
 
-        let mutator_set_update = MutatorSetUpdate::new(
-            inputs.clone(),
-            self.body().transaction_kernel.outputs.clone(),
-        );
-        let after_removals = SwbfiPeaksAfterRemovals::try_apply_removals(
-            &self.body().transaction_kernel.inputs,
-            &msa_before,
-        );
+        let after_removals = if verify_chunk_data {
+            SwbfiPeaksAfterRemovals::try_apply_removals(
+                &self.body().transaction_kernel.inputs,
+                &msa_before,
+            )
+        } else {
+            // Read the mutator set after the removals from the claim that
+            // covers the SWBF update. It's part of the output
+            let inputs = inputs.iter().map(|x| x.absolute_indices).collect_vec();
+            required_claims
+                .last()
+                .and_then(|shape| self.appendix().find(shape))
+                .and_then(|claim| ClaimOutput::try_parse(&claim.output))
+                .and_then(|output| {
+                    SwbfiPeaksAfterRemovals::try_apply_removals_from_peaks(
+                        &inputs,
+                        &msa_before,
+                        output.swbfi_peaks,
+                    )
+                })
+        };
 
         // 2.d)
-        let mut msa = msa_before;
-        mutator_set_update.apply_to_accumulator_unsafe(&mut msa);
+        let msa = if verify_chunk_data {
+            let mutator_set_update = MutatorSetUpdate::new(
+                inputs.clone(),
+                self.body().transaction_kernel.outputs.clone(),
+            );
+            let mut msa = msa_before;
+            mutator_set_update.apply_to_accumulator_unsafe(&mut msa);
+            msa
+        } else {
+            let mut msa = after_removals
+                .clone()
+                .ok_or(BlockValidationError::MutatorSetUpdateIntegrity)?;
+            for output in &self.body().transaction_kernel.outputs {
+                msa.add(output);
+            }
+            msa
+        };
 
         // 2.e)
         if msa.hash() != self.body().mutator_set_accumulator.hash() {
@@ -1889,16 +1998,24 @@ mod test_support {
             // claim of knowing the mutator set.
             let rules = ConsensusRuleSet::infer_from(network, height);
             let activation = ConsensusRuleSet::knows_mutator_set_activation_height(network);
-            let claims = if rules.miners_must_prove_ams_knowledge(network) && height >= activation {
-                vec![KnowsMutatorSet::claim(
+            let mut claims =
+                if rules.miners_must_prove_ams_knowledge(network) && height >= activation {
+                    vec![KnowsMutatorSet::claim(
+                        header.prev_block_digest,
+                        &MutatorSetAccumulator::default(),
+                        activation,
+                        rules,
+                    )]
+                } else {
+                    vec![]
+                };
+            if ConsensusRuleSet::miners_must_prove_extra_data_knowledge(network, height) {
+                claims.push(KnowsBlockExtraData::claim(
                     header.prev_block_digest,
-                    &MutatorSetAccumulator::default(),
-                    activation,
+                    ConsensusRuleSet::knows_block_extra_data_activation_height(network),
                     rules,
-                )]
-            } else {
-                vec![]
-            };
+                ));
+            }
 
             Self::new(
                 header,
@@ -2077,7 +2194,7 @@ pub(crate) mod tests {
             let parent_mutator_set = previous_block.mutator_set_accumulator_after()?;
             let parent_info = PredecessorIsValid::new().parent_block_info(
                 previous_block,
-                &ConsensusRuleSet::epoch_table(network),
+                &ConsensusRuleSet::epoch_table(network, self.header().height),
                 Block::genesis_digest(network),
             );
             self.validate_except_proof(
@@ -2397,6 +2514,61 @@ pub(crate) mod tests {
             assert_eq!(
                 Ok(()),
                 check([vec![transaction_claim], epsilon_claims].concat()),
+                "height {height}"
+            );
+        }
+    }
+
+    #[test]
+    fn block_extra_data_claim_is_required_from_its_activation_height_on() {
+        let network = Network::Main;
+        let activation = ConsensusRuleSet::knows_block_extra_data_activation_height(network);
+        for (parent_height, without_extra_data_claim) in [
+            (activation.checked_sub(2).unwrap(), Ok(())),
+            (
+                activation.previous().unwrap(),
+                Err(BlockValidationError::AppendixMissingClaim),
+            ),
+        ] {
+            let parent = Block::fake_genesis_at_height(network, parent_height);
+            let block = invalid_empty_block(&parent, network);
+            let now = block.header().timestamp;
+            let height = block.header().height;
+            let rule_set = ConsensusRuleSet::infer_from(network, height);
+            let mutator_set = parent.mutator_set_accumulator_after().unwrap();
+            let other_claims = vec![
+                BlockAppendix::transaction_validity_claim(
+                    block.body().transaction_kernel.mast_hash(),
+                    rule_set,
+                ),
+                PredecessorIsValid::claim_about(&parent, block.body().mast_hash(), network),
+                KnowsMutatorSet::claim(
+                    parent.hash(),
+                    &mutator_set,
+                    ConsensusRuleSet::knows_mutator_set_activation_height(network),
+                    rule_set,
+                ),
+                SwbfUpdateAggregation::root_claim_without_proofs(
+                    &block.body().transaction_kernel.inputs,
+                    &mutator_set,
+                    rule_set.min_swbf_padded_rows(network),
+                ),
+            ];
+            let extra_data_claim = KnowsBlockExtraData::claim(parent.hash(), activation, rule_set);
+            let check = |claims: Vec<Claim>| {
+                let mut block = block.clone();
+                block.set_appendix(BlockAppendix::new(claims));
+                block.validate_without_proof(&parent, now, network)
+            };
+
+            assert_eq!(
+                without_extra_data_claim,
+                check(other_claims.clone()),
+                "height {height}"
+            );
+            assert_eq!(
+                Ok(()),
+                check([other_claims, vec![extra_data_claim]].concat()),
                 "height {height}"
             );
         }

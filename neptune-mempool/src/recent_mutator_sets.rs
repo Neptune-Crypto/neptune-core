@@ -8,12 +8,18 @@
 //! Derived from blocks as they become the tip, so it needs no archive, and
 //! from their inputs' index sets alone, so it needs no chunk data. A
 //! reorganization reduces the window to the new tip.
+//!
+//! Also holds the blocks' [`BlockExtraData`], so that the node can serve it
+//! to peers. The tip's is always held on an archival node: composing a block
+//! on the tip requires it, to prove `KnowsBlockExtraData`.
 
 use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::sync::Arc;
 
+use get_size2::GetSize;
 use neptune_consensus::block::Block;
+use neptune_consensus::block::block_extra_data::BlockExtraData;
 use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use neptune_mutator_set::removal_record::RemovalRecord;
 use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
@@ -26,6 +32,11 @@ use tasm_lib::prelude::Digest;
 /// sets, under a kilobyte per input.
 pub const MAX_TX_SYNC_DEPTH: usize = 3;
 
+/// The most memory, in bytes, that the in-memory stored [`BlockExtraData`] may
+/// take together. The tip's is always held; the oldest ancestors' are dropped
+/// first when the total exceeds this. Policy, not consensus.
+pub const MAX_EXTRA_DATA_SIZE: usize = 200 * 1024 * 1024;
+
 /// The index sets a block removed and the mutator set that resulted.
 #[derive(Debug, Clone)]
 struct Entry {
@@ -35,6 +46,10 @@ struct Entry {
 
     /// `None` for the oldest entry.
     removed: Option<Vec<AbsoluteIndexSet>>,
+
+    /// The block's extra data, if known and within
+    /// [`MAX_EXTRA_DATA_SIZE`].
+    extra_data: Option<Arc<BlockExtraData>>,
 }
 
 /// The mutator set at the tip and at up to [`MAX_TX_SYNC_DEPTH`] of its
@@ -80,6 +95,7 @@ impl RecentMutatorSets {
             mutator_set_hash: mutator_set_after.hash(),
             mutator_set_after,
             removed: Some(block.kernel.removal_index_sets()),
+            extra_data: None,
         }
     }
 
@@ -115,8 +131,49 @@ impl RecentMutatorSets {
                 mutator_set_hash: oldest.mutator_set_hash,
                 mutator_set_after: oldest.mutator_set_after.clone(),
                 removed: None,
+                extra_data: oldest.extra_data.clone(),
             });
         }
+    }
+
+    /// Set the tip's [`BlockExtraData`]. Then drops the extra data of the
+    /// oldest ancestors until all held extra data fits within
+    /// [`MAX_EXTRA_DATA_SIZE`]; the tip's is kept regardless.
+    pub fn set_tip_extra_data(&mut self, extra_data: Option<BlockExtraData>) {
+        self.set_tip_extra_data_within(extra_data, MAX_EXTRA_DATA_SIZE);
+    }
+
+    fn set_tip_extra_data_within(&mut self, extra_data: Option<BlockExtraData>, max_size: usize) {
+        let tip = self
+            .entries
+            .back_mut()
+            .expect("Window always holds at least the tip");
+        *tip = Arc::new(Entry {
+            extra_data: extra_data.map(Arc::new),
+            ..(**tip).clone()
+        });
+
+        let size = |entry: &Entry| entry.extra_data.as_ref().map_or(0, |data| data.get_size());
+        let mut total: usize = self.entries.iter().map(|entry| size(entry)).sum();
+        let num_ancestors = self.num_ancestors();
+        for entry in self.entries.iter_mut().take(num_ancestors) {
+            if total <= max_size {
+                break;
+            }
+            total -= size(entry);
+            *entry = Arc::new(Entry {
+                extra_data: None,
+                ..(**entry).clone()
+            });
+        }
+    }
+
+    /// [`BlockExtraData`] of recent blocks, if known.
+    pub fn extra_data(&self, block_hash: Digest) -> Option<&Arc<BlockExtraData>> {
+        self.entries
+            .iter()
+            .find(|entry| entry.block_hash == block_hash)
+            .and_then(|entry| entry.extra_data.as_ref())
     }
 
     fn tip_entry(&self) -> &Entry {
@@ -220,6 +277,7 @@ impl RecentMutatorSets {
             mutator_set_hash: mutator_set_after.hash(),
             mutator_set_after,
             removed: None,
+            extra_data: None,
         };
         Self {
             entries: VecDeque::from([Arc::new(entry)]),
@@ -242,6 +300,7 @@ impl RecentMutatorSets {
             mutator_set_hash: mutator_set_after.hash(),
             mutator_set_after,
             removed: Some(removed),
+            extra_data: None,
         };
         self.push(entry);
     }
@@ -261,6 +320,45 @@ mod tests {
     use proptest::test_runner::TestRunner;
 
     use super::*;
+
+    #[test]
+    fn oldest_extra_data_is_dropped_first_but_the_tips_is_kept() {
+        use neptune_consensus::consensus_rule_set::ConsensusRuleSet;
+
+        let extra_data = |num_digests| {
+            BlockExtraData::from_parts(
+                vec![vec![Digest::default(); num_digests]],
+                vec![],
+                ConsensusRuleSet::HardforkZeta,
+            )
+        };
+        let size = extra_data(100).get_size();
+        let max_size = 2 * size + size / 2;
+
+        let mut sets = RecentMutatorSets::for_mutator_set(MutatorSetAccumulator::default());
+        let mut block_hashes = vec![sets.tip_block_hash()];
+        sets.set_tip_extra_data_within(Some(extra_data(100)), max_size);
+        for _ in 0..MAX_TX_SYNC_DEPTH {
+            sets.push_update(MutatorSetUpdate::new(vec![], vec![]));
+            block_hashes.push(sets.tip_block_hash());
+            sets.set_tip_extra_data_within(Some(extra_data(100)), max_size);
+        }
+        let held = |sets: &RecentMutatorSets| {
+            block_hashes
+                .iter()
+                .map(|block_hash| sets.extra_data(*block_hash).is_some())
+                .collect::<Vec<_>>()
+        };
+        let mut expected = vec![false; MAX_TX_SYNC_DEPTH - 1];
+        expected.extend([true, true]);
+        assert_eq!(expected, held(&sets));
+
+        // Larger than the cap on its own: the tip's is still kept.
+        sets.set_tip_extra_data_within(Some(extra_data(300)), max_size);
+        let mut expected = vec![false; MAX_TX_SYNC_DEPTH];
+        expected.push(true);
+        assert_eq!(expected, held(&sets));
+    }
 
     const _: () = assert!(
         MAX_TX_SYNC_DEPTH >= 1,

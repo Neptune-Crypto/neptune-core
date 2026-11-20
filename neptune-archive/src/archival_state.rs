@@ -15,6 +15,7 @@ use neptune_archival_mutator_set::rusty_archival_mutator_set::RustyArchivalMutat
 use neptune_consensus::block::Block;
 use neptune_consensus::block::INITIAL_BLOCK_SUBSIDY;
 use neptune_consensus::block::PREMINE_MAX_SIZE;
+use neptune_consensus::block::block_extra_data::BlockExtraData;
 use neptune_consensus::block::block_header::BlockHeader;
 use neptune_consensus::block::block_header::BlockHeaderWithBlockHashWitness;
 use neptune_consensus::block::block_header::HeaderToBlockHashWitness;
@@ -53,6 +54,7 @@ use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::twenty_first::bfe_array;
 use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::tip5::digest::Digest;
+use tokio::io::AsyncReadExt;
 use tokio::io::AsyncSeekExt;
 use tokio::io::AsyncWriteExt;
 use tokio::io::SeekFrom;
@@ -70,7 +72,7 @@ use crate::block_index::FileRecord;
 use crate::block_index::LastFileRecord;
 use crate::rusty_archival_block_mmr::RustyArchivalBlockMmr;
 use crate::rusty_utxo_index::RustyUtxoIndex;
-use crate::shared::new_block_file_is_needed;
+use crate::shared::new_file_is_needed;
 
 /// Provides interface to historic blockchain data which consists of
 ///  * block-data stored in individual files (append-only)
@@ -620,7 +622,7 @@ impl ArchivalState {
         let mut block_file = DataDirectory::open_ensure_parent_dir_exists(&block_file_path).await?;
 
         // Check if we should use the last file, or we need a new one.
-        if new_block_file_is_needed(&block_file, serialized_block_size).await {
+        if new_file_is_needed(&block_file, serialized_block_size).await {
             last_rec = LastFileRecord {
                 last_file: last_rec.last_file + 1,
             };
@@ -766,6 +768,10 @@ impl ArchivalState {
         Ok(())
     }
 
+    pub fn data_dir(&self) -> &DataDirectory {
+        &self.data_dir
+    }
+
     /// Update all of archival state with a new block which is set as tip.
     ///
     /// May also be used to set the tip back to any earlier block, including the
@@ -774,13 +780,16 @@ impl ArchivalState {
     ///
     /// Performs no validation.
     ///
+    /// Returns the new tip's [`BlockExtraData`], for blocks whose transaction
+    /// kernel does not carry chunk data. See [`Self::update_mutator_set`].
+    ///
     /// # Panics
     ///
     /// - If the new tip does not have a mutator set update.
     /// - If databases are in an inconsistent state.
-    pub async fn set_new_tip(&mut self, block: &Block) -> Result<()> {
+    pub async fn set_new_tip(&mut self, block: &Block) -> Result<Option<BlockExtraData>> {
         self.write_block_not_tip(block).await?;
-        self.update_mutator_set(block).await?;
+        let extra_data = self.update_mutator_set(block).await?;
 
         // Only mark as tip once the mutator set update passed.
         let mut mark_tip = WriteBatchAsync::new();
@@ -792,7 +801,7 @@ impl ArchivalState {
         self.append_to_archival_block_mmr(block).await;
         self.update_utxo_index(block).await;
 
-        Ok(())
+        Ok(extra_data)
     }
 
     /// Ensure internal consistency of archival state.
@@ -807,7 +816,11 @@ impl ArchivalState {
     /// example if the node is shut down after the block index database has been
     /// updated and the block written to disk but before the rest of the
     /// archival state update is finished.
-    pub async fn recover(&mut self) -> Result<()> {
+    ///
+    /// Returns the tip's [`BlockExtraData`], which applying the tip again
+    /// recomputes: the archival mutator set is rolled back to the tip's parent
+    /// and the tip applied anew. See [`Self::update_mutator_set`].
+    pub async fn recover(&mut self) -> Result<Option<BlockExtraData>> {
         let tip = self.get_tip().await;
 
         // Since the sub-parts of the archival state handle reorganizations,
@@ -1613,6 +1626,99 @@ impl ArchivalState {
             })
     }
 
+    /// Append a block's [`BlockExtraData`] to the extra-data files, which
+    /// roll over like the block files, and record where it is. Does nothing
+    /// if it is stored already.
+    pub async fn store_block_extra_data(
+        &mut self,
+        block_hash: Digest,
+        extra_data: &BlockExtraData,
+    ) -> Result<()> {
+        let key = BlockIndexKey::ExtraData(block_hash);
+        if self.block_index_db.get(key).await.is_some() {
+            return Ok(());
+        }
+
+        let mut last_file: LastFileRecord = self
+            .block_index_db
+            .get(BlockIndexKey::LastExtraDataFile)
+            .await
+            .map(|value| value.as_last_file_record())
+            .unwrap_or_default();
+        let bytes = bincode::serialize(extra_data)?;
+        let path = self
+            .data_dir
+            .block_extra_data_file_path(last_file.last_file);
+        let mut file = DataDirectory::open_ensure_parent_dir_exists(&path).await?;
+
+        // Extra data larger than a whole file goes into an empty one.
+        if new_file_is_needed(&file, bytes.len() as u64).await && file.metadata().await?.len() > 0 {
+            last_file.last_file += 1;
+            let path = self
+                .data_dir
+                .block_extra_data_file_path(last_file.last_file);
+            file = DataDirectory::open_ensure_parent_dir_exists(&path).await?;
+        }
+
+        let offset = file.seek(SeekFrom::End(0)).await?;
+        file.write_all(&bytes).await?;
+        file.sync_data().await?;
+
+        let location = BlockFileLocation {
+            file_index: last_file.last_file,
+            offset,
+            block_length: bytes.len(),
+        };
+        let mut batch = WriteBatchAsync::new();
+        batch.op_write(key, BlockIndexValue::ExtraData(location));
+        batch.op_write(
+            BlockIndexKey::LastExtraDataFile,
+            BlockIndexValue::LastFile(last_file),
+        );
+        self.block_index_db.batch_write(batch).await;
+
+        Ok(())
+    }
+
+    /// Where a block's [`BlockExtraData`] is stored, if it is: the file and
+    /// the location within it, for [`Self::read_block_extra_data`].
+    pub async fn block_extra_data_location(
+        &self,
+        block_hash: Digest,
+    ) -> Option<(PathBuf, BlockFileLocation)> {
+        let location = self
+            .block_index_db
+            .get(BlockIndexKey::ExtraData(block_hash))
+            .await?
+            .as_extra_data_location();
+        let path = self
+            .data_dir
+            .block_extra_data_file_path(location.file_index);
+
+        Some((path, location))
+    }
+
+    /// Read [`BlockExtraData`] stored by [`Self::store_block_extra_data`],
+    /// from the location [`Self::block_extra_data_location`] gives. Needs no
+    /// access to the archival state, so it can run without holding a lock.
+    pub async fn read_block_extra_data(
+        path: PathBuf,
+        location: BlockFileLocation,
+    ) -> Result<BlockExtraData> {
+        let mut file = tokio::fs::File::open(&path).await?;
+        let end = location.offset.saturating_add(location.block_length as u64);
+        ensure!(
+            end <= file.metadata().await?.len(),
+            "Data corruption: block extra data extends beyond the end of '{}'",
+            path.display()
+        );
+        file.seek(SeekFrom::Start(location.offset)).await?;
+        let mut bytes = vec![0; location.block_length];
+        file.read_exact(&mut bytes).await?;
+
+        Ok(bincode::deserialize(&bytes)?)
+    }
+
     /// Get the block record from the block digest, if it is stored.
     ///
     /// Note that the genesis block is not stored, and so does not have a block
@@ -2118,16 +2224,23 @@ impl ArchivalState {
     /// `new_block` is also assumed to be valid. This function will return an
     /// error if the new block does not have a mutator set update.
     ///
+    /// Returns the new block's [`BlockExtraData`], read from the archival
+    /// mutator set before the block's removals are applied, if the rules strip
+    /// chunk data from the block's transaction kernel. Otherwise `None`.
+    ///
     /// # Panics
     ///
     ///  - If the database does not contain rolled back blocks.
     ///  - If there is no path to the new block.
     // Public bc used in benchmarks.
     #[doc(hidden)]
-    pub async fn update_mutator_set(&mut self, new_block: &Block) -> Result<()> {
+    pub async fn update_mutator_set(
+        &mut self,
+        new_block: &Block,
+    ) -> Result<Option<BlockExtraData>> {
         #[cfg(any(test, feature = "test-helpers"))]
         if !self.tracks_genesis() {
-            return Ok(());
+            return Ok(None);
         }
 
         // If new block is genesis block, special case and exit early.
@@ -2142,7 +2255,7 @@ impl ArchivalState {
             )
             .await;
 
-            return Ok(());
+            return Ok(None);
         }
 
         let (forwards, backwards) = {
@@ -2203,6 +2316,7 @@ impl ArchivalState {
             }
         }
 
+        let mut extra_data = None;
         for digest in forwards {
             // Add block to mutator set
             let apply_forward_block = if digest == new_block.hash() {
@@ -2224,6 +2338,12 @@ impl ArchivalState {
                     .timestamp
                     .standard_format()
             );
+
+            // The mutator set is now the one after the new block's parent,
+            // which the new block's inputs are synced to.
+            if digest == new_block.hash() {
+                extra_data = self.block_extra_data(new_block).await;
+            }
 
             // Apply removals, with a defense-in-depth sanity check
             if let Err(double_spend) = self
@@ -2271,7 +2391,29 @@ impl ArchivalState {
             .await;
         self.archival_mutator_set.persist().await;
 
-        Ok(())
+        Ok(extra_data)
+    }
+
+    /// The block's [`BlockExtraData`], from the archival mutator set, which
+    /// must be the one after the block's parent. `None` if the rules require
+    /// the chunk data to be present in the block.
+    pub async fn block_extra_data(&self, block: &Block) -> Option<BlockExtraData> {
+        let consensus_rule_set = ConsensusRuleSet::infer_from(self.network, block.header().height);
+        if consensus_rule_set.block_carries_chunk_data() {
+            return None;
+        }
+
+        let (authentication_structures, chunks) = self
+            .archival_mutator_set
+            .ams()
+            .chunk_witness_data(&block.kernel.removal_index_sets())
+            .await;
+
+        Some(BlockExtraData::from_parts(
+            authentication_structures,
+            chunks,
+            consensus_rule_set,
+        ))
     }
 
     /// Compute the circulating supply heuristically, measured in Neptune coins.

@@ -63,7 +63,10 @@ impl BasicSnippet for GenerateCollectTypeScriptsClaim {
         );
 
         let push_cts_program_hash = {
-            let Digest([d0, d1, d2, d3, d4]) = CollectTypeScripts.program().hash();
+            let Digest([d0, d1, d2, d3, d4]) =
+                CollectTypeScripts::new(self.consensus_rule_set.burns_are_exempt_from_time_locks())
+                    .program()
+                    .hash();
             triton_asm! { push {d4} push {d3} push {d2} push {d1} push {d0} }
         };
 

@@ -690,6 +690,71 @@ impl RemovalRecordList {
         Ok(as_removal_record_list.convert_to_vec())
     }
 
+    /// Split removal records, synced to a mutator set whose SWBFI MMR has
+    /// `num_leafs_swbfi` leafs, into their absolute index sets and their
+    /// deduplicated chunk data: one authentication structure per SWBFI tree,
+    /// smallest tree first, and the packed chunks in ascending chunk index.
+    ///
+    /// See also [`Self::try_construct`], which computes the inverse.
+    ///
+    /// # Panics
+    ///
+    ///  - May (probably) panic if the removal records are invalid or mutually
+    ///    inconsistent.
+    pub fn deconstruct(
+        removal_records: Vec<RemovalRecord>,
+        num_leafs_swbfi: u64,
+        allow_big_chunks: bool,
+    ) -> (Vec<AbsoluteIndexSet>, Vec<Vec<Digest>>, Vec<Chunk>) {
+        let num_leafs_aocl = num_leafs_swbfi * u64::from(BATCH_SIZE) + 1;
+        let list = Self::from_removal_records(removal_records, num_leafs_aocl);
+        let packed_chunks = list
+            .chunks
+            .iter()
+            .map(|chunk| chunk.pack(allow_big_chunks))
+            .collect_vec();
+
+        (
+            list.index_sets,
+            list.authentication_structures,
+            packed_chunks,
+        )
+    }
+
+    /// Rebuild the removal records from the parts produced by [`Self::deconstruct`].
+    /// Returns an error if the parts are inconsistent. Does not verify the
+    /// authentication structures against any MMR peaks.
+    ///
+    /// Never panics on untrusted index sets, authentication structures, or
+    /// chunks. The SWBFI leaf count must come from a trusted mutator set.
+    pub fn try_construct(
+        index_sets: Vec<AbsoluteIndexSet>,
+        authentication_structures: Vec<Vec<Digest>>,
+        packed_chunks: &[Chunk],
+        num_leafs_swbfi: u64,
+        allow_big_chunks: bool,
+    ) -> Result<Vec<RemovalRecord>, RemovalRecordListUnpackError> {
+        let num_leafs_aocl = num_leafs_swbfi * u64::from(BATCH_SIZE) + 1;
+        let chunks = packed_chunks
+            .iter()
+            .map(|chunk| chunk.try_unpack(allow_big_chunks))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(Box::new)
+            .map_err(|e: Box<ChunkUnpackError>| {
+                RemovalRecordListUnpackError::InnerDecodingFailure(e)
+            })?;
+        let list = Self {
+            index_sets,
+            authentication_structures,
+            chunks,
+            num_leafs_aocl,
+        };
+        list.validate_consistency()
+            .map_err(RemovalRecordListUnpackError::Inconsistency)?;
+
+        Ok(list.convert_to_vec())
+    }
+
     /// Convert a [`Vec`] of [`RemovalRecord`]s into a [`RemovalRecordList`],
     /// which is a denser representation of the same object. In particular,
     /// there is no loss of information (unless the input is malicious).
@@ -1925,6 +1990,31 @@ mod tests {
         let packed = RemovalRecordList::pack(removal_records.clone(), true);
         let unpacked = RemovalRecordList::try_unpack(packed, true).unwrap();
         prop_assert_eq!(removal_records, unpacked);
+    }
+
+    #[proptest(cases = 10)]
+    fn deconstruct_try_construct_happy_path(
+        #[strategy(0usize..10)] _num_records: usize,
+        #[strategy(arb::<u64>())] num_leafs_aocl: u64,
+        #[strategy(RemovalRecord::arbitrary_synchronized_set(#num_leafs_aocl, #_num_records))]
+        removal_records: Vec<RemovalRecord>,
+        allow_big_chunks: bool,
+    ) {
+        let num_leafs_swbfi = aocl_to_swbfi_leaf_counts(num_leafs_aocl);
+        let (index_sets, authentication_structures, packed_chunks) = RemovalRecordList::deconstruct(
+            removal_records.clone(),
+            num_leafs_swbfi,
+            allow_big_chunks,
+        );
+        let constructed = RemovalRecordList::try_construct(
+            index_sets,
+            authentication_structures,
+            &packed_chunks,
+            num_leafs_swbfi,
+            allow_big_chunks,
+        )
+        .unwrap();
+        prop_assert_eq!(removal_records, constructed);
     }
 
     #[proptest]

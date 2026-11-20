@@ -265,6 +265,11 @@ neptune-mutator-set = { version = "0.20.1", path = "../neptune-mutator-set", fea
     "test-helpers",
 ] }
 
+# enables neptune-archival-mutator-set's `test_shared` module used by benchmarks.
+neptune-archival-mutator-set = { version = "0.20.1", path = "../neptune-archival-mutator-set", features = [
+    "test-helpers",
+] }
+
 # note: arbitrary, proptest, proptest-arbitrary-interop are duplicated in [dev-dependencies]
 # because they are optional deps but required for unit tests.
 # please ensure versions match in both sections.
@@ -331,6 +336,16 @@ harness = false
 [[bench]]
 name = "wallet_rescan"
 path = "benchmark/benches/wallet_rescan.rs"
+harness = false
+
+[[bench]]
+name = "knows_block_extra_data"
+path = "benchmark/benches/knows_block_extra_data.rs"
+harness = false
+
+[[bench]]
+name = "block_extra_data"
+path = "benchmark/benches/block_extra_data.rs"
 harness = false
 
 [[bench]]

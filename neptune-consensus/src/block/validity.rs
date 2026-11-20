@@ -32,6 +32,7 @@ pub mod epoch_table;
 #[cfg(test)]
 mod extension_claim;
 mod guesser_fee_addition_records;
+pub mod knows_block_extra_data;
 pub mod knows_mutator_set;
 mod meets_threshold;
 pub mod mmr_membership;

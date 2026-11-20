@@ -148,7 +148,7 @@ impl BlockPrimitiveWitness {
                 .next();
             let consensus_rule_set = ConsensusRuleSet::infer_from(self.network, block_height);
             let inputs = RemovalRecordList::try_unpack(
-                transaction_kernel.inputs.clone(),
+                self.transaction.inputs_with_chunk_data.clone(),
                 consensus_rule_set.allow_big_chunks(),
             )
             .expect("Inputs must be packed in block transaction");

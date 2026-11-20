@@ -18,6 +18,7 @@ pub(super) mod tests {
     use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use neptune_database::storage::storage_vec::traits::*;
     use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+    use neptune_mutator_set::removal_record::removal_record_list::RemovalRecordList;
     use neptune_primitives::block_height::BlockHeight;
     use neptune_primitives::data_directory::DataDirectory;
     use neptune_primitives::network::Network;
@@ -179,6 +180,209 @@ pub(super) mod tests {
             .sbf
             .len();
         assert_ne!(0, swbf_active_sbf_len);
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn tip_block_extra_data_is_recomputed_on_recovery() {
+        let network = Network::RegTest;
+        let mut rng = StdRng::seed_from_u64(107221549302u64);
+        let cli_args = Args::default_with_network(network);
+        let alice_wallet = WalletEntropy::devnet_wallet();
+        let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
+        let mut alice = mock_genesis_global_state(0, alice_wallet, cli_args).await;
+
+        let genesis_block = Block::genesis(network);
+        let (block1, _) = make_mock_block(&genesis_block, None, alice_key, rng.random(), network);
+        alice.set_new_tip(block1.clone()).await.unwrap();
+
+        let in_seven_months = block1.kernel.header.timestamp + Timestamp::months(7);
+        let utxo = Utxo::new_native_currency(
+            LockScript::anyone_can_spend().hash(),
+            NativeCurrencyAmount::coins(4),
+        );
+        let output = TxOutput::no_notification(utxo, rng.random(), rng.random(), false);
+        let config = TxCreationConfig::default()
+            .recover_change_on_chain(alice_key.into())
+            .with_prover_capability(TxProvingCapability::PrimitiveWitness);
+        let block_height_2 = block1.header().height.next();
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, block_height_2);
+        assert!(!consensus_rule_set.block_carries_chunk_data());
+        let sender_tx = alice
+            .api()
+            .tx_initiator_internal()
+            .create_transaction(
+                vec![output].into(),
+                NativeCurrencyAmount::coins(2),
+                in_seven_months,
+                config,
+                consensus_rule_set,
+            )
+            .await
+            .unwrap()
+            .transaction;
+        let transaction = BlockTransaction::upgrade((*sender_tx).clone());
+        let block2 = Block::block_template_invalid_proof(
+            &block1,
+            transaction,
+            in_seven_months,
+            None,
+            network,
+        );
+        alice.set_new_tip(block2.clone()).await.unwrap();
+
+        // The mock block's kernel still carries the chunk data, which the
+        // extra data from the archival mutator set must reproduce.
+        let inputs = RemovalRecordList::try_unpack(
+            block2.body().transaction_kernel.inputs.clone(),
+            consensus_rule_set.allow_big_chunks(),
+        )
+        .unwrap();
+        assert!(!inputs.is_empty());
+        let state = alice.lock_guard().await;
+        let extra_data = state.chain.light_state().tip_extra_data().unwrap().clone();
+        let parent_mutator_set = block1.mutator_set_accumulator_after().unwrap();
+        let rebuilt = extra_data
+            .try_rebuild(&inputs, &parent_mutator_set, consensus_rule_set)
+            .unwrap();
+        assert_eq!(inputs, rebuilt);
+
+        // Recovery on startup applies the tip again, which recomputes it.
+        drop(state);
+        let recomputed = alice
+            .lock_guard_mut()
+            .await
+            .chain
+            .archival_state_mut()
+            .recover()
+            .await
+            .unwrap();
+        assert_eq!(Some(extra_data), recomputed);
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn block_extra_data_carries_inactive_chunks() {
+        use neptune_archive::archival_state::ArchivalState;
+        use neptune_mutator_set::addition_record::AdditionRecord;
+        use neptune_mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
+        use neptune_mutator_set::removal_record::chunk_dictionary::ChunkDictionary;
+        use neptune_mutator_set::removal_record::RemovalRecord;
+        use neptune_wallet::mock_block::make_mock_block_with_inputs_and_outputs;
+        use tasm_lib::prelude::Tip5;
+        use tasm_lib::twenty_first::prelude::Mmr;
+
+        let network = Network::RegTest;
+        let mut rng = StdRng::seed_from_u64(107221549303u64);
+        let mut cli_args = Args::default_with_network(network);
+        cli_args.store_block_extra_data = true;
+        let wallet = WalletEntropy::devnet_wallet();
+        let key = wallet.nth_generation_spending_key_for_tests(0);
+        let mut alice = mock_genesis_global_state(0, wallet, cli_args).await;
+
+        // A UTXO that need not lustrate, so far enough past block 1's AOCL
+        // leafs, then enough outputs after it that the window slides past
+        // some of its Bloom filter indices.
+        let random_outputs = |source: &mut StdRng, n| {
+            (0..n)
+                .map(|_| AdditionRecord::new(source.random()))
+                .collect_vec()
+        };
+        let genesis = Block::genesis(network);
+        let (block1, _) = make_mock_block(&genesis, None, key, rng.random(), network);
+        let (block2, _) = make_mock_block_with_inputs_and_outputs(
+            &block1,
+            vec![],
+            random_outputs(&mut rng, 2100),
+            None,
+            key,
+            rng.random(),
+            network,
+        );
+        let (block3, expected) = make_mock_block(&block2, None, key, rng.random(), network);
+        let (block4, _) = make_mock_block_with_inputs_and_outputs(
+            &block3,
+            vec![],
+            random_outputs(&mut rng, 600),
+            None,
+            key,
+            rng.random(),
+            network,
+        );
+        for block in [&block1, &block2, &block3, &block4] {
+            alice.set_new_tip(block.clone()).await.unwrap();
+        }
+
+        let utxo = &expected[0];
+        let aocl_leaf_index = block2
+            .mutator_set_accumulator_after()
+            .unwrap()
+            .aocl
+            .num_leafs()
+            + block3
+                .all_addition_records()
+                .unwrap()
+                .iter()
+                .position(|addition_record| *addition_record == utxo.addition_record)
+                .unwrap() as u64;
+        let absolute_indices = AbsoluteIndexSet::compute(
+            Tip5::hash(&utxo.utxo),
+            utxo.sender_randomness,
+            utxo.receiver_preimage,
+            aocl_leaf_index,
+        );
+        let target_chunks = alice
+            .lock_guard()
+            .await
+            .chain
+            .archival_state()
+            .archival_mutator_set
+            .ams()
+            .chunk_dictionary(absolute_indices)
+            .await;
+        assert!(!target_chunks.is_empty(), "some chunks must be inactive");
+        let input = RemovalRecord {
+            absolute_indices,
+            target_chunks,
+        };
+
+        // The mock block's kernel still carries the chunk data.
+        let (block5, _) = make_mock_block_with_inputs_and_outputs(
+            &block4,
+            vec![input.clone()],
+            vec![],
+            None,
+            key,
+            rng.random(),
+            network,
+        );
+        alice.set_new_tip(block5.clone()).await.unwrap();
+
+        let state = alice.lock_guard().await;
+        let extra_data = state.chain.light_state().tip_extra_data().unwrap().clone();
+        let stripped = RemovalRecord {
+            absolute_indices,
+            target_chunks: ChunkDictionary::empty(),
+        };
+        let rebuilt = extra_data
+            .try_rebuild(
+                &[stripped],
+                &block4.mutator_set_accumulator_after().unwrap(),
+                ConsensusRuleSet::infer_from(network, block5.header().height),
+            )
+            .unwrap();
+        assert_eq!(vec![input], rebuilt);
+
+        let (path, location) = state
+            .chain
+            .archival_state()
+            .block_extra_data_location(block5.hash())
+            .await
+            .unwrap();
+        let stored = ArchivalState::read_block_extra_data(path, location)
+            .await
+            .unwrap();
+        assert_eq!(extra_data, stored);
     }
 
     #[traced_test]

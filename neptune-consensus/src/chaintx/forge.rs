@@ -1874,7 +1874,8 @@ pub(crate) mod tests {
     /// [`rebase_static_addresses`] normalizes away.
     #[test]
     fn forge_confirmed_loop_matches_rri() {
-        let (_, rri_code) = RemovalRecordsIntegrity.library_and_code();
+        let (_, rri_code) =
+            RemovalRecordsIntegrity::new(ConsensusRuleSet::SoftforkEpsilon).library_and_code();
         let (_, forge_code) = LinkProof.library_and_code();
 
         let rri_loop = extract_loop_body(&rri_code, "for_all_utxos");
@@ -1995,7 +1996,8 @@ pub(crate) mod tests {
     fn forge_collect_type_scripts_matches_cts() {
         use crate::transaction::validity::collect_type_scripts::CollectTypeScripts;
 
-        let (_, cts_code) = CollectTypeScripts.library_and_code();
+        // Forge does not exempt burns from time locks, like SingleProof does.
+        let (_, cts_code) = CollectTypeScripts::new(false).library_and_code();
         let (_, forge_code) = LinkProof.library_and_code();
 
         // (CollectTypeScripts label, Forge label) for each copied subroutine.

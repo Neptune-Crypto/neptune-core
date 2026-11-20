@@ -17,6 +17,7 @@ use tasm_lib::twenty_first::bfe;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 
 use super::block_body::BlockBody;
+use crate::block::validity::knows_block_extra_data::KnowsBlockExtraData;
 use crate::block::validity::knows_mutator_set::KnowsMutatorSet;
 use crate::block::validity::predecessor_is_valid::PredecessorIsValid;
 use crate::block::validity::swbf_update::aggregation::SwbfUpdateAggregation;
@@ -87,10 +88,7 @@ impl BlockAppendix {
     }
 
     /// Every claim a block's appendix must hold, by program, version and
-    /// input, given its parent's hash and the mutator set after it: those
-    /// above, and from hard fork epsilon on the composer's claim to know
-    /// that mutator set, where the rules require it, and the SWBF
-    /// update claim about the transaction on it.
+    /// input, given its parent's hash and the mutator set after it.
     pub fn consensus_claims(
         block_body: &BlockBody,
         height: BlockHeight,
@@ -106,6 +104,13 @@ impl BlockAppendix {
                     parent_digest,
                     parent_mutator_set,
                     ConsensusRuleSet::knows_mutator_set_activation_height(network),
+                    consensus_rule_set,
+                ));
+            }
+            if ConsensusRuleSet::miners_must_prove_extra_data_knowledge(network, height) {
+                claims.push(KnowsBlockExtraData::claim(
+                    parent_digest,
+                    ConsensusRuleSet::knows_block_extra_data_activation_height(network),
                     consensus_rule_set,
                 ));
             }
@@ -149,6 +154,13 @@ impl BlockAppendix {
                     parent.hash(),
                     &mutator_set,
                     ConsensusRuleSet::knows_mutator_set_activation_height(network),
+                    consensus_rule_set,
+                ));
+            }
+            if ConsensusRuleSet::miners_must_prove_extra_data_knowledge(network, height) {
+                claims.push(KnowsBlockExtraData::claim(
+                    parent.hash(),
+                    ConsensusRuleSet::knows_block_extra_data_activation_height(network),
                     consensus_rule_set,
                 ));
             }

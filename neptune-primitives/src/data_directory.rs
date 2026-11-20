@@ -15,6 +15,7 @@ use crate::network::Network;
 // code that computes its path (here) cannot drift apart.
 pub const BLOCK_FILENAME_PREFIX: &str = "blk";
 pub const BLOCK_FILENAME_EXTENSION: &str = "dat";
+pub const BLOCK_EXTRA_DATA_FILENAME_PREFIX: &str = "ext";
 pub const DIR_NAME_FOR_BLOCKS: &str = "blocks";
 pub const BANNED_IPS_DB_NAME: &str = "banned_ips";
 pub const BLOCK_INDEX_DB_NAME: &str = "block_index";
@@ -270,6 +271,17 @@ impl DataDirectory {
         let block_file_name = format!("{prefix}{file_index}.{extension}");
 
         self.block_dir_path().join(Path::new(&block_file_name))
+    }
+
+    /// The file path that contains blocks' extra data with `file_index`.
+    ///
+    /// This file lives within `DataDirectory::block_dir_path()`.
+    pub fn block_extra_data_file_path(&self, file_index: u32) -> PathBuf {
+        let prefix = BLOCK_EXTRA_DATA_FILENAME_PREFIX;
+        let extension = BLOCK_FILENAME_EXTENSION;
+        let file_name = format!("{prefix}{file_index}.{extension}");
+
+        self.block_dir_path().join(Path::new(&file_name))
     }
 }
 

@@ -34,10 +34,7 @@ pub(crate) struct ComposerWork {
 /// State related to the mining (composing and guessing) of the next block.
 #[derive(Debug, Default)]
 pub struct MiningState {
-    /// The most profitable block proposal seen on the network. But not
-    /// necessarily the one a guesser is guessing on as the proposal is only
-    /// changed when the delta in reward meets a threshold. Only updateable by
-    /// main loop.
+    /// The most profitable block proposal seen on the network.
     pub block_proposal: BlockProposal,
 
     /// The block proposals that were exported to external guessers. Not

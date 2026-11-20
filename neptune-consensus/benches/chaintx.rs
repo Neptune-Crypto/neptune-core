@@ -161,8 +161,10 @@ mod route {
     use neptune_consensus::proof_abstractions::tasm::program::TritonProgram;
     use neptune_consensus::proof_abstractions::tasm::program::TritonVmProofJobOptions;
     use neptune_consensus::proof_abstractions::triton_vm_job_queue::vm_job_queue;
+    use neptune_consensus::proof_abstractions::SecretWitness;
     use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
     use neptune_consensus::transaction::validity::collect_lock_scripts::CollectLockScriptsWitness;
+    use neptune_consensus::transaction::validity::collect_type_scripts::CollectTypeScripts;
     use neptune_consensus::transaction::validity::collect_type_scripts::CollectTypeScriptsWitness;
     use neptune_consensus::transaction::validity::kernel_to_outputs::KernelToOutputsWitness;
     use neptune_consensus::transaction::validity::proof_collection::ProofCollection;
@@ -264,11 +266,16 @@ mod route {
                 &KernelToOutputsWitness::from(pw),
             )
             .0,
-            stage::prove_witness(
-                &format!("CollectTypeScripts{label}"),
-                &CollectTypeScriptsWitness::from(pw),
-            )
-            .0,
+            {
+                let witness = CollectTypeScriptsWitness::from(pw);
+                stage::prove(
+                    &format!("CollectTypeScripts{label}"),
+                    CollectTypeScripts::new(RULE_SET.burns_are_exempt_from_time_locks()).program(),
+                    &witness.claim_under(RULE_SET),
+                    witness.nondeterminism(),
+                )
+                .0
+            },
         ];
 
         // The collection the raise recurses into. Assembled through the cache:
