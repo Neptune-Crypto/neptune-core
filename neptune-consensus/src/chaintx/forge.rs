@@ -1996,7 +1996,8 @@ pub(crate) mod tests {
     fn forge_collect_type_scripts_matches_cts() {
         use crate::transaction::validity::collect_type_scripts::CollectTypeScripts;
 
-        let (_, cts_code) = CollectTypeScripts.library_and_code();
+        // Forge does not exempt burns from time locks, like SingleProof does.
+        let (_, cts_code) = CollectTypeScripts::new(false).library_and_code();
         let (_, forge_code) = LinkProof.library_and_code();
 
         // (CollectTypeScripts label, Forge label) for each copied subroutine.

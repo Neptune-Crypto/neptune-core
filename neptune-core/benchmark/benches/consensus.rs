@@ -218,7 +218,7 @@ mod transaction {
         .current();
         let collect_type_scripts_witness = CollectTypeScriptsWitness::from(&primitive_witness);
         bench_and_profile_consensus_program(
-            CollectTypeScripts,
+            CollectTypeScripts::new(true),
             &collect_type_scripts_witness.standard_input(),
             collect_type_scripts_witness.nondeterminism(),
             &format!("CollectTypeScripts-{num_inputs}in-{num_outputs}out"),

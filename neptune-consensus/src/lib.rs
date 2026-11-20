@@ -148,7 +148,7 @@ mod tests {
         let all_consensus_critical_imports = name_and_lib![
             block::validity::block_program::BlockProgram,
             transaction::validity::collect_lock_scripts::CollectLockScripts,
-            transaction::validity::collect_type_scripts::CollectTypeScripts,
+            transaction::validity::collect_type_scripts::CollectTypeScripts::new(false),
             transaction::validity::kernel_to_outputs::KernelToOutputs,
             type_scripts::native_currency::NativeCurrency,
             transaction::validity::removal_records_integrity::RemovalRecordsIntegrity::new(

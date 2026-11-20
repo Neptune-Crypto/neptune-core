@@ -1635,7 +1635,7 @@ pub(crate) mod tests {
 
         test_program_snapshot!(
             SingleProof::new(ConsensusRuleSet::HardforkZeta),
-            "399459348c12831e1dd1617cc91a8d746de3d3967f3da486a2d0ea7589ad843b300d5868d918bb60"
+            "5f57dae81bab509cc60255cf684a46e2e48fc0a49e384d0be45832fa984c51b802a17a01213cb424"
         );
     }
 }

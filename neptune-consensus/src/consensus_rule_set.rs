@@ -619,6 +619,21 @@ impl ConsensusRuleSet {
         }
     }
 
+    /// Whether a canonical burn of time-locked coins is exempt from the time
+    /// lock. See [`CollectTypeScripts`](crate::transaction::validity::collect_type_scripts::CollectTypeScripts).
+    pub fn burns_are_exempt_from_time_locks(&self) -> bool {
+        match self {
+            ConsensusRuleSet::Reboot
+            | ConsensusRuleSet::HardforkAlpha
+            | ConsensusRuleSet::TvmProofVersion1
+            | ConsensusRuleSet::HardforkBeta
+            | ConsensusRuleSet::HardforkGamma
+            | ConsensusRuleSet::HardforkDelta
+            | ConsensusRuleSet::SoftforkEpsilon => false,
+            ConsensusRuleSet::HardforkZeta => true,
+        }
+    }
+
     pub fn allow_inputs_in_coinbase(&self) -> bool {
         match self {
             ConsensusRuleSet::Reboot
