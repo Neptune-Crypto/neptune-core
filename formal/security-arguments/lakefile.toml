@@ -1,0 +1,6 @@
+name = "security-arguments"
+version = "0.1.0"
+defaultTargets = ["SecurityArguments"]
+
+[[lean_lib]]
+name = "SecurityArguments"
