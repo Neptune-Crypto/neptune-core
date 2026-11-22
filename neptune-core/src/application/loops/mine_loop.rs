@@ -181,6 +181,7 @@ async fn extend_block_transaction(
             // The leaf price applies to a tip's first proposal only. A later
             // one is worth building whenever it pays the recomposition fee.
             NativeCurrencyAmount::zero(),
+            global_state_lock.cli().max_num_recomposition_leaves,
         );
     let fees = newcomers
         .iter()

@@ -358,6 +358,14 @@ pub struct Args {
     #[clap(long, default_value = "0.05", value_parser = NativeCurrencyAmount::coins_from_str)]
     pub(crate) min_fee_per_recomposition: NativeCurrencyAmount,
 
+    /// When composing, the maximum number of leaf proofs a new proposal may
+    /// add to the SWBF update tree of the composer's earlier proposal on the
+    /// same tip, with the default leaf size. Bounds the time spent on a
+    /// recomposition: the default aims for roughly a third of the target block
+    /// interval on the most powerful composers known to the developers.
+    #[clap(long, default_value = "20")]
+    pub(crate) max_num_recomposition_leaves: usize,
+
     /// By default, a composer will share block proposals with all peers. If
     /// this flag is set, the composer will *not* share their block proposals.
     #[clap(long)]

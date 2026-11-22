@@ -315,6 +315,9 @@ struct BlockTransactionSelection {
     /// Whether the selection extends a block transaction whose SWBF update
     /// tree is already proven.
     extends_proven_tree: bool,
+
+    /// The number of leaves that may still be added to the SWBF update tree.
+    remaining_num_leaves: usize,
 }
 
 impl BlockTransactionSelection {
@@ -355,18 +358,20 @@ impl BlockTransactionSelection {
             full_kernel_size_acc: 0,
             transactions: vec![],
             extends_proven_tree: false,
+            remaining_num_leaves: usize::MAX,
         }
     }
 
     /// The selection that starts from a block transaction composed for an
     /// earlier proposal: its inputs and outputs count as selected, and its
-    /// SWBF update tree is proven.
+    /// SWBF update tree is proven and extended by at most `max_num_leaves`.
     fn extending(
         block_transaction: &TransactionKernel,
         consensus_rule_set: ConsensusRuleSet,
         network: Network,
         max_kernel_size: usize,
         min_fee_per_swbf_leaf: NativeCurrencyAmount,
+        max_num_leaves: usize,
     ) -> Self {
         let mut selection = Self::empty(
             consensus_rule_set,
@@ -394,16 +399,15 @@ impl BlockTransactionSelection {
         selection.selected_inputs = inputs;
         selection.selected_outputs = block_transaction.outputs.clone();
         selection.extends_proven_tree = true;
+        selection.remaining_num_leaves = max_num_leaves;
         selection
     }
 
-    /// Whether the transaction pays the composer's price for every leaf its
-    /// inputs add to the block's SWBF update tree. Inputs below the proving
-    /// threshold dictated by the consensus rules are free, unless the tree
-    /// is proven already.
-    fn pays_for_its_leaves(&self, kernel: &TransactionKernel) -> bool {
+    /// The number of leaves the transaction's inputs add to the block's SWBF
+    /// update tree.
+    fn leaves_added(&self, kernel: &TransactionKernel) -> usize {
         let num_selected = self.selected_inputs.len();
-        let leaves_added = if self.extends_proven_tree {
+        if self.extends_proven_tree {
             kernel
                 .inputs
                 .len()
@@ -413,8 +417,15 @@ impl BlockTransactionSelection {
                 num_selected + kernel.inputs.len(),
                 self.min_swbf_padded_rows,
             ) - CorrectSwbfUpdateWitness::num_leaves(num_selected, self.min_swbf_padded_rows)
-        };
-        let Ok(leaves_added) = u32::try_from(leaves_added) else {
+        }
+    }
+
+    /// Whether the transaction pays the composer's price for every leaf its
+    /// inputs add to the block's SWBF update tree. Inputs below the proving
+    /// threshold dictated by the consensus rules are free, unless the tree
+    /// is proven already.
+    fn pays_for_its_leaves(&self, kernel: &TransactionKernel) -> bool {
+        let Ok(leaves_added) = u32::try_from(self.leaves_added(kernel)) else {
             return false;
         };
         self.min_fee_per_swbf_leaf
@@ -436,7 +447,8 @@ impl BlockTransactionSelection {
     }
 
     /// Include the transaction unless it does not fit in the block's limits.
-    fn push_if_it_fits(&mut self, transaction: &Transaction) {
+    /// Returns whether it was included.
+    fn push_if_it_fits(&mut self, transaction: &Transaction) -> bool {
         // Packing usually shrinks the inputs but can, in degenerate cases,
         // grow them by a few b-field elements per tree in the SWBFI MMR. So
         // the sum of stand-alone kernel sizes plus this slack bounds the
@@ -444,11 +456,13 @@ impl BlockTransactionSelection {
         const FAST_PATH_SLACK: usize = 1_000;
 
         let kernel = &transaction.kernel;
-        if kernel.inputs.len() > self.remaining_num_inputs
+        let leaves_added = self.leaves_added(kernel);
+        if leaves_added > self.remaining_num_leaves
+            || kernel.inputs.len() > self.remaining_num_inputs
             || kernel.outputs.len() > self.remaining_num_outputs
             || kernel.announcements.len() > self.remaining_num_announcements
         {
-            return;
+            return false;
         }
 
         // The kernel of the block transaction contains the packed union of the
@@ -480,7 +494,7 @@ impl BlockTransactionSelection {
             if self.kernel_wo_inputs_size_acc + kernel_wo_inputs_size + packed_inputs_field_size
                 > self.max_kernel_size
             {
-                return;
+                return false;
             }
         }
 
@@ -488,10 +502,12 @@ impl BlockTransactionSelection {
         self.selected_outputs.extend_from_slice(&kernel.outputs);
         self.full_kernel_size_acc += full_kernel_size;
         self.kernel_wo_inputs_size_acc += kernel_wo_inputs_size;
+        self.remaining_num_leaves -= leaves_added;
         self.remaining_num_inputs -= kernel.inputs.len();
         self.remaining_num_outputs -= kernel.outputs.len();
         self.remaining_num_announcements -= kernel.announcements.len();
         self.transactions.push(transaction.to_owned());
+        true
     }
 }
 
@@ -1820,7 +1836,8 @@ impl Mempool {
     /// earlier proposal, selected as [`Self::get_transactions_for_block_composition`]
     /// selects, except that transactions the block transaction contains are
     /// skipped and that every input added needs a new leaf of the proven
-    /// SWBF update tree.
+    /// SWBF update tree, of which at most `max_num_leaves` are added.
+    #[expect(clippy::too_many_arguments)]
     pub fn get_transactions_extending_block_transaction(
         &self,
         block_transaction: &TransactionKernel,
@@ -1829,6 +1846,7 @@ impl Mempool {
         max_kernel_size: usize,
         max_num_txs: Option<usize>,
         min_fee_per_swbf_leaf: NativeCurrencyAmount,
+        max_num_leaves: usize,
     ) -> Vec<Transaction> {
         let selection = BlockTransactionSelection::extending(
             block_transaction,
@@ -1836,6 +1854,7 @@ impl Mempool {
             network,
             max_kernel_size,
             min_fee_per_swbf_leaf,
+            max_num_leaves,
         );
         self.select_for_block(selection, max_num_txs)
     }
@@ -1874,13 +1893,16 @@ impl Mempool {
             }
 
             if selection.pays_for_its_leaves(&transaction_ptr.kernel) {
-                selection.push_if_it_fits(transaction_ptr);
-                continue;
+                let was_included = selection.push_if_it_fits(transaction_ptr);
+                if was_included {
+                    continue;
+                }
             }
 
             // The transaction does not pay for the leaves it adds to the
-            // block's SWBF tree. Compose the transactions it was merged from
-            // that do pay, as far as the merge cache still holds them.
+            // block's SWBF tree, or does not fit. Compose the transactions it
+            // was merged from that do, as far as the merge cache still holds
+            // them.
             let parts = self
                 .merge_input_cache
                 .parts_of(&transaction_ptr.kernel)
@@ -3343,6 +3365,7 @@ mod tests {
                     usize::MAX,
                     None,
                     leaf_price,
+                    usize::MAX,
                 )
                 .into_iter()
                 .map(|tx| tx.txid())
@@ -3350,6 +3373,22 @@ mod tests {
         };
         assert_eq!(vec![merged.txid()], extending(NativeCurrencyAmount::zero()));
         assert_eq!(vec![a.txid()], extending(leaf_price));
+
+        // A merge of more leaves than the extension may add yields to its
+        // constituents likewise, whatever it pays.
+        let capped = mempool.get_transactions_extending_block_transaction(
+            &block_transaction,
+            ConsensusRuleSet::SoftforkEpsilon,
+            Network::Testnet(42),
+            usize::MAX,
+            None,
+            NativeCurrencyAmount::zero(),
+            1,
+        );
+        assert_eq!(
+            vec![a.txid()],
+            capped.iter().map(|tx| tx.txid()).collect_vec()
+        );
     }
 
     #[test]
@@ -3423,6 +3462,7 @@ mod tests {
                     usize::MAX,
                     None,
                     leaf_price,
+                    usize::MAX,
                 )
                 .into_iter()
                 .map(|tx| tx.txid())
@@ -3432,6 +3472,21 @@ mod tests {
         assert_eq!(
             vec![paying.txid(), underpaying.txid()],
             extending(NativeCurrencyAmount::zero())
+        );
+
+        // A cap on the leaves added admits one newcomer only.
+        let capped = mempool.get_transactions_extending_block_transaction(
+            &block_transaction,
+            ConsensusRuleSet::SoftforkEpsilon,
+            Network::Testnet(42),
+            usize::MAX,
+            None,
+            NativeCurrencyAmount::zero(),
+            1,
+        );
+        assert_eq!(
+            vec![paying.txid()],
+            capped.iter().map(|tx| tx.txid()).collect_vec()
         );
         assert_eq!(4, selected_at_leaf_price(&mempool, leaf_price).len());
     }
