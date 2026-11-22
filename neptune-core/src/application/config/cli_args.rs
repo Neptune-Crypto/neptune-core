@@ -347,15 +347,24 @@ pub struct Args {
     /// proof its inputs add to the block's SWBF update tree. Inputs below the
     /// proving complexity threshold dictated by the consensus rules are
     /// included at a marginal cost of zero, since that proving work has to be
-    /// done anyway.
+    /// done anyway. Applies to the first proposal on a tip only; later
+    /// proposals are subject to `min_fee_per_recomposition` instead.
     #[clap(long, default_value = "0.2", value_parser = NativeCurrencyAmount::coins_from_str)]
     pub(crate) min_fee_per_swbf_leaf: NativeCurrencyAmount,
 
     /// When composing, the fee the transactions a new proposal adds to the
     /// composer's earlier proposal on the same tip must pay together, for
     /// the new proposal to be built.
-    #[clap(long, default_value = "0.1", value_parser = NativeCurrencyAmount::coins_from_str)]
+    #[clap(long, default_value = "0.05", value_parser = NativeCurrencyAmount::coins_from_str)]
     pub(crate) min_fee_per_recomposition: NativeCurrencyAmount,
+
+    /// When composing, the maximum number of leaf proofs a new proposal may
+    /// add to the SWBF update tree of the composer's earlier proposal on the
+    /// same tip, with the default leaf size. Bounds the time spent on a
+    /// recomposition: the default aims for roughly a third of the target block
+    /// interval on the most powerful composers known to the developers.
+    #[clap(long, default_value = "20")]
+    pub(crate) max_num_recomposition_leaves: usize,
 
     /// By default, a composer will share block proposals with all peers. If
     /// this flag is set, the composer will *not* share their block proposals.
@@ -1274,7 +1283,7 @@ mod tests {
             default_args.min_fee_per_swbf_leaf
         );
         assert_eq!(
-            NativeCurrencyAmount::coins_from_str("0.1").unwrap(),
+            NativeCurrencyAmount::coins_from_str("0.05").unwrap(),
             default_args.min_fee_per_recomposition
         );
         assert_eq!(TxUpgradeFilter::match_all(), default_args.tx_upgrade_filter);

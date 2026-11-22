@@ -178,7 +178,10 @@ async fn extend_block_transaction(
             network,
             max_kernel_len,
             Some(global_state_lock.cli().max_num_compose_mergers.get()),
-            global_state_lock.cli().min_fee_per_swbf_leaf,
+            // The leaf price applies to a tip's first proposal only. A later
+            // one is worth building whenever it pays the recomposition fee.
+            NativeCurrencyAmount::zero(),
+            global_state_lock.cli().max_num_recomposition_leaves,
         );
     let fees = newcomers
         .iter()
