@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_mempool::transaction_kernel_id::TransactionKernelId;
 use neptune_wallet::utxo_notification::UtxoNotificationMedium;
 
 use crate::parser::beneficiary::Beneficiary;
@@ -78,5 +79,16 @@ pub(crate) enum PaymentCommand {
 
         #[clap(long, required = false)]
         accept_lustrations: bool,
+    },
+
+    /// Increase the fee of a single proof-backed transaction in the mempool.
+    /// The added fee is paid by this node's wallet.
+    BumpFee {
+        /// ID of the transaction whose fee is to be increased
+        txid: TransactionKernelId,
+
+        /// Amount to add to the transaction's existing fee
+        #[clap(value_parser = NativeCurrencyAmount::coins_from_str)]
+        amount: NativeCurrencyAmount,
     },
 }

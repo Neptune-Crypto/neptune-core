@@ -77,6 +77,17 @@ pub enum UpgradeJob {
     },
     UpdateMutatorSetData(UpdateMutatorSetDataJob),
 
+    /// Raise the fee of a single proof-backed mempool transaction ("target")
+    /// by merging it with a transaction initiated by this node that does
+    /// nothing but pay a fee. The fee transaction is upgraded to a single
+    /// proof for the merger only; it is never shared on its own.
+    BumpFee {
+        fee_transaction: PrimitiveWitnessToSingleProof,
+        target_kernel: TransactionKernel,
+        target_single_proof: Proof,
+        shuffle_seed: [u8; 32],
+    },
+
     /// Fix a resolved link transaction into a `SingleProof`-backed
     /// transaction with the same txid. Performed for free: only "raise" is a
     /// paid operation. The incentive reflects this node's own interest in
@@ -456,6 +467,8 @@ impl UpgradeJob {
                 UpgradeIncentive::Critical
             }
             UpgradeJob::ProofCollectionToSingleProof(pc2sp) => pc2sp.upgrade_incentive,
+            // Pays out of this node's wallet.
+            UpgradeJob::BumpFee { .. } => UpgradeIncentive::Critical,
             UpgradeJob::Merge {
                 upgrade_incentive, ..
             } => *upgrade_incentive,
@@ -488,6 +501,14 @@ impl UpgradeJob {
                 vec![pw_to_sp.primitive_witness.kernel.txid()]
             }
             UpgradeJob::UpdateMutatorSetData(update_job) => vec![update_job.old_kernel.txid()],
+            UpgradeJob::BumpFee {
+                fee_transaction,
+                target_kernel,
+                ..
+            } => vec![
+                fee_transaction.primitive_witness.kernel.txid(),
+                target_kernel.txid(),
+            ],
             UpgradeJob::Fix { link_tx, .. } => vec![link_tx.txid()],
         }
     }
@@ -504,6 +525,12 @@ impl UpgradeJob {
             }
             UpgradeJob::ProofCollectionToSingleProof(pc2sp) => pc2sp.mutator_set.clone(),
             UpgradeJob::Merge { mutator_set, .. } => mutator_set.clone(),
+            UpgradeJob::BumpFee {
+                fee_transaction, ..
+            } => fee_transaction
+                .primitive_witness
+                .mutator_set_accumulator
+                .clone(),
             UpgradeJob::Fix { mutator_set, .. } => mutator_set.clone(),
             UpgradeJob::UpdateMutatorSetData(update_mutator_set_data_job) => {
                 update_mutator_set_data_job.catch_up.new_mutator_set.clone()
@@ -519,6 +546,7 @@ impl UpgradeJob {
     fn double_spend_warn_msg(&self) -> &str {
         match self {
             UpgradeJob::Merge { .. } => "Maybe an input to the merge got mined already?",
+            UpgradeJob::BumpFee { .. } => "Transaction got mined before its fee could be bumped?",
             UpgradeJob::PrimitiveWitnessToProofCollection { .. } => {
                 "Your own transaction already got mined?"
             }
@@ -774,6 +802,7 @@ impl UpgradeJob {
                         UpgradeJob::ProofCollectionToSingleProof { .. } => unreachable!(),
                         UpgradeJob::Fix { .. } => unreachable!(),
                         UpgradeJob::Merge { .. } => unreachable!(),
+                        UpgradeJob::BumpFee { .. } => unreachable!(),
                         UpgradeJob::UpdateMutatorSetData(_) => unreachable!(),
                     }
                 }
@@ -973,6 +1002,37 @@ impl UpgradeJob {
                 )
                 .await?;
                 info!("Proof-upgrader, merge: Done");
+
+                Ok((ret, None))
+            }
+            UpgradeJob::BumpFee {
+                fee_transaction,
+                target_kernel,
+                target_single_proof,
+                shuffle_seed,
+            } => {
+                let fee_transaction = fee_transaction
+                    .upgrade(
+                        triton_vm_job_queue.clone(),
+                        &proof_job_options,
+                        consensus_rule_set,
+                    )
+                    .await?;
+                let target = Transaction {
+                    kernel: target_kernel,
+                    proof: TransactionProof::SingleProof(target_single_proof),
+                };
+                info!("Proof-upgrader: Start merging with fee transaction");
+                let ret = fee_transaction
+                    .merge_with(
+                        target,
+                        shuffle_seed,
+                        triton_vm_job_queue.clone(),
+                        proof_job_options,
+                        consensus_rule_set,
+                    )
+                    .await?;
+                info!("Proof-upgrader, bump fee: Done");
 
                 Ok((ret, None))
             }
@@ -1769,6 +1829,92 @@ mod tests {
                 alice.lock_guard().await.chain.tip_mutator_set_after();
             assert!(mempool_tx.is_confirmable_relative_to(&mutator_set_accumulator_after));
         }
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn bump_fee_merges_unshared_fee_transaction_into_target() {
+        let network = Network::Testnet(42);
+
+        let mut rng: StdRng = StdRng::seed_from_u64(512777439430);
+        let cli = cli_args::Args {
+            network,
+            tx_proving_capability: Some(TxProvingCapability::SingleProof),
+            ..Default::default()
+        };
+        let mut bob =
+            state_with_premine_and_self_mined_blocks(cli, rng.random::<[Digest; 2]>()).await;
+        let (main_to_peer_tx, main_to_peer_rx) =
+            broadcast::channel::<MainToPeerTask>(PEER_CHANNEL_CAPACITY);
+
+        let target_fee = NativeCurrencyAmount::coins(2);
+        let target = transaction_from_state(
+            bob.clone(),
+            rng.random(),
+            TxProvingCapability::SingleProof,
+            target_fee,
+        )
+        .await;
+        bob.lock_guard_mut()
+            .await
+            .mempool_insert(target.clone().into(), UpgradePriority::Irrelevant)
+            .await;
+
+        let added_fee = NativeCurrencyAmount::coins(3);
+        let fee_tx = transaction_from_state(
+            bob.clone(),
+            rng.random(),
+            TxProvingCapability::PrimitiveWitness,
+            added_fee,
+        )
+        .await;
+
+        // The fee transaction lives in the mempool, witness-backed, while the
+        // job is running.
+        bob.lock_guard_mut()
+            .await
+            .mempool_insert(fee_tx.clone().into(), UpgradePriority::Critical)
+            .await;
+
+        let TransactionProof::SingleProof(target_single_proof) = target.proof.clone() else {
+            panic!("Target must be single proof-backed");
+        };
+        let job = UpgradeJob::BumpFee {
+            fee_transaction: PrimitiveWitnessToSingleProof {
+                primitive_witness: fee_tx.proof.clone().into_primitive_witness(),
+            },
+            target_kernel: target.kernel.clone(),
+            target_single_proof,
+            shuffle_seed: rng.random(),
+        };
+        job.handle_upgrade(
+            TritonVmJobQueue::get_instance(),
+            bob.clone(),
+            main_to_peer_tx,
+        )
+        .await;
+
+        assert_eq!(
+            1,
+            main_to_peer_rx.len(),
+            "Only the merged transaction may be shared, never the fee transaction"
+        );
+
+        let bob = bob.lock_guard().await;
+        assert_eq!(1, bob.mempool().len(), "Merger must replace both inputs");
+        assert!(!bob.mempool().contains(fee_tx.kernel.txid()));
+        assert!(!bob.mempool().contains(target.kernel.txid()));
+
+        let (txid, _) = bob.mempool().fee_density_iter().next().unwrap();
+        let bumped = bob.mempool().get(txid).unwrap();
+        assert_eq!(target_fee + added_fee, bumped.kernel.fee);
+        assert_eq!(
+            target.kernel.inputs.len() + fee_tx.kernel.inputs.len(),
+            bumped.kernel.inputs.len()
+        );
+
+        let consensus_rule_set = ConsensusRuleSet::infer_from(network, BlockHeight::genesis());
+        assert!(bumped.is_valid(network, consensus_rule_set).await);
     }
 
     #[traced_test]

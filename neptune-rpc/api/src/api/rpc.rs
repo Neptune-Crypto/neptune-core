@@ -771,6 +771,20 @@ pub trait RpcApi: Sync + Send {
 
     async fn claim_utxo_call(&self, request: ClaimUtxoRequest) -> RpcResult<ClaimUtxoResponse>;
 
+    async fn bump_fee(
+        &self,
+        transaction_kernel_id: RpcTransactionKernelId,
+        amount: RpcNativeCurrencyAmount,
+    ) -> RpcResult<BumpFeeResponse> {
+        self.bump_fee_call(BumpFeeRequest {
+            transaction_kernel_id,
+            amount,
+        })
+        .await
+    }
+
+    async fn bump_fee_call(&self, request: BumpFeeRequest) -> RpcResult<BumpFeeResponse>;
+
     /* Mining */
 
     async fn get_block_template(

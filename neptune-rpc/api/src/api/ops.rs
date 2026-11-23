@@ -44,7 +44,8 @@ pub enum Namespace {
     /// Endpoints for serving external wallets
     Wallet,
 
-    /// Endpoints for managing personal wallet
+    /// Endpoints for managing personal wallet. Anything that needs access to
+    /// the wallet's secret.
     Personal,
 
     /// Endpoints relating to and requiring a UTXO index
@@ -200,6 +201,9 @@ pub enum RpcMethods {
 
     #[namespace(Namespace::Personal)]
     ClaimUtxo,
+
+    #[namespace(Namespace::Personal)]
+    BumpFee,
 
     #[namespace(Namespace::Mining)]
     GetBlockTemplate,

@@ -2072,6 +2072,40 @@ impl MainLoopHandler {
 
                 Ok(false)
             }
+            RPCServerToMain::BumpFee {
+                transaction_kernel_id,
+                amount,
+                timestamp,
+            } => {
+                log_slow_scope!(fn_name!() + "::RPCServerToMain::BumpFee");
+
+                let job = self
+                    .global_state_lock
+                    .api_mut()
+                    .tx_initiator_mut()
+                    .bump_fee_job(transaction_kernel_id, amount, timestamp)
+                    .await;
+                match job {
+                    Ok(job) => {
+                        let vm_job_queue = vm_job_queue();
+                        let global_state_lock = self.global_state_lock.clone();
+                        let main_to_peer_broadcast_tx = self.main_to_peer_broadcast_tx.clone();
+                        tokio::task::spawn(async move {
+                            job.handle_upgrade(
+                                vm_job_queue,
+                                global_state_lock,
+                                main_to_peer_broadcast_tx,
+                            )
+                            .await
+                        });
+                    }
+                    Err(err) => {
+                        error!("Cannot bump fee of transaction {transaction_kernel_id}: {err}");
+                    }
+                }
+
+                Ok(false)
+            }
         }
     }
 

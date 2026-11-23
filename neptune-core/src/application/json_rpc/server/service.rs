@@ -13,6 +13,7 @@ use neptune_consensus::transaction::transaction_proof::TransactionProof;
 use neptune_consensus::transaction::Transaction;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_database::storage::storage_vec::traits::StorageVecStream;
+use neptune_mempool::transaction_kernel_id::TransactionKernelId;
 use neptune_mempool::transaction_kernel_id::Txid;
 use neptune_mempool::tx_admission;
 use neptune_mempool::tx_admission::TxAdmissionError;
@@ -1437,6 +1438,24 @@ impl RpcApi for RpcServer {
             .expect("Main loop must still be running");
 
         Ok(ClaimUtxoResponse { new: true })
+    }
+
+    async fn bump_fee_call(&self, request: BumpFeeRequest) -> RpcResult<BumpFeeResponse> {
+        let transaction_kernel_id: TransactionKernelId = request.transaction_kernel_id.into();
+        let amount: NativeCurrencyAmount = request.amount.into();
+
+        // The RPC server may not change state, so main loop does the work.
+        // The outcome of the attempt is reported in the log.
+        self.to_main_tx
+            .send(RPCServerToMain::BumpFee {
+                transaction_kernel_id,
+                amount,
+                timestamp: self.now(),
+            })
+            .await
+            .expect("Main loop must still be running");
+
+        Ok(BumpFeeResponse {})
     }
 
     /* Mining */
