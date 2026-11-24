@@ -19,6 +19,8 @@ use tokio::net::TcpListener;
 use tokio::net::TcpStream;
 use tokio::sync::broadcast;
 
+use crate::notify::ACCEPT_RETRY_DELAY;
+
 /// How many notifications a plugin may fall behind by before the oldest are
 /// dropped for it.
 pub(crate) const BACKLOG: usize = 1024;
@@ -47,8 +49,13 @@ pub(crate) async fn serve(
     notifications: broadcast::Sender<Notification>,
 ) {
     loop {
-        let Ok((stream, _)) = listener.accept().await else {
-            continue;
+        let stream = match listener.accept().await {
+            Ok((stream, _)) => stream,
+            Err(error) => {
+                eprintln!("Could not accept a plugin: {error}");
+                tokio::time::sleep(ACCEPT_RETRY_DELAY).await;
+                continue;
+            }
         };
 
         // Subscribing before the handshake keeps the notifications sent

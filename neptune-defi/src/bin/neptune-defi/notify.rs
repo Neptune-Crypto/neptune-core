@@ -32,6 +32,16 @@ pub(crate) const SUBCOMMAND: &str = "notify";
 /// digest in hex.
 const MAX_LINE_LENGTH: u64 = 128;
 
+/// How long a connection may take to send its line. `send` writes it as soon as
+/// it connects, so only a connection that was not opened by `send` takes
+/// longer, and closing it frees its file descriptor.
+const READ_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How long an accept loop waits after `accept` fails before it tries again.
+/// Some failures, such as running out of file descriptors, persist, and
+/// retrying at once would spin.
+pub(crate) const ACCEPT_RETRY_DELAY: Duration = Duration::from_millis(100);
+
 /// The `neptune-core` flag that runs the notify command for `kind`.
 fn flag(kind: Kind) -> &'static str {
     match kind {
@@ -126,21 +136,27 @@ pub(crate) async fn bind() -> std::io::Result<TcpListener> {
 ///
 /// Every connection carries one line. A line that is not a notification is
 /// dropped, and so is a connection that sends more than one notification's
-/// worth of bytes. Since `neptune-core` starts a process per notification,
+/// worth of bytes, or sends nothing for [`READ_TIMEOUT`]. Since `neptune-core` starts a process per notification,
 /// notifications sent close together may arrive in either order.
 pub(crate) async fn listen(
     listener: TcpListener,
     notifications: mpsc::UnboundedSender<Notification>,
 ) {
     while !notifications.is_closed() {
-        let Ok((stream, _)) = listener.accept().await else {
-            continue;
+        let stream = match listener.accept().await {
+            Ok((stream, _)) => stream,
+            Err(error) => {
+                eprintln!("Could not accept a notification: {error}");
+                tokio::time::sleep(ACCEPT_RETRY_DELAY).await;
+                continue;
+            }
         };
         let notifications = notifications.clone();
         tokio::spawn(async move {
             let mut line = String::new();
             let mut reader = BufReader::new(stream.take(MAX_LINE_LENGTH));
-            if reader.read_line(&mut line).await.is_err() {
+            let read = tokio::time::timeout(READ_TIMEOUT, reader.read_line(&mut line)).await;
+            if !matches!(read, Ok(Ok(_))) {
                 return;
             }
             if let Ok(notification) = line.trim_end().parse() {
@@ -230,6 +246,25 @@ mod tests {
         ] {
             assert!(send(&args).is_err(), "{args:?}");
         }
+    }
+
+    /// A connection that sends nothing is closed after [`READ_TIMEOUT`].
+    #[tokio::test]
+    async fn a_silent_connection_is_closed() {
+        let listener = bind().await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (sender, _receiver) = mpsc::unbounded_channel();
+        tokio::spawn(listen(listener, sender));
+
+        let mut silent = tokio::net::TcpStream::connect(address).await.unwrap();
+        let mut buffer = [0; 1];
+        let read = tokio::time::timeout(
+            READ_TIMEOUT + Duration::from_secs(5),
+            silent.read(&mut buffer),
+        )
+        .await
+        .expect("the listener closes the connection");
+        assert_eq!(0, read.unwrap());
     }
 
     /// Garbage, an oversized line, or a connection that says nothing does not
