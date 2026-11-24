@@ -2,8 +2,14 @@
 //! `--tx-notify` and `--proposal-notify`.
 
 use std::path::Path;
+use std::process::Child;
 use std::process::Command;
 use std::process::Stdio;
+use std::sync::mpsc;
+use std::sync::mpsc::SendError;
+use std::sync::Mutex;
+use std::sync::MutexGuard;
+use std::sync::PoisonError;
 
 use itertools::Itertools;
 use tracing::debug;
@@ -21,14 +27,17 @@ use tracing::trace;
 /// exits.
 ///
 /// If the program cannot be started, logs an error and carries on: once the
-/// node runs, a notification it cannot deliver is no reason to stop it.
+/// node runs, a notification it cannot deliver is no reason to stop it. If the
+/// thread that waits for it cannot be started, logs an error, and the next
+/// notification waits for the process instead, if it has exited by then.
 /// [`check_notify_command`] refuses a command whose program is missing at
 /// startup, so this happens only if the program disappears later, or the
-/// system cannot start another process.
+/// system cannot start another process or thread.
 pub(crate) fn spawn_notify_command(command: &Option<String>, argument: &str) {
     let Some(command) = command else {
         return;
     };
+    reap_unwaited();
     let cmd = command.replace("%s", argument);
 
     debug!("Invoking notify cmd:\"{cmd}\"");
@@ -53,10 +62,39 @@ pub(crate) fn spawn_notify_command(command: &Option<String>, argument: &str) {
         }
     };
 
-    std::thread::spawn(move || {
-        let mut child = child;
-        let _ = child.wait();
+    // The child goes to the waiting thread only once that thread runs, so
+    // that the child stays here if the thread cannot be started.
+    let (to_waiter, from_spawner) = mpsc::channel::<Child>();
+    let waiter = std::thread::Builder::new().spawn(move || {
+        if let Ok(mut waited_for) = from_spawner.recv() {
+            let _ = waited_for.wait();
+        }
     });
+    let unwaited = match waiter {
+        Ok(_) => to_waiter.send(child).err().map(|SendError(unsent)| unsent),
+        Err(e) => {
+            error!("Failed to start a thread to wait for \"{cmd}\": {e}");
+            Some(child)
+        }
+    };
+    if let Some(unwaited) = unwaited {
+        lock_unwaited().push(unwaited);
+    }
+}
+
+/// The children whose waiting thread could not be started. Each call to
+/// [`spawn_notify_command`] waits for those that have exited, so none stays in
+/// the process table for longer than until the next notification.
+static UNWAITED: Mutex<Vec<Child>> = Mutex::new(Vec::new());
+
+fn lock_unwaited() -> MutexGuard<'static, Vec<Child>> {
+    UNWAITED.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Wait for every child in [`UNWAITED`] that has exited, without blocking, and
+/// forget it. A child that cannot be waited for is forgotten too.
+fn reap_unwaited() {
+    lock_unwaited().retain_mut(|child| matches!(child.try_wait(), Ok(None)));
 }
 
 /// Why `command` cannot run, if it cannot: it names no program, or its
@@ -169,6 +207,25 @@ mod tests {
             );
             std::thread::sleep(Duration::from_millis(10));
         }
+    }
+
+    /// A child whose waiting thread could not be started is waited for once
+    /// it has exited, at the next notification.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn an_unwaited_child_is_reaped_at_the_next_notification() {
+        let child = Command::new("sleep").arg("0").spawn().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while exited_children_running("sleep") == 0 {
+            assert!(Instant::now() < deadline, "the child never exited");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let id = child.id();
+        lock_unwaited().push(child);
+
+        spawn_notify_command(&Some("true %s".to_owned()), "argument");
+        assert!(!lock_unwaited().iter().any(|unwaited| unwaited.id() == id));
+        assert_eq!(0, exited_children_running("sleep"));
     }
 
     /// A program that cannot be started leaves the node running. Were it to
