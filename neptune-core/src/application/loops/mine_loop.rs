@@ -582,6 +582,7 @@ pub(crate) async fn make_coinbase_transaction_stateless(
 /// - its coinbase is present and lies in `[0, Block::block_subsidy(h)]`;
 /// - its fee is non-negative;
 /// - its timestamp is at least `predecessor`'s plus the minimum block time;
+/// - its timestamp is earlier than now plus [`FUTUREDATING_LIMIT`];
 /// - if `predecessor` is at or above the first lustration block, the amount
 ///   its inputs lustrate is at most `predecessor`'s lustration counter;
 /// - its witness validates.
@@ -620,6 +621,9 @@ pub(crate) async fn caller_coinbase_tx(
         })
         && !kernel.fee.is_negative()
         && kernel.timestamp >= predecessor.header().timestamp + network.minimum_block_time()
+        // The block takes the latest timestamp of the transactions it merges,
+        // so a transaction from the future would make the block future-dated.
+        && kernel.timestamp < Timestamp::now() + FUTUREDATING_LIMIT
         && witness.validate().await.is_ok();
     if !fits {
         info!("Coinbase transaction set by RPC caller does not fit block {height}; not using it.");
@@ -1886,6 +1890,24 @@ pub(crate) mod tests {
             .outputs
             .iter()
             .any(|o| early_block_kernel.outputs.contains(o)));
+
+        // Timestamped later than the block's own validation allows, the
+        // transaction does not fit, but one timestamped within that limit
+        // does, and the block takes its timestamp.
+        let too_late = Timestamp::now() + FUTUREDATING_LIMIT + Timestamp::minutes(1);
+        let (late_state, _) = state_with_caller_tx(network, too_late).await;
+        assert!(caller_coinbase_tx(&genesis_block, &late_state)
+            .await
+            .is_none());
+        let soon = Timestamp::now() + Timestamp::seconds(30);
+        let (soon_state, _) = state_with_caller_tx(network, soon).await;
+        let (soon_block, _) = mock_compose_block(genesis_block.clone(), soon_state, now).await;
+        assert_eq!(soon, soon_block.header().timestamp);
+        assert!(
+            soon_block
+                .is_valid(&genesis_block, Timestamp::now(), network)
+                .await
+        );
 
         // The consensus rules of other networks forbid coinbase inputs.
         let main_genesis_block = Block::genesis(Network::Main);
