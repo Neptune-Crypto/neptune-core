@@ -55,6 +55,10 @@ pub(crate) enum ArgsError {
 
     /// The data directory cannot be determined.
     NoDataDirectory(String),
+
+    /// `--`, which would make the flags `neptune-defi` appends positional
+    /// arguments, and `neptune-core` takes none.
+    EndOfFlags,
 }
 
 impl fmt::Display for ArgsError {
@@ -75,6 +79,10 @@ impl fmt::Display for ArgsError {
             Self::NoDataDirectory(error) => {
                 write!(f, "Cannot determine neptune-core's data directory: {error}")
             }
+            Self::EndOfFlags => write!(
+                f,
+                "-- cannot be passed: neptune-core takes no positional arguments."
+            ),
         }
     }
 }
@@ -104,9 +112,9 @@ pub(crate) struct NodeCommand {
 /// [`PLUGIN_LISTEN`], which is `neptune-defi`'s own. `neptune-defi` reads the
 /// flags whose values it needs, which are `--listen-rpc`, `--network` and
 /// `--data-dir`, the way `neptune-core` reads them, and `neptune-core`
-/// validates the rest. The result is an error if the user passed one of
-/// [`FIXED_FLAGS`], in either the `--flag value` or the `--flag=value` form, or
-/// an invalid or missing value for a flag `neptune-defi` reads, or
+/// validates the rest. The result is an error if the user passed `--`, or one
+/// of [`FIXED_FLAGS`], in either the `--flag value` or the `--flag=value` form,
+/// or an invalid or missing value for a flag `neptune-defi` reads, or
 /// [`PLUGIN_LISTEN`] more than once. Otherwise
 /// `neptune-defi` appends `--listen-rpc` unless the user passed it, since
 /// plugins reach the node over JSON-RPC, then the RPC flags, and then
@@ -115,6 +123,10 @@ pub(crate) fn node_command(
     user_args: &[String],
     notify_flags: &[String],
 ) -> Result<NodeCommand, ArgsError> {
+    if user_args.iter().any(|arg| arg == "--") {
+        return Err(ArgsError::EndOfFlags);
+    }
+
     if let Some(fixed) = user_args
         .iter()
         .find_map(|arg| FIXED_FLAGS.into_iter().find(|f| *f == flag_name(arg)))
@@ -365,12 +377,22 @@ mod tests {
         for user in [
             args(&["--network", "regtest", "--peers", "1.2.3.4:9798"]),
             args(&["-n", "regtest", "--notx", "--max-num-peers=3"]),
-            args(&["--no-such-flag", "positional", "--", "--anything"]),
+            args(&["--no-such-flag", "positional"]),
             args(&["--data-dir", "/path with spaces/", "--peers="]),
         ] {
             let node = node_command(&user, &notify()).unwrap();
             assert_eq!([user, appended(true)].concat(), node.args);
             assert_eq!(DEFAULT_LISTEN_RPC, node.rpc_address);
+        }
+    }
+
+    #[test]
+    fn end_of_flags_is_refused() {
+        for user in [
+            args(&["--"]),
+            args(&["--network", "regtest", "--", "--anything"]),
+        ] {
+            assert_eq!(Err(ArgsError::EndOfFlags), node_command(&user, &notify()));
         }
     }
 
