@@ -41,6 +41,7 @@ use neptune_wallet::expected_utxo::UtxoNotifier;
 use neptune_wallet::fee_notification_policy::FeeNotificationPolicy;
 use neptune_wallet::incoming_utxo::IncomingUtxo;
 use neptune_wallet::incoming_utxo::IncomingUtxoRecoveryData;
+use neptune_wallet::scan;
 use neptune_wallet::transaction_output::TxOutput;
 use neptune_wallet::transaction_output::UtxoUnlocker;
 use neptune_wallet::wallet_entropy::WalletEntropy;
@@ -138,15 +139,8 @@ impl Debug for WalletState {
 }
 
 impl WalletState {
-    /// Generate [`ComposerParameters`] for composing the next block. If an
-    /// overridden coinbase distribution is specified, that will be used. If no
-    /// coinbase distribution is specified, the entire coinbase reward goes to
-    /// an address of the wallet. If the coinbase distribution *is* set, it is
-    /// assumed that the composer reward does not go to the wallet of this node.
-    ///
-    ///  # Panics
-    ///
-    ///  - If the `guesser_fraction` is not a fraction contained in \[0;1\].
+    /// Generate [`ComposerParameters`] for composing the next block, as
+    /// [`WalletEntropy::composer_parameters`] does.
     pub(crate) fn composer_parameters(
         &self,
         next_block_height: BlockHeight,
@@ -154,29 +148,11 @@ impl WalletState {
         fee_notification: FeeNotificationPolicy,
         overridden_coinbase_distribution: Option<CoinbaseDistribution>,
     ) -> ComposerParameters {
-        let reward_address = self.wallet_entropy.prover_fee_address();
-        let sender_randomness_for_composer = self
-            .wallet_entropy
-            .generate_sender_randomness(next_block_height, reward_address.privacy_digest());
-
-        // If coinbase distribution is set, we assume this wallet does not have
-        // the receiver preimage.
-        let receiver_preimage = if overridden_coinbase_distribution.is_some() {
-            None
-        } else {
-            Some(self.wallet_entropy.composer_fee_key().receiver_preimage())
-        };
-
-        // If no coinbase distribution is set, reward this node's wallet.
-        let coinbase_distribution =
-            overridden_coinbase_distribution.unwrap_or(CoinbaseDistribution::solo(reward_address));
-
-        ComposerParameters::new(
-            coinbase_distribution,
-            sender_randomness_for_composer,
-            receiver_preimage,
+        self.wallet_entropy.composer_parameters(
+            next_block_height,
             guesser_fraction,
             fee_notification,
+            overridden_coinbase_distribution,
         )
     }
 
@@ -755,102 +731,34 @@ impl WalletState {
         spent_own_utxos
     }
 
-    /// Scan the given transaction for announced UTXOs as recognized by owned
-    /// [SpendingKey]s and then verify those announced UTXOs are actually
-    /// present.
-    ///
-    /// Only announced UTXOs actually present in the transaction are returned
-    /// here, it's not sufficient that they are announced.
-    pub(crate) fn scan_for_utxos_announced_to_known_keys<'a>(
-        &'a self,
-        tx_kernel: &'a TransactionKernel,
-    ) -> impl Iterator<Item = IncomingUtxo> + 'a {
-        // Match every announcement against every known key in
-        // O(keys + announcements), rather than scanning all announcements once
-        // per key.
-        SpendingKey::scan_announcements_for_keys(
+    /// Scan the given transaction for UTXOs announced to the wallet's known
+    /// keys that are among its outputs.
+    pub(crate) fn scan_for_utxos_announced_to_known_keys(
+        &self,
+        tx_kernel: &TransactionKernel,
+    ) -> impl Iterator<Item = IncomingUtxo> {
+        scan::utxos_announced_to_keys(
             &tx_kernel.announcements,
+            &tx_kernel.outputs,
             self.get_all_known_spending_keys(),
         )
         .into_iter()
-        .filter(|au| {
-            let transaction_contains_addition_record =
-                tx_kernel.outputs.contains(&au.addition_record());
-            if !transaction_contains_addition_record {
-                warn!(
-                    "Transaction does not contain announced UTXO encrypted \
-                        to own receiving address. Announced UTXO was: {:#?}",
-                    au.utxo
-                );
-            }
-            transaction_contains_addition_record
-        })
     }
 
-    /// Scan the given transaction for announced UTXOs as recognized by *future*
-    /// keys, *i.e.*, keys that will be derived by the next n derivation
-    /// indices.
-    ///
-    /// Only announced UTXOs actually present in the transaction are returned
-    /// here, it's not sufficient that they are announced.
-    fn scan_for_utxos_announced_to_future_keys<'a>(
-        &'a self,
+    /// Scan the given transaction for UTXOs announced to the next
+    /// `num_future_keys` keys of every type that are among its outputs, each
+    /// with the key's type and derivation index.
+    fn scan_for_utxos_announced_to_future_keys(
+        &self,
         num_future_keys: usize,
-        tx_kernel: &'a TransactionKernel,
-    ) -> impl Iterator<Item = (KeyType, u64, IncomingUtxo)> + 'a {
-        self.get_future_spending_keys(num_future_keys).flat_map(
-            |(key_type, derivation_index, key)| {
-                key.scan_for_announced_utxos(tx_kernel)
-                    .into_iter()
-                    .filter(|au| {
-                        let transaction_contains_addition_record =
-                            tx_kernel.outputs.contains(&au.addition_record());
-                        if !transaction_contains_addition_record {
-                            warn!(
-                                "Transaction does not contain announced UTXO \
-                                encrypted to own receiving address."
-                            );
-                            debug!("Announced UTXO was: {:#?}", au.utxo);
-                        }
-                        transaction_contains_addition_record
-                    })
-                    .map(move |au| (key_type, derivation_index, au))
-            },
-        )
-    }
-
-    /// Scan the given block for UTXOs announced to any of the given keys.
-    ///
-    /// This function verifies that the announced UTXOs are actually present in
-    /// the transaction kernel outputs. Otherwise they are not returned.
-    fn scan_block_for_utxos_announced_to_given_keys(
         tx_kernel: &TransactionKernel,
-        keys: HashSet<&SpendingKey>,
-    ) -> HashSet<(AdditionRecord, IncomingUtxo)> {
-        keys.into_iter()
-            .flat_map(|key| {
-                key.scan_for_announced_utxos(tx_kernel)
-                    .into_iter()
-                    .filter_map(|iu| {
-                        let addition_record = iu.addition_record();
-                        let transaction_contains_addition_record =
-                            tx_kernel.outputs.contains(&addition_record);
-                        if !transaction_contains_addition_record {
-                            warn!(
-                                "Transaction does not contain announced UTXO \
-                        encrypted to own receiving address."
-                            );
-                            debug!("Announced UTXO was: {:#?}", iu.utxo);
-                        }
-                        if transaction_contains_addition_record {
-                            Some((addition_record, iu))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect_vec()
-            })
-            .collect()
+    ) -> impl Iterator<Item = (KeyType, u64, IncomingUtxo)> {
+        scan::utxos_announced_to_indexed_keys(
+            &tx_kernel.announcements,
+            &tx_kernel.outputs,
+            self.get_future_spending_keys(num_future_keys),
+        )
+        .into_iter()
     }
 
     /// Scan the given list of addition records for items that match with list
@@ -882,42 +790,8 @@ impl WalletState {
     }
 
     /// Scan the block for guesser fee UTXOs that this wallet can unlock.
-    ///
-    /// A block's guesser reward is locked to the miner's chosen address. That is
-    /// the dedicated guesser-fee key by default, but it can be any address —
-    /// including any of this wallet's other keys — when a custom mining address
-    /// is configured. So all known spending keys are checked, not just the
-    /// guesser-fee key.
-    ///
-    /// Return an iterator over the unlockable UTXOs, which is empty if the
-    /// block was guessed by an address none of this wallet's keys can unlock.
-    fn scan_for_guesser_fee_utxos<'a>(
-        &'a self,
-        block: &Block,
-    ) -> impl Iterator<Item = IncomingUtxo> + 'a {
-        let guessing_key = self
-            .get_all_known_spending_keys()
-            .find(|key| block.header().was_guessed_by(&key.guesser_receiver_data()));
-
-        let incoming_utxos = if let Some(key) = guessing_key {
-            let sender_randomness = block.hash();
-            let receiver_preimage = key.privacy_preimage();
-            block
-                .kernel
-                .guesser_fee_utxos()
-                .expect("Block argument must have guesser fee UTXOs")
-                .into_iter()
-                .map(|utxo| IncomingUtxo {
-                    utxo,
-                    sender_randomness,
-                    receiver_preimage,
-                    is_guesser_fee: true,
-                })
-                .collect_vec()
-        } else {
-            vec![]
-        };
-        incoming_utxos.into_iter()
+    fn scan_for_guesser_fee_utxos(&self, block: &Block) -> impl Iterator<Item = IncomingUtxo> {
+        scan::guesser_fee_utxos(block, self.get_all_known_spending_keys()).into_iter()
     }
 
     /// check if wallet already has the provided `expected_utxo`
@@ -1417,44 +1291,7 @@ impl WalletState {
                 FeeNotificationPolicy::OffChain,
                 overriden_coinbase_distribution,
             );
-
-            // if we have the necessary info to claim them
-            if let Some(receiver_preimage) = composer_parameters.maybe_receiver_preimage() {
-                // derive the composer fee UTXOs as the own miner would have
-                let coinbase_amount = Block::block_subsidy(new_block.header().height);
-                let composer_txos =
-                    composer_parameters.tx_outputs(coinbase_amount, new_block.header().timestamp);
-
-                for composer_output in composer_txos.iter() {
-                    // compute what the addition record would have been
-                    let incoming_utxo = IncomingUtxo {
-                        utxo: composer_output.utxo(),
-                        sender_randomness: composer_output.sender_randomness(),
-                        receiver_preimage,
-                        is_guesser_fee: false,
-                    };
-                    let addition_record = incoming_utxo.addition_record();
-
-                    // if the addition record is an output in the block,
-                    // it is ours!
-                    if new_block
-                        .body()
-                        .transaction_kernel
-                        .outputs
-                        .contains(&addition_record)
-                    {
-                        info!(
-                            "Found composer fee UTXO worth {}; timelocked? {}",
-                            incoming_utxo
-                                .utxo
-                                .get_native_currency_amount()
-                                .display_n_decimals(8),
-                            incoming_utxo.utxo.release_date().is_some()
-                        );
-                        recovered_outputs.push(incoming_utxo);
-                    }
-                }
-            }
+            recovered_outputs.extend(scan::composer_reward_utxos(new_block, &composer_parameters));
         }
 
         info!(
@@ -2040,7 +1877,14 @@ impl WalletState {
         let tx_kernel = block.body().transaction_kernel();
 
         // Scan.
-        let incoming_utxos = Self::scan_block_for_utxos_announced_to_given_keys(tx_kernel, keys);
+        let incoming_utxos = scan::utxos_announced_to_keys(
+            &tx_kernel.announcements,
+            &tx_kernel.outputs,
+            keys.into_iter().cloned(),
+        )
+        .into_iter()
+        .map(|incoming_utxo| (incoming_utxo.addition_record(), incoming_utxo))
+        .collect::<HashSet<_>>();
 
         // Return early if no UTXOs were found.
         if incoming_utxos.is_empty() {

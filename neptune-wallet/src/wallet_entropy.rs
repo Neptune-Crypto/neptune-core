@@ -19,6 +19,9 @@ use crate::address::symmetric_key;
 use crate::address::viewing_address;
 use crate::address::KeyType;
 use crate::address::SpendingKey;
+use crate::coinbase_distribution::CoinbaseDistribution;
+use crate::composer_parameters::ComposerParameters;
+use crate::fee_notification_policy::FeeNotificationPolicy;
 use crate::secret_key_material::SecretKeyMaterial;
 
 /// The wallet's one source of randomness, from which all keys are derived.
@@ -256,6 +259,51 @@ impl WalletEntropy {
         receiver_digest: Digest,
     ) -> Digest {
         Self::sender_randomness_inner(XFieldElement::zero(), block_height, receiver_digest)
+    }
+
+    /// Generate [`ComposerParameters`] for composing the block at
+    /// `next_block_height`. If an overridden coinbase distribution is given,
+    /// that is used, and the composer reward is assumed not to go to this
+    /// wallet. Otherwise the entire coinbase reward goes to this wallet's
+    /// prover-fee address.
+    ///
+    /// A wallet recovering its composer rewards from this entropy calls this
+    /// with no overridden distribution and passes the result to
+    /// [`crate::scan::composer_reward_utxos`].
+    ///
+    ///  # Panics
+    ///
+    ///  - If the `guesser_fraction` is not a fraction contained in \[0;1\].
+    pub fn composer_parameters(
+        &self,
+        next_block_height: BlockHeight,
+        guesser_fraction: f64,
+        fee_notification: FeeNotificationPolicy,
+        overridden_coinbase_distribution: Option<CoinbaseDistribution>,
+    ) -> ComposerParameters {
+        let reward_address = self.prover_fee_address();
+        let sender_randomness_for_composer =
+            self.generate_sender_randomness(next_block_height, reward_address.privacy_digest());
+
+        // If coinbase distribution is set, we assume this wallet does not have
+        // the receiver preimage.
+        let receiver_preimage = if overridden_coinbase_distribution.is_some() {
+            None
+        } else {
+            Some(self.composer_fee_key().receiver_preimage())
+        };
+
+        // If no coinbase distribution is set, reward this node's wallet.
+        let coinbase_distribution =
+            overridden_coinbase_distribution.unwrap_or(CoinbaseDistribution::solo(reward_address));
+
+        ComposerParameters::new(
+            coinbase_distribution,
+            sender_randomness_for_composer,
+            receiver_preimage,
+            guesser_fraction,
+            fee_notification,
+        )
     }
 
     /// Convert a secret seed phrase (list of 18 valid BIP-39 words) to a
