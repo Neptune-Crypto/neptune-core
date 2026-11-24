@@ -2,6 +2,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use anyhow::ensure;
+use neptune_primitives::timestamp::Timestamp;
 
 use crate::consensus_rule_set::ConsensusRuleSet;
 use crate::proof_abstractions::tasm::program::TritonVmProofJobOptions;
@@ -185,6 +186,13 @@ impl BlockTransaction {
         &self.proof
     }
 
+    /// Whether a transaction with a coinbase and timestamp `a` can merge with
+    /// one with timestamp `b`: the merge proof refuses timestamps that lie
+    /// more than 12 hours apart.
+    pub fn timestamps_can_merge(a: Timestamp, b: Timestamp) -> bool {
+        std::cmp::max(a, b) - std::cmp::min(a, b) <= BoundTimeDiff::MAX_TIMESTAMP_DIFF
+    }
+
     /// Merge a [`BlockTransaction`] or a regular [`Transaction`] with a
     /// regular [`Transaction`], resulting in a [`BlockTransaction`].
     ///
@@ -199,11 +207,8 @@ impl BlockTransaction {
         proof_job_options: TritonVmProofJobOptions,
         consensus_rule_set: ConsensusRuleSet,
     ) -> anyhow::Result<BlockTransaction> {
-        let cb_ts = coinbase.kernel().timestamp;
-        let other_ts = other.kernel.timestamp;
-        let diff = std::cmp::max(cb_ts, other_ts) - std::cmp::min(cb_ts, other_ts);
         ensure!(
-            diff <= BoundTimeDiff::MAX_TIMESTAMP_DIFF,
+            Self::timestamps_can_merge(coinbase.kernel().timestamp, other.kernel.timestamp),
             "Time difference may not be too big when merging with coinbase transactions"
         );
         let merge_witness =

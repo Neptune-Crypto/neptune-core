@@ -27,6 +27,7 @@ use neptune_consensus::transaction::transaction_proof::TransactionProofType;
 use neptune_consensus::transaction::*;
 use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use neptune_job_queue::errors::JobHandleError;
+use neptune_mempool::transaction_kernel_id::Txid;
 use neptune_mempool::tx_upgrade_filter::TxUpgradeFilter;
 use neptune_mempool::upgrade_priority::UpgradePriority;
 use neptune_primitives::difficulty_control::difficulty_control;
@@ -633,6 +634,38 @@ pub(crate) async fn caller_coinbase_tx(
     Some(witness)
 }
 
+/// The transactions of `candidates` that can be merged, in order, into a
+/// block transaction whose coinbase transaction has timestamp
+/// `coinbase_timestamp`, in that order.
+///
+/// Each merge takes the later of the two timestamps, and the merge proof
+/// refuses two timestamps more than 12 hours apart. A refused merge would fail
+/// the whole composition, so a transaction that the merges before it would
+/// leave too far apart is passed over instead.
+fn mergeable_with_coinbase(
+    coinbase_timestamp: Timestamp,
+    candidates: Vec<Transaction>,
+) -> Vec<Transaction> {
+    let mut latest = coinbase_timestamp;
+    candidates
+        .into_iter()
+        .filter(|tx| {
+            let timestamp = tx.kernel.timestamp;
+            let mergeable = BlockTransaction::timestamps_can_merge(latest, timestamp);
+            if mergeable {
+                latest = latest.max(timestamp);
+            } else {
+                warn!(
+                    "Not merging transaction {}: its timestamp {timestamp} is too far from \
+                    the block transaction's {latest}",
+                    tx.kernel.txid()
+                );
+            }
+            mergeable
+        })
+        .collect()
+}
+
 /// Enumerates origins of transactions to be merged into a block transaction.
 ///
 /// In the general case, this is (just) the mempool.
@@ -839,13 +872,17 @@ pub(crate) async fn create_block_transaction_from(
         }
     }
 
+    let coinbase_tx_timestamp = coinbase_transaction.kernel.timestamp;
+    transactions_to_merge = mergeable_with_coinbase(coinbase_tx_timestamp, transactions_to_merge);
+
     // If necessary, populate list with nop-tx.
     // Guarantees that some merge happens in below loop, which sets merge-bit.
+    // The nop takes the coinbase transaction's timestamp, so the two merge.
     if transactions_to_merge.is_empty() {
         info!("Creating nop transaction to set merge bit through a merge");
         let nop = TransactionDetails::nop(
             predecessor_block_ms,
-            coinbase_timestamp,
+            coinbase_tx_timestamp,
             global_state_lock.cli().network,
         );
         let nop = nop.primitive_witness();
@@ -882,6 +919,7 @@ pub(crate) async fn create_block_transaction_from(
                 Some(max_num_mergers),
             );
 
+        let txs_from_mempool = mergeable_with_coinbase(coinbase_tx_timestamp, txs_from_mempool);
         transactions_to_merge = if txs_from_mempool.is_empty() || old_rules != new_rules {
             vec![nop]
         } else {
@@ -1916,6 +1954,45 @@ pub(crate) mod tests {
         assert!(caller_coinbase_tx(&main_genesis_block, &main_state)
             .await
             .is_none());
+    }
+
+    /// A transaction is merged if and only if its timestamp lies within 12
+    /// hours of the latest timestamp among the coinbase transaction and the
+    /// transactions merged before it, and the order is kept.
+    #[test]
+    fn only_transactions_the_merge_proof_accepts_are_merged() {
+        use neptune_consensus::transaction::test_helpers::make_mock_transaction_with_mutator_set_hash_timestamp_and_proof_size;
+
+        let tx = |timestamp| {
+            make_mock_transaction_with_mutator_set_hash_timestamp_and_proof_size(
+                vec![],
+                vec![],
+                Digest::default(),
+                timestamp,
+                0,
+            )
+        };
+        let coinbase = Timestamp::days(1000);
+        let twelve_hours = Timestamp::hours(12);
+        let one_ms = Timestamp::millis(1);
+
+        let at_the_bound = tx(coinbase - twelve_hours);
+        let past_the_bound = tx(coinbase - twelve_hours - one_ms);
+        let later = tx(coinbase + Timestamp::hours(11));
+        let near_the_coinbase_but_far_from_later = tx(coinbase - Timestamp::hours(2));
+        let near_later = tx(coinbase + Timestamp::hours(20));
+
+        let merged = mergeable_with_coinbase(
+            coinbase,
+            vec![
+                at_the_bound.clone(),
+                past_the_bound,
+                later.clone(),
+                near_the_coinbase_but_far_from_later,
+                near_later.clone(),
+            ],
+        );
+        assert_eq!(vec![at_the_bound, later, near_later], merged);
     }
 
     /// A coinbase transaction an RPC caller set that does not fit the block
