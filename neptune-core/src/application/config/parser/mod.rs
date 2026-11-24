@@ -16,6 +16,13 @@ pub(crate) enum CliArgsParseError {
 
     #[error("If composition is selected, proving capability must be single proof")]
     ComposerMustBeSingleProofCapable,
+
+    #[error("--{flag} command \"{command}\" cannot run: {reason}")]
+    InvalidNotifyCommand {
+        flag: &'static str,
+        command: String,
+        reason: String,
+    },
 }
 
 impl Args {

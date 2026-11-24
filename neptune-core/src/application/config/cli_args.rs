@@ -33,6 +33,7 @@ use tracing::error;
 use crate::application::config::auto_consolidation::AutoConsolidationSettings;
 use crate::application::config::parser::multiaddr::parse_to_multiaddr;
 use crate::application::config::parser::CliArgsParseError;
+use crate::application::notify::check_notify_command;
 use crate::state::mining::block_proposal::BlockProposalRejectError;
 
 const MAX_NUM_INPUTS_FOR_PC_BACKED_TXS: u64 = 200;
@@ -80,7 +81,9 @@ pub struct Args {
     /// meaning that the node software continues and does not wait for the
     /// spawned process to finish.
     ///
-    /// If external command cannot be started, the entire node is stopped.
+    /// The node refuses to start if the command names no program, or names
+    /// one that is neither at the path given nor on `PATH`. If the program
+    /// later fails to start, the node logs an error and carries on.
     ///
     /// Spaces separate the program from its arguments, and the arguments from
     /// each other, except inside double quotes, which may enclose a path that
@@ -863,6 +866,22 @@ impl Args {
     /// # Panics
     /// - If this method is ever called more than once on the same object.
     pub(crate) fn second_parse(&mut self) -> Result<(), CliArgsParseError> {
+        for (flag, command) in [
+            ("block-notify", &self.block_notify),
+            ("tx-notify", &self.tx_notify),
+            ("proposal-notify", &self.proposal_notify),
+        ] {
+            if let Some(command) = command {
+                check_notify_command(command).map_err(|reason| {
+                    CliArgsParseError::InvalidNotifyCommand {
+                        flag,
+                        command: command.clone(),
+                        reason,
+                    }
+                })?;
+            }
+        }
+
         let network = self.network;
         let auto_consolidate = AutoConsolidationSettings::parse(
             &self.auto_consolidate,
@@ -1313,6 +1332,21 @@ mod tests {
     #[test]
     fn proposal_notify_command_is_not_a_positional_argument() {
         assert!(Args::try_parse_from(["neptune-core", "notify.sh %s"]).is_err());
+    }
+
+    #[test]
+    fn a_notify_command_whose_program_is_missing_is_refused_at_startup() {
+        for flag in ["block-notify", "tx-notify", "proposal-notify"] {
+            let mut args = Args::try_parse_from([
+                "neptune-core".to_owned(),
+                format!("--{flag}=/no/such/program %s"),
+            ])
+            .unwrap();
+            assert!(matches!(
+                args.second_parse(),
+                Err(CliArgsParseError::InvalidNotifyCommand { flag: f, .. }) if f == flag
+            ));
+        }
     }
 
     #[test]

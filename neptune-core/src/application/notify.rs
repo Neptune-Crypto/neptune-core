@@ -1,6 +1,7 @@
 //! The external programs a node runs when something happens: `--block-notify`,
 //! `--tx-notify` and `--proposal-notify`.
 
+use std::path::Path;
 use std::process::Command;
 use std::process::Stdio;
 
@@ -17,7 +18,13 @@ use tracing::trace;
 /// thread of its own waits for it instead, because on Unix a process that
 /// exits stays in the process table until its parent waits for it; were no
 /// one to wait, every notification would leave one behind until the node
-/// exits. Halts the node if the program cannot be started.
+/// exits.
+///
+/// If the program cannot be started, logs an error and carries on: once the
+/// node runs, a notification it cannot deliver is no reason to stop it.
+/// [`check_notify_command`] refuses a command whose program is missing at
+/// startup, so this happens only if the program disappears later, or the
+/// system cannot start another process.
 pub(crate) fn spawn_notify_command(command: &Option<String>, argument: &str) {
     let Some(command) = command else {
         return;
@@ -28,25 +35,64 @@ pub(crate) fn spawn_notify_command(command: &Option<String>, argument: &str) {
     let args = words(&cmd);
     let Some((program, args)) = args.split_first() else {
         error!("Notify command \"{command}\" names no program");
-        std::process::exit(1);
+        return;
     };
     trace!("program=\"{program}\"");
     trace!("args=[{}]", args.iter().join(","));
-    let child = Command::new(program)
+    let child = match Command::new(program)
         .args(args)
         .stdin(Stdio::null()) // detach from our stdin
         .stdout(Stdio::null()) // discard output
         .stderr(Stdio::null()) // discard errors
         .spawn()
-        .unwrap_or_else(|e| {
+    {
+        Ok(child) => child,
+        Err(e) => {
             error!("Failed to start external program \"{cmd}\": {e}");
-            std::process::exit(1);
-        });
+            return;
+        }
+    };
 
     std::thread::spawn(move || {
         let mut child = child;
         let _ = child.wait();
     });
+}
+
+/// Why `command` cannot run, if it cannot: it names no program, or its
+/// program is neither a file at the path given nor a file in a directory on
+/// `PATH`.
+///
+/// A program named by a path, that is, by more than one component, is looked
+/// up at that path, and a bare name is looked up on `PATH`, as
+/// [`Command::new`] does. On Windows a bare name also matches the name with
+/// `.exe` appended.
+// ponytail: on Windows, `Command::new` also searches the node's own directory
+// and the system directories, which this does not; a program found only there
+// is refused. Mirror that search if anyone relies on it.
+pub(crate) fn check_notify_command(command: &str) -> Result<(), String> {
+    let words = words(command);
+    let Some(program) = words.first() else {
+        return Err("it names no program".to_owned());
+    };
+
+    let path = Path::new(program);
+    let exists = if path.components().count() > 1 {
+        path.is_file()
+    } else {
+        std::env::var_os("PATH").is_some_and(|dirs| {
+            std::env::split_paths(&dirs).any(|dir| {
+                let candidate = dir.join(program);
+                candidate.is_file() || (cfg!(windows) && candidate.with_extension("exe").is_file())
+            })
+        })
+    };
+
+    if exists {
+        Ok(())
+    } else {
+        Err(format!("program \"{program}\" not found"))
+    }
 }
 
 /// The words of `command`.
@@ -123,6 +169,39 @@ mod tests {
             );
             std::thread::sleep(Duration::from_millis(10));
         }
+    }
+
+    /// A program that cannot be started leaves the node running. Were it to
+    /// halt the node, it would end this test process, and the test with it.
+    #[test]
+    fn a_missing_program_leaves_the_node_running() {
+        spawn_notify_command(&Some("/no/such/program %s".to_owned()), "argument");
+        spawn_notify_command(&Some("   ".to_owned()), "argument");
+    }
+
+    #[test]
+    fn a_command_whose_program_exists_passes_the_check() {
+        let this_program = std::env::current_exe().unwrap();
+        let command = format!("\"{}\" %s", this_program.to_string_lossy());
+        assert_eq!(Ok(()), check_notify_command(&command));
+
+        #[cfg(unix)]
+        assert_eq!(Ok(()), check_notify_command("sh -c true"));
+        #[cfg(windows)]
+        assert_eq!(Ok(()), check_notify_command("cmd /c rem"));
+    }
+
+    #[test]
+    fn a_command_whose_program_is_missing_fails_the_check() {
+        assert!(check_notify_command("").is_err());
+        assert!(check_notify_command("   ").is_err());
+        assert!(check_notify_command("/no/such/program %s").is_err());
+        assert!(check_notify_command("no-such-program-on-path %s").is_err());
+
+        // A directory is not a program.
+        let dir = std::env::temp_dir();
+        let command = format!("\"{}\" %s", dir.to_string_lossy());
+        assert!(check_notify_command(&command).is_err());
     }
 
     fn strings(words: &[&str]) -> Vec<String> {
