@@ -600,18 +600,27 @@ pub(crate) async fn caller_coinbase_tx(
     let network = global_state_lock.cli().network;
     let height = predecessor.header().height.next();
     let kernel = &witness.kernel;
-    let lustration_status = (ConsensusRuleSet::first_lustration_block(network)
-        <= predecessor.header().height)
-        .then(|| predecessor.header().pow.lustration_status().ok())
-        .flatten();
-    let lustrates = lustration_status.is_none_or(|status| {
-        kernel
-            .verified_lustration_amount(
-                status.max_lustrating_aocl_leaf_index,
-                ConsensusRuleSet::infer_from(network, height).fix_lustration_double_counting(),
-            )
-            .is_ok_and(|amount| amount <= status.counter)
-    });
+    // Before the first lustration block nothing is lustrated, so any
+    // transaction lustrates little enough. From then on, a predecessor whose
+    // status does not decode admits none.
+    let lustrates =
+        if predecessor.header().height < ConsensusRuleSet::first_lustration_block(network) {
+            true
+        } else {
+            predecessor
+                .header()
+                .pow
+                .lustration_status()
+                .is_ok_and(|status| {
+                    kernel
+                        .verified_lustration_amount(
+                            status.max_lustrating_aocl_leaf_index,
+                            ConsensusRuleSet::infer_from(network, height)
+                                .fix_lustration_double_counting(),
+                        )
+                        .is_ok_and(|amount| amount <= status.counter)
+                })
+        };
     let fits = ConsensusRuleSet::allows_coinbase_inputs(network, height)
         && lustrates
         && predecessor
