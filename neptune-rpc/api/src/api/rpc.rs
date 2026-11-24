@@ -805,9 +805,9 @@ pub trait RpcApi: Sync + Send {
         request: SubmitBlockRequest,
     ) -> RpcResult<SubmitBlockResponse>;
 
-    /// Have this node's next block proposals use `tx` as their coinbase
-    /// transaction, in place of the one the node builds, until it is set
-    /// again. No transaction unsets it.
+    /// Have this node's block proposals use `tx` as their coinbase
+    /// transaction, in place of the one the node builds. No transaction
+    /// unsets it.
     ///
     /// The node proves `tx` from its primitive witness. The node registers no
     /// expected UTXOs for its outputs, so an output meant for this node's
@@ -815,8 +815,19 @@ pub trait RpcApi: Sync + Send {
     /// back to the node's own coinbase transaction if the consensus rules at
     /// its height forbid coinbase inputs, or if `tx` is invalid, was built
     /// against another tip, claims more than the block subsidy, pays a
-    /// negative fee, is timestamped too early, or does not lustrate an input
-    /// that must lustrate.
+    /// negative fee, is timestamped too early or more than a minute ahead of
+    /// the node's clock, or does not lustrate an input that must lustrate.
+    ///
+    /// Each composition of a block proposal takes the transaction set when it
+    /// begins. If that transaction does not fit the new tip, the node unsets
+    /// it and waits up to a second for one that does. A composition that
+    /// begins without a fitting transaction starts over with one set while it
+    /// runs. A composition that begins with one is never interrupted, and a
+    /// transaction set while it runs is used from the next composition on. A
+    /// node that only composes begins the next composition on the same tip as
+    /// soon as it has a proposal. A node that also guesses stops composing on
+    /// a tip once it has a proposal worth guessing on, so for it the
+    /// transaction is used from the next tip on.
     ///
     /// Fails with [`RpcError::CoinbaseInputsNotAllowed`] if the consensus
     /// rules for the next block forbid coinbase inputs.

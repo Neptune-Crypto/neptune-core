@@ -128,10 +128,13 @@ async fn compose_block(
     // An RPC caller who sets coinbase transactions hears of the new tip after
     // this node does, so a transaction it set that does not fit this block was
     // built for an older tip. The composer unsets it and gives the caller a
-    // moment to set one for this tip. A transaction that fits and arrives
-    // later still wins, also when none was set to begin with: the composition
-    // that began without it is dropped, which cancels its proof jobs, and
-    // begins again.
+    // moment to set one for this tip. If no transaction fits by then, the
+    // composer begins without one and keeps listening: a transaction that fits
+    // and arrives later still wins, and the composition that began without it
+    // is dropped, which cancels its proof jobs, and begins again. A
+    // composition that begins with a fitting transaction is never
+    // interrupted; a transaction set while it runs waits for the next
+    // composition.
     let mut caller_tx = global_state_lock
         .lock_guard()
         .await
