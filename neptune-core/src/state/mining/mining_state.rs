@@ -1,7 +1,9 @@
 use std::collections::HashMap;
+use std::ops::Deref;
 
 use itertools::Itertools;
 use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
+use neptune_consensus::transaction::primitive_witness::WitnessValidationError;
 use neptune_primitives::mast_hash::MastHash;
 use neptune_wallet::coinbase_distribution::CoinbaseDistribution;
 use tasm_lib::prelude::Digest;
@@ -16,6 +18,30 @@ use crate::Block;
 /// be reached unless node is under some form of attack.
 pub const MAX_NUM_EXPORTED_BLOCK_PROPOSAL_STORED: usize = 10_000;
 
+/// The primitive witness of a coinbase transaction that an RPC caller set,
+/// which validates.
+///
+/// Whether a witness validates depends on the witness alone, not on the tip,
+/// so it is checked once, here, when the transaction is set, rather than in
+/// every composition that considers it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ValidCoinbaseTx(PrimitiveWitness);
+
+impl ValidCoinbaseTx {
+    pub(crate) async fn try_new(witness: PrimitiveWitness) -> Result<Self, WitnessValidationError> {
+        witness.validate().await?;
+        Ok(Self(witness))
+    }
+}
+
+impl Deref for ValidCoinbaseTx {
+    type Target = PrimitiveWitness;
+
+    fn deref(&self) -> &PrimitiveWitness {
+        &self.0
+    }
+}
+
 #[derive(Debug, Default)]
 struct OverrideCoinbaseSettings {
     coinbase_distribution: Option<CoinbaseDistribution>,
@@ -23,7 +49,7 @@ struct OverrideCoinbaseSettings {
     /// A coinbase transaction an RPC caller set, which block proposals use in
     /// place of the one this node builds. A channel, so that the composer can
     /// wait for the caller to set it.
-    coinbase_tx: watch::Sender<Option<PrimitiveWitness>>,
+    coinbase_tx: watch::Sender<Option<ValidCoinbaseTx>>,
 }
 
 /// State related to the mining (composing and guessing) of the next block.
@@ -81,11 +107,15 @@ impl MiningState {
     }
 
     pub(crate) fn coinbase_tx(&self) -> Option<PrimitiveWitness> {
-        self.override_coinbase_settings.coinbase_tx.borrow().clone()
+        self.override_coinbase_settings
+            .coinbase_tx
+            .borrow()
+            .as_deref()
+            .cloned()
     }
 
     /// The coinbase transaction an RPC caller set, as it changes.
-    pub(crate) fn watch_coinbase_tx(&self) -> watch::Receiver<Option<PrimitiveWitness>> {
+    pub(crate) fn watch_coinbase_tx(&self) -> watch::Receiver<Option<ValidCoinbaseTx>> {
         self.override_coinbase_settings.coinbase_tx.subscribe()
     }
 
@@ -109,10 +139,9 @@ impl MiningState {
             });
     }
 
-    /// Have this node's next block proposals use `coinbase_tx` in place of the
-    /// coinbase transaction this node builds, until it is set again. `None`
-    /// unsets it.
-    pub(crate) fn set_coinbase_tx(&mut self, coinbase_tx: Option<PrimitiveWitness>) {
+    /// Have this node's block proposals use `coinbase_tx` in place of the
+    /// coinbase transaction this node builds. `None` unsets it.
+    pub(crate) fn set_coinbase_tx(&mut self, coinbase_tx: Option<ValidCoinbaseTx>) {
         info!(
             "{} coinbase transaction set by RPC caller.",
             if coinbase_tx.is_some() {

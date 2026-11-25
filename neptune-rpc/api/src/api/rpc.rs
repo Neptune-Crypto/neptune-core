@@ -144,6 +144,9 @@ pub enum RpcError {
     #[error("The consensus rules for the next block forbid coinbase inputs.")]
     CoinbaseInputsNotAllowed,
 
+    #[error("Invalid coinbase transaction: {0}")]
+    InvalidCoinbaseTx(String),
+
     #[error(
         "The consensus rules require lustration of the input, but the lustration flag was not set."
     )]
@@ -813,10 +816,10 @@ pub trait RpcApi: Sync + Send {
     /// expected UTXOs for its outputs, so an output meant for this node's
     /// wallet must carry an on-chain notification. A block proposal falls
     /// back to the node's own coinbase transaction if the consensus rules at
-    /// its height forbid coinbase inputs, or if `tx` is invalid, was built
-    /// against another tip, claims more than the block subsidy, pays a
-    /// negative fee, is timestamped too early or more than a minute ahead of
-    /// the node's clock, or does not lustrate an input that must lustrate.
+    /// its height forbid coinbase inputs, or if `tx` was built against another
+    /// tip, claims more than the block subsidy, is timestamped too early or
+    /// more than a minute ahead of the node's clock, or does not lustrate an
+    /// input that must lustrate.
     ///
     /// Each composition of a block proposal takes the transaction set when it
     /// begins. If that transaction does not fit the new tip, the node unsets
@@ -830,7 +833,11 @@ pub trait RpcApi: Sync + Send {
     /// transaction is used from the next tip on.
     ///
     /// Fails with [`RpcError::CoinbaseInputsNotAllowed`] if the consensus
-    /// rules for the next block forbid coinbase inputs.
+    /// rules for the next block forbid coinbase inputs, and with
+    /// [`RpcError::InvalidCoinbaseTx`] if `tx`'s primitive witness does not
+    /// validate, that is, if a lock script or type script fails on it. A
+    /// coinbase transaction that pays a negative fee is one such, since the
+    /// native currency's type script forbids it.
     async fn set_coinbase_tx(
         &self,
         tx: Option<RpcPrimitiveWitness>,

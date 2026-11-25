@@ -584,12 +584,15 @@ pub(crate) async fn make_coinbase_transaction_stateless(
 /// - the consensus rules at `h` allow coinbase inputs;
 /// - its mutator set hash is that of the mutator set after `predecessor`;
 /// - its coinbase is present and lies in `[0, Block::block_subsidy(h)]`;
-/// - its fee is non-negative;
 /// - its timestamp is at least `predecessor`'s plus the minimum block time;
 /// - its timestamp is earlier than now plus [`FUTUREDATING_LIMIT`];
 /// - if `predecessor` is at or above the first lustration block, the amount
-///   its inputs lustrate is at most `predecessor`'s lustration counter;
-/// - its witness validates.
+///   its inputs lustrate is at most `predecessor`'s lustration counter.
+///
+/// Its witness validates, since the mining state holds only witnesses that
+/// do; see [`ValidCoinbaseTx`](crate::state::mining::mining_state::ValidCoinbaseTx).
+/// So its fee is non-negative, since the native currency's type script
+/// forbids a negative fee beside a coinbase.
 pub(crate) async fn caller_coinbase_tx(
     predecessor: &Block,
     global_state_lock: &GlobalStateLock,
@@ -632,12 +635,10 @@ pub(crate) async fn caller_coinbase_tx(
         && kernel.coinbase.is_some_and(|coinbase| {
             !coinbase.is_negative() && coinbase <= Block::block_subsidy(height)
         })
-        && !kernel.fee.is_negative()
         && kernel.timestamp >= predecessor.header().timestamp + network.minimum_block_time()
         // The block takes the latest timestamp of the transactions it merges,
         // so a transaction from the future would make the block future-dated.
-        && kernel.timestamp < Timestamp::now() + FUTUREDATING_LIMIT
-        && witness.validate().await.is_ok();
+        && kernel.timestamp < Timestamp::now() + FUTUREDATING_LIMIT;
     if !fits {
         info!("Coinbase transaction set by RPC caller does not fit block {height}; not using it.");
         return None;
@@ -1348,6 +1349,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::application::config::cli_args;
     use crate::application::loops::mine_loop::mock_block_generator::MockBlockGenerator;
+    use crate::state::mining::mining_state::ValidCoinbaseTx;
     use crate::state::mining::mining_status::MiningStatus;
     use crate::state::transaction::tx_creation_config::TxCreationConfig;
     use crate::state::GlobalState;
@@ -1906,7 +1908,9 @@ pub(crate) mod tests {
                 .lock_guard_mut()
                 .await
                 .mining_state
-                .set_coinbase_tx(Some(witness.clone()));
+                .set_coinbase_tx(Some(
+                    ValidCoinbaseTx::try_new(witness.clone()).await.unwrap(),
+                ));
 
             (state, witness)
         }
@@ -2053,7 +2057,7 @@ pub(crate) mod tests {
                 .lock_guard_mut()
                 .await
                 .mining_state
-                .set_coinbase_tx(Some(stale));
+                .set_coinbase_tx(Some(ValidCoinbaseTx::try_new(stale).await.unwrap()));
 
             let (sender, receiver) = oneshot::channel();
             let (_cancel_compose_tx, cancel_compose_rx) = tokio::sync::watch::channel(());
@@ -2070,7 +2074,7 @@ pub(crate) mod tests {
                     .lock_guard_mut()
                     .await
                     .mining_state
-                    .set_coinbase_tx(Some(fresh));
+                    .set_coinbase_tx(Some(ValidCoinbaseTx::try_new(fresh).await.unwrap()));
             }
             composer.await.unwrap().unwrap();
 
@@ -2112,9 +2116,10 @@ pub(crate) mod tests {
     }
 
     /// The composer ignores a caller's coinbase transaction that claims more
-    /// than the block subsidy, was built against another mutator set, or pays
-    /// a negative fee, however valid it is otherwise, and composes a valid
-    /// block of its own instead.
+    /// than the block subsidy, or was built against another mutator set,
+    /// however valid it is otherwise, and composes a valid block of its own
+    /// instead. One that pays a negative fee does not validate, so it cannot
+    /// be set.
     #[apply(shared_tokio_runtime)]
     async fn composer_ignores_a_caller_coinbase_tx_that_breaks_the_blocks_rules() {
         use neptune_mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -2153,15 +2158,19 @@ pub(crate) mod tests {
         assert!(elsewhere.validate().await.is_ok());
 
         // The outputs stay; the coinbase shrinks by what the guesser had,
-        // and by `excess` more, which the fee then takes back.
+        // and by `excess` more, which the fee then takes back. The native
+        // currency's type script forbids a negative fee beside a coinbase, so
+        // such a transaction cannot even be set.
         let mut negative_fee = valid.clone();
         negative_fee.coinbase = Some(subsidy.checked_sub(&(valid.fee + excess)).unwrap());
         negative_fee.fee = -excess;
+        assert!(ValidCoinbaseTx::try_new(negative_fee.primitive_witness())
+            .await
+            .is_err());
 
         for (case, details) in [
             ("more than the subsidy", too_rich),
             ("another mutator set", elsewhere),
-            ("a negative fee", negative_fee),
         ] {
             let cli = cli_args::Args::default_with_network(network);
             let mut state = mock_genesis_global_state(2, WalletEntropy::devnet_wallet(), cli).await;
@@ -2170,7 +2179,9 @@ pub(crate) mod tests {
                 .lock_guard_mut()
                 .await
                 .mining_state
-                .set_coinbase_tx(Some(witness.clone()));
+                .set_coinbase_tx(Some(
+                    ValidCoinbaseTx::try_new(witness.clone()).await.unwrap(),
+                ));
 
             let (block, _) = mock_compose_block(genesis_block.clone(), state, now).await;
             assert!(block.is_valid(&genesis_block, now, network).await, "{case}");

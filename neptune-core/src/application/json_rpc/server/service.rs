@@ -53,6 +53,7 @@ use crate::api::tx_initiation::builder::input_selector::InputSelectionPolicy;
 use crate::application::json_rpc::server::rpc::RpcServer;
 use crate::application::loops::channel::RPCServerToMain;
 use crate::state::block_selector::BlockSelectorExt;
+use crate::state::mining::mining_state::ValidCoinbaseTx;
 use crate::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::state::wallet::sent_transaction::SentTransaction;
 use crate::state::wallet::wallet_db_tables::StrongUtxoKey;
@@ -1527,15 +1528,38 @@ impl RpcApi for RpcServer {
             .transpose()
             .map_err(RpcError::MalformedPrimitiveWitness)?;
 
-        let mut state = self.state.clone();
-        let mut state = state.lock_guard_mut().await;
-        let next_height = state.chain.tip().header().height.next();
+        let next_height = self
+            .state
+            .lock_guard()
+            .await
+            .chain
+            .tip()
+            .header()
+            .height
+            .next();
         if coinbase_tx.is_some()
             && !ConsensusRuleSet::allows_coinbase_inputs(self.state.cli().network, next_height)
         {
             return Err(RpcError::CoinbaseInputsNotAllowed);
         }
-        state.mining_state.set_coinbase_tx(coinbase_tx);
+
+        // Validating runs every lock script and type script, so it happens
+        // before the state lock is taken.
+        let coinbase_tx = match coinbase_tx {
+            Some(witness) => Some(
+                ValidCoinbaseTx::try_new(witness)
+                    .await
+                    .map_err(|error| RpcError::InvalidCoinbaseTx(error.to_string()))?,
+            ),
+            None => None,
+        };
+
+        let mut state = self.state.clone();
+        state
+            .lock_guard_mut()
+            .await
+            .mining_state
+            .set_coinbase_tx(coinbase_tx);
 
         Ok(SetCoinbaseTxResponse {})
     }
@@ -2791,12 +2815,13 @@ pub mod tests {
     }
 
     /// Setting the coinbase transaction needs unrestricted access, a
-    /// well-formed primitive witness, and consensus rules that allow coinbase
-    /// inputs in the next block. With all three, the transaction reaches the
-    /// mining state, and no transaction unsets it.
+    /// well-formed primitive witness that validates, and consensus rules that
+    /// allow coinbase inputs in the next block. With all of these, the
+    /// transaction reaches the mining state, and no transaction unsets it.
     #[apply(shared_tokio_runtime)]
     async fn set_coinbase_tx_reaches_the_mining_state() {
         use neptune_consensus::transaction::primitive_witness::PrimitiveWitness;
+        use neptune_consensus::transaction::transaction_kernel::TransactionKernelModifier;
         use neptune_rpc_api::model::mining::RpcPrimitiveWitness;
         use proptest::strategy::Strategy;
         use proptest::strategy::ValueTree;
@@ -2824,6 +2849,19 @@ pub mod tests {
         assert!(matches!(
             rpc_server.set_coinbase_tx(Some(malformed)).await,
             Err(RpcError::MalformedPrimitiveWitness(_))
+        ));
+
+        // A fee that the inputs, outputs and coinbase do not balance fails the
+        // native currency's type script.
+        let mut invalid = witness.clone();
+        invalid.kernel = TransactionKernelModifier::default()
+            .fee(invalid.kernel.fee + NativeCurrencyAmount::coins(1))
+            .modify(invalid.kernel);
+        assert!(matches!(
+            rpc_server
+                .set_coinbase_tx(Some(RpcPrimitiveWitness::from(&invalid)))
+                .await,
+            Err(RpcError::InvalidCoinbaseTx(_))
         ));
 
         rpc_server
