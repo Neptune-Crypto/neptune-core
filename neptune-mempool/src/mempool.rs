@@ -83,6 +83,13 @@ use crate::upgrade_priority::UpgradePriority;
 /// Transactions with a timestamp older than this are removed from the mempool.
 pub const MEMPOOL_TX_THRESHOLD_AGE: Timestamp = Timestamp::hours(10);
 
+/// Primitive witness-backed transactions with a timestamp older than this are
+/// removed from the mempool. Such transactions are only kept in the mempool to
+/// reserve inputs, such that no other new transactions spend the same inputs.
+/// So the PrimitiveWitness-backed transactions need not outlive the upgrading
+/// job by much.
+pub const MEMPOOL_WITNESS_TX_THRESHOLD_AGE: Timestamp = Timestamp::minutes(10);
+
 /// How long a transaction with a retirement announcement must still be valid
 /// for this node to hold it and to compose with it.
 ///
@@ -1963,10 +1970,19 @@ impl Mempool {
     /// Computes in O(n)
     pub fn prune_stale_transactions(&mut self) -> Vec<MempoolEvent> {
         let now = self.now();
-        let cutoff = now - MEMPOOL_TX_THRESHOLD_AGE;
+        let std_cutoff = now - MEMPOOL_TX_THRESHOLD_AGE;
+        let witness_cutoff = now - MEMPOOL_WITNESS_TX_THRESHOLD_AGE;
 
         let keep = |(_transaction_id, transaction): LookupItem| -> bool {
             let kernel = transaction.kernel();
+            let is_witness_backed = transaction
+                .as_standard()
+                .is_some_and(|tx| tx.proof.is_witness());
+            let cutoff = if is_witness_backed {
+                witness_cutoff
+            } else {
+                std_cutoff
+            };
 
             cutoff < kernel.timestamp && !kernel.retires_before(now + MEMPOOL_RETIREMENT_MARGIN)
         };
@@ -2131,19 +2147,19 @@ impl Mempool {
                 TransactionProof::ProofCollection(_) => {
                     if let Some(pw) = &tx.primitive_witness {
                         let pw_update_job = PrimitiveWitnessUpdate::new(pw.to_owned());
-                        let pw_update_job = MempoolUpdateJob::ProofCollection(pw_update_job);
+                        let pw_update_job =
+                            MempoolUpdateJob::ProofCollection(Box::new(pw_update_job));
                         Some(pw_update_job)
                     } else {
                         None
                     }
                 }
 
-                // Primitive witness-backed transactions can easily be updated.
-                TransactionProof::Witness(pw) => {
-                    let pw_update_job = PrimitiveWitnessUpdate::new(pw.to_owned());
-                    let pw_update_job = MempoolUpdateJob::PrimitiveWitness(pw_update_job);
-                    Some(pw_update_job)
-                }
+                // Primitive witness-backed transactions are not updated: the
+                // job upgrading such a transaction carries its own witness and
+                // handles new blocks itself. The transaction is kept, unsynced,
+                // to reserve its inputs until that job replaces it.
+                TransactionProof::Witness(_) => None,
 
                 // If the transaction was initiated locally, i.e. deemed
                 // critical, *and* node can produce single-proofs, transaction
@@ -2154,7 +2170,7 @@ impl Mempool {
                     {
                         // Node initiated transaction and can update.
                         let update_sp = MempoolUpdateJob::SingleProof {
-                            old_kernel: transaction.kernel.clone(),
+                            old_kernel: Box::new(transaction.kernel.clone()),
                             old_single_proof: sp.to_owned(),
                         };
 
@@ -3068,6 +3084,39 @@ mod tests {
         assert_eq!(mempool.len(), 11);
         mempool.prune_stale_transactions();
         assert_eq!(mempool.len(), 5);
+    }
+
+    #[apply(shared_tokio_runtime)]
+    async fn witness_backed_transactions_are_dropped_early() {
+        let genesis_block = Block::genesis(Network::Main);
+        let mut mempool = Mempool::new(
+            ByteSize::gb(1),
+            TxProvingCapability::ProofCollection,
+            &genesis_block,
+        );
+
+        let now = Timestamp::now();
+        mempool.with_mocked_now(now);
+        let margin = Timestamp::minutes(1);
+        let [fresh] = make_mock_txs_with_primitive_witness_with_timestamp(
+            1,
+            now - super::MEMPOOL_WITNESS_TX_THRESHOLD_AGE + margin,
+        )
+        .try_into()
+        .unwrap();
+        let [stale] = make_mock_txs_with_primitive_witness_with_timestamp(
+            1,
+            now - super::MEMPOOL_WITNESS_TX_THRESHOLD_AGE - margin,
+        )
+        .try_into()
+        .unwrap();
+        let (fresh_txid, stale_txid) = (fresh.kernel.txid(), stale.kernel.txid());
+        mempool.insert(fresh, UpgradePriority::Critical);
+        mempool.insert(stale, UpgradePriority::Critical);
+
+        mempool.prune_stale_transactions();
+        assert!(mempool.contains(fresh_txid));
+        assert!(!mempool.contains(stale_txid));
     }
 
     #[apply(shared_tokio_runtime)]

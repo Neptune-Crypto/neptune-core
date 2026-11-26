@@ -111,7 +111,7 @@ impl TransactionInitiator {
         // Inserts the witness-backed fee transaction into the mempool, which
         // reserves its inputs but does not share it. The merged transaction
         // replaces it there. Should the fee bump fail, it is left to expire
-        // like any other transaction; no cleanup is attempted.
+        // like any other witness-backed transaction; no cleanup is attempted.
         self.global_state_lock
             .record_own_transaction(&fee_tx)
             .await

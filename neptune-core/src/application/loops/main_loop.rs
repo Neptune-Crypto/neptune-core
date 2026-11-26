@@ -21,7 +21,6 @@ use neptune_consensus::proof_abstractions::triton_vm_job_queue::TritonVmJobQueue
 use neptune_consensus::proof_abstractions::tx_proving_capability::TxProvingCapability;
 use neptune_consensus::transaction::validity::single_proof::SingleProof;
 use neptune_consensus::transaction::Transaction;
-use neptune_consensus::transaction::TransactionProof;
 use neptune_mempool::mempool_update_job::MempoolUpdateJob;
 use neptune_mempool::mempool_update_job_result::MempoolUpdateJobResult;
 use neptune_mempool::transaction_kernel_id::Txid;
@@ -222,9 +221,12 @@ impl MainLoopHandler {
 
     /// Update the mutator set data for a list of mempool transactions. Will
     /// produce transactions with the same proof quality as what was present in
-    /// the mempool, so a primitive witness backed transaction will be updated
-    /// to a new primitive witness backed transaction, a proof-collection to
-    /// proof-collection, and single proof to single proof.
+    /// the mempool.
+    ///
+    /// Does not handle PrimitiveWitness-backed transactions since there is
+    /// never a good reason to upgrade those, as they must currently be
+    /// in the process of being upgraded to a higher, and thus shreable, proof
+    /// form.
     ///
     /// In the case of proof collection, it is not possible to update the
     /// transaction, so the primitive witness is instead used to accomplish
@@ -246,8 +248,7 @@ impl MainLoopHandler {
         for job in update_jobs {
             let txid = job.txid();
             match &job {
-                MempoolUpdateJob::PrimitiveWitness(pw_update)
-                | MempoolUpdateJob::ProofCollection(pw_update) => {
+                MempoolUpdateJob::ProofCollection(pw_update) => {
                     // Acquire lock, and drop it immediately.
                     let new_pw = global_state_lock
                         .lock_guard()
@@ -261,10 +262,6 @@ impl MainLoopHandler {
                         continue;
                     };
                     let upgraded_tx = match &job {
-                        MempoolUpdateJob::PrimitiveWitness(_) => Transaction {
-                            kernel: new_pw.kernel.clone(),
-                            proof: TransactionProof::Witness(new_pw.clone()),
-                        },
                         MempoolUpdateJob::ProofCollection(_) => {
                             let pc_job = PrimitiveWitnessToProofCollection {
                                 primitive_witness: new_pw.clone(),
@@ -353,7 +350,7 @@ impl MainLoopHandler {
                         .lock_guard()
                         .await
                         .update_single_proof_job(
-                            old_kernel.to_owned(),
+                            old_kernel.as_ref().to_owned(),
                             old_single_proof.to_owned(),
                             upgrade_incentive,
                         )
@@ -2647,7 +2644,6 @@ mod tests {
                 ..Default::default()
             };
             for tx_proving_capability in [
-                TxProvingCapability::PrimitiveWitness,
                 TxProvingCapability::ProofCollection,
                 TxProvingCapability::SingleProof,
             ] {
@@ -2725,14 +2721,12 @@ mod tests {
                     "transaction must be updatable"
                 );
 
-                if tx_proving_capability != TxProvingCapability::PrimitiveWitness {
-                    let peer_msg = main_to_peer_rx.recv().await.unwrap();
-                    let MainToPeerTask::TransactionNotification(tx_notification) = peer_msg else {
-                        panic!("Outgoing peer message must be tx notification");
-                    };
-                    assert_eq!(txid, tx_notification.txid);
-                    assert_eq!(block1_msa.hash(), tx_notification.mutator_set_hash);
-                }
+                let peer_msg = main_to_peer_rx.recv().await.unwrap();
+                let MainToPeerTask::TransactionNotification(tx_notification) = peer_msg else {
+                    panic!("Outgoing peer message must be tx notification");
+                };
+                assert_eq!(txid, tx_notification.txid);
+                assert_eq!(block1_msa.hash(), tx_notification.mutator_set_hash);
 
                 let new_outputs = new_tx.kernel.outputs.clone();
                 assert_eq!(
