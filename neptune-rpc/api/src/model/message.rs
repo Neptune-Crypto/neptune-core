@@ -593,6 +593,17 @@ pub struct ClaimUtxoResponse {
     pub new: bool,
 }
 
+#[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(rename_all = "camelCase")]
+pub struct BumpFeeRequest {
+    pub transaction_kernel_id: RpcTransactionKernelId,
+    pub amount: RpcNativeCurrencyAmount,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BumpFeeResponse {}
+
 /* Mining */
 #[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]

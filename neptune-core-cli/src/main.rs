@@ -1161,6 +1161,11 @@ async fn main() -> Result<()> {
 
             println!("Initiating transaction to consolidate {num_utxos_consolidated} UTXOs.");
         }
+        Command::Payment(PaymentCommand::BumpFee { txid, amount }) => {
+            client.bump_fee(ctx, token, txid, amount).await??;
+
+            println!("Initiated bumping the fee of transaction {txid} by {amount}.");
+        }
         Command::Mining(MiningCommand::Upgrade { tx_kernel_id }) => {
             println!("Attempting to upgrade transaction {tx_kernel_id}");
             let response = client.upgrade(ctx, token, tx_kernel_id).await??;

@@ -56,6 +56,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::io::BufReader;
 use tokio::io::BufWriter;
 use tracing::debug;
+use tracing::error;
 use tracing::info;
 use tracing::trace;
 use tracing::warn;
@@ -2171,7 +2172,22 @@ impl WalletState {
         let monitored_utxos = self.wallet_db.monitored_utxos();
         let stream = monitored_utxos.stream().await;
         pin_mut!(stream); // needed for iteration
+
+        // UTXOs without a known spending key cannot be spent, so they must not
+        // count towards the balance or be selected as transaction inputs.
+        let known_lock_script_hashes: HashSet<Digest> = self
+            .get_all_known_spending_keys()
+            .map(|key| key.lock_script_hash())
+            .collect();
         while let Some((_i, mutxo)) = stream.next().await {
+            if !known_lock_script_hashes.contains(&mutxo.utxo.lock_script_hash()) {
+                error!(
+                    "Ignoring monitored UTXO without known spending key; AOCL leaf index {}.",
+                    mutxo.aocl_leaf_index
+                );
+                continue;
+            }
+
             let mutxo_status = validator.mutxo_state(&mutxo).await;
 
             let MonitoredUtxo {

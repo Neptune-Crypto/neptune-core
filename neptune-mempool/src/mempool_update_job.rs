@@ -14,18 +14,15 @@ use crate::transaction_kernel_id::Txid;
 /// That data must be fetched by the caller prior to performing the update.
 #[derive(Debug, Clone)]
 pub enum MempoolUpdateJob {
-    /// The mempool transaction was primitive-witness backed
-    PrimitiveWitness(PrimitiveWitnessUpdate),
-
     /// The transaction was proof-collection backed
-    ProofCollection(PrimitiveWitnessUpdate),
+    ProofCollection(Box<PrimitiveWitnessUpdate>),
 
     /// The mempool transaction was a proof-backed link transaction
     Link { old_link_tx: Box<LinkTx> },
 
     /// The transaction was single-proof backed
     SingleProof {
-        old_kernel: TransactionKernel,
+        old_kernel: Box<TransactionKernel>,
         old_single_proof: NeptuneProof,
     },
 }
@@ -33,9 +30,6 @@ pub enum MempoolUpdateJob {
 impl MempoolUpdateJob {
     pub fn txid(&self) -> TransactionKernelId {
         match self {
-            MempoolUpdateJob::PrimitiveWitness(primitive_witness_update) => {
-                primitive_witness_update.old_primitive_witness.kernel.txid()
-            }
             MempoolUpdateJob::ProofCollection(primitive_witness_update) => {
                 primitive_witness_update.old_primitive_witness.kernel.txid()
             }

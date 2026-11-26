@@ -104,12 +104,6 @@ mod tests {
                 MempoolUpdateJob::Link { .. } => {
                     unimplemented!("this mock does not update link transactions")
                 }
-                MempoolUpdateJob::PrimitiveWitness(primitive_witness_update) => {
-                    let new_pw = primitive_witness_update
-                        .old_primitive_witness
-                        .update_with_new_ms_data(mutator_set_update.clone());
-                    updated_txs.push((new_pw.clone().into(), Some(new_pw)))
-                }
                 MempoolUpdateJob::ProofCollection(primitive_witness_update) => {
                     let new_pw = primitive_witness_update
                         .old_primitive_witness
@@ -142,7 +136,7 @@ mod tests {
                     )
                     .unwrap();
                     let upgrade_result = UpdateMutatorSetDataJob::new(
-                        old_kernel,
+                        *old_kernel,
                         old_single_proof,
                         old_mutator_set.clone(),
                         catch_up,
@@ -1381,7 +1375,6 @@ mod tests {
             let genesis_block = Block::genesis(network);
             let block1 = fake_valid_deterministic_successor(&genesis_block, network).await;
             for tx_proving_capability in [
-                TxProvingCapability::PrimitiveWitness,
                 TxProvingCapability::ProofCollection,
                 TxProvingCapability::SingleProof,
             ] {

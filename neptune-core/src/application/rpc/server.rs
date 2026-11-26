@@ -1859,6 +1859,21 @@ pub trait RPC {
         accept_lustration: bool,
     ) -> RpcResult<usize>;
 
+    /// Increase fee of the specified transaction ID, by the specified amount.
+    ///
+    /// The transaction will have its fee increased by the specified amount. So
+    /// `amount` in this function is how much will be added to the existing fee
+    /// of the transaction. The amount will be spent from this node's wallet.
+    ///
+    /// The target transaction must be single proof-backed, and this node must
+    /// be able to produce single proofs. Returns once the fee bump has been
+    /// scheduled; the bumped transaction is broadcast when proving is done.
+    async fn bump_fee(
+        token: auth::Token,
+        tx_kernel_id: TransactionKernelId,
+        amount: NativeCurrencyAmount,
+    ) -> RpcResult<()>;
+
     /// Upgrade a proof for a transaction found in the mempool. If the
     /// transaction cannot be in the mempool, or the transaction is not in need
     /// of upgrading because it is already single proof-backed and synced, then
@@ -3522,6 +3537,27 @@ impl RPC for NeptuneRPCServer {
             .tx_initiator_mut()
             .consolidate(num_inputs, to_address, Timestamp::now(), accept_lustration)
             .await?)
+    }
+
+    // Documented in trait. Do not add doc-comment.
+    async fn bump_fee(
+        mut self,
+        _ctx: context::Context,
+        token: auth::Token,
+        tx_kernel_id: TransactionKernelId,
+        amount: NativeCurrencyAmount,
+    ) -> RpcResult<()> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        self.state
+            .api_mut()
+            .tx_initiator_mut()
+            .bump_fee(tx_kernel_id, amount, Timestamp::now())
+            .await
+            .map_err(|e| RpcError::SendError(e.to_string()))?;
+
+        Ok(())
     }
 
     async fn upgrade(

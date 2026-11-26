@@ -4,7 +4,10 @@ use libp2p::Multiaddr;
 use neptune_consensus::block::Block;
 use neptune_consensus::chaintx::link_tx::LinkTx;
 use neptune_consensus::transaction::Transaction;
+use neptune_consensus::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use neptune_mempool::transaction_kernel_id::TransactionKernelId;
 use neptune_primitives::block_height::BlockHeight;
+use neptune_primitives::timestamp::Timestamp;
 use neptune_wallet::address::KeyType;
 use neptune_wallet::address::ReceivingAddress;
 use neptune_wallet::address::SpendingKey;
@@ -143,5 +146,13 @@ pub(crate) enum RPCServerToMain {
     RecordAndBroadcastOwnTx {
         transaction: TxCreationArtifacts,
         increment_change_key_counter: bool,
+    },
+
+    /// Bump the fee of a mempool transaction. Used by JSON-RPC, which may not
+    /// mutate state itself.
+    BumpFee {
+        transaction_kernel_id: TransactionKernelId,
+        amount: NativeCurrencyAmount,
+        timestamp: Timestamp,
     },
 }
